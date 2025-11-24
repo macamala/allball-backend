@@ -1,7 +1,5 @@
 import logging
-
 from apscheduler.schedulers.blocking import BlockingScheduler
-
 from .pipeline import run_pipeline
 
 logging.basicConfig(level=logging.INFO)
@@ -31,7 +29,5 @@ scheduler.add_job(
 logger.info("Starting AllBall scheduler (every 3 hours)...")
 
 if __name__ == "__main__":
-    # Run once immediately on startup
-    job()
-    # Then continue with scheduled runs
+    # This call blocks and keeps the process alive
     scheduler.start()
