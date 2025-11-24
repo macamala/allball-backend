@@ -6,18 +6,20 @@ from slugify import slugify
 
 from database import SessionLocal
 from models import Article
-from .fetch_sources import fetch_all_headlines
-from .rewrite_ai import rewrite_to_long_form
+from .fetch_sources import fetch_football_headlines  # <- this exists
 
 logger = logging.getLogger(__name__)
 
 
 def run_pipeline() -> None:
-    """Fetch news, rewrite with AI and store new unique articles."""
+    """
+    Fetch news, rewrite with AI and store new unique articles.
+    Currently uses fetch_football_headlines() as the source.
+    """
     db: Session = SessionLocal()
     try:
         logger.info("Fetching raw headlines...")
-        raw_items: List[Dict] = fetch_all_headlines()
+        raw_items: List[Dict] = fetch_football_headlines()
 
         if not raw_items:
             logger.info("No items fetched from sources.")
@@ -61,6 +63,7 @@ def run_pipeline() -> None:
                 suffix += 1
 
             # Rewrite with OpenAI
+            from .rewrite_ai import rewrite_to_long_form  # imported here to avoid cycles
             long_form = rewrite_to_long_form(title, raw_text)
 
             article = Article(
