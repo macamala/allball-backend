@@ -1,6 +1,8 @@
-from apscheduler.schedulers.blocking import BlockingScheduler
-from bot.pipeline import run_pipeline
 import logging
+
+from apscheduler.schedulers.blocking import BlockingScheduler
+
+from .pipeline import run_pipeline
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -17,13 +19,13 @@ def job():
         logger.exception(f"AllBall pipeline failed: {e}")
 
 
-# ⏱ Pokreće job na svaka 3 sata, max 1 istovremeno
+# Run every 3 hours, never overlapping
 scheduler.add_job(
     job,
     "interval",
     hours=3,
     max_instances=1,
-    coalesce=True,  # ako zakasni, spoji u jedan
+    coalesce=True,
 )
 
 logger.info("Starting AllBall scheduler (every 3 hours)...")
