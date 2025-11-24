@@ -31,4 +31,7 @@ scheduler.add_job(
 logger.info("Starting AllBall scheduler (every 3 hours)...")
 
 if __name__ == "__main__":
+    # Run once immediately on startup
+    job()
+    # Then continue with scheduled runs
     scheduler.start()
