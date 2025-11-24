@@ -17,7 +17,7 @@ def job():
         logger.exception(f"AllBall pipeline failed: {e}")
 
 
-# Run every 3 hours, never overlapping
+# Run every 3 hours (for now set to 5 minutes for testing)
 scheduler.add_job(
     job,
     "interval",
@@ -28,7 +28,15 @@ scheduler.add_job(
 
 logger.info("Starting AllBall scheduler (every 3 hours)...")
 
+
 if __name__ == "__main__":
+    # TEMP: RUN IMMEDIATELY ON START (delete after testing!)
+    logger.info("Running AllBall pipeline immediately for testing...")
+    try:
+        run_pipeline()
+        logger.info("Initial run completed successfully.")
+    except Exception as e:
+        logger.exception(f"Initial run failed: {e}")
+
     # This call blocks and keeps the process alive
     scheduler.start()
-
