@@ -1,13 +1,13 @@
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from typing import Optional, List
+
 from database import SessionLocal, engine
 from models import Base, Article
 
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="AllBallSports API")
-
 
 def get_db():
     db = SessionLocal()
@@ -17,31 +17,34 @@ def get_db():
         db.close()
 
 
-@app.get("/health")
-def health():
-    return {"status": "ok"}
-
-
 @app.get("/articles")
 def get_articles(
     sport: Optional[str] = None,
     league: Optional[str] = None,
+    country: Optional[str] = None,
     limit: int = 20,
     db: Session = Depends(get_db),
 ):
-    query = db.query(Article).filter(Article.is_live == True)
-    if sport:
-        query = query.filter(Article.sport == sport)
-    if league:
-        query = query.filter(Article.league == league)
+    q = db.query(Article).filter(Article.is_live == True)
 
-    articles = query.order_by(Article.created_at.desc()).limit(limit).all()
-    return articles
+    if sport:
+        q = q.filter(Article.sport == sport)
+
+    if league:
+        q = q.filter(Article.league == league)
+
+    if country:
+        q = q.filter(Article.country == country)
+
+    q = q.order_by(Article.created_at.desc()).limit(limit)
+    return q.all()
 
 
 @app.get("/article/{slug}")
 def get_article(slug: str, db: Session = Depends(get_db)):
-    article = db.query(Article).filter(Article.slug == slug).first()
-    if not article:
-        raise HTTPException(status_code=404, detail="Article not found")
-    return article
+    return db.query(Article).filter(Article.slug == slug).first()
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
