@@ -21,7 +21,7 @@ def job():
 scheduler.add_job(
     job,
     "interval",
-    hours=3,
+    minutes=5,
     max_instances=1,
     coalesce=True,
 )
@@ -31,3 +31,4 @@ logger.info("Starting AllBall scheduler (every 3 hours)...")
 if __name__ == "__main__":
     # This call blocks and keeps the process alive
     scheduler.start()
+
