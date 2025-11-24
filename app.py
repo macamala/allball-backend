@@ -9,6 +9,23 @@ Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="AllBallSports API")
 
+from fastapi.responses import HTMLResponse
+
+@app.get("/", response_class=HTMLResponse)
+def homepage():
+    return """
+    <html>
+        <head>
+            <title>AllBallSports</title>
+        </head>
+        <body>
+            <h1>AllBallSports backend is running ✅</h1>
+            <p>Try <a href="/health">/health</a> or <a href="/articles">/articles</a></p>
+        </body>
+    </html>
+    """
+
+
 def get_db():
     db = SessionLocal()
     try:
