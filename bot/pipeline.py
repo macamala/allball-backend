@@ -1,3 +1,4 @@
+import logging
 from typing import List, Dict
 
 from sqlalchemy.orm import Session
@@ -5,36 +6,40 @@ from slugify import slugify
 
 from database import SessionLocal
 from models import Article
-from .fetch_sources import fetch_all_sports_headlines
+from .fetch_sources import fetch_all_headlines
 from .rewrite_ai import rewrite_to_long_form
 
-MAX_ARTICLES_PER_RUN = 20
+logger = logging.getLogger(__name__)
 
 
-def run_pipeline(max_articles: int = MAX_ARTICLES_PER_RUN) -> None:
-    """
-    Main AllBall pipeline:
-    - Fetch multi-sport, multi-league headlines.
-    - Skip duplicates (based on external_id = url).
-    - Rewrite to long-form with AI.
-    - Insert into database.
-    """
+def run_pipeline() -> None:
+    """Fetch news, rewrite with AI and store new unique articles."""
     db: Session = SessionLocal()
     try:
-        raw_articles: List[Dict] = fetch_all_sports_headlines(
-            max_per_league=3,
-            hard_limit=max_articles,
-        ) or []
+        logger.info("Fetching raw headlines...")
+        raw_items: List[Dict] = fetch_all_headlines()
 
-        raw_articles = raw_articles[:max_articles]
+        if not raw_items:
+            logger.info("No items fetched from sources.")
+            return
 
-        for item in raw_articles:
+        # Load existing external_ids and slugs so we don't insert duplicates
+        existing_external_ids = {
+            eid for (eid,) in db.query(Article.external_id).all()
+        }
+        existing_slugs = {
+            s for (s,) in db.query(Article.slug).all()
+        }
+
+        new_count = 0
+
+        for item in raw_items:
             external_id = item.get("url")
             if not external_id:
                 continue
 
-            existing = db.query(Article).filter_by(external_id=external_id).first()
-            if existing:
+            # Skip if this article already exists in DB
+            if external_id in existing_external_ids:
                 continue
 
             title = item.get("title") or ""
@@ -45,21 +50,27 @@ def run_pipeline(max_articles: int = MAX_ARTICLES_PER_RUN) -> None:
             if not raw_text:
                 continue
 
-            sport = item.get("sport") or "sports"
-            league = item.get("league") or "general"
-            country = item.get("country") or "global"
+            # Make base slug
+            base_slug = slugify(title)[:190]  # keep a bit of room for suffix
+            slug = base_slug
 
-            long_form = rewrite_to_long_form(title, raw_text, sport=sport)
-            slug = slugify(title)[:200]
+            # Ensure slug is unique (avoid ix_articles_slug violation)
+            suffix = 2
+            while slug in existing_slugs:
+                slug = f"{base_slug}-{suffix}"
+                suffix += 1
+
+            # Rewrite with OpenAI
+            long_form = rewrite_to_long_form(title, raw_text)
 
             article = Article(
                 external_id=external_id,
                 title=title,
                 slug=slug,
-                league=league,
-                sport=sport,
-                country=country,
-                division=1,
+                sport=item.get("sport") or "football",
+                league=item.get("league") or "",
+                country=item.get("country") or "",
+                division=item.get("division") or 1,
                 image_url=item.get("urlToImage"),
                 source_url=item.get("url"),
                 summary=item.get("description") or "",
@@ -68,6 +79,16 @@ def run_pipeline(max_articles: int = MAX_ARTICLES_PER_RUN) -> None:
 
             db.add(article)
 
+            # Mark as used so we don't create same slug/external_id again
+            existing_external_ids.add(external_id)
+            existing_slugs.add(slug)
+            new_count += 1
+
         db.commit()
+        logger.info(f"Pipeline finished. Inserted {new_count} new articles.")
+
+    except Exception:
+        logger.exception("Pipeline run failed.")
+        db.rollback()
     finally:
         db.close()
