@@ -1,8 +1,13 @@
 import os
 import logging
-from typing import List, Dict
+from typing import List, Dict, Optional
+import re
 
 import requests
+from sqlalchemy.orm import Session
+
+from database import SessionLocal
+from models import Article
 
 logger = logging.getLogger(__name__)
 
@@ -10,6 +15,19 @@ NEWS_API_KEY = os.getenv("NEWS_API_KEY")
 
 if not NEWS_API_KEY:
     logger.warning("NEWS_API_KEY is not set. News fetching will fail.")
+
+# Pokušaj da uvezeš AI rewrite funkciju, ako postoji
+try:
+    from bot.rewrite_ai import rewrite_text as ai_rewrite_text
+except Exception:
+    logger.warning("Could not import bot.rewrite_ai.rewrite_text. AI content will fallback to summary/content.")
+
+    def ai_rewrite_text(text: str) -> str:
+        """
+        Fallback ako rewrite_ai nije dostupan – samo vrati originalni tekst.
+        Možeš kasnije povezati pravi OpenAI poziv ovde.
+        """
+        return text or ""
 
 
 # Top 30 football leagues + European and global competitions + NBA, EuroLeague, NCAA
@@ -451,6 +469,9 @@ def fetch_all_sports_headlines(
     Fetch headlines for all configured leagues.
     max_per_league: max articles per league per run.
     hard_limit: max total articles per run.
+
+    Ovo je stari helper koji samo vraća listu dictova – ostavljam ga
+    zbog kompatibilnosti, ako ga koristiš negde drugde.
     """
     all_articles: List[Dict] = []
 
@@ -465,3 +486,157 @@ def fetch_all_sports_headlines(
         all_articles.extend(league_articles)
 
     return all_articles[:hard_limit]
+
+
+# ------------- NOVO: helper za slug i DB upis -------------
+
+
+def _slugify(title: str, fallback: str = "") -> str:
+    """
+    Jednostavan slug generator: mala slova, slova-brojevi, crtice.
+    """
+    if not title:
+        title = fallback or "article"
+
+    # samo slova, brojevi i razmaci
+    slug = re.sub(r"[^a-zA-Z0-9\s-]", "", title)
+    slug = slug.strip().lower()
+    slug = re.sub(r"[\s-]+", "-", slug)
+    return slug or "article"
+
+
+def _get_or_create_article(
+    db: Session, item: Dict, sport: str, league: str, country: str
+) -> Optional[Article]:
+    """
+    Proverava da li već postoji Article za dati source_url (external_id),
+    ako ne postoji – kreira novi.
+    """
+    source_url = item.get("url")
+    if not source_url:
+        return None
+
+    # Koristimo source_url kao external_id – unikatan je po članku
+    existing = (
+        db.query(Article).filter(Article.external_id == source_url).first()
+    )
+    if existing:
+        return existing
+
+    title = item.get("title") or "Untitled"
+    summary = item.get("description") or item.get("content") or ""
+    content = item.get("content") or summary
+
+    slug_base = _slugify(title)
+    slug = slug_base
+    counter = 1
+
+    # obezbedi da slug bude unikatan
+    while db.query(Article).filter(Article.slug == slug).first() is not None:
+        counter += 1
+        slug = f"{slug_base}-{counter}"
+
+    article = Article(
+        external_id=source_url,
+        title=title,
+        slug=slug,
+        sport=sport,
+        league=league,
+        country=country,
+        division=1,
+        image_url=item.get("urlToImage"),
+        source_url=source_url,
+        summary=summary,
+        content=content,
+        is_live=True,
+    )
+
+    db.add(article)
+    db.commit()
+    db.refresh(article)
+
+    return article
+
+
+def fetch_and_store_all_articles(
+    max_per_league: int = 3,
+    hard_limit: int = 20,
+    use_ai: bool = True,
+    max_ai_chars: int = 3000,
+) -> int:
+    """
+    Glavna funkcija za bota:
+    - povuče vesti za sve lige
+    - kreira Article ako ne postoji
+    - generiše AI tekst (ai_content) i setuje ai_generated = True
+    - vraća broj novih/svežih artikala (koji su prošli kroz proces)
+    """
+    db = SessionLocal()
+    created_or_updated = 0
+
+    try:
+        all_articles = []
+
+        for config in LEAGUE_CONFIG:
+            if len(all_articles) >= hard_limit:
+                break
+
+            remaining = hard_limit - len(all_articles)
+            limit_for_this_league = min(max_per_league, remaining)
+
+            league_articles = _fetch_for_league(config, limit_for_this_league)
+            all_articles.extend(
+                [
+                    {
+                        **a,
+                        "sport": config["sport"],
+                        "league": config["league"],
+                        "country": config["country"],
+                    }
+                    for a in league_articles
+                ]
+            )
+
+        for item in all_articles[:hard_limit]:
+            sport = item.get("sport")
+            league = item.get("league")
+            country = item.get("country")
+
+            article = _get_or_create_article(
+                db=db,
+                item=item,
+                sport=sport,
+                league=league,
+                country=country,
+            )
+
+            if not article:
+                continue
+
+            # Ako već ima AI content, preskoči
+            if use_ai and not article.ai_generated:
+                base_text = article.content or article.summary or article.title
+                if base_text:
+                    # Ograniči tekst koji šalješ AI-u
+                    text_for_ai = base_text[:max_ai_chars]
+                    try:
+                        ai_text = ai_rewrite_text(text_for_ai)
+                        if ai_text and ai_text.strip():
+                            article.ai_content = ai_text.strip()
+                            article.ai_generated = True
+                            db.add(article)
+                            db.commit()
+                            created_or_updated += 1
+                    except Exception as e:
+                        logger.error(
+                            f"AI rewrite failed for article {article.id}: {e}"
+                        )
+                else:
+                    logger.info(
+                        f"No base text for AI rewrite for article {article.id}"
+                    )
+
+        return created_or_updated
+
+    finally:
+        db.close()
