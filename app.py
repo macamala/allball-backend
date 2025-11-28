@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import List, Optional
 
-from fastapi import FastAPI, Depends, Query
+from fastapi import FastAPI, Depends, Query, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -23,7 +23,6 @@ app.add_middleware(
 )
 
 # ---------- DB dependency ----------
-
 def get_db():
     db = SessionLocal()
     try:
@@ -33,7 +32,6 @@ def get_db():
 
 
 # ---------- Pydantic schema za izlaz ----------
-
 class ArticleOut(BaseModel):
     id: int
     title: str
@@ -52,7 +50,6 @@ class ArticleOut(BaseModel):
 
 
 # ---------- Root i health ----------
-
 @app.get("/", response_class=HTMLResponse)
 def root():
     return """
@@ -67,7 +64,6 @@ def health():
 
 
 # ---------- Glavni /articles endpoint ----------
-
 @app.get("/articles", response_model=List[ArticleOut])
 def list_articles(
     db: Session = Depends(get_db),
@@ -98,7 +94,6 @@ def list_articles(
 
 
 # ---------- Shortcut rute ----------
-
 @app.get("/articles/recent", response_model=List[ArticleOut])
 def recent_articles(
     db: Session = Depends(get_db),
@@ -146,8 +141,34 @@ def articles_by_sport(
     )
 
 
-# ---------- Meta rute ----------
+# ---------- NOVA RUTA: jedan članak po slug-u ----------
+@app.get("/articles/{slug}")
+def get_article_by_slug(slug: str, db: Session = Depends(get_db)):
+    article = db.query(Article).filter(Article.slug == slug).first()
 
+    if not article:
+        raise HTTPException(status_code=404, detail="Article not found")
+
+    # vraćamo AI content ako postoji, fallback na content/summary
+    full_text = article.ai_content or article.content or article.summary
+
+    return {
+        "id": article.id,
+        "title": article.title,
+        "slug": article.slug,
+        "sport": article.sport,
+        "league": article.league,
+        "country": article.country,
+        "division": article.division,
+        "image_url": article.image_url,
+        "source_url": article.source_url,
+        "created_at": article.created_at,
+        "content": full_text,
+        "ai_generated": getattr(article, "ai_generated", False),
+    }
+
+
+# ---------- Meta rute ----------
 @app.get("/meta/leagues")
 def list_leagues():
     return LEAGUE_CONFIG
