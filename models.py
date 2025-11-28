@@ -25,6 +25,12 @@ class Article(Base):
     summary = Column(Text)
     content = Column(Text)
 
+    # 👉 NOVO: naš AI prošireni tekst (300–500+ reči)
+    ai_content = Column(Text, nullable=True)
+
+    # (opciono, ali korisno) da znamo da li je generisan AI tekst
+    ai_generated = Column(Boolean, default=False)
+
     is_live = Column(Boolean, default=True)
 
     created_at = Column(DateTime, default=datetime.utcnow)
