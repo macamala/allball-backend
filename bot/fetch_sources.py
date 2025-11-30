@@ -1,20 +1,13 @@
-import os
 import logging
-from typing import List, Dict, Optional
 import re
+from typing import List, Dict, Optional
 
-import requests
 from sqlalchemy.orm import Session
 
 from database import SessionLocal
 from models import Article
 
 logger = logging.getLogger(__name__)
-
-# NewsAPI key (za sada još koristimo NewsAPI kao izvor, AI rewrite pravi tekst "našim")
-NEWS_API_KEY = os.getenv("NEWS_API_KEY")
-if not NEWS_API_KEY:
-    logger.warning("NEWS_API_KEY is not set. News fetching will fail.")
 
 # Pokušaj da uvezeš AI rewrite funkciju
 try:
@@ -420,45 +413,13 @@ LEAGUE_CONFIG: List[Dict] = [
 
 def _fetch_for_league(config: Dict, max_articles: int) -> List[Dict]:
     """
-    Fetch news articles for a specific league configuration using NewsAPI.
+    NOVO: NewsAPI je ugašen. Trenutno ne dovlačimo vesti sa spoljnog API-ja.
+    Vraćamo praznu listu da ne puca ništa (nema 429, nema grešaka).
     """
-    if not NEWS_API_KEY:
-        return []
-
-    url = "https://newsapi.org/v2/everything"
-    params = {
-        "q": config["query"],
-        "language": "en",
-        "pageSize": max_articles,
-        "sortBy": "publishedAt",
-        "apiKey": NEWS_API_KEY,
-    }
-
-    try:
-        resp = requests.get(url, params=params, timeout=15)
-        resp.raise_for_status()
-        data = resp.json()
-        articles = data.get("articles", []) or []
-        normalized: List[Dict] = []
-
-        for item in articles:
-            normalized.append(
-                {
-                    "title": item.get("title"),
-                    "description": item.get("description"),
-                    "content": item.get("content"),
-                    "url": item.get("url"),
-                    "urlToImage": item.get("urlToImage"),
-                    "sport": config["sport"],
-                    "league": config["league"],
-                    "country": config["country"],
-                }
-            )
-
-        return normalized
-    except Exception as e:
-        logger.error(f"Error fetching news for {config.get('league')}: {e}")
-        return []
+    logger.info(
+        f"[fetch_sources] NewsAPI DISABLED – skipping external fetch for {config.get('league')}"
+    )
+    return []
 
 
 def fetch_all_sports_headlines(
@@ -466,7 +427,8 @@ def fetch_all_sports_headlines(
     hard_limit: int = 20,
 ) -> List[Dict]:
     """
-    Stari helper koji samo vraća listu dict-ova – može da ostane zbog kompatibilnosti.
+    Stari helper koji samo vraća listu dict-ova – sada će uvek vratiti praznu listu
+    dok ne ubacimo novi izvor (RSS ili drugo).
     """
     all_articles: List[Dict] = []
 
@@ -556,7 +518,7 @@ def fetch_and_store_all_articles(
 ) -> int:
     """
     Glavna funkcija za bota:
-    - povuče vesti za sve lige
+    - povuče vesti za sve lige (trenutno 0, dok ne dodamo novi izvor)
     - kreira Article ako ne postoji
     - generiše AI tekst (ai_content) i setuje ai_generated = True
     - vraća broj artikala za koje je urađen AI rewrite
