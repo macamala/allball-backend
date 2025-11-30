@@ -11,23 +11,23 @@ from models import Article
 
 logger = logging.getLogger(__name__)
 
+# NewsAPI key (za sada još koristimo NewsAPI kao izvor, AI rewrite pravi tekst "našim")
 NEWS_API_KEY = os.getenv("NEWS_API_KEY")
-
 if not NEWS_API_KEY:
     logger.warning("NEWS_API_KEY is not set. News fetching will fail.")
 
-# Pokušaj da uvezeš AI rewrite funkciju, ako postoji
+# Pokušaj da uvezeš AI rewrite funkciju
 try:
-    from bot.rewrite_ai import rewrite_text as ai_rewrite_text
+    from bot.rewrite_ai import rewrite_to_long_form as ai_rewrite_text
 except Exception:
-    logger.warning("Could not import bot.rewrite_ai.rewrite_text. AI content will fallback to summary/content.")
+    logger.warning(
+        "Could not import bot.rewrite_ai.rewrite_to_long_form. "
+        "AI content will fallback to raw text."
+    )
 
-    def ai_rewrite_text(text: str) -> str:
-        """
-        Fallback ako rewrite_ai nije dostupan – samo vrati originalni tekst.
-        Možeš kasnije povezati pravi OpenAI poziv ovde.
-        """
-        return text or ""
+    def ai_rewrite_text(title: str, raw_text: str, sport: str = "sports") -> str:
+        # fallback – bez AI, samo vrati original
+        return raw_text or ""
 
 
 # Top 30 football leagues + European and global competitions + NBA, EuroLeague, NCAA
@@ -466,12 +466,7 @@ def fetch_all_sports_headlines(
     hard_limit: int = 20,
 ) -> List[Dict]:
     """
-    Fetch headlines for all configured leagues.
-    max_per_league: max articles per league per run.
-    hard_limit: max total articles per run.
-
-    Ovo je stari helper koji samo vraća listu dictova – ostavljam ga
-    zbog kompatibilnosti, ako ga koristiš negde drugde.
+    Stari helper koji samo vraća listu dict-ova – može da ostane zbog kompatibilnosti.
     """
     all_articles: List[Dict] = []
 
@@ -486,9 +481,6 @@ def fetch_all_sports_headlines(
         all_articles.extend(league_articles)
 
     return all_articles[:hard_limit]
-
-
-# ------------- NOVO: helper za slug i DB upis -------------
 
 
 def _slugify(title: str, fallback: str = "") -> str:
@@ -516,10 +508,7 @@ def _get_or_create_article(
     if not source_url:
         return None
 
-    # Koristimo source_url kao external_id – unikatan je po članku
-    existing = (
-        db.query(Article).filter(Article.external_id == source_url).first()
-    )
+    existing = db.query(Article).filter(Article.external_id == source_url).first()
     if existing:
         return existing
 
@@ -560,29 +549,40 @@ def _get_or_create_article(
 
 def fetch_and_store_all_articles(
     max_per_league: int = 3,
-    hard_limit: int = 20,
+    hard_limit: Optional[int] = None,
     use_ai: bool = True,
     max_ai_chars: int = 3000,
+    max_ai_articles: Optional[int] = None,
 ) -> int:
     """
     Glavna funkcija za bota:
     - povuče vesti za sve lige
     - kreira Article ako ne postoji
     - generiše AI tekst (ai_content) i setuje ai_generated = True
-    - vraća broj novih/svežih artikala (koji su prošli kroz proces)
+    - vraća broj artikala za koje je urađen AI rewrite
+
+    max_per_league: max artikala po ligi u jednom run-u
+    hard_limit: max ukupno artikala po run-u (None = bez limita)
+    max_ai_articles: max AI rewritova po run-u (None = bez limita)
     """
     db = SessionLocal()
     created_or_updated = 0
+    ai_used = 0
 
     try:
-        all_articles = []
+        all_articles: List[Dict] = []
 
         for config in LEAGUE_CONFIG:
-            if len(all_articles) >= hard_limit:
+            if hard_limit is not None and len(all_articles) >= hard_limit:
                 break
 
-            remaining = hard_limit - len(all_articles)
-            limit_for_this_league = min(max_per_league, remaining)
+            remaining = None
+            if hard_limit is not None:
+                remaining = hard_limit - len(all_articles)
+
+            limit_for_this_league = max_per_league
+            if remaining is not None:
+                limit_for_this_league = min(max_per_league, remaining)
 
             league_articles = _fetch_for_league(config, limit_for_this_league)
             all_articles.extend(
@@ -597,7 +597,10 @@ def fetch_and_store_all_articles(
                 ]
             )
 
-        for item in all_articles[:hard_limit]:
+        if hard_limit is not None:
+            all_articles = all_articles[:hard_limit]
+
+        for item in all_articles:
             sport = item.get("sport")
             league = item.get("league")
             country = item.get("country")
@@ -615,17 +618,25 @@ def fetch_and_store_all_articles(
 
             # Ako već ima AI content, preskoči
             if use_ai and not article.ai_generated:
+                # limit koliko AI članka sme po run-u
+                if max_ai_articles is not None and ai_used >= max_ai_articles:
+                    continue
+
                 base_text = article.content or article.summary or article.title
                 if base_text:
-                    # Ograniči tekst koji šalješ AI-u
                     text_for_ai = base_text[:max_ai_chars]
                     try:
-                        ai_text = ai_rewrite_text(text_for_ai)
+                        ai_text = ai_rewrite_text(
+                            title=article.title,
+                            raw_text=text_for_ai,
+                            sport=article.sport or "sports",
+                        )
                         if ai_text and ai_text.strip():
                             article.ai_content = ai_text.strip()
                             article.ai_generated = True
                             db.add(article)
                             db.commit()
+                            ai_used += 1
                             created_or_updated += 1
                     except Exception as e:
                         logger.error(
