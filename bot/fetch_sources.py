@@ -2,6 +2,7 @@ import logging
 import re
 from typing import List, Dict, Optional
 
+import feedparser
 from sqlalchemy.orm import Session
 
 from database import SessionLocal
@@ -23,7 +24,7 @@ except Exception:
         return raw_text or ""
 
 
-# Top 30 football leagues + European and global competitions + NBA, EuroLeague, NCAA
+# ================== LEAGUE CONFIG (ISTO KAO KOD TEBE) ==================
 LEAGUE_CONFIG: List[Dict] = [
     # Football - England
     {
@@ -410,16 +411,119 @@ LEAGUE_CONFIG: List[Dict] = [
     },
 ]
 
+# ================== RSS KONFIG – DEFAULTI ==================
+
+COMMON_FOOTBALL_FEEDS = [
+    "https://www.espn.com/espn/rss/soccer/news",
+    "https://feeds.bbci.co.uk/sport/football/rss.xml",
+]
+
+COMMON_BASKETBALL_FEEDS = [
+    "https://www.espn.com/espn/rss/nba/news",
+]
+
+NBA_FEEDS = [
+    "https://www.espn.com/espn/rss/nba/news",
+]
+
+NCAA_FEEDS = [
+    "https://www.espn.com/espn/rss/ncb/news",
+]
+
+EUROLEAGUE_FEEDS = [
+    "https://www.euroleaguebasketball.net/euroleague/rss",
+]
+
+# Ako za neku ligu želimo specijalne feedove (override):
+RSS_OVERRIDE: Dict[str, List[str]] = {
+    "nba": NBA_FEEDS,
+    "ncaa-basketball": NCAA_FEEDS,
+    "euroleague": EUROLEAGUE_FEEDS,
+    # ovde kasnije možemo dodavati specifične feedove po ligi
+}
+
+
+def _get_rss_urls_for_config(config: Dict) -> List[str]:
+    """
+    Vrati listu RSS url-ova za dati config.
+    1) ako postoji u RSS_OVERRIDE → koristi to
+    2) ako je sport football → COMMON_FOOTBALL_FEEDS
+    3) ako je sport basketball → COMMON_BASKETBALL_FEEDS
+    """
+    league = config["league"]
+    sport = config["sport"]
+
+    if league in RSS_OVERRIDE:
+        return RSS_OVERRIDE[league]
+
+    if sport == "football":
+        return COMMON_FOOTBALL_FEEDS
+
+    if sport == "basketball":
+        # fallback za sve košarkaške lige
+        return COMMON_BASKETBALL_FEEDS
+
+    # default ako se pojavi neki novi sport
+    return []
+
 
 def _fetch_for_league(config: Dict, max_articles: int) -> List[Dict]:
     """
-    NOVO: NewsAPI je ugašen. Trenutno ne dovlačimo vesti sa spoljnog API-ja.
-    Vraćamo praznu listu da ne puca ništa (nema 429, nema grešaka).
+    Fetch za jednu ligu preko RSS-a.
+    Nikakav NewsAPI više, sve ide direktno sa javnih RSS feedova.
     """
-    logger.info(
-        f"[fetch_sources] NewsAPI DISABLED – skipping external fetch for {config.get('league')}"
-    )
-    return []
+    league_key = config["league"]
+    rss_urls = _get_rss_urls_for_config(config)
+
+    if not rss_urls:
+        logger.info(f"[fetch_sources] No RSS configured for league={league_key}")
+        return []
+
+    normalized: List[Dict] = []
+
+    per_feed_limit = max_articles
+    if max_articles and len(rss_urls) > 0:
+        per_feed_limit = max(1, max_articles // len(rss_urls))
+
+    for url in rss_urls:
+        try:
+            logger.info(f"[fetch_sources] Fetching RSS for league={league_key} url={url}")
+            feed = feedparser.parse(url)
+
+            if getattr(feed, "bozo", False):
+                logger.warning(f"[fetch_sources] RSS parse issue for {url}: {feed.bozo_exception}")
+                continue
+
+            entries = feed.entries
+            if per_feed_limit:
+                entries = entries[:per_feed_limit]
+
+            for entry in entries:
+                title = entry.get("title")
+                summary = entry.get("summary") or entry.get("description", "")
+                link = entry.get("link")
+
+                if not link or not title:
+                    continue
+
+                normalized.append(
+                    {
+                        "title": title,
+                        "description": summary,
+                        "content": summary,
+                        "url": link,
+                        "urlToImage": None,
+                        "sport": config["sport"],
+                        "league": config["league"],
+                        "country": config["country"],
+                    }
+                )
+        except Exception as e:
+            logger.error(f"[fetch_sources] Error reading RSS for {league_key} ({url}): {e}")
+
+    if max_articles:
+        return normalized[:max_articles]
+    return normalized
 
 
 def fetch_all_sports_headlines(
@@ -427,8 +531,7 @@ def fetch_all_sports_headlines(
     hard_limit: int = 20,
 ) -> List[Dict]:
     """
-    Stari helper koji samo vraća listu dict-ova – sada će uvek vratiti praznu listu
-    dok ne ubacimo novi izvor (RSS ili drugo).
+    Vraća listu dict-ova sa osnovnim info o člancima, preko RSS-a.
     """
     all_articles: List[Dict] = []
 
@@ -452,7 +555,6 @@ def _slugify(title: str, fallback: str = "") -> str:
     if not title:
         title = fallback or "article"
 
-    # samo slova, brojevi i razmaci
     slug = re.sub(r"[^a-zA-Z0-9\s-]", "", title)
     slug = slug.strip().lower()
     slug = re.sub(r"[\s-]+", "-", slug)
@@ -518,14 +620,10 @@ def fetch_and_store_all_articles(
 ) -> int:
     """
     Glavna funkcija za bota:
-    - povuče vesti za sve lige (trenutno 0, dok ne dodamo novi izvor)
+    - povuče vesti za SVE lige iz LEAGUE_CONFIG (preko RSS-a)
     - kreira Article ako ne postoji
     - generiše AI tekst (ai_content) i setuje ai_generated = True
     - vraća broj artikala za koje je urađen AI rewrite
-
-    max_per_league: max artikala po ligi u jednom run-u
-    hard_limit: max ukupno artikala po run-u (None = bez limita)
-    max_ai_articles: max AI rewritova po run-u (None = bez limita)
     """
     db = SessionLocal()
     created_or_updated = 0
@@ -578,9 +676,7 @@ def fetch_and_store_all_articles(
             if not article:
                 continue
 
-            # Ako već ima AI content, preskoči
             if use_ai and not article.ai_generated:
-                # limit koliko AI članka sme po run-u
                 if max_ai_articles is not None and ai_used >= max_ai_articles:
                     continue
 
