@@ -24,7 +24,7 @@ except Exception:
         return raw_text or ""
 
 
-# ================== LEAGUE CONFIG (ISTO KAO KOD TEBE) ==================
+# ================== LEAGUE CONFIG (SVE LIGE) ==================
 LEAGUE_CONFIG: List[Dict] = [
     # Football - England
     {
@@ -411,7 +411,7 @@ LEAGUE_CONFIG: List[Dict] = [
     },
 ]
 
-# ================== RSS KONFIG – DEFAULTI ==================
+# ================== RSS KONFIG ==================
 
 COMMON_FOOTBALL_FEEDS = [
     "https://www.espn.com/espn/rss/soccer/news",
@@ -434,13 +434,50 @@ EUROLEAGUE_FEEDS = [
     "https://www.euroleaguebasketball.net/euroleague/rss",
 ]
 
-# Ako za neku ligu želimo specijalne feedove (override):
+# Specijalni feedovi po ligi (ako treba override)
 RSS_OVERRIDE: Dict[str, List[str]] = {
     "nba": NBA_FEEDS,
     "ncaa-basketball": NCAA_FEEDS,
     "euroleague": EUROLEAGUE_FEEDS,
-    # ovde kasnije možemo dodavati specifične feedove po ligi
 }
+
+
+def _extract_image_url(entry) -> Optional[str]:
+    """
+    Pokušava da izvuče URL slike iz RSS entry-ja.
+    Gleda najčešće formate: media:content, media:thumbnail, enclosure, <img src="..."> u summary-ju.
+    """
+    # 1) media_content
+    media_content = entry.get("media_content")
+    if media_content and isinstance(media_content, list):
+        for m in media_content:
+            url = m.get("url")
+            if url:
+                return url
+
+    # 2) media_thumbnail
+    media_thumb = entry.get("media_thumbnail")
+    if media_thumb and isinstance(media_thumb, list):
+        for m in media_thumb:
+            url = m.get("url")
+            if url:
+                return url
+
+    # 3) enclosure u links
+    links = entry.get("links") or []
+    for link in links:
+        if link.get("rel") == "enclosure" and str(link.get("type", "")).startswith("image"):
+            url = link.get("href")
+            if url:
+                return url
+
+    # 4) <img src="..."> iz summary/description
+    summary = entry.get("summary") or entry.get("description") or ""
+    match = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', summary)
+    if match:
+        return match.group(1)
+
+    return None
 
 
 def _get_rss_urls_for_config(config: Dict) -> List[str]:
@@ -460,17 +497,14 @@ def _get_rss_urls_for_config(config: Dict) -> List[str]:
         return COMMON_FOOTBALL_FEEDS
 
     if sport == "basketball":
-        # fallback za sve košarkaške lige
         return COMMON_BASKETBALL_FEEDS
 
-    # default ako se pojavi neki novi sport
     return []
 
 
 def _fetch_for_league(config: Dict, max_articles: int) -> List[Dict]:
     """
-    Fetch za jednu ligu preko RSS-a.
-    Nikakav NewsAPI više, sve ide direktno sa javnih RSS feedova.
+    Fetch za jednu ligu preko RSS-a. Nema više NewsAPI-ja.
     """
     league_key = config["league"]
     rss_urls = _get_rss_urls_for_config(config)
@@ -506,13 +540,15 @@ def _fetch_for_league(config: Dict, max_articles: int) -> List[Dict]:
                 if not link or not title:
                     continue
 
+                image_url = _extract_image_url(entry)
+
                 normalized.append(
                     {
                         "title": title,
                         "description": summary,
                         "content": summary,
                         "url": link,
-                        "urlToImage": None,
+                        "urlToImage": image_url,
                         "sport": config["sport"],
                         "league": config["league"],
                         "country": config["country"],
@@ -620,7 +656,7 @@ def fetch_and_store_all_articles(
 ) -> int:
     """
     Glavna funkcija za bota:
-    - povuče vesti za SVE lige iz LEAGUE_CONFIG (preko RSS-a)
+    - povuče vesti za sve lige iz LEAGUE_CONFIG (preko RSS-a)
     - kreira Article ako ne postoji
     - generiše AI tekst (ai_content) i setuje ai_generated = True
     - vraća broj artikala za koje je urađen AI rewrite
