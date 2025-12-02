@@ -10,7 +10,9 @@ class Article(Base):
 
     id = Column(Integer, primary_key=True, index=True)
 
+    # URL izvora (BBC/ESPN...) – koristimo ga za deduplikaciju
     external_id = Column(String(500), unique=True, index=True)
+
     title = Column(String(500))
     slug = Column(String(300), unique=True, index=True)
 
@@ -25,15 +27,16 @@ class Article(Base):
     summary = Column(Text)
     content = Column(Text)
 
-    # 👉 naš AI prošireni tekst (300–500+ reči)
+    # naš AI prošireni tekst (300–500+ reči)
     ai_content = Column(Text, nullable=True)
 
     # da znamo da li je generisan AI tekst
     ai_generated = Column(Boolean, default=False)
 
+    # da li je članak "aktivan" na sajtu
     is_live = Column(Boolean, default=True)
 
-    # 👉 NOVO: vreme kada je vest objavljena na izvoru (BBC/ESPN…)
+    # 🆕 vreme objave na IZVORU (BBC/ESPN…), koristimo za svežinu
     published_at = Column(DateTime, index=True, nullable=True)
 
     # kada smo mi ubacili u bazu
