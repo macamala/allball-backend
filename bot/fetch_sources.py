@@ -5,7 +5,7 @@ from typing import List, Dict, Optional
 from datetime import datetime, timezone, timedelta
 
 import feedparser
-from dateutil import parser as date_parser  # pip install python-dateutil
+from dateutil import parser as date_parser
 from sqlalchemy.orm import Session
 
 from database import SessionLocal
@@ -517,6 +517,7 @@ def _get_rss_urls_for_config(config: Dict) -> List[str]:
 def _parse_published(entry) -> Optional[datetime]:
     """
     Pokušava da pročita vreme objave vesti iz RSS entry-ja i vrati ga kao UTC datetime.
+    Koristi published_parsed / updated_parsed ili string published/updated.
     """
     # 1) published_parsed / updated_parsed (time.struct_time)
     for key in ("published_parsed", "updated_parsed"):
@@ -547,8 +548,8 @@ def _parse_published(entry) -> Optional[datetime]:
 
 def _fetch_for_league(config: Dict, max_articles: int) -> List[Dict]:
     """
-    Fetch za jednu ligu preko RSS-a. Nema više NewsAPI-ja.
-    """
+    Fetch za jednu ligu preko RSS-a.
+    */
     league_key = config["league"]
     rss_urls = _get_rss_urls_for_config(config)
 
@@ -585,9 +586,8 @@ def _fetch_for_league(config: Dict, max_articles: int) -> List[Dict]:
                 if not link or not title:
                     continue
 
-                # vreme objave
+                # vreme objave – koristimo samo za filtriranje, ne upisujemo u bazu
                 published_at = _parse_published(entry)
-                # ako nema datum ili je starije od cutoff-a → preskoči
                 if not published_at or published_at < cutoff:
                     continue
 
@@ -603,7 +603,6 @@ def _fetch_for_league(config: Dict, max_articles: int) -> List[Dict]:
                         "sport": config["sport"],
                         "league": config["league"],
                         "country": config["country"],
-                        "published_at": published_at,
                     }
                 )
         except Exception as e:
@@ -662,12 +661,6 @@ def _get_or_create_article(
 
     existing = db.query(Article).filter(Article.external_id == source_url).first()
     if existing:
-        # ako stari nema published_at, a novi ima – upiši
-        if not existing.published_at and item.get("published_at"):
-            existing.published_at = item["published_at"]
-            db.add(existing)
-            db.commit()
-            db.refresh(existing)
         return existing
 
     title = item.get("title") or "Untitled"
@@ -678,14 +671,9 @@ def _get_or_create_article(
     slug = slug_base
     counter = 1
 
-    # obezbedi da slug bude unikatan
     while db.query(Article).filter(Article.slug == slug).first() is not None:
         counter += 1
         slug = f"{slug_base}-{counter}"
-
-    published_at = item.get("published_at")
-    if not published_at:
-        published_at = datetime.utcnow()
 
     article = Article(
         external_id=source_url,
@@ -700,7 +688,6 @@ def _get_or_create_article(
         summary=summary,
         content=content,
         is_live=True,
-        published_at=published_at,
     )
 
     db.add(article)
@@ -719,7 +706,7 @@ def fetch_and_store_all_articles(
 ) -> int:
     """
     Glavna funkcija za bota:
-    - povuče vesti za sve lige iz LEAGUE_CONFIG (preko RSS-a)
+    - povuče vesti za sve lige iz LEAGUE_CONFIG (RSS)
     - kreira Article ako ne postoji
     - generiše AI tekst (ai_content) i setuje ai_generated = True
     - vraća broj artikala za koje je urađen AI rewrite
