@@ -1,11 +1,8 @@
 import logging
 import re
-import time
 from typing import List, Dict, Optional
-from datetime import datetime, timezone, timedelta
 
 import feedparser
-from dateutil import parser as date_parser
 from sqlalchemy.orm import Session
 
 from database import SessionLocal
@@ -13,411 +10,96 @@ from models import Article
 
 logger = logging.getLogger(__name__)
 
-# Maksimalna starost vesti iz RSS-a (u satima)
-MAX_AGE_HOURS = 3
-
-# Pokušaj da uvezeš AI rewrite funkciju
+# Import AI rewrite (fallback if missing)
 try:
     from bot.rewrite_ai import rewrite_to_long_form as ai_rewrite_text
 except Exception:
-    logger.warning(
-        "Could not import bot.rewrite_ai.rewrite_to_long_form. "
-        "AI content will fallback to raw text."
-    )
-
+    logger.warning("AI rewrite not available. Using fallback.")
     def ai_rewrite_text(title: str, raw_text: str, sport: str = "sports") -> str:
-        # fallback – bez AI, samo vrati original
         return raw_text or ""
 
 
-# ================== LEAGUE CONFIG (SVE LIGE) ==================
+# ==========================================
+# LEAGUE CONFIG
+# ==========================================
 LEAGUE_CONFIG: List[Dict] = [
-    # Football - England
-    {
-        "sport": "football",
-        "league": "england-premier-league",
-        "country": "england",
-        "query": "Premier League football",
-    },
-    {
-        "sport": "football",
-        "league": "england-championship",
-        "country": "england",
-        "query": "EFL Championship football",
-    },
+    # Example:
+    # {
+    #     "sport": "football",
+    #     "league": "england-premier-league",
+    #     "country": "england",
+    #     "query": "Premier League football"
+    # },
 
-    # Football - Spain
-    {
-        "sport": "football",
-        "league": "spain-la-liga",
-        "country": "spain",
-        "query": "La Liga football",
-    },
-    {
-        "sport": "football",
-        "league": "spain-la-liga-2",
-        "country": "spain",
-        "query": "Segunda Division La Liga 2 football",
-    },
+    {"sport": "football", "league": "england-premier-league", "country": "england", "query": "Premier League football"},
+    {"sport": "football", "league": "england-championship", "country": "england", "query": "EFL Championship football"},
 
-    # Football - Italy
-    {
-        "sport": "football",
-        "league": "italy-serie-a",
-        "country": "italy",
-        "query": "Serie A football",
-    },
-    {
-        "sport": "football",
-        "league": "italy-serie-b",
-        "country": "italy",
-        "query": "Serie B football",
-    },
+    {"sport": "football", "league": "spain-la-liga", "country": "spain", "query": "La Liga football"},
+    {"sport": "football", "league": "spain-la-liga-2", "country": "spain", "query": "Segunda Division La Liga 2 football"},
 
-    # Football - Germany
-    {
-        "sport": "football",
-        "league": "germany-bundesliga",
-        "country": "germany",
-        "query": "Bundesliga football",
-    },
-    {
-        "sport": "football",
-        "league": "germany-2-bundesliga",
-        "country": "germany",
-        "query": "2. Bundesliga football",
-    },
+    {"sport": "football", "league": "italy-serie-a", "country": "italy", "query": "Serie A football"},
+    {"sport": "football", "league": "italy-serie-b", "country": "italy", "query": "Serie B football"},
 
-    # Football - France
-    {
-        "sport": "football",
-        "league": "france-ligue-1",
-        "country": "france",
-        "query": "Ligue 1 football",
-    },
-    {
-        "sport": "football",
-        "league": "france-ligue-2",
-        "country": "france",
-        "query": "Ligue 2 football",
-    },
+    {"sport": "football", "league": "germany-bundesliga", "country": "germany", "query": "Bundesliga football"},
+    {"sport": "football", "league": "germany-2-bundesliga", "country": "germany", "query": "2. Bundesliga football"},
 
-    # Football - Netherlands
-    {
-        "sport": "football",
-        "league": "netherlands-eredivisie",
-        "country": "netherlands",
-        "query": "Eredivisie football",
-    },
+    {"sport": "football", "league": "france-ligue-1", "country": "france", "query": "Ligue 1 football"},
+    {"sport": "football", "league": "france-ligue-2", "country": "france", "query": "Ligue 2 football"},
 
-    # Football - Portugal
-    {
-        "sport": "football",
-        "league": "portugal-primeira-liga",
-        "country": "portugal",
-        "query": "Primeira Liga football",
-    },
+    {"sport": "football", "league": "netherlands-eredivisie", "country": "netherlands", "query": "Eredivisie football"},
+    {"sport": "football", "league": "portugal-primeira-liga", "country": "portugal", "query": "Primeira Liga football"},
+    {"sport": "football", "league": "belgium-pro-league", "country": "belgium", "query": "Belgian Pro League football"},
+    {"sport": "football", "league": "turkey-super-lig", "country": "turkey", "query": "Turkish Super Lig football"},
+    {"sport": "football", "league": "greece-super-league", "country": "greece", "query": "Greek Super League football"},
+    {"sport": "football", "league": "scotland-premiership", "country": "scotland", "query": "Scottish Premiership football"},
+    {"sport": "football", "league": "switzerland-super-league", "country": "switzerland", "query": "Swiss Super League football"},
+    {"sport": "football", "league": "austria-bundesliga", "country": "austria", "query": "Austrian Bundesliga football"},
+    {"sport": "football", "league": "denmark-superliga", "country": "denmark", "query": "Danish Superliga football"},
+    {"sport": "football", "league": "croatia-hnl", "country": "croatia", "query": "Croatian HNL football"},
+    {"sport": "football", "league": "serbia-superliga", "country": "serbia", "query": "Serbian SuperLiga football"},
+    {"sport": "football", "league": "poland-ekstraklasa", "country": "poland", "query": "Ekstraklasa football"},
+    {"sport": "football", "league": "czech-first-league", "country": "czech-republic", "query": "Czech First League football"},
+    {"sport": "football", "league": "russia-premier-league", "country": "russia", "query": "Russian Premier League football"},
+    {"sport": "football", "league": "ukraine-premier-league", "country": "ukraine", "query": "Ukrainian Premier League football"},
+    {"sport": "football", "league": "sweden-allsvenskan", "country": "sweden", "query": "Allsvenskan football"},
+    {"sport": "football", "league": "norway-eliteserien", "country": "norway", "query": "Eliteserien football"},
+    {"sport": "football", "league": "usa-mls", "country": "usa", "query": "MLS soccer"},
+    {"sport": "football", "league": "brazil-serie-a", "country": "brazil", "query": "Brasileirao Serie A football"},
+    {"sport": "football", "league": "argentina-liga-profesional", "country": "argentina", "query": "Argentina Liga Profesional football"},
 
-    # Football - Belgium
-    {
-        "sport": "football",
-        "league": "belgium-pro-league",
-        "country": "belgium",
-        "query": "Belgian Pro League football",
-    },
+    {"sport": "football", "league": "uefa-champions-league", "country": "europe", "query": "UEFA Champions League football"},
+    {"sport": "football", "league": "uefa-europa-league", "country": "europe", "query": "UEFA Europa League football"},
+    {"sport": "football", "league": "uefa-conference-league", "country": "europe", "query": "UEFA Conference League football"},
+    {"sport": "football", "league": "uefa-super-cup", "country": "europe", "query": "UEFA Super Cup football"},
 
-    # Football - Turkey
-    {
-        "sport": "football",
-        "league": "turkey-super-lig",
-        "country": "turkey",
-        "query": "Turkish Super Lig football",
-    },
+    {"sport": "football", "league": "uefa-euro", "country": "europe", "query": "UEFA Euro football"},
+    {"sport": "football", "league": "world-cup-qualifiers-europe", "country": "europe", "query": "World Cup Qualifiers Europe football"},
+    {"sport": "football", "league": "uefa-nations-league", "country": "europe", "query": "UEFA Nations League football"},
 
-    # Football - Greece
-    {
-        "sport": "football",
-        "league": "greece-super-league",
-        "country": "greece",
-        "query": "Greek Super League football",
-    },
+    {"sport": "football", "league": "fifa-world-cup", "country": "global", "query": "FIFA World Cup football"},
+    {"sport": "football", "league": "fifa-world-cup-qualifiers", "country": "global", "query": "World Cup qualifiers football"},
 
-    # Football - Scotland
-    {
-        "sport": "football",
-        "league": "scotland-premiership",
-        "country": "scotland",
-        "query": "Scottish Premiership football",
-    },
+    {"sport": "football", "league": "copa-america", "country": "south-america", "query": "Copa America football"},
+    {"sport": "football", "league": "africa-cup-of-nations", "country": "africa", "query": "Africa Cup of Nations football"},
+    {"sport": "football", "league": "afc-asian-cup", "country": "asia", "query": "AFC Asian Cup football"},
 
-    # Football - Switzerland
-    {
-        "sport": "football",
-        "league": "switzerland-super-league",
-        "country": "switzerland",
-        "query": "Swiss Super League football",
-    },
+    {"sport": "football", "league": "concacaf-gold-cup", "country": "north-america", "query": "CONCACAF Gold Cup football"},
+    {"sport": "football", "league": "copa-libertadores", "country": "south-america", "query": "Copa Libertadores football"},
+    {"sport": "football", "league": "copa-sudamericana", "country": "south-america", "query": "Copa Sudamericana football"},
+    {"sport": "football", "league": "concacaf-champions-cup", "country": "north-america", "query": "CONCACAF Champions Cup football"},
 
-    # Football - Austria
-    {
-        "sport": "football",
-        "league": "austria-bundesliga",
-        "country": "austria",
-        "query": "Austrian Bundesliga football",
-    },
+    {"sport": "football", "league": "afc-champions-league", "country": "asia", "query": "AFC Champions League football"},
+    {"sport": "football", "league": "caf-champions-league", "country": "africa", "query": "CAF Champions League football"},
 
-    # Football - Denmark
-    {
-        "sport": "football",
-        "league": "denmark-superliga",
-        "country": "denmark",
-        "query": "Danish Superliga football",
-    },
-
-    # Football - Croatia
-    {
-        "sport": "football",
-        "league": "croatia-hnl",
-        "country": "croatia",
-        "query": "Croatian HNL football",
-    },
-
-    # Football - Serbia
-    {
-        "sport": "football",
-        "league": "serbia-superliga",
-        "country": "serbia",
-        "query": "Serbian SuperLiga football",
-    },
-
-    # Football - Poland
-    {
-        "sport": "football",
-        "league": "poland-ekstraklasa",
-        "country": "poland",
-        "query": "Ekstraklasa football",
-    },
-
-    # Football - Czech Republic
-    {
-        "sport": "football",
-        "league": "czech-first-league",
-        "country": "czech-republic",
-        "query": "Czech First League football",
-    },
-
-    # Football - Russia
-    {
-        "sport": "football",
-        "league": "russia-premier-league",
-        "country": "russia",
-        "query": "Russian Premier League football",
-    },
-
-    # Football - Ukraine
-    {
-        "sport": "football",
-        "league": "ukraine-premier-league",
-        "country": "ukraine",
-        "query": "Ukrainian Premier League football",
-    },
-
-    # Football - Sweden
-    {
-        "sport": "football",
-        "league": "sweden-allsvenskan",
-        "country": "sweden",
-        "query": "Allsvenskan football",
-    },
-
-    # Football - Norway
-    {
-        "sport": "football",
-        "league": "norway-eliteserien",
-        "country": "norway",
-        "query": "Eliteserien football",
-    },
-
-    # Football - USA
-    {
-        "sport": "football",
-        "league": "usa-mls",
-        "country": "usa",
-        "query": "MLS soccer",
-    },
-
-    # Football - Brazil
-    {
-        "sport": "football",
-        "league": "brazil-serie-a",
-        "country": "brazil",
-        "query": "Brasileirao Serie A football",
-    },
-
-    # Football - Argentina
-    {
-        "sport": "football",
-        "league": "argentina-liga-profesional",
-        "country": "argentina",
-        "query": "Argentina Liga Profesional football",
-    },
-
-    # European club competitions
-    {
-        "sport": "football",
-        "league": "uefa-champions-league",
-        "country": "europe",
-        "query": "UEFA Champions League football",
-    },
-    {
-        "sport": "football",
-        "league": "uefa-europa-league",
-        "country": "europe",
-        "query": "UEFA Europa League football",
-    },
-    {
-        "sport": "football",
-        "league": "uefa-conference-league",
-        "country": "europe",
-        "query": "UEFA Conference League football",
-    },
-    {
-        "sport": "football",
-        "league": "uefa-super-cup",
-        "country": "europe",
-        "query": "UEFA Super Cup football",
-    },
-
-    # European national team competitions
-    {
-        "sport": "football",
-        "league": "uefa-euro",
-        "country": "europe",
-        "query": "UEFA Euro national team football",
-    },
-    {
-        "sport": "football",
-        "league": "world-cup-qualifiers-europe",
-        "country": "europe",
-        "query": "World Cup Qualifiers Europe football",
-    },
-    {
-        "sport": "football",
-        "league": "uefa-nations-league",
-        "country": "europe",
-        "query": "UEFA Nations League football",
-    },
-
-    # Global national team competitions
-    {
-        "sport": "football",
-        "league": "fifa-world-cup",
-        "country": "global",
-        "query": "FIFA World Cup national team football",
-    },
-    {
-        "sport": "football",
-        "league": "fifa-world-cup-qualifiers",
-        "country": "global",
-        "query": "World Cup qualifiers football",
-    },
-
-    # South America national team competitions
-    {
-        "sport": "football",
-        "league": "copa-america",
-        "country": "south-america",
-        "query": "Copa America national team football",
-    },
-
-    # Africa national team competitions
-    {
-        "sport": "football",
-        "league": "africa-cup-of-nations",
-        "country": "africa",
-        "query": "Africa Cup of Nations football",
-    },
-
-    # Asia national team competitions
-    {
-        "sport": "football",
-        "league": "afc-asian-cup",
-        "country": "asia",
-        "query": "AFC Asian Cup football",
-    },
-
-    # North America national team competitions
-    {
-        "sport": "football",
-        "league": "concacaf-gold-cup",
-        "country": "north-america",
-        "query": "CONCACAF Gold Cup national team football",
-    },
-
-    # South America club competitions
-    {
-        "sport": "football",
-        "league": "copa-libertadores",
-        "country": "south-america",
-        "query": "Copa Libertadores football",
-    },
-    {
-        "sport": "football",
-        "league": "copa-sudamericana",
-        "country": "south-america",
-        "query": "Copa Sudamericana football",
-    },
-
-    # North America club competitions
-    {
-        "sport": "football",
-        "league": "concacaf-champions-cup",
-        "country": "north-america",
-        "query": "CONCACAF Champions Cup football",
-    },
-
-    # Asia club competitions
-    {
-        "sport": "football",
-        "league": "afc-champions-league",
-        "country": "asia",
-        "query": "AFC Champions League football",
-    },
-
-    # Africa club competitions
-    {
-        "sport": "football",
-        "league": "caf-champions-league",
-        "country": "africa",
-        "query": "CAF Champions League football",
-    },
-
-    # Basketball - NBA
-    {
-        "sport": "basketball",
-        "league": "nba",
-        "country": "usa",
-        "query": "NBA basketball",
-    },
-
-    # Basketball - EuroLeague
-    {
-        "sport": "basketball",
-        "league": "euroleague",
-        "country": "europe",
-        "query": "EuroLeague basketball",
-    },
-
-    # Basketball - NCAA College
-    {
-        "sport": "basketball",
-        "league": "ncaa-basketball",
-        "country": "usa",
-        "query": "NCAA college basketball",
-    },
+    {"sport": "basketball", "league": "nba", "country": "usa", "query": "NBA basketball"},
+    {"sport": "basketball", "league": "euroleague", "country": "europe", "query": "EuroLeague basketball"},
+    {"sport": "basketball", "league": "ncaa-basketball", "country": "usa", "query": "NCAA basketball"},
 ]
 
-# ================== RSS KONFIG ==================
+
+# ==========================================
+# RSS FEEDS
+# ==========================================
 
 COMMON_FOOTBALL_FEEDS = [
     "https://www.espn.com/espn/rss/soccer/news",
@@ -428,19 +110,10 @@ COMMON_BASKETBALL_FEEDS = [
     "https://www.espn.com/espn/rss/nba/news",
 ]
 
-NBA_FEEDS = [
-    "https://www.espn.com/espn/rss/nba/news",
-]
+NBA_FEEDS = ["https://www.espn.com/espn/rss/nba/news"]
+NCAA_FEEDS = ["https://www.espn.com/espn/rss/ncb/news"]
+EUROLEAGUE_FEEDS = ["https://www.euroleaguebasketball.net/euroleague/rss"]
 
-NCAA_FEEDS = [
-    "https://www.espn.com/espn/rss/ncb/news",
-]
-
-EUROLEAGUE_FEEDS = [
-    "https://www.euroleaguebasketball.net/euroleague/rss",
-]
-
-# Specijalni feedovi po ligi (ako treba override)
 RSS_OVERRIDE: Dict[str, List[str]] = {
     "nba": NBA_FEEDS,
     "ncaa-basketball": NCAA_FEEDS,
@@ -448,57 +121,39 @@ RSS_OVERRIDE: Dict[str, List[str]] = {
 }
 
 
+# ==========================================
+# IMAGE EXTRACTOR
+# ==========================================
 def _extract_image_url(entry) -> Optional[str]:
-    """
-    Pokušava da izvuče URL slike iz RSS entry-ja.
-    Gleda media:content, media:thumbnail, enclosure, image linkove i <img> u summary-ju.
-    """
-    # 1) media_content
-    media_content = entry.get("media_content")
-    if media_content and isinstance(media_content, list):
-        for m in media_content:
-            url = m.get("url")
-            if url:
-                return url
+    media = entry.get("media_content")
+    if media and isinstance(media, list):
+        for m in media:
+            if m.get("url"):
+                return m["url"]
 
-    # 2) media_thumbnail
-    media_thumb = entry.get("media_thumbnail")
-    if media_thumb and isinstance(media_thumb, list):
-        for m in media_thumb:
-            url = m.get("url")
-            if url:
-                return url
+    thumb = entry.get("media_thumbnail")
+    if thumb and isinstance(thumb, list):
+        for m in thumb:
+            if m.get("url"):
+                return m["url"]
 
-    # 3) enclosure u links
     links = entry.get("links") or []
     for link in links:
-        link_type = str(link.get("type", ""))
-        href = link.get("href")
-        if href and (link.get("rel") == "enclosure" and link_type.startswith("image")):
-            return href
+        if link.get("rel") == "enclosure" and "image" in str(link.get("type", "")):
+            return link.get("href")
 
-    # 4) bilo koji image-like link (često .jpg/.png)
-    for link in links:
-        href = link.get("href")
-        if href and any(href.lower().endswith(ext) for ext in [".jpg", ".jpeg", ".png", ".webp"]):
-            return href
-
-    # 5) <img src="..."> iz summary/description
     summary = entry.get("summary") or entry.get("description") or ""
-    match = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', summary)
+    match = re.search(r'<img[^>]+src="([^"]+)"', summary)
     if match:
         return match.group(1)
 
     return None
 
 
+# ==========================================
+# GET RSS URLS FOR LEAGUE
+# ==========================================
 def _get_rss_urls_for_config(config: Dict) -> List[str]:
-    """
-    Vrati listu RSS url-ova za dati config.
-    1) ako postoji u RSS_OVERRIDE → koristi to
-    2) ako je sport football → COMMON_FOOTBALL_FEEDS
-    3) ako je sport basketball → COMMON_BASKETBALL_FEEDS
-    """
     league = config["league"]
     sport = config["sport"]
 
@@ -514,47 +169,14 @@ def _get_rss_urls_for_config(config: Dict) -> List[str]:
     return []
 
 
-def _parse_published(entry) -> Optional[datetime]:
-    """
-    Pokušava da pročita vreme objave vesti iz RSS entry-ja i vrati ga kao UTC datetime.
-    Koristi published_parsed / updated_parsed ili string published/updated.
-    """
-    # 1) published_parsed / updated_parsed (time.struct_time)
-    for key in ("published_parsed", "updated_parsed"):
-        parsed = entry.get(key)
-        if parsed:
-            try:
-                ts = time.mktime(parsed)
-                return datetime.fromtimestamp(ts, tz=timezone.utc)
-            except Exception:
-                pass
-
-    # 2) string published / updated
-    for key in ("published", "updated"):
-        val = entry.get(key)
-        if val:
-            try:
-                dt = date_parser.parse(val)
-                if not dt.tzinfo:
-                    dt = dt.replace(tzinfo=timezone.utc)
-                else:
-                    dt = dt.astimezone(timezone.utc)
-                return dt
-            except Exception:
-                pass
-
-    return None
-
-
+# ==========================================
+# FETCH FOR ONE LEAGUE
+# ==========================================
 def _fetch_for_league(config: Dict, max_articles: int) -> List[Dict]:
-    """
-    Fetch za jednu ligu preko RSS-a.
-    */
-    league_key = config["league"]
+    league = config["league"]
     rss_urls = _get_rss_urls_for_config(config)
 
     if not rss_urls:
-        logger.info(f"[fetch_sources] No RSS configured for league={league_key}")
         return []
 
     normalized: List[Dict] = []
@@ -563,20 +185,16 @@ def _fetch_for_league(config: Dict, max_articles: int) -> List[Dict]:
     if max_articles and len(rss_urls) > 0:
         per_feed_limit = max(1, max_articles // len(rss_urls))
 
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=MAX_AGE_HOURS)
-
     for url in rss_urls:
         try:
-            logger.info(f"[fetch_sources] Fetching RSS for league={league_key} url={url}")
+            logger.info(f"Fetching RSS for league={league} url={url}")
             feed = feedparser.parse(url)
 
             if getattr(feed, "bozo", False):
-                logger.warning(f"[fetch_sources] RSS parse issue for {url}: {feed.bozo_exception}")
+                logger.warning(f"RSS parse issue for {url}: {feed.bozo_exception}")
                 continue
 
-            entries = feed.entries
-            if per_feed_limit:
-                entries = entries[:per_feed_limit]
+            entries = feed.entries[:per_feed_limit]
 
             for entry in entries:
                 title = entry.get("title")
@@ -586,107 +204,71 @@ def _fetch_for_league(config: Dict, max_articles: int) -> List[Dict]:
                 if not link or not title:
                     continue
 
-                # vreme objave – koristimo samo za filtriranje, ne upisujemo u bazu
-                published_at = _parse_published(entry)
-                if not published_at or published_at < cutoff:
-                    continue
-
-                image_url = _extract_image_url(entry)
-
                 normalized.append(
                     {
                         "title": title,
                         "description": summary,
                         "content": summary,
                         "url": link,
-                        "urlToImage": image_url,
+                        "urlToImage": _extract_image_url(entry),
                         "sport": config["sport"],
                         "league": config["league"],
                         "country": config["country"],
                     }
                 )
         except Exception as e:
-            logger.error(f"[fetch_sources] Error reading RSS for {league_key} ({url}): {e}")
+            logger.error(f"RSS error for league={league}: {e}")
 
-    if max_articles:
-        return normalized[:max_articles]
-    return normalized
+    return normalized[:max_articles]
 
 
-def fetch_all_sports_headlines(
-    max_per_league: int = 3,
-    hard_limit: int = 20,
-) -> List[Dict]:
-    """
-    Vraća listu dict-ova sa osnovnim info o člancima, preko RSS-a.
-    """
-    all_articles: List[Dict] = []
+# ==========================================
+# SLUGIFY
+# ==========================================
+def _slugify(text: str, fallback: str = "") -> str:
+    if not text:
+        text = fallback or "article"
 
-    for config in LEAGUE_CONFIG:
-        if len(all_articles) >= hard_limit:
-            break
-
-        remaining = hard_limit - len(all_articles)
-        limit_for_this_league = min(max_per_league, remaining)
-
-        league_articles = _fetch_for_league(config, limit_for_this_league)
-        all_articles.extend(league_articles)
-
-    return all_articles[:hard_limit]
-
-
-def _slugify(title: str, fallback: str = "") -> str:
-    """
-    Jednostavan slug generator: mala slova, slova-brojevi, crtice.
-    """
-    if not title:
-        title = fallback or "article"
-
-    slug = re.sub(r"[^a-zA-Z0-9\s-]", "", title)
-    slug = slug.strip().lower()
+    slug = re.sub(r"[^a-zA-Z0-9\s-]", "", text).strip().lower()
     slug = re.sub(r"[\s-]+", "-", slug)
     return slug or "article"
 
 
-def _get_or_create_article(
-    db: Session, item: Dict, sport: str, league: str, country: str
-) -> Optional[Article]:
-    """
-    Proverava da li već postoji Article za dati source_url (external_id),
-    ako ne postoji – kreira novi.
-    """
-    source_url = item.get("url")
-    if not source_url:
+# ==========================================
+# GET OR CREATE ARTICLE
+# ==========================================
+def _get_or_create_article(db: Session, item: Dict) -> Optional[Article]:
+    url = item.get("url")
+    if not url:
         return None
 
-    existing = db.query(Article).filter(Article.external_id == source_url).first()
+    existing = db.query(Article).filter(Article.external_id == url).first()
     if existing:
         return existing
 
-    title = item.get("title") or "Untitled"
+    title = item.get("title")
     summary = item.get("description") or item.get("content") or ""
-    content = item.get("content") or summary
 
     slug_base = _slugify(title)
     slug = slug_base
     counter = 1
 
-    while db.query(Article).filter(Article.slug == slug).first() is not None:
+    while db.query(Article).filter(Article.slug == slug).first():
         counter += 1
         slug = f"{slug_base}-{counter}"
 
     article = Article(
-        external_id=source_url,
+        external_id=url,
         title=title,
         slug=slug,
-        sport=sport,
-        league=league,
-        country=country,
+        sport=item.get("sport"),
+        league=item.get("league"),
+        country=item.get("country"),
         division=1,
         image_url=item.get("urlToImage"),
-        source_url=source_url,
+        source_url=url,
         summary=summary,
-        content=content,
+        content=summary,
         is_live=True,
     )
 
@@ -697,6 +279,9 @@ def _get_or_create_article(
     return article
 
 
+# ==========================================
+# MAIN BOT FUNCTION
+# ==========================================
 def fetch_and_store_all_articles(
     max_per_league: int = 3,
     hard_limit: Optional[int] = None,
@@ -704,94 +289,60 @@ def fetch_and_store_all_articles(
     max_ai_chars: int = 3000,
     max_ai_articles: Optional[int] = None,
 ) -> int:
-    """
-    Glavna funkcija za bota:
-    - povuče vesti za sve lige iz LEAGUE_CONFIG (RSS)
-    - kreira Article ako ne postoji
-    - generiše AI tekst (ai_content) i setuje ai_generated = True
-    - vraća broj artikala za koje je urađen AI rewrite
-    """
     db = SessionLocal()
-    created_or_updated = 0
     ai_used = 0
 
     try:
-        all_articles: List[Dict] = []
+        collected = []
 
         for config in LEAGUE_CONFIG:
-            if hard_limit is not None and len(all_articles) >= hard_limit:
+            if hard_limit is not None and len(collected) >= hard_limit:
                 break
 
-            remaining = None
+            limit = max_per_league
             if hard_limit is not None:
-                remaining = hard_limit - len(all_articles)
+                limit = min(limit, hard_limit - len(collected))
 
-            limit_for_this_league = max_per_league
-            if remaining is not None:
-                limit_for_this_league = min(max_per_league, remaining)
+            league_articles = _fetch_for_league(config, limit)
+            for a in league_articles:
+                a["sport"] = config["sport"]
+                a["league"] = config["league"]
+                a["country"] = config["country"]
 
-            league_articles = _fetch_for_league(config, limit_for_this_league)
-            all_articles.extend(
-                [
-                    {
-                        **a,
-                        "sport": config["sport"],
-                        "league": config["league"],
-                        "country": config["country"],
-                    }
-                    for a in league_articles
-                ]
-            )
+            collected.extend(league_articles)
 
         if hard_limit is not None:
-            all_articles = all_articles[:hard_limit]
+            collected = collected[:hard_limit]
 
-        for item in all_articles:
-            sport = item.get("sport")
-            league = item.get("league")
-            country = item.get("country")
+        created_count = 0
 
-            article = _get_or_create_article(
-                db=db,
-                item=item,
-                sport=sport,
-                league=league,
-                country=country,
-            )
-
+        for item in collected:
+            article = _get_or_create_article(db, item)
             if not article:
                 continue
 
+            # AI rewrite
             if use_ai and not article.ai_generated:
                 if max_ai_articles is not None and ai_used >= max_ai_articles:
                     continue
 
                 base_text = article.content or article.summary or article.title
                 if base_text:
-                    text_for_ai = base_text[:max_ai_chars]
+                    raw_text = base_text[:max_ai_chars]
+
                     try:
-                        ai_text = ai_rewrite_text(
-                            title=article.title,
-                            raw_text=text_for_ai,
-                            sport=article.sport or "sports",
-                        )
-                        if ai_text and ai_text.strip():
-                            article.ai_content = ai_text.strip()
+                        new_text = ai_rewrite_text(article.title, raw_text, article.sport)
+                        if new_text and new_text.strip():
+                            article.ai_content = new_text.strip()
                             article.ai_generated = True
                             db.add(article)
                             db.commit()
                             ai_used += 1
-                            created_or_updated += 1
+                            created_count += 1
                     except Exception as e:
-                        logger.error(
-                            f"AI rewrite failed for article {article.id}: {e}"
-                        )
-                else:
-                    logger.info(
-                        f"No base text for AI rewrite for article {article.id}"
-                    )
+                        logger.error(f"AI rewrite failed for article {article.id}: {e}")
 
-        return created_or_updated
+        return created_count
 
     finally:
         db.close()
