@@ -1,14 +1,20 @@
 import logging
 import re
+import time
 from typing import List, Dict, Optional
+from datetime import datetime, timezone, timedelta
 
 import feedparser
+from dateutil import parser as date_parser  # pip install python-dateutil
 from sqlalchemy.orm import Session
 
 from database import SessionLocal
 from models import Article
 
 logger = logging.getLogger(__name__)
+
+# Maksimalna starost vesti iz RSS-a (u satima)
+MAX_AGE_HOURS = 3
 
 # Pokušaj da uvezeš AI rewrite funkciju
 try:
@@ -445,7 +451,7 @@ RSS_OVERRIDE: Dict[str, List[str]] = {
 def _extract_image_url(entry) -> Optional[str]:
     """
     Pokušava da izvuče URL slike iz RSS entry-ja.
-    Gleda najčešće formate: media:content, media:thumbnail, enclosure, <img src="..."> u summary-ju.
+    Gleda media:content, media:thumbnail, enclosure, image linkove i <img> u summary-ju.
     """
     # 1) media_content
     media_content = entry.get("media_content")
@@ -466,12 +472,18 @@ def _extract_image_url(entry) -> Optional[str]:
     # 3) enclosure u links
     links = entry.get("links") or []
     for link in links:
-        if link.get("rel") == "enclosure" and str(link.get("type", "")).startswith("image"):
-            url = link.get("href")
-            if url:
-                return url
+        link_type = str(link.get("type", ""))
+        href = link.get("href")
+        if href and (link.get("rel") == "enclosure" and link_type.startswith("image")):
+            return href
 
-    # 4) <img src="..."> iz summary/description
+    # 4) bilo koji image-like link (često .jpg/.png)
+    for link in links:
+        href = link.get("href")
+        if href and any(href.lower().endswith(ext) for ext in [".jpg", ".jpeg", ".png", ".webp"]):
+            return href
+
+    # 5) <img src="..."> iz summary/description
     summary = entry.get("summary") or entry.get("description") or ""
     match = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', summary)
     if match:
@@ -502,6 +514,37 @@ def _get_rss_urls_for_config(config: Dict) -> List[str]:
     return []
 
 
+def _parse_published(entry) -> Optional[datetime]:
+    """
+    Pokušava da pročita vreme objave vesti iz RSS entry-ja i vrati ga kao UTC datetime.
+    """
+    # 1) published_parsed / updated_parsed (time.struct_time)
+    for key in ("published_parsed", "updated_parsed"):
+        parsed = entry.get(key)
+        if parsed:
+            try:
+                ts = time.mktime(parsed)
+                return datetime.fromtimestamp(ts, tz=timezone.utc)
+            except Exception:
+                pass
+
+    # 2) string published / updated
+    for key in ("published", "updated"):
+        val = entry.get(key)
+        if val:
+            try:
+                dt = date_parser.parse(val)
+                if not dt.tzinfo:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                else:
+                    dt = dt.astimezone(timezone.utc)
+                return dt
+            except Exception:
+                pass
+
+    return None
+
+
 def _fetch_for_league(config: Dict, max_articles: int) -> List[Dict]:
     """
     Fetch za jednu ligu preko RSS-a. Nema više NewsAPI-ja.
@@ -518,6 +561,8 @@ def _fetch_for_league(config: Dict, max_articles: int) -> List[Dict]:
     per_feed_limit = max_articles
     if max_articles and len(rss_urls) > 0:
         per_feed_limit = max(1, max_articles // len(rss_urls))
+
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=MAX_AGE_HOURS)
 
     for url in rss_urls:
         try:
@@ -540,6 +585,12 @@ def _fetch_for_league(config: Dict, max_articles: int) -> List[Dict]:
                 if not link or not title:
                     continue
 
+                # vreme objave
+                published_at = _parse_published(entry)
+                # ako nema datum ili je starije od cutoff-a → preskoči
+                if not published_at or published_at < cutoff:
+                    continue
+
                 image_url = _extract_image_url(entry)
 
                 normalized.append(
@@ -552,6 +603,7 @@ def _fetch_for_league(config: Dict, max_articles: int) -> List[Dict]:
                         "sport": config["sport"],
                         "league": config["league"],
                         "country": config["country"],
+                        "published_at": published_at,
                     }
                 )
         except Exception as e:
@@ -610,6 +662,12 @@ def _get_or_create_article(
 
     existing = db.query(Article).filter(Article.external_id == source_url).first()
     if existing:
+        # ako stari nema published_at, a novi ima – upiši
+        if not existing.published_at and item.get("published_at"):
+            existing.published_at = item["published_at"]
+            db.add(existing)
+            db.commit()
+            db.refresh(existing)
         return existing
 
     title = item.get("title") or "Untitled"
@@ -625,6 +683,10 @@ def _get_or_create_article(
         counter += 1
         slug = f"{slug_base}-{counter}"
 
+    published_at = item.get("published_at")
+    if not published_at:
+        published_at = datetime.utcnow()
+
     article = Article(
         external_id=source_url,
         title=title,
@@ -638,6 +700,7 @@ def _get_or_create_article(
         summary=summary,
         content=content,
         is_live=True,
+        published_at=published_at,
     )
 
     db.add(article)
