@@ -1,67 +1,121 @@
+# bot/rewrite_ai.py
+
 import os
 import logging
-from openai import OpenAI
+from typing import Optional
+
+import httpx
 
 logger = logging.getLogger(__name__)
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-if not OPENAI_API_KEY:
-    logger.warning("OPENAI_API_KEY is not set. Long-form rewrite will fall back to raw text.")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
 
-client = OpenAI(api_key=OPENAI_API_KEY)
+if not OPENAI_API_KEY:
+    logger.warning(
+        "[rewrite_ai] OPENAI_API_KEY is not set. "
+        "AI rewrite will not work and raw text will be used."
+    )
+
+
+def _call_openai(prompt: str) -> Optional[str]:
+    """
+    Low-level call to OpenAI chat completions.
+    Returns a single string: first line is English headline,
+    blank line, then the rest is the article body.
+    """
+    if not OPENAI_API_KEY:
+        return None
+
+    try:
+        with httpx.Client(timeout=60) as client:
+            resp = client.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {OPENAI_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": OPENAI_MODEL,
+                    "messages": [
+                        {
+                            "role": "system",
+                            "content": (
+                                "You are a professional sports journalist.\n"
+                                "- You ALWAYS write in natural, fluent ENGLISH only.\n"
+                                "- You never include sentences in other languages.\n"
+                                "- Ignore any HTML tags (like <img>, <br>, <a>) and never copy them.\n"
+                                "- Output format MUST be:\n"
+                                "  1) First line: English headline, plain text, no quotes, no markdown.\n"
+                                "  2) One blank line.\n"
+                                "  3) Several paragraphs of article text in English.\n"
+                            ),
+                        },
+                        {
+                            "role": "user",
+                            "content": prompt,
+                        },
+                    ],
+                    "temperature": 0.5,
+                    "max_tokens": 900,
+                },
+            )
+        resp.raise_for_status()
+        data = resp.json()
+        return data["choices"][0]["message"]["content"].strip()
+    except Exception as e:
+        logger.error(f"[rewrite_ai] OpenAI call failed: {e}")
+        return None
 
 
 def rewrite_to_long_form(title: str, raw_text: str, sport: str = "sports") -> str:
     """
-    Rewrite short news text into a long-form sports article.
-    Uses gpt-4o-mini (jeftin i dobar).
-    If OpenAI fails (quota, rate limit, etc.), returns the original raw_text.
+    Main function for the rest of the code.
+
+    Input:
+      - title: original title (any language)
+      - raw_text: text or summary from RSS, may contain HTML
+      - sport: 'football', 'basketball', etc.
+
+    Output:
+      - A string where:
+        * first line = English headline
+        * blank line
+        * rest = English article body
     """
-    if not OPENAI_API_KEY:
-        return raw_text or ""
+    base_title = (title or "").strip()
+    base_text = (raw_text or "").strip()
 
-    if not raw_text:
-        return raw_text or ""
+    if not base_title and not base_text:
+        return ""
 
-    prompt = f"""
-You are a professional sports journalist for a premium portal called NinkoSports.
+    prompt = (
+        f"SPORT: {sport}\n\n"
+        f"ORIGINAL TITLE:\n{base_title}\n\n"
+        "SOURCE TEXT (may contain a different language and some HTML tags):\n"
+        f"{base_text}\n\n"
+        "TASK:\n"
+        "- Write a sports news piece in ENGLISH only.\n"
+        "- If the original language is not English, translate and rewrite it into English.\n"
+        "- DO NOT include any sentences in the original language.\n"
+        "- Ignore HTML tags (<img>, <br>, <a>, etc.) and do not copy them.\n"
+        "- Output format MUST be:\n"
+        "  First line: English headline, no quotes, no markdown.\n"
+        "  Then a blank line.\n"
+        "  Then 3–6 paragraphs of English article text.\n"
+    )
 
-Write a detailed, engaging article based on the following information.
+    ai_result = _call_openai(prompt)
 
-Sport: {sport}
-Title: {title}
+    if not ai_result:
+        # fallback: return plain cleaned text (title + raw)
+        from html import unescape
+        import re
 
-Original text:
-{raw_text}
+        text = f"{base_title}\n\n{base_text}".strip()
+        text = unescape(text)
+        text = re.sub(r"<[^>]+>", " ", text)
+        text = re.sub(r"\s+", " ", text).strip()
+        return text
 
-Requirements:
-- Keep it factual. Do NOT invent fake transfers, results, injuries, or quotes.
-- Structure: short intro, clear middle, and short conclusion.
-- Use paragraphs and simple, direct English.
-- Neutral, professional tone but dynamic and interesting.
-- Do NOT mention that this text was generated by AI.
-"""
-
-    try:
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {
-                    "role": "system",
-                    "content": "You are an expert sports journalist for NinkoSports."
-                },
-                {
-                    "role": "user",
-                    "content": prompt
-                },
-            ],
-            temperature=0.6,
-            max_tokens=700,  # limitiramo da ne troši bezveze
-        )
-        content = response.choices[0].message.content
-        if content:
-            return content.strip()
-        return raw_text or ""
-    except Exception as e:
-        logger.error(f"OpenAI rewrite error: {e}")
-        return raw_text or ""
+    return ai_result
