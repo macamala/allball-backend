@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 # Try to import AI rewrite function
 try:
-    from bot.rewrite_ai import rewrite_to_long_form as ai_rewrite_text
+    from .rewrite_ai import rewrite_to_long_form as ai_rewrite_text
 except Exception:
     logger.warning(
         "Could not import bot.rewrite_ai.rewrite_to_long_form. "
@@ -21,7 +21,7 @@ except Exception:
 
     def ai_rewrite_text(title: str, raw_text: str, sport: str = "sports") -> str:
         # Fallback: return original text
-        return raw_text or ""
+        return (raw_text or "").strip()
 
 
 # ================== LEAGUE CONFIG (ALL LEAGUES WE SUPPORT NOW) ==================
@@ -437,6 +437,39 @@ RSS_OVERRIDE: Dict[str, List[str]] = {
     "euroleague": EUROLEAGUE_FEEDS,
 }
 
+# ================== HELPER FUNKCIJE POSLE RSS_OVERRIDE ==================
+
+
+def clean_html_text(text: str) -> str:
+    """
+    Remove HTML tags (img, script, style, etc) and return clean plain text.
+    """
+    if not text:
+        return ""
+
+    from html import unescape
+
+    # remove script/style blocks
+    text = re.sub(
+        r"<(script|style)[^>]*>.*?</\1>",
+        " ",
+        text,
+        flags=re.DOTALL | re.IGNORECASE,
+    )
+
+    # remove <img ...>
+    text = re.sub(r"<img[^>]*>", " ", text, flags=re.IGNORECASE)
+
+    # remove all remaining tags
+    text = re.sub(r"<[^>]+>", " ", text)
+
+    # decode HTML entities
+    text = unescape(text)
+
+    # normalize whitespace
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
 
 def _extract_image_url(entry) -> Optional[str]:
     """
@@ -594,12 +627,32 @@ def _slugify(title: str, fallback: str = "") -> str:
     return slug or "article"
 
 
+def _make_unique_slug(db: Session, base_slug: str, skip_article_id: Optional[int] = None) -> str:
+    """
+    Create unique slug in DB. Can skip one article id (current article).
+    """
+    slug = base_slug
+    counter = 1
+
+    while True:
+        q = db.query(Article).filter(Article.slug == slug)
+        if skip_article_id is not None:
+            q = q.filter(Article.id != skip_article_id)
+        exists = db.query(q.exists()).scalar()
+        if not exists:
+            return slug
+
+        counter += 1
+        slug = f"{base_slug}-{counter}"
+
+
 def _get_or_create_article(
     db: Session, item: Dict, sport: str, league: str, country: str
 ) -> Optional[Article]:
     """
     Check if Article with given external_id already exists.
     If not, create a new one.
+    We DO NOT create article if it has no image.
     """
     source_url = item.get("url")
     if not source_url:
@@ -609,38 +662,37 @@ def _get_or_create_article(
     if existing:
         return existing
 
-    title = item.get("title") or "Untitled"
-    summary = item.get("description") or item.get("content") or ""
-    content = item.get("content") or summary
+    # image is mandatory
+    image_url = item.get("urlToImage")
+    if not image_url:
+        return None
 
-    slug_base = _slugify(title)
-    slug = slug_base
-    counter = 1
+    raw_title = item.get("title") or "Untitled"
+    raw_summary = item.get("description") or item.get("content") or ""
 
-    # Ensure slug is unique
-    while db.query(Article).filter(Article.slug == slug).first() is not None:
-        counter += 1
-        slug = f"{slug_base}-{counter}"
+    clean_summary = clean_html_text(raw_summary)
+
+    slug_base = _slugify(raw_title)
+    slug = _make_unique_slug(db, slug_base)
 
     article = Article(
         external_id=source_url,
-        title=title,
+        title=raw_title,  # temporary, AI will update to English title
         slug=slug,
         sport=sport,
         league=league,
         country=country,
         division=1,
-        image_url=item.get("urlToImage"),
+        image_url=image_url,
         source_url=source_url,
-        summary=summary,
-        content=content,
+        summary=clean_summary,
+        content=clean_summary,
         is_live=True,
     )
 
     db.add(article)
     db.commit()
     db.refresh(article)
-
     return article
 
 
@@ -654,91 +706,120 @@ def fetch_and_store_all_articles(
     """
     Main bot function:
     - fetches RSS articles for all leagues in LEAGUE_CONFIG
-    - creates Article records if they do not exist
-    - optionally generates AI long-form content into ai_content
-    - returns number of articles that were AI rewritten
+    - creates Article records if they do not exist (only with image)
+    - uses AI to generate English headline + article text
+    - updates title, slug, summary, ai_content
+    - returns number of articles that were AI rewritten in this run
     """
     db = SessionLocal()
-    created_or_updated = 0
     ai_used = 0
+    rewritten_count = 0
 
     try:
-        all_articles: List[Dict] = []
+        all_items: List[Dict] = []
 
         for config in LEAGUE_CONFIG:
-            if hard_limit is not None and len(all_articles) >= hard_limit:
+            if hard_limit is not None and len(all_items) >= hard_limit:
                 break
 
             remaining = None
             if hard_limit is not None:
-                remaining = hard_limit - len(all_articles)
+                remaining = hard_limit - len(all_items)
 
-            limit_for_this_league = max_per_league
+            limit_for_league = max_per_league
             if remaining is not None:
-                limit_for_this_league = min(max_per_league, remaining)
+                limit_for_league = min(max_per_league, remaining)
 
-            league_articles = _fetch_for_league(config, limit_for_this_league)
-            all_articles.extend(
-                [
+            league_items = _fetch_for_league(config, limit_for_league)
+            for it in league_items:
+                all_items.append(
                     {
-                        **a,
+                        **it,
                         "sport": config["sport"],
                         "league": config["league"],
                         "country": config["country"],
                     }
-                    for a in league_articles
-                ]
-            )
+                )
 
         if hard_limit is not None:
-            all_articles = all_articles[:hard_limit]
+            all_items = all_items[:hard_limit]
 
-        for item in all_articles:
-            sport = item.get("sport")
-            league = item.get("league")
-            country = item.get("country")
-
+        for item in all_items:
             article = _get_or_create_article(
                 db=db,
                 item=item,
-                sport=sport,
-                league=league,
-                country=country,
+                sport=item["sport"],
+                league=item["league"],
+                country=item["country"],
             )
 
             if not article:
                 continue
 
-            if use_ai and not article.ai_generated:
-                if max_ai_articles is not None and ai_used >= max_ai_articles:
-                    continue
+            if not use_ai or article.ai_generated:
+                continue
 
-                base_text = article.content or article.summary or article.title
-                if base_text:
-                    text_for_ai = base_text[:max_ai_chars]
-                    try:
-                        ai_text = ai_rewrite_text(
-                            title=article.title,
-                            raw_text=text_for_ai,
-                            sport=article.sport or "sports",
-                        )
-                        if ai_text and ai_text.strip():
-                            article.ai_content = ai_text.strip()
-                            article.ai_generated = True
-                            db.add(article)
-                            db.commit()
-                            ai_used += 1
-                            created_or_updated += 1
-                    except Exception as e:
-                        logger.error(
-                            f"AI rewrite failed for article {article.id}: {e}"
-                        )
+            if max_ai_articles is not None and ai_used >= max_ai_articles:
+                continue
+
+            base_text = article.content or article.summary or article.title
+            if not base_text:
+                continue
+
+            text_for_ai = base_text[:max_ai_chars]
+
+            try:
+                ai_output = ai_rewrite_text(
+                    title=article.title,
+                    raw_text=text_for_ai,
+                    sport=article.sport or "sports",
+                )
+            except Exception as e:
+                logger.error(f"AI rewrite failed for article {article.id}: {e}")
+                continue
+
+            if not ai_output or not ai_output.strip():
+                continue
+
+            text = ai_output.strip()
+            lines = text.splitlines()
+
+            english_title = article.title
+            body = text
+
+            if len(lines) >= 3:
+                cand_title = lines[0].strip().strip("*").strip()
+                english_title = cand_title or article.title
+
+                if lines[1].strip() == "":
+                    body_part = lines[2:]
                 else:
-                    logger.info(
-                        f"No base text for AI rewrite for article {article.id}"
-                    )
+                    body_part = lines[1:]
 
-        return created_or_updated
+                body = "\n".join(body_part).strip()
+
+            # summary = first paragraph / line from body
+            preview = body.split("\n")[0].strip()
+            if len(preview) > 400:
+                preview = preview[:400].rsplit(" ", 1)[0] + "..."
+
+            article.ai_content = body
+            article.ai_generated = True
+            article.summary = preview or article.summary
+
+            # update title and slug to English version
+            if english_title and english_title != article.title:
+                article.title = english_title
+                new_base = _slugify(english_title)
+                article.slug = _make_unique_slug(db, new_base, skip_article_id=article.id)
+
+            db.add(article)
+            db.commit()
+
+            ai_used += 1
+            rewritten_count += 1
+
+        return rewritten_count
 
     finally:
         db.close()
