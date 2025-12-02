@@ -25,12 +25,16 @@ class Article(Base):
     summary = Column(Text)
     content = Column(Text)
 
-    # 👉 NOVO: naš AI prošireni tekst (300–500+ reči)
+    # 👉 naš AI prošireni tekst (300–500+ reči)
     ai_content = Column(Text, nullable=True)
 
-    # (opciono, ali korisno) da znamo da li je generisan AI tekst
+    # da znamo da li je generisan AI tekst
     ai_generated = Column(Boolean, default=False)
 
     is_live = Column(Boolean, default=True)
 
+    # 👉 NOVO: vreme kada je vest objavljena na izvoru (BBC/ESPN…)
+    published_at = Column(DateTime, index=True, nullable=True)
+
+    # kada smo mi ubacili u bazu
     created_at = Column(DateTime, default=datetime.utcnow)
