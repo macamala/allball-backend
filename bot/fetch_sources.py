@@ -288,7 +288,8 @@ NCAA_FEEDS = [
 ]
 
 EUROLEAGUE_FEEDS = [
-    "https://www.euroleaguebasketball.net/euroleague/rss",
+    # Možeš promeniti kasnije na drugi stabilan Euroleague RSS
+    "https://www.talkbasket.net/feed",
 ]
 
 # League-specific RSS overrides
@@ -437,8 +438,6 @@ RSS_OVERRIDE: Dict[str, List[str]] = {
     "euroleague": EUROLEAGUE_FEEDS,
 }
 
-# ================== HELPER FUNKCIJE POSLE RSS_OVERRIDE ==================
-
 
 def clean_html_text(text: str) -> str:
     """
@@ -531,6 +530,85 @@ def _get_rss_urls_for_config(config: Dict) -> List[str]:
     return []
 
 
+# ---------- SPORT/LEAGUE DETECTION FOR MIXED RSS (e.g. Mozzart, 24sata) ----------
+
+_BASKET_KEYWORDS = [
+    "nba",
+    "basket",
+    "basketball",
+    "košarka",
+    "kosarka",
+    "euroleague",
+    "evroliga",
+]
+
+_NBA_TEAM_KEYWORDS = [
+    "nuggets",
+    "lakers",
+    "clippers",
+    "warriors",
+    "celtics",
+    "bucks",
+    "mavericks",
+    "knicks",
+    "heat",
+    "bulls",
+    "sixers",
+    "76ers",
+    "suns",
+    "spurs",
+    "rockets",
+]
+
+_EURO_TEAMS_KEYWORDS = [
+    "real madrid",
+    "barcelona",
+    "fenerbahce",
+    "olympiacos",
+    "panathinaikos",
+    "partizan",
+    "crvena zvezda",
+    "maccabi",
+    "anadolu efes",
+]
+
+
+def _detect_sport_and_league_from_text(
+    config: Dict,
+    title: str,
+    summary: str,
+) -> Dict[str, str]:
+    """
+    Neki RSS (Mozzart, 24sata, Index...) imaju i fudbal i košarku.
+    Ovde probamo da prepravimo tagove sport/league po tekstu.
+    """
+    sport = config["sport"]
+    league = config["league"]
+    country = config["country"]
+
+    text = f"{title} {summary}".lower()
+
+    # Ako je već basketball liga u config-u, ne diramo
+    if sport == "basketball":
+        return {"sport": sport, "league": league, "country": country}
+
+    # Detekcija košarke
+    if any(kw in text for kw in _BASKET_KEYWORDS):
+        sport = "basketball"
+
+        # Pokušaj da prepozna NBA vs Euroleague
+        if "nba" in text or any(kw in text for kw in _NBA_TEAM_KEYWORDS):
+            league = "nba"
+            country = "usa"
+        elif "euroleague" in text or "evroliga" in text or any(
+            kw in text for kw in _EURO_TEAMS_KEYWORDS
+        ):
+            league = "euroleague"
+            country = "europe"
+
+    return {"sport": sport, "league": league, "country": country}
+
+
 def _fetch_for_league(config: Dict, max_articles: int) -> List[Dict]:
     """
     Fetch articles for a single league via RSS.
@@ -571,6 +649,8 @@ def _fetch_for_league(config: Dict, max_articles: int) -> List[Dict]:
 
                 image_url = _extract_image_url(entry)
 
+                tags = _detect_sport_and_league_from_text(config, title, summary)
+
                 normalized.append(
                     {
                         "title": title,
@@ -578,9 +658,9 @@ def _fetch_for_league(config: Dict, max_articles: int) -> List[Dict]:
                         "content": summary,
                         "url": link,
                         "urlToImage": image_url,
-                        "sport": config["sport"],
-                        "league": config["league"],
-                        "country": config["country"],
+                        "sport": tags["sport"],
+                        "league": tags["league"],
+                        "country": tags["country"],
                     }
                 )
         except Exception as e:
@@ -596,8 +676,7 @@ def fetch_all_sports_headlines(
     hard_limit: int = 20,
 ) -> List[Dict]:
     """
-    Return a list of normalized article dicts for all leagues.
-    This is a light version, does not write to DB.
+    Light verzija – samo vrati listu dict-ova, ne upisuje u bazu.
     """
     all_articles: List[Dict] = []
 
@@ -647,7 +726,7 @@ def _make_unique_slug(db: Session, base_slug: str, skip_article_id: Optional[int
 
 
 def _get_or_create_article(
-    db: Session, item: Dict, sport: str, league: str, country: str
+    db: Session, item: Dict
 ) -> Optional[Article]:
     """
     Check if Article with given external_id already exists.
@@ -679,9 +758,9 @@ def _get_or_create_article(
         external_id=source_url,
         title=raw_title,  # temporary, AI will update to English title
         slug=slug,
-        sport=sport,
-        league=league,
-        country=country,
+        sport=item.get("sport"),
+        league=item.get("league"),
+        country=item.get("country"),
         division=1,
         image_url=image_url,
         source_url=source_url,
@@ -696,6 +775,76 @@ def _get_or_create_article(
     return article
 
 
+def _rewrite_article_with_ai(
+    db: Session,
+    article: Article,
+    max_ai_chars: int,
+) -> bool:
+    """
+    Run AI rewrite for a single article.
+    Returns True if rewritten.
+    """
+    base_text = article.content or article.summary or article.title
+    if not base_text:
+        return False
+
+    # uvek očisti HTML pre slanja AI-u
+    base_text = clean_html_text(base_text)
+    if not base_text.strip():
+        return False
+
+    text_for_ai = base_text[:max_ai_chars]
+
+    try:
+        ai_output = ai_rewrite_text(
+            title=article.title,
+            raw_text=text_for_ai,
+            sport=article.sport or "sports",
+        )
+    except Exception as e:
+        logger.error(f"AI rewrite failed for article {article.id}: {e}")
+        return False
+
+    if not ai_output or not ai_output.strip():
+        return False
+
+    text = ai_output.strip()
+    lines = text.splitlines()
+
+    english_title = article.title
+    body = text
+
+    if len(lines) >= 3:
+        cand_title = lines[0].strip().strip("*").strip()
+        english_title = cand_title or article.title
+
+        if len(lines) > 1 and lines[1].strip() == "":
+            body_part = lines[2:]
+        else:
+            body_part = lines[1:]
+
+        body = "\n".join(body_part).strip()
+
+    # summary = first paragraph / line from body
+    preview = body.split("\n")[0].strip()
+    if len(preview) > 400:
+        preview = preview[:400].rsplit(" ", 1)[0] + "..."
+
+    article.ai_content = body
+    article.ai_generated = True
+    article.summary = preview or article.summary
+
+    # update title and slug to English version
+    if english_title and english_title != article.title:
+        article.title = english_title
+        new_base = _slugify(english_title)
+        article.slug = _make_unique_slug(db, new_base, skip_article_id=article.id)
+
+    db.add(article)
+    db.commit()
+    return True
+
+
 def fetch_and_store_all_articles(
     max_per_league: int = 3,
     hard_limit: Optional[int] = None,
@@ -705,19 +854,19 @@ def fetch_and_store_all_articles(
 ) -> int:
     """
     Main bot function:
-    - fetches RSS articles for all leagues in LEAGUE_CONFIG
-    - creates Article records if they do not exist (only with image)
-    - uses AI to generate English headline + article text
-    - updates title, slug, summary, ai_content
-    - returns number of articles that were AI rewritten in this run
+    - povlači RSS za sve lige
+    - pravi Article zapise (samo ako imaju sliku)
+    - AI pravi EN title + tekst (za nove + stare koji još nisu ai_generated)
+    - vraća broj članaka koje je AI prepisao u ovom run-u
     """
     db = SessionLocal()
-    ai_used = 0
     rewritten_count = 0
+    ai_budget = max_ai_articles if max_ai_articles is not None else 10_000
 
     try:
         all_items: List[Dict] = []
 
+        # -------- STEP 1: FETCH ITEMS FROM RSS --------
         for config in LEAGUE_CONFIG:
             if hard_limit is not None and len(all_items) >= hard_limit:
                 break
@@ -731,93 +880,51 @@ def fetch_and_store_all_articles(
                 limit_for_league = min(max_per_league, remaining)
 
             league_items = _fetch_for_league(config, limit_for_league)
-            for it in league_items:
-                all_items.append(
-                    {
-                        **it,
-                        "sport": config["sport"],
-                        "league": config["league"],
-                        "country": config["country"],
-                    }
-                )
+            all_items.extend(league_items)
 
         if hard_limit is not None:
             all_items = all_items[:hard_limit]
 
+        # -------- STEP 2: CREATE/UPDATE ARTICLES FROM FEED --------
+        created_articles: List[Article] = []
         for item in all_items:
-            article = _get_or_create_article(
-                db=db,
-                item=item,
-                sport=item["sport"],
-                league=item["league"],
-                country=item["country"],
+            article = _get_or_create_article(db=db, item=item)
+            if article:
+                created_articles.append(article)
+
+        # -------- STEP 3: AI REWRITE ZA NOVE --------
+        if use_ai and ai_budget > 0:
+            for article in created_articles:
+                if ai_budget <= 0:
+                    break
+                if getattr(article, "ai_generated", False):
+                    continue
+
+                if _rewrite_article_with_ai(db, article, max_ai_chars):
+                    rewritten_count += 1
+                    ai_budget -= 1
+
+        # -------- STEP 4: AI REWRITE ZA STARE KOJI NISU PREPISANI --------
+        if use_ai and ai_budget > 0:
+            pending = (
+                db.query(Article)
+                .filter(Article.is_live == True)
+                .filter(Article.ai_generated == False)
+                .order_by(Article.created_at.desc())
+                .limit(500)
+                .all()
             )
 
-            if not article:
-                continue
+            for article in pending:
+                if ai_budget <= 0:
+                    break
+                # preskoči one koje smo već obradili u ovom run-u
+                if getattr(article, "ai_content", None):
+                    continue
 
-            if not use_ai or article.ai_generated:
-                continue
-
-            if max_ai_articles is not None and ai_used >= max_ai_articles:
-                continue
-
-            base_text = article.content or article.summary or article.title
-            if not base_text:
-                continue
-
-            text_for_ai = base_text[:max_ai_chars]
-
-            try:
-                ai_output = ai_rewrite_text(
-                    title=article.title,
-                    raw_text=text_for_ai,
-                    sport=article.sport or "sports",
-                )
-            except Exception as e:
-                logger.error(f"AI rewrite failed for article {article.id}: {e}")
-                continue
-
-            if not ai_output or not ai_output.strip():
-                continue
-
-            text = ai_output.strip()
-            lines = text.splitlines()
-
-            english_title = article.title
-            body = text
-
-            if len(lines) >= 3:
-                cand_title = lines[0].strip().strip("*").strip()
-                english_title = cand_title or article.title
-
-                if lines[1].strip() == "":
-                    body_part = lines[2:]
-                else:
-                    body_part = lines[1:]
-
-                body = "\n".join(body_part).strip()
-
-            # summary = first paragraph / line from body
-            preview = body.split("\n")[0].strip()
-            if len(preview) > 400:
-                preview = preview[:400].rsplit(" ", 1)[0] + "..."
-
-            article.ai_content = body
-            article.ai_generated = True
-            article.summary = preview or article.summary
-
-            # update title and slug to English version
-            if english_title and english_title != article.title:
-                article.title = english_title
-                new_base = _slugify(english_title)
-                article.slug = _make_unique_slug(db, new_base, skip_article_id=article.id)
-
-            db.add(article)
-            db.commit()
-
-            ai_used += 1
-            rewritten_count += 1
+                if _rewrite_article_with_ai(db, article, max_ai_chars):
+                    rewritten_count += 1
+                    ai_budget -= 1
 
         return rewritten_count
 
