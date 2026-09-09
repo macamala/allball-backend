@@ -79,6 +79,19 @@ def test_kawhi_raptors_nba_not_euroleague():
     assert result.league == "nba"
 
 
+def test_league_feed_hints_sport_when_article_is_silent():
+    result = classify_article(
+        "Alabama jump-starts 2027 recruiting class with No. 28 Lumpkin",
+        "The Crimson Tide added a five-star prospect from the 2027 cycle.",
+        feed_kind="league",
+        feed_sport="basketball",
+        feed_league="ncaa-basketball",
+        feed_country="usa",
+    )
+    assert result.sport == "basketball"
+    assert result.league == "ncaa-basketball"
+
+
 def test_mixed_feed_does_not_stamp_league():
     result = classify_article(
         "Formula 1: Verstappen wins the Grand Prix",

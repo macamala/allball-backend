@@ -15,7 +15,12 @@ from .dedupe import existing_by_url, existing_near_duplicate
 from .extract import extract_from_url, parse_feed_datetime
 from .feeds import enabled_feeds
 from .quality import enough_for_brief, is_english_enough, quality_check
-from .rewrite_ai import parse_ai_output, write_ninkosports_story
+from .rewrite_ai import (
+    openai_rate_limited,
+    parse_ai_output,
+    reset_openai_rate_limit,
+    write_ninkosports_story,
+)
 from .taxonomy import COMPETITIONS
 from .textutil import clean_text, looks_like_garbage, strip_truncation_markers
 
@@ -170,7 +175,7 @@ def _ingest_item(db: Session, item: Dict, use_ai: bool, max_ai_chars: int, ai_bu
     story_body = facts
     story_summary = facts[:400]
     used_ai = False
-    if use_ai and ai_budget > 0:
+    if use_ai and ai_budget > 0 and not openai_rate_limited():
         raw = write_ninkosports_story(
             title=item["title"],
             facts=facts[:max_ai_chars],
@@ -277,34 +282,41 @@ def fetch_and_store_all_articles(
     rewritten = 0
     ai_budget = max_ai_articles if max_ai_articles is not None else 0
     created = 0
+    reset_openai_rate_limit()
     try:
         per_feed = max(1, max_per_league)
+        queued = []
         for feed in enabled_feeds():
-            if hard_limit is not None and created >= hard_limit:
-                break
             try:
-                items = _fetch_feed_entries(feed, per_feed)
+                queued.extend(_fetch_feed_entries(feed, per_feed))
             except Exception as e:
                 logger.error("[fetch_sources] feed error %s: %s", feed.get("url"), e)
+        queued.sort(
+            key=lambda item: 0
+            if not is_english_enough(f"{item.get('title') or ''} {item.get('summary') or ''}")
+            else 1
+        )
+        for item in queued:
+            if hard_limit is not None and created >= hard_limit:
+                break
+            allow_ai = use_ai and ai_budget > 0 and not openai_rate_limited()
+            try:
+                article, used_ai = _ingest_item(
+                    db,
+                    item,
+                    use_ai=allow_ai,
+                    max_ai_chars=max_ai_chars,
+                    ai_budget=ai_budget,
+                )
+            except Exception as e:
+                logger.exception("[fetch_sources] item failed: %s", e)
+                db.rollback()
                 continue
-            for item in items:
-                if hard_limit is not None and created >= hard_limit:
-                    break
-                try:
-                    article, used_ai = _ingest_item(
-                        db, item, use_ai=use_ai, max_ai_chars=max_ai_chars, ai_budget=ai_budget
-                    )
-                except Exception as e:
-                    logger.exception("[fetch_sources] item failed: %s", e)
-                    db.rollback()
-                    continue
-                if article and article.created_at and article.created_at.date() == datetime.utcnow().date():
-                    created += 1
-                elif article:
-                    created += 1
-                if used_ai:
-                    rewritten += 1
-                    ai_budget = max(0, ai_budget - 1)
+            if article:
+                created += 1
+            if used_ai:
+                rewritten += 1
+                ai_budget = max(0, ai_budget - 1)
         return rewritten
     finally:
         db.close()

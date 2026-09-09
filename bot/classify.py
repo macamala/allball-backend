@@ -84,7 +84,12 @@ def classify_article(
                 sport = non_fb[0]
 
     if not sport:
-        return Classification(None, None, None, "low", "unknown-sport")
+        # Genuine league feeds may hint sport only when the article itself is silent.
+        # Mixed/national firehoses must not inherit a bucket.
+        if feed_kind == "league" and feed_sport:
+            sport = feed_sport
+        else:
+            return Classification(None, None, None, "low", "unknown-sport")
 
     league_scores: Dict[str, int] = {}
     for slug, meta in COMPETITIONS.items():

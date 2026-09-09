@@ -119,9 +119,9 @@ FEEDS: List[Feed] = [
     },
     {
         "url": "https://www.getfootballnewsfrance.com/feed/",
-        "kind": "mixed",
-        "enabled": True,
-        "note": "Often malformed XML; skipped when bozo",
+        "kind": "disabled",
+        "enabled": False,
+        "note": "Extract returns HTTP 403; skip until a usable source exists",
     },
     {
         "url": "https://www.blick.ch/sport/rss.xml",

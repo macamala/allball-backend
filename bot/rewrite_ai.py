@@ -2,6 +2,7 @@
 
 import logging
 import os
+import time
 from typing import Optional
 
 import httpx
@@ -10,6 +11,8 @@ logger = logging.getLogger(__name__)
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
+
+_rate_limited = False
 
 SYSTEM_PROMPT = """You are a staff writer for NinkoSports, an English-language sports news site.
 
@@ -31,34 +34,59 @@ Then 2-6 short paragraphs of article body.
 """
 
 
+def reset_openai_rate_limit() -> None:
+    global _rate_limited
+    _rate_limited = False
+
+
+def openai_rate_limited() -> bool:
+    return _rate_limited
+
+
 def _call_openai(prompt: str) -> Optional[str]:
+    global _rate_limited
+    if _rate_limited:
+        return None
     if not OPENAI_API_KEY:
         logger.warning("[rewrite_ai] OPENAI_API_KEY is not set")
         return None
-    try:
-        with httpx.Client(timeout=60) as client:
-            resp = client.post(
-                "https://api.openai.com/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {OPENAI_API_KEY}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": OPENAI_MODEL,
-                    "messages": [
-                        {"role": "system", "content": SYSTEM_PROMPT},
-                        {"role": "user", "content": prompt},
-                    ],
-                    "temperature": 0.35,
-                    "max_tokens": 700,
-                },
-            )
-        resp.raise_for_status()
-        data = resp.json()
-        return data["choices"][0]["message"]["content"].strip()
-    except Exception as e:
-        logger.error("[rewrite_ai] OpenAI call failed: %s", e)
-        return None
+    last_error = None
+    for attempt in range(3):
+        try:
+            with httpx.Client(timeout=60) as client:
+                resp = client.post(
+                    "https://api.openai.com/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {OPENAI_API_KEY}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": OPENAI_MODEL,
+                        "messages": [
+                            {"role": "system", "content": SYSTEM_PROMPT},
+                            {"role": "user", "content": prompt},
+                        ],
+                        "temperature": 0.35,
+                        "max_tokens": 700,
+                    },
+                )
+            if resp.status_code == 429:
+                last_error = "429 Too Many Requests"
+                if attempt < 2:
+                    time.sleep(2 * (attempt + 1))
+                    continue
+                _rate_limited = True
+                logger.error("[rewrite_ai] OpenAI rate-limited; pausing AI for this run")
+                return None
+            resp.raise_for_status()
+            data = resp.json()
+            return data["choices"][0]["message"]["content"].strip()
+        except Exception as e:
+            last_error = e
+            logger.error("[rewrite_ai] OpenAI call failed: %s", e)
+            return None
+    logger.error("[rewrite_ai] OpenAI call failed: %s", last_error)
+    return None
 
 
 def write_ninkosports_story(
@@ -67,6 +95,8 @@ def write_ninkosports_story(
     sport: str = "sports",
     league: str = "",
 ) -> Optional[str]:
+    if openai_rate_limited():
+        return None
     facts = (facts or "").strip()
     title = (title or "").strip()
     if not title and not facts:
@@ -108,7 +138,6 @@ def parse_ai_output(ai_text: str) -> dict:
     return {"title": headline, "summary": summary, "body": body}
 
 
-# Backward-compatible name used by older pipeline.py
 def rewrite_to_long_form(title: str, raw_text: str, sport: str = "sports") -> str:
     result = write_ninkosports_story(title, raw_text, sport=sport)
     return result or ""
