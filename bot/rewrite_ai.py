@@ -1,7 +1,7 @@
-# bot/rewrite_ai.py
+"""Original English NinkoSports journalism from verified source facts."""
 
-import os
 import logging
+import os
 from typing import Optional
 
 import httpx
@@ -11,22 +11,30 @@ logger = logging.getLogger(__name__)
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
 
-if not OPENAI_API_KEY:
-    logger.warning(
-        "[rewrite_ai] OPENAI_API_KEY is not set. "
-        "AI rewrite will not work and raw text will be used."
-    )
+SYSTEM_PROMPT = """You are a staff writer for NinkoSports, an English-language sports news site.
+
+Write an ORIGINAL news story from the provided facts.
+- English only. Natural sports journalism. No clickbait.
+- Do not translate word-for-word or copy the source paragraph-for-paragraph.
+- Do not invent scores, quotes, fees, injuries, statistics, dates, or unnamed details.
+- If facts are thin, write a short accurate brief. Prefer short and true over long and guessed.
+- Never mention AI, translation, or the original publisher.
+- Never include URLs, source names, or attribution lines.
+- Never include HTML or markers like [+123 chars].
+
+Output format MUST be:
+Line 1: headline (plain text, no quotes, no markdown)
+Line 2: blank
+Line 3: one-sentence summary
+Line 4: blank
+Then 2-6 short paragraphs of article body.
+"""
 
 
 def _call_openai(prompt: str) -> Optional[str]:
-    """
-    Low-level call to OpenAI chat completions.
-    Returns a single string: first line is English headline,
-    blank line, then the rest is the article body.
-    """
     if not OPENAI_API_KEY:
+        logger.warning("[rewrite_ai] OPENAI_API_KEY is not set")
         return None
-
     try:
         with httpx.Client(timeout=60) as client:
             resp = client.post(
@@ -38,84 +46,69 @@ def _call_openai(prompt: str) -> Optional[str]:
                 json={
                     "model": OPENAI_MODEL,
                     "messages": [
-                        {
-                            "role": "system",
-                            "content": (
-                                "You are a professional sports journalist.\n"
-                                "- You ALWAYS write in natural, fluent ENGLISH only.\n"
-                                "- You never include sentences in other languages.\n"
-                                "- Ignore any HTML tags (like <img>, <br>, <a>) and never copy them.\n"
-                                "- Output format MUST be:\n"
-                                "  1) First line: English headline, plain text, no quotes, no markdown.\n"
-                                "  2) One blank line.\n"
-                                "  3) Several paragraphs of article text in English.\n"
-                            ),
-                        },
-                        {
-                            "role": "user",
-                            "content": prompt,
-                        },
+                        {"role": "system", "content": SYSTEM_PROMPT},
+                        {"role": "user", "content": prompt},
                     ],
-                    "temperature": 0.5,
-                    "max_tokens": 900,
+                    "temperature": 0.35,
+                    "max_tokens": 700,
                 },
             )
         resp.raise_for_status()
         data = resp.json()
         return data["choices"][0]["message"]["content"].strip()
     except Exception as e:
-        logger.error(f"[rewrite_ai] OpenAI call failed: {e}")
+        logger.error("[rewrite_ai] OpenAI call failed: %s", e)
         return None
 
 
-def rewrite_to_long_form(title: str, raw_text: str, sport: str = "sports") -> str:
-    """
-    Main function for the rest of the code.
-
-    Input:
-      - title: original title (any language)
-      - raw_text: text or summary from RSS, may contain HTML
-      - sport: 'football', 'basketball', etc.
-
-    Output:
-      - A string where:
-        * first line = English headline
-        * blank line
-        * rest = English article body
-    """
-    base_title = (title or "").strip()
-    base_text = (raw_text or "").strip()
-
-    if not base_title and not base_text:
-        return ""
-
+def write_ninkosports_story(
+    title: str,
+    facts: str,
+    sport: str = "sports",
+    league: str = "",
+) -> Optional[str]:
+    facts = (facts or "").strip()
+    title = (title or "").strip()
+    if not title and not facts:
+        return None
+    if len(facts) > 3500:
+        facts = facts[:3500]
     prompt = (
-        f"SPORT: {sport}\n\n"
-        f"ORIGINAL TITLE:\n{base_title}\n\n"
-        "SOURCE TEXT (may contain a different language and some HTML tags):\n"
-        f"{base_text}\n\n"
-        "TASK:\n"
-        "- Write a sports news piece in ENGLISH only.\n"
-        "- If the original language is not English, translate and rewrite it into English.\n"
-        "- DO NOT include any sentences in the original language.\n"
-        "- Ignore HTML tags (<img>, <br>, <a>, etc.) and do not copy them.\n"
-        "- Output format MUST be:\n"
-        "  First line: English headline, no quotes, no markdown.\n"
-        "  Then a blank line.\n"
-        "  Then 3–6 paragraphs of English article text.\n"
+        f"SPORT: {sport}\n"
+        f"COMPETITION: {league or 'unspecified'}\n\n"
+        f"ORIGINAL HEADLINE (any language):\n{title}\n\n"
+        "VERIFIED SOURCE FACTS (may be another language; use only what is stated):\n"
+        f"{facts}\n"
     )
+    return _call_openai(prompt)
 
-    ai_result = _call_openai(prompt)
 
-    if not ai_result:
-        # fallback: return plain cleaned text (title + raw)
-        from html import unescape
-        import re
+def parse_ai_output(ai_text: str) -> dict:
+    text = (ai_text or "").strip()
+    if not text:
+        return {}
+    lines = [ln.rstrip() for ln in text.splitlines()]
+    headline = (lines[0] if lines else "").strip().strip("*").strip('"')
+    rest = lines[1:]
+    while rest and not rest[0].strip():
+        rest = rest[1:]
+    summary = ""
+    body_lines = rest
+    if rest:
+        summary = rest[0].strip()
+        body_lines = rest[1:]
+        while body_lines and not body_lines[0].strip():
+            body_lines = body_lines[1:]
+    body = "\n".join(body_lines).strip()
+    if not body:
+        body = summary
+        summary = summary[:240]
+    if len(summary) > 280:
+        summary = summary[:277].rsplit(" ", 1)[0] + "..."
+    return {"title": headline, "summary": summary, "body": body}
 
-        text = f"{base_title}\n\n{base_text}".strip()
-        text = unescape(text)
-        text = re.sub(r"<[^>]+>", " ", text)
-        text = re.sub(r"\s+", " ", text).strip()
-        return text
 
-    return ai_result
+# Backward-compatible name used by older pipeline.py
+def rewrite_to_long_form(title: str, raw_text: str, sport: str = "sports") -> str:
+    result = write_ninkosports_story(title, raw_text, sport=sport)
+    return result or ""

@@ -34,3 +34,4 @@ class Article(Base):
     is_live = Column(Boolean, default=True)
 
     created_at = Column(DateTime, default=datetime.utcnow)
+    published_at = Column(DateTime, nullable=True)

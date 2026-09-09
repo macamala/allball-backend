@@ -12,24 +12,26 @@ logger = logging.getLogger(__name__)
 INTERVAL_MINUTES = int(os.getenv("NEWS_FETCH_INTERVAL_MINUTES", "10"))
 
 # Koliko AI članaka sme da obradi po jednom run-u
-MAX_AI_ARTICLES = int(os.getenv("NEWS_MAX_AI_ARTICLES", "100"))
+MAX_AI_ARTICLES = int(os.getenv("NEWS_MAX_AI_ARTICLES", "10"))
 
 
 def job():
     """
-    Jedan ciklus:
-    - povuče vesti sa RSS-a za sve lige
-    - upiše nove Article zapise u bazu
-    - uradi AI rewrite u ai_content (nove + deo starih koji nisu prevedeni)
+    One ingest cycle for NEW candidates only:
+    - fetch enabled RSS feeds
+    - classify from article evidence (not feed buckets)
+    - extract/clean facts, quality-gate, dedupe
+    - write original English NinkoSports copy for new rows
+    - never mass-rewrite historical articles
     """
     logger.info("Running NinkoSports pipeline (scheduled job)...")
     try:
         rewritten = fetch_and_store_all_articles(
-            max_per_league=5,                 # max 3 članka po ligi po run-u
-            hard_limit=None,                  # nema ukupnog total limita po run-u
-            use_ai=True,                      # koristi OpenAI
-            max_ai_chars=3000,                # max dužina ulaznog teksta
-            max_ai_articles=MAX_AI_ARTICLES,  # max AI rewritova po run-u
+            max_per_league=3,
+            hard_limit=None,
+            use_ai=True,
+            max_ai_chars=3000,
+            max_ai_articles=MAX_AI_ARTICLES,
         )
         logger.info(
             "NinkoSports pipeline finished successfully. "

@@ -1,6 +1,8 @@
+"""Ingest RSS, classify independently, extract facts, write English NinkoSports copy."""
+
 import logging
-import re
-from typing import List, Dict, Optional
+from datetime import datetime
+from typing import Dict, List, Optional
 
 import feedparser
 from sqlalchemy.orm import Session
@@ -8,841 +10,256 @@ from sqlalchemy.orm import Session
 from database import SessionLocal
 from models import Article
 
+from .classify import classify_article
+from .dedupe import existing_by_url, existing_near_duplicate
+from .extract import extract_from_url, parse_feed_datetime
+from .feeds import enabled_feeds
+from .quality import enough_for_brief, is_english_enough, quality_check
+from .rewrite_ai import parse_ai_output, write_ninkosports_story
+from .taxonomy import COMPETITIONS
+from .textutil import clean_text, looks_like_garbage, strip_truncation_markers
+
 logger = logging.getLogger(__name__)
 
-# Try to import AI rewrite function
-try:
-    from .rewrite_ai import rewrite_to_long_form as ai_rewrite_text
-except Exception:
-    logger.warning(
-        "Could not import bot.rewrite_ai.rewrite_to_long_form. "
-        "AI content will fallback to raw text."
-    )
-
-    def ai_rewrite_text(title: str, raw_text: str, sport: str = "sports") -> str:
-        # Fallback: return original text
-        return (raw_text or "").strip()
-
-
-# ================== LEAGUE CONFIG (ALL LEAGUES WE SUPPORT NOW) ==================
+# Public filter catalog (human labels included for the API).
 LEAGUE_CONFIG: List[Dict] = [
-    # ========= TOP 5 + EUROPE MAIN =========
-
-    # England
     {
-        "sport": "football",
-        "league": "england-premier-league",
-        "country": "england",
-        "query": "Premier League football",
-    },
-    {
-        "sport": "football",
-        "league": "england-championship",
-        "country": "england",
-        "query": "Championship football",
-    },
-
-    # Spain
-    {
-        "sport": "football",
-        "league": "spain-la-liga",
-        "country": "spain",
-        "query": "La Liga football",
-    },
-    {
-        "sport": "football",
-        "league": "spain-la-liga-2",
-        "country": "spain",
-        "query": "Segunda Division football",
-    },
-
-    # Italy
-    {
-        "sport": "football",
-        "league": "italy-serie-a",
-        "country": "italy",
-        "query": "Serie A football",
-    },
-    {
-        "sport": "football",
-        "league": "italy-serie-b",
-        "country": "italy",
-        "query": "Serie B football",
-    },
-
-    # Germany
-    {
-        "sport": "football",
-        "league": "germany-bundesliga",
-        "country": "germany",
-        "query": "Bundesliga football",
-    },
-    {
-        "sport": "football",
-        "league": "germany-2-bundesliga",
-        "country": "germany",
-        "query": "2. Bundesliga football",
-    },
-
-    # France
-    {
-        "sport": "football",
-        "league": "france-ligue-1",
-        "country": "france",
-        "query": "Ligue 1 football",
-    },
-    {
-        "sport": "football",
-        "league": "france-ligue-2",
-        "country": "france",
-        "query": "Ligue 2 football",
-    },
-
-    # Netherlands
-    {
-        "sport": "football",
-        "league": "netherlands-eredivisie",
-        "country": "netherlands",
-        "query": "Eredivisie football",
-    },
-
-    # Portugal
-    {
-        "sport": "football",
-        "league": "portugal-primeira-liga",
-        "country": "portugal",
-        "query": "Primeira Liga football",
-    },
-
-    # Belgium
-    {
-        "sport": "football",
-        "league": "belgium-pro-league",
-        "country": "belgium",
-        "query": "Belgian Pro League football",
-    },
-
-    # Turkey
-    {
-        "sport": "football",
-        "league": "turkey-super-lig",
-        "country": "turkey",
-        "query": "Turkish Super Lig football",
-    },
-
-    # Greece
-    {
-        "sport": "football",
-        "league": "greece-super-league",
-        "country": "greece",
-        "query": "Greek Super League football",
-    },
-
-    # Scotland
-    {
-        "sport": "football",
-        "league": "scotland-premiership",
-        "country": "scotland",
-        "query": "Scottish Premiership football",
-    },
-
-    # Switzerland
-    {
-        "sport": "football",
-        "league": "switzerland-super-league",
-        "country": "switzerland",
-        "query": "Swiss Super League football",
-    },
-
-    # Croatia
-    {
-        "sport": "football",
-        "league": "croatia-hnl",
-        "country": "croatia",
-        "query": "Croatian HNL football",
-    },
-
-    # Serbia
-    {
-        "sport": "football",
-        "league": "serbia-superliga",
-        "country": "serbia",
-        "query": "Serbian SuperLiga football",
-    },
-
-    # Poland
-    {
-        "sport": "football",
-        "league": "poland-ekstraklasa",
-        "country": "poland",
-        "query": "Ekstraklasa football",
-    },
-
-    # Czech
-    {
-        "sport": "football",
-        "league": "czech-first-league",
-        "country": "czech-republic",
-        "query": "Czech First League football",
-    },
-
-    # ========== OUTSIDE EUROPE MAIN LEAGUES ==========
-
-    # USA
-    {
-        "sport": "football",
-        "league": "usa-mls",
-        "country": "usa",
-        "query": "MLS soccer",
-    },
-
-    # Brazil
-    {
-        "sport": "football",
-        "league": "brazil-serie-a",
-        "country": "brazil",
-        "query": "Brasileirao Serie A football",
-    },
-
-    # Argentina
-    {
-        "sport": "football",
-        "league": "argentina-liga-profesional",
-        "country": "argentina",
-        "query": "Argentina Liga Profesional football",
-    },
-
-    # ========== BIG INTERNATIONAL COMPETITIONS ==========
-
-    {
-        "sport": "football",
-        "league": "uefa-champions-league",
-        "country": "europe",
-        "query": "UEFA Champions League football",
-    },
-    {
-        "sport": "football",
-        "league": "uefa-europa-league",
-        "country": "europe",
-        "query": "UEFA Europa League football",
-    },
-    {
-        "sport": "football",
-        "league": "uefa-conference-league",
-        "country": "europe",
-        "query": "UEFA Conference League football",
-    },
-    {
-        "sport": "football",
-        "league": "uefa-euro",
-        "country": "europe",
-        "query": "UEFA Euro national team football",
-    },
-    {
-        "sport": "football",
-        "league": "fifa-world-cup",
-        "country": "global",
-        "query": "FIFA World Cup football",
-    },
-
-    # ========== BASKETBALL ==========
-
-    {
-        "sport": "basketball",
-        "league": "nba",
-        "country": "usa",
-        "query": "NBA basketball",
-    },
-    {
-        "sport": "basketball",
-        "league": "euroleague",
-        "country": "europe",
-        "query": "EuroLeague basketball",
-    },
-    {
-        "sport": "basketball",
-        "league": "ncaa-basketball",
-        "country": "usa",
-        "query": "NCAA college basketball",
-    },
+        "sport": meta["sport"],
+        "league": slug,
+        "country": meta["country"],
+        "label": meta["label"],
+        "query": meta["label"],
+    }
+    for slug, meta in COMPETITIONS.items()
 ]
-
-# ================== RSS CONFIG ==================
-
-# Generic fallback feeds (only used if league is not in RSS_OVERRIDE)
-COMMON_FOOTBALL_FEEDS = [
-    "https://www.espn.com/espn/rss/soccer/news",
-    "https://feeds.bbci.co.uk/sport/football/rss.xml",
-]
-
-COMMON_BASKETBALL_FEEDS = [
-    "https://www.espn.com/espn/rss/nba/news",
-]
-
-NBA_FEEDS = [
-    "https://www.espn.com/espn/rss/nba/news",
-]
-
-NCAA_FEEDS = [
-    "https://www.espn.com/espn/rss/ncb/news",
-]
-
-EUROLEAGUE_FEEDS = [
-    # Možeš promeniti kasnije na drugi stabilan Euroleague RSS
-    "https://www.talkbasket.net/feed",
-]
-
-# League-specific RSS overrides
-RSS_OVERRIDE: Dict[str, List[str]] = {
-    # ===== ENGLAND =====
-    "england-premier-league": [
-        "https://www.skysports.com/rss/12040",
-        "https://feeds.bbci.co.uk/sport/football/premier-league/rss.xml",
-    ],
-    "england-championship": [
-        "https://www.skysports.com/rss/12040/championship",
-        "https://feeds.bbci.co.uk/sport/football/championship/rss.xml",
-    ],
-
-    # ===== SPAIN =====
-    "spain-la-liga": [
-        "https://as.com/rss/futbol/primera.xml",
-        "https://www.marca.com/en/rss/futbol/primera-division.xml",
-    ],
-    "spain-la-liga-2": [
-        "https://as.com/rss/futbol/segunda.xml",
-    ],
-
-    # ===== ITALY =====
-    "italy-serie-a": [
-        "https://www.gazzetta.it/rss/home.xml",
-        "https://www.football-italia.net/feed",
-    ],
-    "italy-serie-b": [
-        "https://www.gazzetta.it/rss/calcio/serie-b.xml",
-    ],
-
-    # ===== GERMANY =====
-    "germany-bundesliga": [
-        "https://www.bundesliga.com/en/bundesliga/rss-feed",
-        "https://www.kicker.de/bundesliga/rss",
-    ],
-    "germany-2-bundesliga": [
-        "https://www.kicker.de/2-bundesliga/rss",
-    ],
-
-    # ===== FRANCE =====
-    "france-ligue-1": [
-        "https://www.lequipe.fr/rss/actu_rss_Football.xml",
-        "https://www.getfootballnewsfrance.com/feed/",
-    ],
-    "france-ligue-2": [
-        "https://www.lequipe.fr/rss/actu_rss_Football_Ligue-2.xml",
-    ],
-
-    # ===== NETHERLANDS =====
-    "netherlands-eredivisie": [
-        "https://www.ad.nl/sport/voetbal/eredivisie/rss.xml",
-        "https://www.vi.nl/feeds/nieuws",
-    ],
-
-    # ===== PORTUGAL =====
-    "portugal-primeira-liga": [
-        "https://www.abola.pt/rss",
-        "https://www.record.pt/rss",
-    ],
-
-    # ===== BELGIUM =====
-    "belgium-pro-league": [
-        "https://www.hln.be/sport/voetbal/rss.xml",
-        "https://www.voetbalprimeur.nl/feed",
-    ],
-
-    # ===== TURKEY =====
-    "turkey-super-lig": [
-        "https://www.fanatik.com.tr/rss",
-        "https://www.ntvspor.net/rss",
-    ],
-
-    # ===== GREECE =====
-    "greece-super-league": [
-        "https://www.sport24.gr/rss",
-        "https://www.gazzetta.gr/rss",
-    ],
-
-    # ===== SCOTLAND =====
-    "scotland-premiership": [
-        "https://www.skysports.com/rss/29328",
-        "https://www.bbc.co.uk/sport/football/scottish-premiership/rss.xml",
-    ],
-
-    # ===== SWITZERLAND =====
-    "switzerland-super-league": [
-        "https://www.blick.ch/sport/rss.xml",
-    ],
-
-    # ===== CROATIA =====
-    "croatia-hnl": [
-        "https://www.24sata.hr/feeds/sport.xml",
-        "https://www.index.hr/rss/sport",
-    ],
-
-    # ===== SERBIA =====
-    "serbia-superliga": [
-        "https://www.mozzartsport.com/rss",
-        "https://www.novosti.rs/rss/sport",
-    ],
-
-    # ===== POLAND =====
-    "poland-ekstraklasa": [
-        "https://sport.tvp.pl/rss",
-        "https://www.przegladsportowy.pl/rss,pi",
-    ],
-
-    # ===== CZECH =====
-    "czech-first-league": [
-        "https://isport.blesk.cz/rss",
-    ],
-
-    # ===== USA / AMERICAS =====
-    "usa-mls": [
-        "https://www.mlssoccer.com/rss",
-    ],
-    "brazil-serie-a": [
-        "https://ge.globo.com/dynamo/rss/futebol/brasileirao-serie-a/",
-    ],
-    "argentina-liga-profesional": [
-        "https://www.tycsports.com/rss",
-    ],
-
-    # ===== INTERNATIONAL COMPETITIONS =====
-    "uefa-champions-league": [
-        "https://www.uefa.com/rssfeed/uefachampionsleague/rss.xml",
-    ],
-    "uefa-europa-league": [
-        "https://www.uefa.com/rssfeed/uefaeuropaleague/rss.xml",
-    ],
-    "uefa-conference-league": [
-        "https://www.uefa.com/rssfeed/uefaconferenceleague/rss.xml",
-    ],
-    "uefa-euro": [
-        "https://www.uefa.com/uefaeuro/rss.xml",
-    ],
-    "fifa-world-cup": [
-        "https://www.fifa.com/rss-feeds/news",
-    ],
-
-    # ===== BASKETBALL =====
-    "nba": NBA_FEEDS,
-    "ncaa-basketball": NCAA_FEEDS,
-    "euroleague": EUROLEAGUE_FEEDS,
-}
 
 
 def clean_html_text(text: str) -> str:
-    """
-    Remove HTML tags (img, script, style, etc) and return clean plain text.
-    """
-    if not text:
-        return ""
-
-    from html import unescape
-
-    # remove script/style blocks
-    text = re.sub(
-        r"<(script|style)[^>]*>.*?</\1>",
-        " ",
-        text,
-        flags=re.DOTALL | re.IGNORECASE,
-    )
-
-    # remove <img ...>
-    text = re.sub(r"<img[^>]*>", " ", text, flags=re.IGNORECASE)
-
-    # remove all remaining tags
-    text = re.sub(r"<[^>]+>", " ", text)
-
-    # decode HTML entities
-    text = unescape(text)
-
-    # normalize whitespace
-    text = re.sub(r"\s+", " ", text).strip()
-    return text
+    return clean_text(text)
 
 
 def _extract_image_url(entry) -> Optional[str]:
-    """
-    Try to extract an image URL from an RSS entry.
-    Checks media:content, media:thumbnail, enclosure, or <img> in summary.
-    """
-    # 1) media_content
     media_content = entry.get("media_content")
     if media_content and isinstance(media_content, list):
         for m in media_content:
             url = m.get("url")
             if url:
                 return url
-
-    # 2) media_thumbnail
     media_thumb = entry.get("media_thumbnail")
     if media_thumb and isinstance(media_thumb, list):
         for m in media_thumb:
             url = m.get("url")
             if url:
                 return url
-
-    # 3) enclosure in links
     links = entry.get("links") or []
     for link in links:
         if link.get("rel") == "enclosure" and str(link.get("type", "")).startswith("image"):
             url = link.get("href")
             if url:
                 return url
-
-    # 4) <img src="..."> in summary/description
     summary = entry.get("summary") or entry.get("description") or ""
+    import re
+
     match = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', summary)
     if match:
         return match.group(1)
-
     return None
 
 
-def _get_rss_urls_for_config(config: Dict) -> List[str]:
-    """
-    Return the list of RSS URLs for given league config.
-    1) If league is in RSS_OVERRIDE -> use that
-    2) If sport is football -> COMMON_FOOTBALL_FEEDS
-    3) If sport is basketball -> COMMON_BASKETBALL_FEEDS
-    """
-    league = config["league"]
-    sport = config["sport"]
+def _slugify(title: str, fallback: str = "") -> str:
+    import re
 
-    if league in RSS_OVERRIDE:
-        return RSS_OVERRIDE[league]
-
-    if sport == "football":
-        return COMMON_FOOTBALL_FEEDS
-
-    if sport == "basketball":
-        return COMMON_BASKETBALL_FEEDS
-
-    return []
+    if not title:
+        title = fallback or "article"
+    slug = re.sub(r"[^a-zA-Z0-9\s-]", "", title)
+    slug = slug.strip().lower()
+    slug = re.sub(r"[\s-]+", "-", slug)
+    return slug[:90] or "article"
 
 
-# ---------- SPORT/LEAGUE DETECTION FOR MIXED RSS (e.g. Mozzart, 24sata) ----------
-
-_BASKET_KEYWORDS = [
-    "nba",
-    "basket",
-    "basketball",
-    "košarka",
-    "kosarka",
-    "euroleague",
-    "evroliga",
-]
-
-_NBA_TEAM_KEYWORDS = [
-    "nuggets",
-    "lakers",
-    "clippers",
-    "warriors",
-    "celtics",
-    "bucks",
-    "mavericks",
-    "knicks",
-    "heat",
-    "bulls",
-    "sixers",
-    "76ers",
-    "suns",
-    "spurs",
-    "rockets",
-]
-
-_EURO_TEAMS_KEYWORDS = [
-    "real madrid",
-    "barcelona",
-    "fenerbahce",
-    "olympiacos",
-    "panathinaikos",
-    "partizan",
-    "crvena zvezda",
-    "maccabi",
-    "anadolu efes",
-]
+def _make_unique_slug(db: Session, base_slug: str, skip_article_id: Optional[int] = None) -> str:
+    slug = base_slug
+    counter = 1
+    while True:
+        q = db.query(Article).filter(Article.slug == slug)
+        if skip_article_id is not None:
+            q = q.filter(Article.id != skip_article_id)
+        if q.first() is None:
+            return slug
+        counter += 1
+        slug = f"{base_slug}-{counter}"
 
 
-def _detect_sport_and_league_from_text(
-    config: Dict,
-    title: str,
-    summary: str,
-) -> Dict[str, str]:
-    """
-    Neki RSS (Mozzart, 24sata, Index...) imaju i fudbal i košarku.
-    Ovde probamo da prepravimo tagove sport/league po tekstu.
-    """
-    sport = config["sport"]
-    league = config["league"]
-    country = config["country"]
-
-    text = f"{title} {summary}".lower()
-
-    # Ako je već basketball liga u config-u, ne diramo
-    if sport == "basketball":
-        return {"sport": sport, "league": league, "country": country}
-
-    # Detekcija košarke
-    if any(kw in text for kw in _BASKET_KEYWORDS):
-        sport = "basketball"
-
-        # Pokušaj da prepozna NBA vs Euroleague
-        if "nba" in text or any(kw in text for kw in _NBA_TEAM_KEYWORDS):
-            league = "nba"
-            country = "usa"
-        elif "euroleague" in text or "evroliga" in text or any(
-            kw in text for kw in _EURO_TEAMS_KEYWORDS
-        ):
-            league = "euroleague"
-            country = "europe"
-
-    return {"sport": sport, "league": league, "country": country}
-
-
-def _fetch_for_league(config: Dict, max_articles: int) -> List[Dict]:
-    """
-    Fetch articles for a single league via RSS.
-    """
-    league_key = config["league"]
-    rss_urls = _get_rss_urls_for_config(config)
-
-    if not rss_urls:
-        logger.info(f"[fetch_sources] No RSS configured for league={league_key}")
+def _fetch_feed_entries(feed_cfg: Dict, max_articles: int) -> List[Dict]:
+    url = feed_cfg["url"]
+    logger.info("[fetch_sources] Fetching RSS kind=%s url=%s", feed_cfg.get("kind"), url)
+    feed = feedparser.parse(url)
+    entries = list(feed.entries or [])
+    if not entries:
+        logger.warning(
+            "[fetch_sources] empty/unusable RSS for %s bozo=%s — fail closed",
+            url,
+            getattr(feed, "bozo_exception", None),
+        )
         return []
+    if getattr(feed, "bozo", False):
+        logger.warning(
+            "[fetch_sources] RSS warning for %s: %s (using parsed entries)",
+            url,
+            feed.bozo_exception,
+        )
 
-    normalized: List[Dict] = []
+    items = []
+    for entry in entries[: max(1, max_articles)]:
+        title = strip_truncation_markers(clean_text(entry.get("title") or ""))
+        summary = strip_truncation_markers(
+            clean_text(entry.get("summary") or entry.get("description") or "")
+        )
+        link = (entry.get("link") or "").strip()
+        if not link or not title or looks_like_garbage(title):
+            continue
+        items.append(
+            {
+                "title": title,
+                "summary": summary,
+                "url": link,
+                "image": _extract_image_url(entry),
+                "published_at": parse_feed_datetime(entry),
+                "feed": feed_cfg,
+            }
+        )
+    return items
 
-    per_feed_limit = max_articles
-    if max_articles and len(rss_urls) > 0:
-        per_feed_limit = max(1, max_articles // len(rss_urls))
 
-    for url in rss_urls:
-        try:
-            logger.info(f"[fetch_sources] Fetching RSS for league={league_key} url={url}")
-            feed = feedparser.parse(url)
+def _ingest_item(db: Session, item: Dict, use_ai: bool, max_ai_chars: int, ai_budget: int) -> tuple:
+    """Returns (created_article_or_None, ai_used_bool)."""
+    source_url = item["url"]
+    if existing_by_url(db, source_url):
+        return None, False
 
-            if getattr(feed, "bozo", False):
-                logger.warning(f"[fetch_sources] RSS parse issue for {url}: {feed.bozo_exception}")
-                continue
+    published_at = item.get("published_at")
+    if existing_near_duplicate(db, item["title"], published_at):
+        logger.info("[fetch_sources] skip near-duplicate title: %s", item["title"][:80])
+        return None, False
 
-            entries = feed.entries
-            if per_feed_limit:
-                entries = entries[:per_feed_limit]
+    rss_text = item.get("summary") or ""
+    extracted, extracted_image = extract_from_url(source_url)
+    facts = extracted if len(extracted) >= len(rss_text) else "\n\n".join(
+        p for p in (extracted, rss_text) if p
+    )
+    facts = strip_truncation_markers(clean_text(facts))
+    if not enough_for_brief(item["title"], facts):
+        logger.info("[fetch_sources] skip insufficient facts: %s", item["title"][:80])
+        return None, False
 
-            for entry in entries:
-                title = entry.get("title")
-                summary = entry.get("summary") or entry.get("description", "")
-                link = entry.get("link")
+    feed = item.get("feed") or {}
+    tags = classify_article(
+        item["title"],
+        facts,
+        feed_kind=feed.get("kind") or "mixed",
+        feed_sport=feed.get("sport"),
+        feed_league=feed.get("league"),
+        feed_country=feed.get("country"),
+    )
+    ok, reason = quality_check(item["title"], facts, tags.sport, require_english=False)
+    if not ok:
+        logger.info("[fetch_sources] skip quality=%s title=%s", reason, item["title"][:80])
+        return None, False
 
-                if not link or not title:
-                    continue
+    story_title = item["title"]
+    story_body = facts
+    story_summary = facts[:400]
+    used_ai = False
+    if use_ai and ai_budget > 0:
+        raw = write_ninkosports_story(
+            title=item["title"],
+            facts=facts[:max_ai_chars],
+            sport=tags.sport or "sports",
+            league=tags.league or "",
+        )
+        parsed = parse_ai_output(raw or "")
+        body = parsed.get("body") or ""
+        title = parsed.get("title") or item["title"]
+        ok_ai, reason_ai = quality_check(title, body, tags.sport, require_english=True)
+        if ok_ai:
+            story_title = title
+            story_body = body
+            story_summary = parsed.get("summary") or body.split("\n", 1)[0][:280]
+            used_ai = True
+        else:
+            logger.info(
+                "[fetch_sources] AI skipped/rejected: %s title=%s",
+                reason_ai,
+                item["title"][:80],
+            )
 
-                image_url = _extract_image_url(entry)
+    if not used_ai:
+        if not is_english_enough(facts):
+            logger.info(
+                "[fetch_sources] skip non-English without usable AI: %s",
+                item["title"][:80],
+            )
+            return None, False
+        ok_en, reason_en = quality_check(
+            story_title, story_body, tags.sport, require_english=True
+        )
+        if not ok_en:
+            logger.info("[fetch_sources] skip english brief: %s", reason_en)
+            return None, False
 
-                tags = _detect_sport_and_league_from_text(config, title, summary)
-
-                normalized.append(
-                    {
-                        "title": title,
-                        "description": summary,
-                        "content": summary,
-                        "url": link,
-                        "urlToImage": image_url,
-                        "sport": tags["sport"],
-                        "league": tags["league"],
-                        "country": tags["country"],
-                    }
-                )
-        except Exception as e:
-            logger.error(f"[fetch_sources] Error reading RSS for {league_key} ({url}): {e}")
-
-    if max_articles:
-        return normalized[:max_articles]
-    return normalized
+    image_url = item.get("image") or extracted_image
+    if image_url and len(image_url) > 500:
+        image_url = image_url[:500]
+    slug = _make_unique_slug(db, _slugify(story_title))
+    article = Article(
+        external_id=source_url[:500],
+        title=story_title,
+        slug=slug,
+        sport=tags.sport,
+        league=tags.league,
+        country=tags.country,
+        division=1,
+        image_url=image_url,
+        source_url=source_url[:500],
+        summary=story_summary,
+        content=story_body,
+        ai_content=story_body if used_ai else None,
+        ai_generated=used_ai,
+        is_live=True,
+        published_at=published_at,
+    )
+    db.add(article)
+    db.commit()
+    db.refresh(article)
+    return article, used_ai
 
 
 def fetch_all_sports_headlines(
     max_per_league: int = 3,
     hard_limit: int = 20,
 ) -> List[Dict]:
-    """
-    Light verzija – samo vrati listu dict-ova, ne upisuje u bazu.
-    """
-    all_articles: List[Dict] = []
-
-    for config in LEAGUE_CONFIG:
-        if len(all_articles) >= hard_limit:
+    """Lightweight RSS list for legacy pipeline.py; does not write DB."""
+    all_items: List[Dict] = []
+    for feed in enabled_feeds():
+        if len(all_items) >= hard_limit:
             break
-
-        remaining = hard_limit - len(all_articles)
-        limit_for_this_league = min(max_per_league, remaining)
-
-        league_articles = _fetch_for_league(config, limit_for_this_league)
-        all_articles.extend(league_articles)
-
-    return all_articles[:hard_limit]
-
-
-def _slugify(title: str, fallback: str = "") -> str:
-    """
-    Simple slug generator: lowercase, alphanumeric and dashes.
-    """
-    if not title:
-        title = fallback or "article"
-
-    slug = re.sub(r"[^a-zA-Z0-9\s-]", "", title)
-    slug = slug.strip().lower()
-    slug = re.sub(r"[\s-]+", "-", slug)
-    return slug or "article"
-
-
-def _make_unique_slug(db: Session, base_slug: str, skip_article_id: Optional[int] = None) -> str:
-    """
-    Create unique slug in DB. Can skip one article id (current article).
-    """
-    slug = base_slug
-    counter = 1
-
-    while True:
-        q = db.query(Article).filter(Article.slug == slug)
-        if skip_article_id is not None:
-            q = q.filter(Article.id != skip_article_id)
-        exists = db.query(q.exists()).scalar()
-        if not exists:
-            return slug
-
-        counter += 1
-        slug = f"{base_slug}-{counter}"
-
-
-def _get_or_create_article(
-    db: Session, item: Dict
-) -> Optional[Article]:
-    """
-    Check if Article with given external_id already exists.
-    If not, create a new one.
-    We DO NOT create article if it has no image.
-    """
-    source_url = item.get("url")
-    if not source_url:
-        return None
-
-    existing = db.query(Article).filter(Article.external_id == source_url).first()
-    if existing:
-        return existing
-
-    # image is mandatory
-    image_url = item.get("urlToImage")
-    if not image_url:
-        return None
-
-    raw_title = item.get("title") or "Untitled"
-    raw_summary = item.get("description") or item.get("content") or ""
-
-    clean_summary = clean_html_text(raw_summary)
-
-    slug_base = _slugify(raw_title)
-    slug = _make_unique_slug(db, slug_base)
-
-    article = Article(
-        external_id=source_url,
-        title=raw_title,  # temporary, AI will update to English title
-        slug=slug,
-        sport=item.get("sport"),
-        league=item.get("league"),
-        country=item.get("country"),
-        division=1,
-        image_url=image_url,
-        source_url=source_url,
-        summary=clean_summary,
-        content=clean_summary,
-        is_live=True,
-    )
-
-    db.add(article)
-    db.commit()
-    db.refresh(article)
-    return article
-
-
-def _rewrite_article_with_ai(
-    db: Session,
-    article: Article,
-    max_ai_chars: int,
-) -> bool:
-    """
-    Run AI rewrite for a single article.
-    Returns True if rewritten.
-    """
-    base_text = article.content or article.summary or article.title
-    if not base_text:
-        return False
-
-    # uvek očisti HTML pre slanja AI-u
-    base_text = clean_html_text(base_text)
-    if not base_text.strip():
-        return False
-
-    text_for_ai = base_text[:max_ai_chars]
-
-    try:
-        ai_output = ai_rewrite_text(
-            title=article.title,
-            raw_text=text_for_ai,
-            sport=article.sport or "sports",
-        )
-    except Exception as e:
-        logger.error(f"AI rewrite failed for article {article.id}: {e}")
-        return False
-
-    if not ai_output or not ai_output.strip():
-        return False
-
-    text = ai_output.strip()
-    lines = text.splitlines()
-
-    english_title = article.title
-    body = text
-
-    if len(lines) >= 3:
-        cand_title = lines[0].strip().strip("*").strip()
-        english_title = cand_title or article.title
-
-        if len(lines) > 1 and lines[1].strip() == "":
-            body_part = lines[2:]
-        else:
-            body_part = lines[1:]
-
-        body = "\n".join(body_part).strip()
-
-    # summary = first paragraph / line from body
-    preview = body.split("\n")[0].strip()
-    if len(preview) > 400:
-        preview = preview[:400].rsplit(" ", 1)[0] + "..."
-
-    article.ai_content = body
-    article.ai_generated = True
-    article.summary = preview or article.summary
-
-    # update title and slug to English version
-    if english_title and english_title != article.title:
-        article.title = english_title
-        new_base = _slugify(english_title)
-        article.slug = _make_unique_slug(db, new_base, skip_article_id=article.id)
-
-    db.add(article)
-    db.commit()
-    return True
+        for item in _fetch_feed_entries(feed, max_per_league):
+            tags = classify_article(item["title"], item.get("summary") or "", feed.get("kind", "mixed"))
+            all_items.append(
+                {
+                    "title": item["title"],
+                    "description": item.get("summary"),
+                    "content": item.get("summary"),
+                    "url": item["url"],
+                    "urlToImage": item.get("image"),
+                    "sport": tags.sport,
+                    "league": tags.league,
+                    "country": tags.country,
+                }
+            )
+            if len(all_items) >= hard_limit:
+                break
+    return all_items[:hard_limit]
 
 
 def fetch_and_store_all_articles(
@@ -853,80 +270,41 @@ def fetch_and_store_all_articles(
     max_ai_articles: Optional[int] = None,
 ) -> int:
     """
-    Main bot function:
-    - povlači RSS za sve lige
-    - pravi Article zapise (samo ako imaju sliku)
-    - AI pravi EN title + tekst (za nove + stare koji još nisu ai_generated)
-    - vraća broj članaka koje je AI prepisao u ovom run-u
+    NEW pipeline only. Does not backfill historical rows.
+    Returns number of articles AI-written in this run.
     """
     db = SessionLocal()
-    rewritten_count = 0
-    ai_budget = max_ai_articles if max_ai_articles is not None else 10_000
-
+    rewritten = 0
+    ai_budget = max_ai_articles if max_ai_articles is not None else 0
+    created = 0
     try:
-        all_items: List[Dict] = []
-
-        # -------- STEP 1: FETCH ITEMS FROM RSS --------
-        for config in LEAGUE_CONFIG:
-            if hard_limit is not None and len(all_items) >= hard_limit:
+        per_feed = max(1, max_per_league)
+        for feed in enabled_feeds():
+            if hard_limit is not None and created >= hard_limit:
                 break
-
-            remaining = None
-            if hard_limit is not None:
-                remaining = hard_limit - len(all_items)
-
-            limit_for_league = max_per_league
-            if remaining is not None:
-                limit_for_league = min(max_per_league, remaining)
-
-            league_items = _fetch_for_league(config, limit_for_league)
-            all_items.extend(league_items)
-
-        if hard_limit is not None:
-            all_items = all_items[:hard_limit]
-
-        # -------- STEP 2: CREATE/UPDATE ARTICLES FROM FEED --------
-        created_articles: List[Article] = []
-        for item in all_items:
-            article = _get_or_create_article(db=db, item=item)
-            if article:
-                created_articles.append(article)
-
-        # -------- STEP 3: AI REWRITE ZA NOVE --------
-        if use_ai and ai_budget > 0:
-            for article in created_articles:
-                if ai_budget <= 0:
+            try:
+                items = _fetch_feed_entries(feed, per_feed)
+            except Exception as e:
+                logger.error("[fetch_sources] feed error %s: %s", feed.get("url"), e)
+                continue
+            for item in items:
+                if hard_limit is not None and created >= hard_limit:
                     break
-                if getattr(article, "ai_generated", False):
+                try:
+                    article, used_ai = _ingest_item(
+                        db, item, use_ai=use_ai, max_ai_chars=max_ai_chars, ai_budget=ai_budget
+                    )
+                except Exception as e:
+                    logger.exception("[fetch_sources] item failed: %s", e)
+                    db.rollback()
                     continue
-
-                if _rewrite_article_with_ai(db, article, max_ai_chars):
-                    rewritten_count += 1
-                    ai_budget -= 1
-
-        # -------- STEP 4: AI REWRITE ZA STARE KOJI NISU PREPISANI --------
-        if use_ai and ai_budget > 0:
-            pending = (
-                db.query(Article)
-                .filter(Article.is_live == True)
-                .filter(Article.ai_generated == False)
-                .order_by(Article.created_at.desc())
-                .limit(500)
-                .all()
-            )
-
-            for article in pending:
-                if ai_budget <= 0:
-                    break
-                # preskoči one koje smo već obradili u ovom run-u
-                if getattr(article, "ai_content", None):
-                    continue
-
-                if _rewrite_article_with_ai(db, article, max_ai_chars):
-                    rewritten_count += 1
-                    ai_budget -= 1
-
-        return rewritten_count
-
+                if article and article.created_at and article.created_at.date() == datetime.utcnow().date():
+                    created += 1
+                elif article:
+                    created += 1
+                if used_ai:
+                    rewritten += 1
+                    ai_budget = max(0, ai_budget - 1)
+        return rewritten
     finally:
         db.close()
