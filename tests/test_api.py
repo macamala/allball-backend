@@ -46,6 +46,14 @@ def test_health_reports_database():
         assert "DATABASE_URL" not in str(body)
 
 
+def test_sitemap_handles_date_objects():
+    with TestClient(app) as client:
+        res = client.get("/sitemap.xml")
+        assert res.status_code == 200
+        assert "urlset" in res.text
+        assert "ninkosports.com" in res.text
+
+
 def test_published_at_preferred_and_created_at_fallback():
     older_created = datetime.utcnow() - timedelta(days=10)
     newer_source = datetime.utcnow() - timedelta(hours=1)

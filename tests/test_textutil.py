@@ -3,7 +3,11 @@ from bot.quality import quality_check
 from bot.rewrite_ai import parse_ai_output
 
 
-def test_strips_truncation_markers():
+def test_strips_publisher_footer():
+    raw = "The 76ers signed Dillon Jones. The post 76ers sign Dillon Jones appeared first on TalkBasket.net ."
+    cleaned = clean_text(raw)
+    assert "TalkBasket" not in cleaned
+    assert "76ers signed Dillon Jones" in cleaned
     raw = "Villa won at home. … [+1773 chars]"
     cleaned = strip_truncation_markers(raw)
     assert "[+" not in cleaned

@@ -265,10 +265,14 @@ def sitemap(db: Session = Depends(get_db)):
     for slug, published_at, created_at in rows:
         if not slug:
             continue
-        lastmod = (published_at or created_at)
-        lastmod_xml = (
-            f"<lastmod>{lastmod.date().isoformat()}</lastmod>" if lastmod else ""
-        )
+        lastmod = published_at or created_at
+        lastmod_xml = ""
+        if lastmod is not None:
+            if hasattr(lastmod, "date") and callable(getattr(lastmod, "date")):
+                iso = lastmod.date().isoformat()
+            else:
+                iso = str(lastmod)[:10]
+            lastmod_xml = f"<lastmod>{iso}</lastmod>"
         urls.append(
             "  <url>"
             f"<loc>{CANONICAL_SITE}/article/{escape(slug)}</loc>"

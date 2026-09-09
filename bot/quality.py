@@ -47,7 +47,7 @@ def quality_check(
         return False, "insufficient-facts"
     if require_english and not is_english_enough(body or title):
         return False, "not-english"
-    if re.search(r"cookie (policy|settings)|subscribe to our newsletter", body.lower()):
+    if re.search(r"cookie (policy|settings)|subscribe to our newsletter|appeared first on", body.lower()):
         return False, "boilerplate"
     return True, "ok"
 

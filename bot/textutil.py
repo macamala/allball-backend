@@ -10,6 +10,10 @@ TRUNCATION_RE = re.compile(
 )
 CDATA_RE = re.compile(r"<!\[CDATA\[(.*?)\]\]>", re.DOTALL | re.IGNORECASE)
 HTML_TAG_RE = re.compile(r"<[^>]+>", re.DOTALL)
+PUBLISHER_FOOTER_RE = re.compile(
+    r"(?:the post\s+.+?\s+)?appeared first on\s+.+$",
+    re.IGNORECASE,
+)
 
 
 def strip_truncation_markers(text: str) -> str:
@@ -35,6 +39,7 @@ def clean_text(text: Optional[str]) -> str:
     text = re.sub(r"<img[^>]*>", " ", text, flags=re.IGNORECASE)
     text = HTML_TAG_RE.sub(" ", text)
     text = strip_truncation_markers(text)
+    text = PUBLISHER_FOOTER_RE.sub("", text)
     text = text.replace("\xa0", " ")
     text = re.sub(r"\s+", " ", text).strip()
     return text
