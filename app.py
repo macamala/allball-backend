@@ -1,17 +1,25 @@
+from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import List, Optional
 
 from fastapi import FastAPI, Depends, Query, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
-from database import SessionLocal
-from models import Article
+from database import SessionLocal, engine
+from models import Article, Base
 from bot.fetch_sources import LEAGUE_CONFIG
 
-app = FastAPI()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    Base.metadata.create_all(bind=engine)
+    yield
+
+
+app = FastAPI(lifespan=lifespan)
 
 # ----------- CORS FIX (bitno za frontend!) ------------
 app.add_middleware(
@@ -45,15 +53,14 @@ class ArticleOut(BaseModel):
     summary: Optional[str] = None
     created_at: Optional[datetime] = None
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ---------- Root i health ----------
 @app.get("/", response_class=HTMLResponse)
 def root():
     return """
-    <h1>AllBallSports backend is running ✅</h1>
+    <h1>NinkoSports backend is running ✅</h1>
     <p>Try <a href="/health">/health</a> or <a href="/articles">/articles</a></p>
     """
 
@@ -70,7 +77,7 @@ def list_articles(
     sport: Optional[str] = Query(None),
     league: Optional[str] = Query(None),
     country: Optional[str] = Query(None),
-    sort: str = Query("newest", regex="^(newest|oldest)$"),
+    sort: str = Query("newest", pattern="^(newest|oldest)$"),
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
 ):
