@@ -2,6 +2,7 @@
 
 import logging
 import os
+import random
 import time
 from typing import Optional
 
@@ -13,6 +14,12 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
 
 _rate_limited = False
+_hard_quota = False
+_QUOTA_CODES = {
+    "insufficient_quota",
+    "billing_not_active",
+    "billing_hard_limit_reached",
+}
 
 SYSTEM_PROMPT = """You are a staff writer for NinkoSports, an English-language sports news site.
 
@@ -35,23 +42,50 @@ Then 2-6 short paragraphs of article body.
 
 
 def reset_openai_rate_limit() -> None:
+    """Clear per-run RPM pauses. Do not clear a hard quota/billing lock."""
     global _rate_limited
     _rate_limited = False
 
 
 def openai_rate_limited() -> bool:
-    return _rate_limited
+    return _rate_limited or _hard_quota
+
+
+def _parse_openai_error(resp: httpx.Response) -> dict:
+    payload = {}
+    try:
+        payload = resp.json() if resp.content else {}
+    except Exception:
+        payload = {}
+    err = payload.get("error") if isinstance(payload, dict) else {}
+    if not isinstance(err, dict):
+        err = {}
+    retry_after = resp.headers.get("retry-after") or resp.headers.get("Retry-After")
+    return {
+        "type": err.get("type") or "",
+        "code": err.get("code") or "",
+        "message": (err.get("message") or "").strip(),
+        "retry_after": retry_after or "",
+    }
+
+
+def _is_quota_error(info: dict) -> bool:
+    code = str(info.get("code") or "").lower()
+    err_type = str(info.get("type") or "").lower()
+    message = str(info.get("message") or "").lower()
+    if code in _QUOTA_CODES or err_type in _QUOTA_CODES:
+        return True
+    return "exceeded your current quota" in message or "check your plan and billing" in message
 
 
 def _call_openai(prompt: str) -> Optional[str]:
-    global _rate_limited
-    if _rate_limited:
+    global _rate_limited, _hard_quota
+    if openai_rate_limited():
         return None
     if not OPENAI_API_KEY:
         logger.warning("[rewrite_ai] OPENAI_API_KEY is not set")
         return None
-    last_error = None
-    for attempt in range(3):
+    for attempt in range(2):
         try:
             with httpx.Client(timeout=60) as client:
                 resp = client.post(
@@ -71,9 +105,28 @@ def _call_openai(prompt: str) -> Optional[str]:
                     },
                 )
             if resp.status_code == 429:
-                last_error = "429 Too Many Requests"
-                if attempt < 2:
-                    time.sleep(2 * (attempt + 1))
+                info = _parse_openai_error(resp)
+                logger.error(
+                    "[rewrite_ai] OpenAI 429 type=%s code=%s retry_after=%s message=%s",
+                    info["type"] or "unknown",
+                    info["code"] or "unknown",
+                    info["retry_after"] or "none",
+                    info["message"] or resp.text[:300],
+                )
+                if _is_quota_error(info):
+                    _hard_quota = True
+                    logger.error(
+                        "[rewrite_ai] OpenAI quota/billing lock; skipping AI until process restart"
+                    )
+                    return None
+                if attempt == 0:
+                    wait_s = 5.0
+                    if info["retry_after"]:
+                        try:
+                            wait_s = min(20.0, max(1.0, float(info["retry_after"])))
+                        except ValueError:
+                            wait_s = 5.0
+                    time.sleep(wait_s + random.uniform(0.1, 0.6))
                     continue
                 _rate_limited = True
                 logger.error("[rewrite_ai] OpenAI rate-limited; pausing AI for this run")
@@ -82,10 +135,8 @@ def _call_openai(prompt: str) -> Optional[str]:
             data = resp.json()
             return data["choices"][0]["message"]["content"].strip()
         except Exception as e:
-            last_error = e
             logger.error("[rewrite_ai] OpenAI call failed: %s", e)
             return None
-    logger.error("[rewrite_ai] OpenAI call failed: %s", last_error)
     return None
 
 
