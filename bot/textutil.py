@@ -40,6 +40,7 @@ def clean_text(text: Optional[str]) -> str:
     text = HTML_TAG_RE.sub(" ", text)
     text = strip_truncation_markers(text)
     text = PUBLISHER_FOOTER_RE.sub("", text)
+    text = re.sub(r"skip to (?:main content|navigation)", " ", text, flags=re.IGNORECASE)
     text = text.replace("\xa0", " ")
     text = re.sub(r"\s+", " ", text).strip()
     return text

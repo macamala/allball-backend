@@ -136,9 +136,9 @@ FEEDS: List[Feed] = [
     },
     {
         "url": "https://feeds.bbci.co.uk/sport/football/german/rss.xml",
-        "kind": "mixed",
-        "enabled": True,
-        "note": "BBC German football mix; classify independently, do not stamp Bundesliga",
+        "kind": "disabled",
+        "enabled": False,
+        "note": "404 / mismatched tags; Bundesliga still needs a replacement RSS",
     },
     # Disabled: confirmed HTML/broken XML firehoses from production audit
     {

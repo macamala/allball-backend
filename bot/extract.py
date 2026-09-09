@@ -58,6 +58,8 @@ def _paragraphs_from_html(html: str) -> str:
                 "subscribe",
                 "all rights reserved",
                 "privacy policy",
+                "skip to main content",
+                "skip to navigation",
             )
         ):
             continue
