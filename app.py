@@ -12,7 +12,17 @@ from sqlalchemy import func, or_, text
 from sqlalchemy.orm import Session
 
 from database import SessionLocal, engine, ensure_schema
-from models import Article, Base
+from models import Article, ArticleMedia, Base
+from editorial import (
+    attach_inline_media,
+    evaluate_quality,
+    maybe_related_insert,
+    public_media_items,
+    sanitize_body,
+    sanitize_summary,
+    sanitize_title,
+    to_blocks,
+)
 from bot.fetch_sources import LEAGUE_CONFIG
 from bot.taxonomy import COMPETITIONS, competition_label, country_label, sport_label
 from sports_provider import (
@@ -86,18 +96,34 @@ def _reading_minutes(text_value: Optional[str]) -> int:
     return max(1, round(words / 220))
 
 
-def serialize_article(article: Article, include_content: bool = False) -> dict:
-    full_text = article.ai_content or article.content or article.summary
+def serialize_article(
+    article: Article,
+    include_content: bool = False,
+    media_rows: Optional[list] = None,
+    related_insert: Optional[dict] = None,
+) -> dict:
+    raw_body = article.ai_content or article.content or article.summary
+    title = sanitize_title(article.title)
+    summary = sanitize_summary(article.summary, title=article.title)
+    body = sanitize_body(raw_body, title=article.title)
+    quality = evaluate_quality(
+        title=article.title,
+        summary=article.summary,
+        body=raw_body,
+        image_url=article.image_url,
+    )
+    media = public_media_items(article.image_url, media_rows)
+    hero = next((item for item in media if item.get("is_hero")), media[0] if media else None)
     data = {
         "id": article.id,
-        "title": article.title,
+        "title": title,
         "slug": article.slug,
         "sport": article.sport,
         "league": article.league,
         "country": article.country,
         "division": article.division,
-        "image_url": article.image_url,
-        "summary": article.summary,
+        "image_url": hero["url"] if hero else None,
+        "summary": summary,
         "created_at": article.created_at,
         "published_at": article.published_at or article.created_at,
         "ai_generated": bool(getattr(article, "ai_generated", False)),
@@ -105,10 +131,15 @@ def serialize_article(article: Article, include_content: bool = False) -> dict:
         "sport_label": sport_label(article.sport),
         "league_label": competition_label(article.league),
         "country_label": country_label(article.country),
+        "quality_ok": bool(quality["ok"]),
     }
     if include_content:
-        data["content"] = full_text
-        data["reading_time_minutes"] = _reading_minutes(full_text)
+        blocks = attach_inline_media(to_blocks(raw_body, title=article.title), media)
+        blocks = maybe_related_insert(blocks, related_insert)
+        data["content"] = body
+        data["blocks"] = blocks
+        data["media"] = media
+        data["reading_time_minutes"] = _reading_minutes(body)
     return data
 
 
@@ -129,6 +160,7 @@ class ArticleOut(BaseModel):
     sport_label: Optional[str] = None
     league_label: Optional[str] = None
     country_label: Optional[str] = None
+    quality_ok: Optional[bool] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -183,16 +215,31 @@ def _search_query(db: Session, q: str, sport: Optional[str], league: Optional[st
     )
 
 
+def _article_quality(article: Article) -> dict:
+    raw_body = article.ai_content or article.content or article.summary
+    return evaluate_quality(
+        title=article.title,
+        summary=article.summary,
+        body=raw_body,
+        image_url=article.image_url,
+    )
+
+
+def _premium_rows(rows: List[Article]) -> List[Article]:
+    return [row for row in rows if _article_quality(article=row)["ok"]]
+
+
 def _has_image(article: Article) -> bool:
-    url = (article.image_url or "").strip()
-    return bool(url)
+    return bool((article.image_url or "").strip())
 
 
 def _featured_from(rows: List[Article], limit: int) -> List[Article]:
-    with_image = [row for row in rows if _has_image(row)]
-    without = [row for row in rows if not _has_image(row)]
-    picked = (with_image + without)[:limit]
-    return picked
+    eligible = [
+        row
+        for row in _premium_rows(rows)
+        if _article_quality(row)["ok"] and _has_image(row)
+    ]
+    return eligible[:limit]
 
 
 def _neighbor(db: Session, article: Article, newer: bool) -> Optional[Article]:
@@ -281,7 +328,7 @@ def featured_articles(
     rows = (
         _filtered_query(db, sport=sport, league=league)
         .order_by(_sort_expr().desc())
-        .limit(max(limit * 4, 20))
+        .limit(max(limit * 8, 40))
         .all()
     )
     return [serialize_article(row) for row in _featured_from(rows, limit)]
@@ -376,17 +423,19 @@ def portal_home(
     sport_limit: int = Query(6, ge=1, le=12),
     league_min: int = Query(3, ge=1, le=10),
 ):
-    latest_rows = (
-        db.query(Article).order_by(_sort_expr().desc()).limit(latest_limit).all()
+    latest_pool = (
+        db.query(Article).order_by(_sort_expr().desc()).limit(max(latest_limit * 3, 40)).all()
     )
-    featured = _featured_from(latest_rows, featured_limit)
-    breaking_rows = (
+    latest_rows = latest_pool[:latest_limit]
+    featured = _featured_from(latest_pool, featured_limit)
+    breaking_pool = (
         db.query(Article)
         .filter(Article.is_breaking == True)
         .order_by(_sort_expr().desc())
-        .limit(8)
+        .limit(24)
         .all()
     )
+    breaking_rows = _premium_rows(breaking_pool)[:8]
     most_read_rows = (
         db.query(Article)
         .filter(Article.view_count > 0)
@@ -396,14 +445,15 @@ def portal_home(
     )
     by_sport = {}
     for sport in MAIN_SPORTS:
-        sport_rows = (
+        sport_pool = (
             db.query(Article)
             .filter(Article.sport == sport)
             .order_by(_sort_expr().desc())
-            .limit(sport_limit)
+            .limit(sport_limit * 4)
             .all()
         )
-        by_sport[sport] = [serialize_article(row) for row in sport_rows]
+        premium = _premium_rows(sport_pool)[:sport_limit]
+        by_sport[sport] = [serialize_article(row) for row in premium]
 
     count_rows = (
         db.query(Article.league, func.count(Article.id))
@@ -416,13 +466,16 @@ def portal_home(
     )
     by_league = []
     for league_key, count in count_rows:
-        league_rows = (
+        league_pool = (
             db.query(Article)
             .filter(Article.league == league_key)
             .order_by(_sort_expr().desc())
-            .limit(4)
+            .limit(16)
             .all()
         )
+        league_rows = _premium_rows(league_pool)[:4]
+        if not league_rows:
+            continue
         by_league.append(
             {
                 "league": league_key,
@@ -506,13 +559,35 @@ def get_article_by_slug(slug: str, db: Session = Depends(get_db)):
     article = db.query(Article).filter(Article.slug == slug).first()
     if not article:
         raise HTTPException(status_code=404, detail="Article not found")
-    data = serialize_article(article, include_content=True)
+    media_rows = (
+        db.query(ArticleMedia)
+        .filter(ArticleMedia.article_id == article.id)
+        .order_by(ArticleMedia.is_hero.desc(), ArticleMedia.sort_order.asc(), ArticleMedia.id.asc())
+        .all()
+    )
     previous = _neighbor(db, article, newer=False)
     nxt = _neighbor(db, article, newer=True)
-    data["previous"] = (
-        {"slug": previous.slug, "title": previous.title} if previous else None
+    related_insert = None
+    related_rows = (
+        db.query(Article)
+        .filter(Article.id != article.id)
+        .filter(Article.league == article.league if article.league else Article.sport == article.sport)
+        .order_by(_sort_expr().desc())
+        .limit(1)
+        .all()
     )
-    data["next"] = {"slug": nxt.slug, "title": nxt.title} if nxt else None
+    if related_rows:
+        related_insert = serialize_article(related_rows[0])
+    data = serialize_article(
+        article,
+        include_content=True,
+        media_rows=media_rows,
+        related_insert=related_insert,
+    )
+    data["previous"] = (
+        {"slug": previous.slug, "title": sanitize_title(previous.title)} if previous else None
+    )
+    data["next"] = {"slug": nxt.slug, "title": sanitize_title(nxt.title)} if nxt else None
     return data
 
 
