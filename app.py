@@ -106,6 +106,10 @@ def serialize_article(
     title = sanitize_title(article.title)
     summary = sanitize_summary(article.summary, title=article.title)
     body = sanitize_body(raw_body, title=article.title)
+    if summary and body:
+        prefix = summary[: min(48, len(summary))].lower()
+        if prefix and body.lower().startswith(prefix):
+            summary = ""
     quality = evaluate_quality(
         title=article.title,
         summary=article.summary,

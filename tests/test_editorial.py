@@ -42,6 +42,7 @@ def test_strips_menu_espn_cdata_and_truncation():
     assert "]]>" not in cleaned
     assert "[+" not in cleaned
     assert "Villa" in cleaned
+    assert "[" not in sanitize_body("Jones joined the 76ers after two seasons. [...]")
 
 
 def test_strips_duplicated_title_and_nav_garbage():

@@ -13,6 +13,7 @@ TRUNCATION_RE = re.compile(
     r"\[(?:\s*)\+\s*\d+\s*chars?(?:\s*)\]",
     re.IGNORECASE,
 )
+ELLIPSIS_MARK_RE = re.compile(r"\[\s*(?:\.{3}|…)\s*\]")
 CDATA_OPEN_RE = re.compile(r"<!\[CDATA\[", re.IGNORECASE)
 CDATA_CLOSE_RE = re.compile(r"\]\]>", re.IGNORECASE)
 HTML_TAG_RE = re.compile(r"</?[a-z][^>]*>", re.IGNORECASE)
@@ -81,6 +82,7 @@ def strip_contamination(text: str) -> str:
     text = strip_cdata(text)
     text = HTML_TAG_RE.sub(" ", text)
     text = TRUNCATION_RE.sub(" ", text)
+    text = ELLIPSIS_MARK_RE.sub(" ", text)
     text = MENU_ESPN_RE.sub(" ", text)
     text = SKIP_NAV_RE.sub(" ", text)
     text = COOKIE_RE.sub(" ", text)
