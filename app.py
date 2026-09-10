@@ -254,13 +254,13 @@ def _article_quality(article: Article) -> dict:
     )
 
 
-def _premium_rows(rows: List[Article], sport: Optional[str] = None) -> List[Article]:
+def _premium_rows(rows: List[Article], sport: Optional[str] = None, strict: bool = True) -> List[Article]:
     eligible = []
     for row in rows:
         if not _article_quality(article=row)["ok"]:
             continue
         target = sport or row.sport
-        if not isolation_ok(row, target, strict=True):
+        if not isolation_ok(row, target, strict=strict):
             continue
         eligible.append(row)
     return eligible
@@ -270,8 +270,13 @@ def _has_image(article: Article) -> bool:
     return bool((article.image_url or "").strip())
 
 
-def _featured_from(rows: List[Article], limit: int, sport: Optional[str] = None) -> List[Article]:
-    eligible = [row for row in _premium_rows(rows, sport=sport) if _has_image(row)]
+def _featured_from(
+    rows: List[Article],
+    limit: int,
+    sport: Optional[str] = None,
+    strict: bool = True,
+) -> List[Article]:
+    eligible = [row for row in _premium_rows(rows, sport=sport, strict=strict) if _has_image(row)]
     return eligible[:limit]
 
 
@@ -351,7 +356,7 @@ def recent_articles(
     limit: int = Query(20, ge=1, le=100),
 ):
     rows = db.query(Article).order_by(_sort_expr().desc()).limit(max(limit * 4, 40)).all()
-    rows = _premium_rows(rows)[:limit]
+    rows = _premium_rows(rows, strict=False)[:limit]
     return [serialize_article(row) for row in rows]
 
 
@@ -398,7 +403,7 @@ def most_read_articles(
         .limit(max(limit * 6, 24))
         .all()
     )
-    rows = _premium_rows(rows)[:limit]
+    rows = _premium_rows(rows, strict=False)[:limit]
     return [serialize_article(row) for row in rows]
 
 
@@ -470,8 +475,8 @@ def portal_home(
     latest_pool = (
         db.query(Article).order_by(_sort_expr().desc()).limit(max(latest_limit * 8, 80)).all()
     )
-    latest_rows = _premium_rows(latest_pool)[:latest_limit]
-    featured = _featured_from(latest_pool, featured_limit)
+    latest_rows = _premium_rows(latest_pool, strict=False)[:latest_limit]
+    featured = _featured_from(latest_pool, featured_limit, strict=False)
     breaking_pool = (
         db.query(Article)
         .filter(Article.is_breaking == True)
@@ -479,7 +484,7 @@ def portal_home(
         .limit(24)
         .all()
     )
-    breaking_rows = _premium_rows(breaking_pool)[:8]
+    breaking_rows = _premium_rows(breaking_pool, strict=False)[:8]
     most_read_pool = (
         db.query(Article)
         .filter(Article.view_count > 0)
@@ -487,7 +492,7 @@ def portal_home(
         .limit(24)
         .all()
     )
-    most_read_rows = _premium_rows(most_read_pool)[:8]
+    most_read_rows = _premium_rows(most_read_pool, strict=False)[:8]
     by_sport = {}
     for sport in MAIN_SPORTS:
         sport_pool = (

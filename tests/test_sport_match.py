@@ -61,6 +61,16 @@ def test_formula_one_rejected_from_tennis():
     assert belongs_to_sport(row, "motorsport") is True
 
 
+def test_football_tagged_formula_one_rejected_from_motorsport():
+    row = _Row(
+        title="Who has your Premiership club brought in this summer",
+        summary="Edu leaves Nottingham Forest after a turbulent spell.",
+        league="formula-1",
+        sport="motorsport",
+    )
+    assert belongs_to_sport(row, "motorsport", strict=True) is False
+
+
 def test_nba_story_rejected_from_football():
     row = _Row(
         title="Lakers and 76ers meet in a heavy NBA night",

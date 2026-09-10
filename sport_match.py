@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from bot.taxonomy import COMPETITIONS, competition_label
+from bot.taxonomy import COMPETITIONS
 
 MAIN_SPORTS = ("football", "basketball", "tennis", "motorsport")
 
@@ -25,6 +25,8 @@ EXCLUSIVE_KEYWORDS = {
         "tottenham",
         "real madrid",
         "barcelona",
+        "nottingham forest",
+        "premiership",
         "transfer window",
         "goalkeeper",
         "striker",
@@ -102,8 +104,7 @@ def league_sport(league: Optional[str]) -> Optional[str]:
 def article_text_blob(article) -> str:
     title = getattr(article, "title", "") or ""
     summary = getattr(article, "summary", "") or ""
-    league = getattr(article, "league", "") or ""
-    return f"{title} {summary} {league} {competition_label(league)}"
+    return f"{title} {summary}"
 
 
 def belongs_to_sport(article, sport: str, *, strict: bool = True) -> bool:
@@ -126,11 +127,11 @@ def belongs_to_sport(article, sport: str, *, strict: bool = True) -> bool:
         return False
     if best_foreign >= 3 and best_foreign > own:
         return False
-    if mapped == sport:
+    if own >= 2 and own >= best_foreign:
         return True
-    if own >= 2 and own > best_foreign:
+    if mapped == sport and own >= 2:
         return True
-    if stored == sport and best_foreign == 0:
+    if not strict and stored == sport and best_foreign == 0:
         return True
     if strict:
         return False
