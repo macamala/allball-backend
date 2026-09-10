@@ -12,7 +12,7 @@ from sqlalchemy import func, or_, text
 from sqlalchemy.orm import Session
 
 from database import SessionLocal, engine, ensure_schema
-from models import Article, ArticleMedia, Base
+from models import Article, ArticleMedia, ArticleTranslation, Base
 from editorial import (
     attach_inline_media,
     evaluate_quality,
@@ -23,6 +23,9 @@ from editorial import (
     sanitize_title,
     to_blocks,
 )
+from sport_match import MAIN_SPORTS as ISOLATED_SPORTS, belongs_to_sport, isolation_ok, league_sport
+from auth import router as auth_router
+from comments_api import router as comments_router
 from bot.fetch_sources import LEAGUE_CONFIG
 from bot.taxonomy import COMPETITIONS, competition_label, country_label, sport_label
 from sports_provider import (
@@ -70,11 +73,22 @@ app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "https://ninkosports.com",
+        "https://www.ninkosports.com",
+        "https://allball-frontend-production.up.railway.app",
+        "http://localhost:8080",
+        "http://127.0.0.1:8080",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(auth_router)
+app.include_router(comments_router)
 
 
 def get_db():
@@ -144,6 +158,15 @@ def serialize_article(
         data["blocks"] = blocks
         data["media"] = media
         data["reading_time_minutes"] = _reading_minutes(body)
+        words = len(body.split())
+        inline = sum(1 for item in media if not item.get("is_hero"))
+        if words < 120:
+            data["presentation_type"] = "brief"
+        elif words >= 500 or inline:
+            data["presentation_type"] = "major"
+        else:
+            data["presentation_type"] = "standard"
+    data["sport_match_ok"] = isolation_ok(article, article.sport, strict=True)
     return data
 
 
@@ -165,6 +188,8 @@ class ArticleOut(BaseModel):
     league_label: Optional[str] = None
     country_label: Optional[str] = None
     quality_ok: Optional[bool] = None
+    sport_match_ok: Optional[bool] = None
+    presentation_type: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -229,20 +254,24 @@ def _article_quality(article: Article) -> dict:
     )
 
 
-def _premium_rows(rows: List[Article]) -> List[Article]:
-    return [row for row in rows if _article_quality(article=row)["ok"]]
+def _premium_rows(rows: List[Article], sport: Optional[str] = None) -> List[Article]:
+    eligible = []
+    for row in rows:
+        if not _article_quality(article=row)["ok"]:
+            continue
+        target = sport or row.sport
+        if not isolation_ok(row, target, strict=True):
+            continue
+        eligible.append(row)
+    return eligible
 
 
 def _has_image(article: Article) -> bool:
     return bool((article.image_url or "").strip())
 
 
-def _featured_from(rows: List[Article], limit: int) -> List[Article]:
-    eligible = [
-        row
-        for row in _premium_rows(rows)
-        if _article_quality(row)["ok"] and _has_image(row)
-    ]
+def _featured_from(rows: List[Article], limit: int, sport: Optional[str] = None) -> List[Article]:
+    eligible = [row for row in _premium_rows(rows, sport=sport) if _has_image(row)]
     return eligible[:limit]
 
 
@@ -309,7 +338,10 @@ def list_articles(
 ):
     query = _filtered_query(db, sport, league, country, exclude_leagues)
     order = _sort_expr().asc() if sort == "oldest" else _sort_expr().desc()
-    rows = query.order_by(order).offset(offset).limit(limit).all()
+    fetch = min(100, limit * 6) if sport in ISOLATED_SPORTS or sport == "other" else limit
+    rows = query.order_by(order).offset(offset).limit(fetch).all()
+    if sport in ISOLATED_SPORTS or sport == "other":
+        rows = [row for row in rows if belongs_to_sport(row, sport, strict=True)][:limit]
     return [serialize_article(row) for row in rows]
 
 
@@ -318,7 +350,8 @@ def recent_articles(
     db: Session = Depends(get_db),
     limit: int = Query(20, ge=1, le=100),
 ):
-    rows = db.query(Article).order_by(_sort_expr().desc()).limit(limit).all()
+    rows = db.query(Article).order_by(_sort_expr().desc()).limit(max(limit * 4, 40)).all()
+    rows = _premium_rows(rows)[:limit]
     return [serialize_article(row) for row in rows]
 
 
@@ -335,7 +368,7 @@ def featured_articles(
         .limit(max(limit * 20, 80))
         .all()
     )
-    return [serialize_article(row) for row in _featured_from(rows, limit)]
+    return [serialize_article(row) for row in _featured_from(rows, limit, sport=sport)]
 
 
 @app.get("/articles/breaking", response_model=List[ArticleOut])
@@ -362,9 +395,10 @@ def most_read_articles(
         db.query(Article)
         .filter(Article.view_count > 0)
         .order_by(Article.view_count.desc(), _sort_expr().desc())
-        .limit(limit)
+        .limit(max(limit * 6, 24))
         .all()
     )
+    rows = _premium_rows(rows)[:limit]
     return [serialize_article(row) for row in rows]
 
 
@@ -376,14 +410,19 @@ def articles_by_league(
     offset: int = Query(0, ge=0),
 ):
     league_key = _resolve_league_key(league)
+    mapped = league_sport(league_key)
     rows = (
         db.query(Article)
         .filter(Article.league == league_key)
         .order_by(_sort_expr().desc())
         .offset(offset)
-        .limit(limit)
+        .limit(min(100, limit * 6))
         .all()
     )
+    if mapped:
+        rows = [row for row in rows if belongs_to_sport(row, mapped, strict=True)][:limit]
+    else:
+        rows = rows[:limit]
     return [serialize_article(row) for row in rows]
 
 
@@ -398,9 +437,10 @@ def articles_by_sport(
         _filtered_query(db, sport=sport)
         .order_by(_sort_expr().desc())
         .offset(offset)
-        .limit(limit)
+        .limit(min(100, limit * 8))
         .all()
     )
+    rows = [row for row in rows if belongs_to_sport(row, sport, strict=True)][:limit]
     return [serialize_article(row) for row in rows]
 
 
@@ -428,9 +468,9 @@ def portal_home(
     league_min: int = Query(3, ge=1, le=10),
 ):
     latest_pool = (
-        db.query(Article).order_by(_sort_expr().desc()).limit(max(latest_limit * 3, 40)).all()
+        db.query(Article).order_by(_sort_expr().desc()).limit(max(latest_limit * 8, 80)).all()
     )
-    latest_rows = latest_pool[:latest_limit]
+    latest_rows = _premium_rows(latest_pool)[:latest_limit]
     featured = _featured_from(latest_pool, featured_limit)
     breaking_pool = (
         db.query(Article)
@@ -440,13 +480,14 @@ def portal_home(
         .all()
     )
     breaking_rows = _premium_rows(breaking_pool)[:8]
-    most_read_rows = (
+    most_read_pool = (
         db.query(Article)
         .filter(Article.view_count > 0)
         .order_by(Article.view_count.desc(), _sort_expr().desc())
-        .limit(8)
+        .limit(24)
         .all()
     )
+    most_read_rows = _premium_rows(most_read_pool)[:8]
     by_sport = {}
     for sport in MAIN_SPORTS:
         sport_pool = (
@@ -456,7 +497,7 @@ def portal_home(
             .limit(sport_limit * 12)
             .all()
         )
-        premium = _premium_rows(sport_pool)[:sport_limit]
+        premium = _premium_rows(sport_pool, sport=sport)[:sport_limit]
         by_sport[sport] = [serialize_article(row) for row in premium]
 
     count_rows = (
@@ -477,7 +518,7 @@ def portal_home(
             .limit(16)
             .all()
         )
-        league_rows = _premium_rows(league_pool)[:4]
+        league_rows = _premium_rows(league_pool, sport=league_sport(league_key))[:4]
         if not league_rows:
             continue
         by_league.append(
@@ -533,6 +574,11 @@ def related_articles(
         )
         related.extend(extra)
 
+    related = [
+        row
+        for row in related
+        if isolation_ok(row, article.sport, strict=True) and _article_quality(row)["ok"]
+    ]
     return [serialize_article(row) for row in related[:limit]]
 
 
@@ -593,6 +639,37 @@ def get_article_by_slug(slug: str, db: Session = Depends(get_db)):
     )
     data["next"] = {"slug": nxt.slug, "title": sanitize_title(nxt.title)} if nxt else None
     return data
+
+
+@app.get("/articles/{slug}/translation/{language}")
+def article_translation(slug: str, language: str, db: Session = Depends(get_db)):
+    article = db.query(Article).filter(Article.slug == slug).first()
+    if not article:
+        raise HTTPException(status_code=404, detail="Article not found")
+    row = (
+        db.query(ArticleTranslation)
+        .filter(
+            ArticleTranslation.article_id == article.id,
+            ArticleTranslation.language_code == language,
+            ArticleTranslation.status == "ready",
+        )
+        .first()
+    )
+    if not row:
+        return {
+            "available": False,
+            "language": language,
+            "status": "missing",
+            "message": "English article is shown until a translation is ready.",
+        }
+    return {
+        "available": True,
+        "language": language,
+        "status": row.status,
+        "title": row.translated_title,
+        "summary": row.translated_summary,
+        "body": row.translated_body,
+    }
 
 
 @app.get("/meta/leagues")

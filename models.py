@@ -1,4 +1,14 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, ForeignKey
+from sqlalchemy import (
+    Column,
+    Integer,
+    String,
+    Boolean,
+    DateTime,
+    Text,
+    ForeignKey,
+    UniqueConstraint,
+    Index,
+)
 from sqlalchemy.orm import declarative_base, relationship
 from datetime import datetime
 
@@ -60,3 +70,111 @@ class ArticleMedia(Base):
     is_hero = Column(Boolean, default=False)
 
     article = relationship("Article", back_populates="media_items")
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True)
+    email = Column(String(320), unique=True, index=True, nullable=False)
+    password_hash = Column(String(500), nullable=False)
+    display_name = Column(String(80), nullable=False)
+    role = Column(String(20), default="user")
+    preferred_language = Column(String(10), default="en")
+    avatar_url = Column(String(1000), nullable=True)
+    email_verified = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class UserSession(Base):
+    __tablename__ = "user_sessions"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
+    token_hash = Column(String(128), unique=True, index=True, nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class UserFavorite(Base):
+    __tablename__ = "user_favorites"
+    __table_args__ = (
+        UniqueConstraint("user_id", "kind", "value", name="uq_user_favorite"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
+    kind = Column(String(20), nullable=False)  # sports | leagues | teams
+    value = Column(String(120), nullable=False)
+
+
+class SavedArticle(Base):
+    __tablename__ = "saved_articles"
+    __table_args__ = (
+        UniqueConstraint("user_id", "article_id", name="uq_saved_article"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
+    article_id = Column(Integer, ForeignKey("articles.id"), index=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class Comment(Base):
+    __tablename__ = "comments"
+
+    id = Column(Integer, primary_key=True)
+    article_id = Column(Integer, ForeignKey("articles.id"), index=True, nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
+    parent_id = Column(Integer, ForeignKey("comments.id"), nullable=True)
+    body = Column(Text, nullable=False)
+    like_count = Column(Integer, default=0)
+    hidden = Column(Boolean, default=False)
+    deleted_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=True)
+
+
+class CommentLike(Base):
+    __tablename__ = "comment_likes"
+    __table_args__ = (
+        UniqueConstraint("user_id", "comment_id", name="uq_comment_like"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
+    comment_id = Column(Integer, ForeignKey("comments.id"), index=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class CommentReport(Base):
+    __tablename__ = "comment_reports"
+
+    id = Column(Integer, primary_key=True)
+    comment_id = Column(Integer, ForeignKey("comments.id"), index=True, nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
+    reason = Column(String(80), nullable=False)
+    detail = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class ArticleTranslation(Base):
+    """Cache for a future translation provider. No provider is called in Phase 4."""
+
+    __tablename__ = "article_translations"
+    __table_args__ = (
+        UniqueConstraint("article_id", "language_code", name="uq_article_translation"),
+        Index("ix_translation_status", "language_code", "status"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    article_id = Column(Integer, ForeignKey("articles.id"), index=True, nullable=False)
+    language_code = Column(String(10), nullable=False)
+    translated_title = Column(Text, nullable=True)
+    translated_summary = Column(Text, nullable=True)
+    translated_body = Column(Text, nullable=True)
+    status = Column(String(20), default="missing")  # missing | pending | ready | failed
+    provider = Column(String(80), nullable=True)
+    model_name = Column(String(80), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=True)

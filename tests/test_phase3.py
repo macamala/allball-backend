@@ -22,8 +22,13 @@ def _make_article(**kwargs):
             sport=kwargs.get("sport", "football"),
             league=kwargs.get("league", "england-premier-league"),
             country=kwargs.get("country", "england"),
-            summary=kwargs.get("summary", "Summary about the match"),
-            content=kwargs.get("content", "Body text for the article."),
+            summary=kwargs.get("summary", "Summary about the match and how both sides approached the closing minutes."),
+            content=kwargs.get(
+                "content",
+                "The match produced a late twist as the visitors pushed for a winner while the home side held their shape. "
+                "Players kept working through stoppage time and the crowd stayed loud until the final whistle. "
+                "Coaches later pointed to concentration and the value of taking the few chances that appeared.",
+            ),
             image_url=kwargs.get("image_url"),
             created_at=kwargs.get("created_at", datetime.utcnow()),
             published_at=kwargs.get("published_at"),
