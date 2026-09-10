@@ -71,7 +71,14 @@ def test_football_tagged_formula_one_rejected_from_motorsport():
     assert belongs_to_sport(row, "motorsport", strict=True) is False
 
 
-def test_nba_story_rejected_from_football():
+def test_haaland_city_story_rejected_from_tennis():
+    row = _Row(
+        title="Haaland iguala o melhor marcador da história do Manchester City na Liga dos Campeões",
+        summary="",
+        league="us-open",
+        sport="tennis",
+    )
+    assert belongs_to_sport(row, "tennis", strict=True) is False
     row = _Row(
         title="Lakers and 76ers meet in a heavy NBA night",
         summary="The Eastern Conference remains tight.",

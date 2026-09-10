@@ -125,11 +125,11 @@ def belongs_to_sport(article, sport: str, *, strict: bool = True) -> bool:
 
     if mapped and mapped != sport:
         return False
-    if best_foreign >= 3 and best_foreign > own:
+    if best_foreign >= 2 and best_foreign >= own:
         return False
-    if own >= 2 and own >= best_foreign:
+    if own >= 2 and own > best_foreign:
         return True
-    if mapped == sport and own >= 2:
+    if mapped == sport and own >= 2 and own > best_foreign:
         return True
     if not strict and stored == sport and best_foreign == 0:
         return True
