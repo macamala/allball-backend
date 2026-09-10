@@ -332,7 +332,7 @@ def featured_articles(
     rows = (
         _filtered_query(db, sport=sport, league=league)
         .order_by(_sort_expr().desc())
-        .limit(max(limit * 8, 40))
+        .limit(max(limit * 20, 80))
         .all()
     )
     return [serialize_article(row) for row in _featured_from(rows, limit)]
@@ -453,7 +453,7 @@ def portal_home(
             db.query(Article)
             .filter(Article.sport == sport)
             .order_by(_sort_expr().desc())
-            .limit(sport_limit * 4)
+            .limit(sport_limit * 12)
             .all()
         )
         premium = _premium_rows(sport_pool)[:sport_limit]
