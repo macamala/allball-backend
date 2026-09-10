@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Optional
 
 from bot.taxonomy import COMPETITIONS
+from editorial import sanitize_summary, sanitize_title
 
 MAIN_SPORTS = ("football", "basketball", "tennis", "motorsport")
 
@@ -102,8 +103,8 @@ def league_sport(league: Optional[str]) -> Optional[str]:
 
 
 def article_text_blob(article) -> str:
-    title = getattr(article, "title", "") or ""
-    summary = getattr(article, "summary", "") or ""
+    title = sanitize_title(getattr(article, "title", "") or "")
+    summary = sanitize_summary(getattr(article, "summary", "") or "", title=title)
     return f"{title} {summary}"
 
 
