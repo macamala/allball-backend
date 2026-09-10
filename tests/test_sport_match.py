@@ -79,6 +79,13 @@ def test_haaland_city_story_rejected_from_tennis():
         sport="tennis",
     )
     assert belongs_to_sport(row, "tennis", strict=True) is False
+    chrome = _Row(
+        title="Haaland iguala o melhor marcador da história do Manchester City na Liga dos Campeões",
+        summary="Shelton elimina Alcaraz após batalha histórica: nunca um jogo do US Open tinha acabado tão tarde",
+        league="us-open",
+        sport="tennis",
+    )
+    assert belongs_to_sport(chrome, "tennis", strict=True) is False
     row = _Row(
         title="Lakers and 76ers meet in a heavy NBA night",
         summary="The Eastern Conference remains tight.",
@@ -131,12 +138,13 @@ def test_sport_pages_isolate_mismatches():
         external_id="https://example.com/open-on-football",
     )
     _make(
-        slug="f1-on-tennis",
-        title="Formula 1 drivers prepare for the next Grand Prix",
+        slug="haaland-on-tennis",
+        title="Haaland iguala o melhor marcador da história do Manchester City na Liga dos Campeões",
+        summary="Shelton elimina Alcaraz após batalha histórica no US Open",
         sport="tennis",
-        league="formula-1",
-        country="international",
-        external_id="https://example.com/f1-on-tennis",
+        league="us-open",
+        country="usa",
+        external_id="https://example.com/haaland-on-tennis",
     )
     _make(
         slug="nba-on-football",
@@ -163,6 +171,7 @@ def test_sport_pages_isolate_mismatches():
         assert all(row["slug"] != "nba-on-football" for row in football)
         assert any(row["slug"] == "clean-football" for row in football)
         assert all(row["slug"] != "f1-on-tennis" for row in tennis)
+        assert all(row["slug"] != "haaland-on-tennis" for row in tennis)
         assert all(row["slug"] != "nba-on-football" for row in basketball)
         search = client.get("/search?q=Arsenal").json()
         assert any(row["slug"] == "pl-on-motorsport" for row in search)

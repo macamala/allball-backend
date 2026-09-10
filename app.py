@@ -23,7 +23,7 @@ from editorial import (
     sanitize_title,
     to_blocks,
 )
-from sport_match import MAIN_SPORTS as ISOLATED_SPORTS, belongs_to_sport, isolation_ok, league_sport
+from sport_match import MAIN_SPORTS as ISOLATED_SPORTS, isolation_ok, league_sport
 from auth import router as auth_router
 from comments_api import router as comments_router
 from bot.fetch_sources import LEAGUE_CONFIG
@@ -343,10 +343,13 @@ def list_articles(
 ):
     query = _filtered_query(db, sport, league, country, exclude_leagues)
     order = _sort_expr().asc() if sort == "oldest" else _sort_expr().desc()
-    fetch = min(100, limit * 6) if sport in ISOLATED_SPORTS or sport == "other" else limit
-    rows = query.order_by(order).offset(offset).limit(fetch).all()
-    if sport in ISOLATED_SPORTS or sport == "other":
-        rows = [row for row in rows if belongs_to_sport(row, sport, strict=True)][:limit]
+    isolated = sport in ISOLATED_SPORTS or sport == "other"
+    if isolated:
+        fetch = min(400, max(limit * 25, offset + limit * 20, 120))
+        rows = query.order_by(order).limit(fetch).all()
+        rows = _premium_rows(rows, sport=sport, strict=True)[offset : offset + limit]
+    else:
+        rows = query.order_by(order).offset(offset).limit(limit).all()
     return [serialize_article(row) for row in rows]
 
 
@@ -420,14 +423,13 @@ def articles_by_league(
         db.query(Article)
         .filter(Article.league == league_key)
         .order_by(_sort_expr().desc())
-        .offset(offset)
-        .limit(min(100, limit * 6))
+        .limit(min(400, max(limit * 25, offset + limit * 20, 120)))
         .all()
     )
     if mapped:
-        rows = [row for row in rows if belongs_to_sport(row, mapped, strict=True)][:limit]
+        rows = _premium_rows(rows, sport=mapped, strict=True)[offset : offset + limit]
     else:
-        rows = rows[:limit]
+        rows = rows[offset : offset + limit]
     return [serialize_article(row) for row in rows]
 
 
@@ -441,11 +443,10 @@ def articles_by_sport(
     rows = (
         _filtered_query(db, sport=sport)
         .order_by(_sort_expr().desc())
-        .offset(offset)
-        .limit(min(100, limit * 8))
+        .limit(min(400, max(limit * 25, offset + limit * 20, 120)))
         .all()
     )
-    rows = [row for row in rows if belongs_to_sport(row, sport, strict=True)][:limit]
+    rows = _premium_rows(rows, sport=sport, strict=True)[offset : offset + limit]
     return [serialize_article(row) for row in rows]
 
 
@@ -499,7 +500,7 @@ def portal_home(
             db.query(Article)
             .filter(Article.sport == sport)
             .order_by(_sort_expr().desc())
-            .limit(sport_limit * 12)
+            .limit(max(sport_limit * 25, 80))
             .all()
         )
         premium = _premium_rows(sport_pool, sport=sport)[:sport_limit]
@@ -557,31 +558,30 @@ def related_articles(
     if not article:
         raise HTTPException(status_code=404, detail="Article not found")
 
-    related: List[Article] = []
+    pool: List[Article] = []
     seen = {article.id}
     if article.league:
-        related = (
+        league_rows = (
             db.query(Article)
             .filter(Article.league == article.league, Article.id != article.id)
             .order_by(_sort_expr().desc())
-            .limit(limit)
+            .limit(max(limit * 8, 24))
             .all()
         )
-        seen.update(a.id for a in related)
-
-    if len(related) < limit and article.sport:
+        pool.extend(league_rows)
+        seen.update(a.id for a in league_rows)
+    if article.sport:
         extra = (
             db.query(Article)
             .filter(Article.sport == article.sport, Article.id.notin_(seen))
             .order_by(_sort_expr().desc())
-            .limit(limit - len(related))
+            .limit(max(limit * 8, 24))
             .all()
         )
-        related.extend(extra)
-
+        pool.extend(extra)
     related = [
         row
-        for row in related
+        for row in pool
         if isolation_ok(row, article.sport, strict=True) and _article_quality(row)["ok"]
     ]
     return [serialize_article(row) for row in related[:limit]]
