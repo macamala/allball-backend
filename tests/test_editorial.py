@@ -71,6 +71,24 @@ def test_quality_gate_blocks_contaminated_from_premium():
     assert "navigation" in quality["flags"]
 
 
+def test_quality_gate_blocks_foreign_language_from_premium():
+    title = "Třetí komerční pauza v extralize. Moc mi to nesedí do úprav pravidel, říká eso Liberce"
+    body = (
+        "Extraligový hokej zavádí třetí komerční pauzu během jedné třetiny a fanoušci mezi sebou řeší, "
+        "zda už to není příliš. A nejen oni, logicky i ti, jichž se to výrazně týká. Hráči. "
+        "Další vnější zásah může zápasu sebrat přirozený spád, narušit tempo, prodloužit jeho trvání. "
+        "Faktem je, že novinku si přály kluby a vedení soutěže požadavek odsouhlasilo."
+    )
+    quality = evaluate_quality(
+        title=title,
+        summary=body,
+        body=body,
+        image_url="https://example.com/hockey.jpg",
+    )
+    assert quality["ok"] is False
+    assert "non_english" in quality["flags"]
+
+
 def test_quality_gate_allows_clean_english_story():
     body = (
         "Aston Villa earned a late point against Arsenal in the Premier League. "

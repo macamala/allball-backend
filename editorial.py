@@ -49,6 +49,10 @@ NAV_MARKERS = (
     "cookie consent",
 )
 
+# Distinctive letters that almost never appear in English sports copy
+# except occasional surnames. Thresholds keep player names from tripping this.
+SLAVIC_LETTER_RE = re.compile(r"[řěůťďňščžąćęłńśźżŘĚŮŤĎŇŠČŽĄĆĘŁŃŚŹŻ]")
+
 HEADING_MARKERS = (
     "heading",
     "subheading",
@@ -210,11 +214,14 @@ def _word_count(text: str) -> int:
 
 
 def looks_non_english(text: str) -> bool:
-    words = re.findall(r"[A-Za-zÀ-ÿ']+", (text or "").lower())
+    raw = text or ""
+    if len(SLAVIC_LETTER_RE.findall(raw)) >= 3:
+        return True
+    words = re.findall(r"[A-Za-zÀ-ÿ']+", raw.lower())
     if len(words) < 50:
         return False
     hits = sum(1 for word in words if word in ENGLISH_STOPWORDS)
-    return (hits / len(words)) < 0.06
+    return (hits / len(words)) < 0.10
 
 
 def title_is_malformed(title: Optional[str]) -> bool:
@@ -282,8 +289,11 @@ def evaluate_quality(
     cleaned_title = sanitize_title(raw_title)
     if _word_count(cleaned_body) < 40:
         flags.append("weak_body")
-    if looks_non_english(cleaned_body or cleaned_title):
+    if looks_non_english(cleaned_body) or looks_non_english(cleaned_title):
         flags.append("non_english")
+    if len(SLAVIC_LETTER_RE.findall(raw_title)) >= 2:
+        if "non_english" not in flags:
+            flags.append("non_english")
     if not image_is_usable(image_url):
         flags.append("unusable_image")
     premium_flags = {
