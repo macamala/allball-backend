@@ -163,7 +163,7 @@ COMPETITIONS: Dict[str, Competition] = {
     "uefa-champions-league": {
         "sport": "football",
         "country": "international",
-        "label": "Champions League",
+            "label": "UEFA Champions League",
         "aliases": [
             "champions league",
             "liga sampiona",

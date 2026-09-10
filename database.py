@@ -31,6 +31,29 @@ def ensure_schema(bind=None):
     if "articles" not in insp.get_table_names():
         return
     columns = {col["name"] for col in insp.get_columns("articles")}
+    dialect = bind.dialect.name
+    additions = []
     if "published_at" not in columns:
+        additions.append("ALTER TABLE articles ADD COLUMN published_at TIMESTAMP")
+    if "is_breaking" not in columns:
+        if dialect == "postgresql":
+            additions.append(
+                "ALTER TABLE articles ADD COLUMN is_breaking BOOLEAN DEFAULT FALSE"
+            )
+        else:
+            additions.append(
+                "ALTER TABLE articles ADD COLUMN is_breaking BOOLEAN DEFAULT 0"
+            )
+    if "view_count" not in columns:
+        if dialect == "postgresql":
+            additions.append(
+                "ALTER TABLE articles ADD COLUMN view_count INTEGER DEFAULT 0"
+            )
+        else:
+            additions.append(
+                "ALTER TABLE articles ADD COLUMN view_count INTEGER DEFAULT 0"
+            )
+    if additions:
         with bind.begin() as conn:
-            conn.execute(text("ALTER TABLE articles ADD COLUMN published_at TIMESTAMP"))
+            for stmt in additions:
+                conn.execute(text(stmt))

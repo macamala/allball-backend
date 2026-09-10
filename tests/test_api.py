@@ -93,6 +93,9 @@ def test_articles_schema_compatible():
             row = res.json()[0]
             for key in ("id", "slug", "title", "sport", "league", "country", "created_at"):
                 assert key in row
+            assert "source_url" not in row
+            assert "is_breaking" in row
+            assert row["is_breaking"] is False
         leagues = client.get("/meta/leagues").json()
         assert isinstance(leagues, list)
         sports = client.get("/meta/sports").json()

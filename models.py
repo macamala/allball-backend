@@ -33,5 +33,9 @@ class Article(Base):
 
     is_live = Column(Boolean, default=True)
 
+    # Phase 3 flags: additive defaults only. Never backfill historical rows.
+    is_breaking = Column(Boolean, default=False)
+    view_count = Column(Integer, default=0)
+
     created_at = Column(DateTime, default=datetime.utcnow)
     published_at = Column(DateTime, nullable=True)
