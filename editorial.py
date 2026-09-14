@@ -32,6 +32,31 @@ FOOTER_RE = re.compile(
     re.IGNORECASE,
 )
 ARROW_MENU_RE = re.compile(r"-->\s*", re.IGNORECASE)
+SOCIAL_PIC_RE = re.compile(r"\bpic\.twitter\.com/\S+", re.IGNORECASE)
+SOCIAL_URL_RE = re.compile(
+    r"https?://(?:www\.)?(?:x|twitter|t\.co)\.com/\S+",
+    re.IGNORECASE,
+)
+WATCH_NOW_RE = re.compile(r"\bwatch now on\b.{0,120}", re.IGNORECASE)
+HANDLE_STAMP_RE = re.compile(
+    r"(?:[A-Za-z0-9 .,'&/-]{0,80})?\(@[\w.]+\)\s+"
+    r"(?:January|February|March|April|May|June|July|August|"
+    r"September|October|November|December)\s+\d{1,2},\s+\d{4}",
+    re.IGNORECASE,
+)
+LOCATION_CAPTION_RE = re.compile(
+    r"^(?P<caption>[A-Z][A-Z .'-]{1,48},\s+[A-Z][A-Z .'-]{1,40}"
+    r"\s+[-–—]\s+[A-Z]{3,9}\s+\d{1,2}:.*?"
+    r"(?:\(Photo by [^)]+\)|\(Getty Images\)))"
+    r"\s*(?P<body>.*)$",
+    re.DOTALL,
+)
+STANDALONE_CREDIT_RE = re.compile(
+    r"^(?:photo(?:graph)?(?:\s+by)?\s*:?\s+.+|"
+    r"getty images.*|"
+    r"\(photo by .+\))$",
+    re.IGNORECASE,
+)
 
 ENGLISH_STOPWORDS = {
     "the", "a", "an", "and", "of", "to", "in", "for", "with", "on", "at",
@@ -97,6 +122,11 @@ CHROME_PHRASES = (
     "comments are closed",
     "search for:",
     "skip to footer",
+    "watch now on",
+    "pic.twitter.com",
+    "download our app",
+    "subscribe now",
+    "sign up for breaking news",
 )
 
 CHROME_LABEL_RE = re.compile(
@@ -144,6 +174,17 @@ def is_chrome_paragraph(text: str) -> bool:
     if FOOTER_RE.search(raw):
         return True
     if VIDEO_CHROME_RE.search(raw):
+        return True
+    if SOCIAL_PIC_RE.search(raw) or SOCIAL_URL_RE.search(raw):
+        remainder = SOCIAL_PIC_RE.sub(" ", raw)
+        remainder = SOCIAL_URL_RE.sub(" ", remainder)
+        remainder = WATCH_NOW_RE.sub(" ", remainder)
+        remainder = HANDLE_STAMP_RE.sub(" ", remainder)
+        if _word_count(remainder) < 12:
+            return True
+    if WATCH_NOW_RE.search(raw) and _word_count(WATCH_NOW_RE.sub(" ", raw)) < 12:
+        return True
+    if HANDLE_STAMP_RE.fullmatch(raw.strip()):
         return True
     if lower in {"name *", "email *", "website", "comment", "comments", "menu"}:
         return True
@@ -206,6 +247,10 @@ def strip_contamination(text: str) -> str:
     text = VIDEO_CHROME_RE.sub(" ", text)
     text = FOOTER_RE.sub("", text)
     text = ARROW_MENU_RE.sub(" ", text)
+    text = SOCIAL_PIC_RE.sub(" ", text)
+    text = SOCIAL_URL_RE.sub(" ", text)
+    text = WATCH_NOW_RE.sub(" ", text)
+    text = HANDLE_STAMP_RE.sub(" ", text)
     return _collapse_spaces(text)
 
 
@@ -302,12 +347,39 @@ def _is_heading(text: str, marker: Optional[str] = None) -> bool:
     return False
 
 
+def split_photo_caption(text: str) -> Tuple[Optional[str], str]:
+    """Separate Getty/location credits from the following editorial paragraph."""
+    raw = (text or "").strip()
+    if not raw:
+        return None, ""
+    if STANDALONE_CREDIT_RE.match(raw) and _word_count(raw) < 28:
+        return raw, ""
+    match = LOCATION_CAPTION_RE.match(raw)
+    if not match:
+        return None, raw
+    caption = _collapse_spaces(match.group("caption"))
+    body = _collapse_spaces(match.group("body") or "")
+    if _word_count(caption) < 6:
+        return None, raw
+    return caption, body
+
+
 def to_blocks(text: str, title: Optional[str] = None) -> List[Dict]:
     cleaned = strip_contamination(text or "")
     cleaned = _strip_leading_title(cleaned, title)
     paragraphs = cut_trailing_chrome(restore_paragraphs(cleaned))
     blocks: List[Dict] = []
+    caption_emitted = False
     for para in paragraphs:
+        if is_chrome_paragraph(para):
+            continue
+        caption, remainder = split_photo_caption(para)
+        if caption and not caption_emitted:
+            blocks.append({"type": "caption", "text": caption})
+            caption_emitted = True
+            para = remainder
+            if not para:
+                continue
         if _is_list_block(para):
             items = [re.sub(r"^([-*•]|\d+[.)])\s+", "", line).strip() for line in para.split("\n")]
             blocks.append({"type": "list", "items": [item for item in items if item]})
@@ -316,6 +388,25 @@ def to_blocks(text: str, title: Optional[str] = None) -> List[Dict]:
         else:
             blocks.append({"type": "paragraph", "text": para})
     return blocks
+
+
+def lift_hero_caption(blocks: List[Dict], media: Sequence[Dict]) -> Tuple[List[Dict], List[Dict]]:
+    """Move a leading caption block onto the hero image instead of article prose."""
+    media_out = [dict(item) for item in media]
+    if not blocks or blocks[0].get("type") != "caption":
+        return list(blocks), media_out
+    caption = (blocks[0].get("text") or "").strip()
+    rest = list(blocks[1:])
+    if caption:
+        placed = False
+        for item in media_out:
+            if item.get("is_hero") and not (item.get("caption") or "").strip():
+                item["caption"] = caption
+                placed = True
+                break
+        if not placed and media_out and not (media_out[0].get("caption") or "").strip():
+            media_out[0]["caption"] = caption
+    return rest, media_out
 
 
 def sanitize_body(text: Optional[str], title: Optional[str] = None) -> str:

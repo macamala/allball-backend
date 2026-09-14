@@ -16,6 +16,7 @@ from models import Article, ArticleMedia, ArticleTaxonomyResolution, ArticleTran
 from editorial import (
     attach_inline_media,
     evaluate_quality,
+    lift_hero_caption,
     maybe_related_insert,
     public_media_items,
     sanitize_body,
@@ -169,7 +170,8 @@ def serialize_article(
         "quality_ok": bool(quality["ok"]),
     }
     if include_content:
-        blocks = attach_inline_media(to_blocks(raw_body, title=article.title), media)
+        blocks, media = lift_hero_caption(to_blocks(raw_body, title=article.title), media)
+        blocks = attach_inline_media(blocks, media)
         blocks = maybe_related_insert(blocks, related_insert)
         data["content"] = body
         data["blocks"] = blocks
