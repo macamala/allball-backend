@@ -1,5 +1,6 @@
 from contextlib import asynccontextmanager
 from datetime import datetime
+import logging
 import time
 from typing import List, Optional
 from xml.sax.saxutils import escape
@@ -15,6 +16,7 @@ from database import SessionLocal, engine, ensure_schema
 from models import Article, ArticleMedia, ArticleTaxonomyResolution, ArticleTranslation, Base
 from editorial import (
     attach_inline_media,
+    classify_media_url,
     evaluate_quality,
     lift_hero_caption,
     maybe_related_insert,
@@ -22,6 +24,7 @@ from editorial import (
     sanitize_body,
     sanitize_summary,
     sanitize_title,
+    suitable_for_lead_hero,
     to_blocks,
 )
 from sport_match import MAIN_SPORTS as ISOLATED_SPORTS, isolation_ok
@@ -37,11 +40,13 @@ from bot.taxonomy import (
     sport_label,
 )
 from taxonomy_resolver import (
+    MIN_SPORT_CONFIDENCE,
     RESOLVER_VERSION,
     resolve_article_competition,
     resolve_many,
     title_like_terms,
 )
+from taxonomy_audit import audit_article_sample, log_homepage_audit
 from entities import extract_entities
 from homepage_compose import (
     _article_stamp,
@@ -64,6 +69,7 @@ CANONICAL_SITE = "https://ninkosports.com"
 MAIN_SPORTS = ("football", "basketball", "tennis", "motorsport")
 VIEW_DEDUP_SECONDS = 30 * 60
 _recent_views = {}
+logger = logging.getLogger("ninkosports.app")
 
 SPORT_PATHS = {
     "football": "/football",
@@ -150,6 +156,7 @@ def serialize_article(
     resolved = resolution or resolve_article_competition(article)
     public_sport = resolved.sport
     public_comp = resolved.public_competition
+    hero_kind = (hero or {}).get("presentation") or classify_media_url(article.image_url)
     data = {
         "id": article.id,
         "title": title,
@@ -158,7 +165,7 @@ def serialize_article(
         "league": public_comp,
         "country": article.country,
         "division": article.division,
-        "image_url": hero["url"] if hero else None,
+        "image_url": hero["url"] if hero and hero_kind != "MISSING" else None,
         "summary": summary,
         "created_at": article.created_at,
         "published_at": article.published_at or article.created_at,
@@ -168,6 +175,7 @@ def serialize_article(
         "league_label": competition_label(public_comp) if public_comp else None,
         "country_label": country_label(article.country),
         "quality_ok": bool(quality["ok"]),
+        "hero_media_kind": hero_kind,
     }
     if include_content:
         blocks, media = lift_hero_caption(to_blocks(raw_body, title=article.title), media)
@@ -187,7 +195,9 @@ def serialize_article(
             data["presentation_type"] = "standard"
     match_sport = public_sport
     data["sport_match_ok"] = bool(
-        match_sport and isolation_ok(article, match_sport, strict=True)
+        match_sport
+        and resolved.sport_confidence >= MIN_SPORT_CONFIDENCE
+        and isolation_ok(article, match_sport, strict=True, resolution=resolved)
     )
     return data
 
@@ -212,6 +222,7 @@ class ArticleOut(BaseModel):
     quality_ok: Optional[bool] = None
     sport_match_ok: Optional[bool] = None
     presentation_type: Optional[str] = None
+    hero_media_kind: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -287,8 +298,7 @@ def _search_query(db: Session, q: str, sport: Optional[str], league: Optional[st
     if len(term) < 2:
         return None
     like = f"%{term.lower()}%"
-    query = _filtered_query(db, sport=sport, league=league)
-    return query.filter(
+    query = db.query(Article).filter(
         or_(
             func.lower(Article.title).like(like),
             func.lower(func.coalesce(Article.summary, "")).like(like),
@@ -296,6 +306,7 @@ def _search_query(db: Session, q: str, sport: Optional[str], league: Optional[st
             func.lower(func.coalesce(Article.league, "")).like(like),
         )
     )
+    return query
 
 
 def _article_quality(article: Article) -> dict:
@@ -328,9 +339,16 @@ def _premium_rows(
         if sport == "other":
             if resolved.sport in MAIN_SPORTS:
                 continue
-        elif sport and resolved.sport and resolved.sport != sport:
+        elif sport and resolved.sport != sport:
             continue
-        if not isolation_ok(row, target, strict=strict):
+        if strict:
+            if not resolved.sport:
+                continue
+            if resolved.sport_confidence < MIN_SPORT_CONFIDENCE:
+                continue
+        elif resolved.sport and sport and resolved.sport != sport:
+            continue
+        if not isolation_ok(row, target, strict=strict, resolution=resolved):
             continue
         if competition and resolved.public_competition != competition:
             continue
@@ -347,8 +365,13 @@ def _featured_from(
     limit: int,
     sport: Optional[str] = None,
     strict: bool = True,
+    resolutions: Optional[dict] = None,
 ) -> List[Article]:
-    eligible = [row for row in _premium_rows(rows, sport=sport, strict=strict) if _has_image(row)]
+    eligible = [
+        row
+        for row in _premium_rows(rows, sport=sport, strict=strict, resolutions=resolutions)
+        if suitable_for_lead_hero(row.image_url)
+    ]
     return eligible[:limit]
 
 
@@ -371,9 +394,23 @@ def _neighbor(db: Session, article: Article, newer: bool, resolved) -> Optional[
         .limit(80)
         .all()
     )
-    cache_rows: List[Article] = []
+    cache_sport = (
+        scoped()
+        .join(
+            ArticleTaxonomyResolution,
+            ArticleTaxonomyResolution.article_id == Article.id,
+        )
+        .filter(
+            ArticleTaxonomyResolution.resolver_version == RESOLVER_VERSION,
+            ArticleTaxonomyResolution.resolved_sport == resolved.sport,
+        )
+        .order_by(stamp_col.asc() if newer else stamp_col.desc())
+        .limit(80)
+        .all()
+    )
+    cache_rows: List[Article] = list(cache_sport)
     if resolved.public_competition:
-        cache_rows = (
+        cache_rows.extend(
             scoped()
             .join(
                 ArticleTaxonomyResolution,
@@ -405,7 +442,7 @@ def _neighbor(db: Session, article: Article, newer: bool, resolved) -> Optional[
             continue
         if not _article_quality(row)["ok"]:
             continue
-        if not isolation_ok(row, resolved.sport, strict=True):
+        if not isolation_ok(row, resolved.sport, strict=True, resolution=other):
             continue
         if (
             resolved.public_competition
@@ -480,17 +517,26 @@ def list_articles(
         )[offset : offset + limit]
         return _serialize_rows(db, rows)
     if isolated:
+        fetch = min(400, max(limit * 25, offset + limit * 20, 120))
+        recent = db.query(Article).order_by(order).limit(fetch).all()
         cached_ids = db.query(ArticleTaxonomyResolution.article_id).filter(
             ArticleTaxonomyResolution.resolver_version == RESOLVER_VERSION,
             ArticleTaxonomyResolution.resolved_sport == sport,
         )
-        fetch = min(400, max(limit * 25, offset + limit * 20, 120))
-        rows = (
+        extra = (
             db.query(Article)
-            .filter(or_(Article.sport == sport, Article.id.in_(cached_ids)))
+            .filter(Article.id.in_(cached_ids))
             .order_by(order)
             .limit(fetch)
             .all()
+        )
+        merged = {row.id: row for row in recent}
+        for row in extra:
+            merged[row.id] = row
+        rows = sorted(
+            merged.values(),
+            key=lambda item: _article_stamp(item),
+            reverse=(sort != "oldest"),
         )
         resolutions = resolve_many(db, rows)
         rows = _premium_rows(
@@ -530,7 +576,7 @@ def featured_articles(
         rows = _competition_candidate_query(db, league, limit=max(limit * 20, 80)).all()
         mapped = (COMPETITIONS.get(_resolve_league_key(league)) or {}).get("sport") or sport
         resolutions = resolve_many(db, rows)
-        picked = _featured_from(rows, limit, sport=mapped, strict=True)
+        picked = _featured_from(rows, limit, sport=mapped, strict=True, resolutions=resolutions)
         picked = [
             row
             for row in picked
@@ -539,12 +585,13 @@ def featured_articles(
         ][:limit]
         return _serialize_rows(db, picked)
     rows = (
-        _filtered_query(db, sport=sport, league=None)
+        db.query(Article)
         .order_by(_sort_expr().desc())
         .limit(max(limit * 20, 80))
         .all()
     )
-    return _serialize_rows(db, _featured_from(rows, limit, sport=sport))
+    resolutions = resolve_many(db, rows)
+    return _serialize_rows(db, _featured_from(rows, limit, sport=sport, resolutions=resolutions))
 
 
 @app.get("/articles/breaking", response_model=List[ArticleOut])
@@ -608,12 +655,8 @@ def articles_by_sport(
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
 ):
-    rows = (
-        _filtered_query(db, sport=sport)
-        .order_by(_sort_expr().desc())
-        .limit(min(400, max(limit * 25, offset + limit * 20, 120)))
-        .all()
-    )
+    fetch = min(400, max(limit * 25, offset + limit * 20, 120))
+    recent = db.query(Article).order_by(_sort_expr().desc()).limit(fetch).all()
     cached_ids = db.query(ArticleTaxonomyResolution.article_id).filter(
         ArticleTaxonomyResolution.resolver_version == RESOLVER_VERSION,
         ArticleTaxonomyResolution.resolved_sport == sport,
@@ -622,10 +665,10 @@ def articles_by_sport(
         db.query(Article)
         .filter(Article.id.in_(cached_ids))
         .order_by(_sort_expr().desc())
-        .limit(80)
+        .limit(fetch)
         .all()
     )
-    merged = {row.id: row for row in rows}
+    merged = {row.id: row for row in recent}
     for row in extra:
         merged[row.id] = row
     rows = sorted(
@@ -651,8 +694,22 @@ def search_articles(
     query = _search_query(db, q, sport, league)
     if query is None:
         return []
-    rows = query.order_by(_sort_expr().desc()).limit(limit).all()
-    return _serialize_rows(db, rows)
+    rows = query.order_by(_sort_expr().desc()).limit(max(limit * 4, 40)).all()
+    resolutions = resolve_many(db, rows)
+    league_key = _resolve_league_key(league)
+    filtered = []
+    for row in rows:
+        resolved = resolutions.get(row.id) or resolve_article_competition(row)
+        if sport in ISOLATED_SPORTS and resolved.sport != sport:
+            continue
+        if sport == "other" and resolved.sport in MAIN_SPORTS:
+            continue
+        if league_key and resolved.public_competition != league_key:
+            continue
+        filtered.append(row)
+        if len(filtered) >= limit:
+            break
+    return _serialize_rows(db, filtered)
 
 
 @app.get("/portal/home")
@@ -689,9 +746,13 @@ def portal_home(
         quality = _article_quality(row)
         if not quality["ok"]:
             continue
-        if resolved.sport in MAIN_SPORTS and not isolation_ok(row, resolved.sport, strict=True):
-            continue
         if not resolved.sport:
+            continue
+        if resolved.sport_confidence < MIN_SPORT_CONFIDENCE:
+            continue
+        if resolved.sport in MAIN_SPORTS and not isolation_ok(
+            row, resolved.sport, strict=True, resolution=resolved
+        ):
             continue
         ranked.append(
             editorial_score(
@@ -701,6 +762,10 @@ def portal_home(
                 extract_entities(row.title, row.summary),
             )
         )
+    try:
+        log_homepage_audit(audit_article_sample(pool, resolutions))
+    except Exception:
+        logger.exception("homepage taxonomy audit failed")
 
     used: set = set()
     featured_items = select_diverse(
@@ -796,7 +861,20 @@ def related_articles(
     if source.sport:
         extra = (
             db.query(Article)
-            .filter(Article.sport == source.sport, Article.id.notin_(seen))
+            .outerjoin(
+                ArticleTaxonomyResolution,
+                ArticleTaxonomyResolution.article_id == Article.id,
+            )
+            .filter(
+                Article.id.notin_(seen),
+                or_(
+                    Article.sport == source.sport,
+                    and_(
+                        ArticleTaxonomyResolution.resolver_version == RESOLVER_VERSION,
+                        ArticleTaxonomyResolution.resolved_sport == source.sport,
+                    ),
+                ),
+            )
             .order_by(_sort_expr().desc())
             .limit(max(limit * 8, 32))
             .all()
@@ -849,7 +927,7 @@ def get_article_by_slug(slug: str, db: Session = Depends(get_db)):
         .order_by(ArticleMedia.is_hero.desc(), ArticleMedia.sort_order.asc(), ArticleMedia.id.asc())
         .all()
     )
-    resolved = resolve_article_competition(article)
+    resolved = resolve_many(db, [article]).get(article.id) or resolve_article_competition(article)
     previous = _neighbor(db, article, newer=False, resolved=resolved)
     nxt = _neighbor(db, article, newer=True, resolved=resolved)
     related_insert = None

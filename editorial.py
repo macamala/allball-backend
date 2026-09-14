@@ -160,6 +160,18 @@ def strip_cdata(text: str) -> str:
     return text
 
 
+def strip_inline_chrome(text: str) -> str:
+    raw = text or ""
+    for phrase in CHROME_PHRASES:
+        raw = re.sub(re.escape(phrase), " ", raw, flags=re.IGNORECASE)
+    raw = CHROME_LABEL_RE.sub(" ", raw)
+    raw = SOCIAL_PIC_RE.sub(" ", raw)
+    raw = SOCIAL_URL_RE.sub(" ", raw)
+    raw = WATCH_NOW_RE.sub(" ", raw)
+    raw = HANDLE_STAMP_RE.sub(" ", raw)
+    return _collapse_spaces(raw)
+
+
 def is_chrome_paragraph(text: str) -> bool:
     raw = (text or "").strip()
     if not raw:
@@ -168,7 +180,10 @@ def is_chrome_paragraph(text: str) -> bool:
     if CHROME_LABEL_RE.match(raw):
         return True
     if any(phrase in lower for phrase in CHROME_PHRASES):
-        return True
+        remainder = strip_inline_chrome(raw)
+        if _word_count(remainder) < 12:
+            return True
+        return False
     if MENU_ESPN_RE.search(raw) or SKIP_NAV_RE.search(raw) or COOKIE_RE.search(raw):
         return True
     if FOOTER_RE.search(raw):
@@ -301,6 +316,8 @@ def restore_paragraphs(text: str) -> List[str]:
     if not cleaned:
         return []
     chunks = [part.strip() for part in re.split(r"\n{2,}", cleaned) if part.strip()]
+    if chunks and LEADING_CATEGORY_RE.match(chunks[0]):
+        chunks = chunks[1:]
     if len(chunks) == 1:
         lined = [part.strip() for part in re.split(r"\n+", chunks[0]) if part.strip()]
         if len(lined) > 1:
@@ -370,8 +387,20 @@ def to_blocks(text: str, title: Optional[str] = None) -> List[Dict]:
     paragraphs = cut_trailing_chrome(restore_paragraphs(cleaned))
     blocks: List[Dict] = []
     caption_emitted = False
+    seen_norm = set()
+    title_norm = _collapse_spaces(sanitize_title(title)).lower()
     for para in paragraphs:
+        para = _strip_leading_title(para, title)
         if is_chrome_paragraph(para):
+            continue
+        key = _collapse_spaces(para).lower()
+        if title_norm and key == title_norm:
+            continue
+        if key in seen_norm:
+            continue
+        seen_norm.add(key)
+        para = strip_inline_chrome(para)
+        if not para or is_chrome_paragraph(para):
             continue
         caption, remainder = split_photo_caption(para)
         if caption and not caption_emitted:
@@ -464,6 +493,22 @@ def has_cdata(text: Optional[str]) -> bool:
     return bool(CDATA_OPEN_RE.search(raw) or CDATA_CLOSE_RE.search(raw) or "<![cdata" in raw.lower())
 
 
+MEDIA_CREST_RE = re.compile(
+    r"(?:^|[/?._~-])(?:logo|crest|badge|escudo|wordmark|coat[-_]?of[-_]?arms|"
+    r"club[-_]?mark|team[-_]?logo)(?:[/?._~-]|$)",
+    re.IGNORECASE,
+)
+MEDIA_GRAPHIC_RE = re.compile(
+    r"(?:infographic|og[-_]?default|placeholder|sprite|watermark|site[-_]?icon)",
+    re.IGNORECASE,
+)
+LEADING_CATEGORY_RE = re.compile(
+    r"^(?:football|soccer|basketball|tennis|motorsport|nba|nfl|mlb|nhl|"
+    r"formula\s*1|formula one)\s*$",
+    re.IGNORECASE,
+)
+
+
 def image_is_usable(url: Optional[str]) -> bool:
     value = (url or "").strip()
     if not value:
@@ -474,6 +519,27 @@ def image_is_usable(url: Optional[str]) -> bool:
     if "1x1" in lower or "pixel.gif" in lower or lower.endswith(".svg?blank"):
         return False
     return True
+
+
+def classify_media_url(url: Optional[str]) -> str:
+    value = (url or "").strip()
+    if not value or not image_is_usable(value):
+        return "MISSING"
+    lower = value.lower()
+    path = lower.split("?", 1)[0]
+    if path.endswith(".svg") or ".svg/" in path:
+        return "CREST_OR_LOGO"
+    if MEDIA_CREST_RE.search(path) or MEDIA_CREST_RE.search(lower):
+        return "CREST_OR_LOGO"
+    if MEDIA_GRAPHIC_RE.search(lower):
+        return "GRAPHIC"
+    if re.search(r"\.(?:jpe?g|png|webp|gif)(?:$|\?)", path):
+        return "EDITORIAL_PHOTO"
+    return "UNKNOWN"
+
+
+def suitable_for_lead_hero(url: Optional[str]) -> bool:
+    return classify_media_url(url) == "EDITORIAL_PHOTO"
 
 
 def evaluate_quality(
@@ -532,6 +598,7 @@ def public_media_items(
         url = getattr(row, "url", None)
         if not image_is_usable(url):
             continue
+        kind = classify_media_url(url)
         items.append(
             {
                 "id": getattr(row, "id", None),
@@ -540,10 +607,13 @@ def public_media_items(
                 "caption": sanitize_summary(getattr(row, "caption", None)),
                 "sort_order": int(getattr(row, "sort_order", 0) or 0),
                 "is_hero": bool(getattr(row, "is_hero", False)),
+                "presentation": kind,
+                "media_kind": kind,
             }
         )
     items.sort(key=lambda item: (not item["is_hero"], item["sort_order"], item["id"] or 0))
     if not items and image_is_usable(image_url):
+        kind = classify_media_url(image_url)
         items.append(
             {
                 "id": None,
@@ -552,9 +622,19 @@ def public_media_items(
                 "caption": "",
                 "sort_order": 0,
                 "is_hero": True,
+                "presentation": kind,
+                "media_kind": kind,
             }
         )
-    return items
+    seen_urls = set()
+    unique: List[Dict] = []
+    for item in items:
+        key = (item.get("url") or "").split("?", 1)[0]
+        if key in seen_urls:
+            continue
+        seen_urls.add(key)
+        unique.append(item)
+    return unique
 
 
 def attach_inline_media(blocks: List[Dict], media: Sequence[Dict]) -> List[Dict]:

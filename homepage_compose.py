@@ -12,8 +12,10 @@ from math import log
 from typing import Dict, Iterable, List, Optional, Sequence, Set
 
 from bot.taxonomy import competition_label
+from editorial import classify_media_url, suitable_for_lead_hero
 from entities import ArticleEntities, extract_entities
 from sport_match import MAIN_SPORTS
+from taxonomy_resolver import MIN_SPORT_CONFIDENCE
 
 # Generic competition weight, not club importance.
 COMPETITION_WEIGHT = {
@@ -116,9 +118,12 @@ def editorial_score(article, resolution, quality: dict, entities: ArticleEntitie
     elif words >= 40:
         score += 2
 
-    if getattr(article, "image_url", None):
+    kind = classify_media_url(getattr(article, "image_url", None))
+    if kind == "EDITORIAL_PHOTO":
         score += 8
         reasons.append("image")
+    elif kind == "UNKNOWN":
+        score += 3
     if getattr(article, "is_breaking", False):
         score += 10
         reasons.append("breaking")
@@ -166,9 +171,14 @@ def select_diverse(
     ordered = sorted(candidates, key=lambda item: item.score, reverse=True)
     picked: List[RankedStory] = []
     remaining = [item for item in ordered if item.id not in used]
+    remaining = [
+        item
+        for item in remaining
+        if float(getattr(item.resolution, "sport_confidence", 0) or 0) >= MIN_SPORT_CONFIDENCE
+    ]
     if require_image:
         remaining = [
-            item for item in remaining if getattr(item.article, "image_url", None)
+            item for item in remaining if suitable_for_lead_hero(getattr(item.article, "image_url", None))
         ]
 
     def try_take(item: RankedStory, relax: bool) -> bool:
@@ -269,7 +279,14 @@ def sport_sections(
 ) -> Dict[str, List[RankedStory]]:
     by_sport: Dict[str, List[RankedStory]] = {}
     for sport in MAIN_SPORTS:
-        pool = chronological([item for item in candidates if item.sport == sport])
+        pool = chronological(
+            [
+                item
+                for item in candidates
+                if item.sport == sport
+                and float(getattr(item.resolution, "sport_confidence", 0) or 0) >= MIN_SPORT_CONFIDENCE
+            ]
+        )
         unused = [item for item in pool if item.id not in used_prominent]
         chosen = unused[:limit]
         if not chosen:

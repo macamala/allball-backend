@@ -24,8 +24,6 @@ EXCLUSIVE_KEYWORDS = {
         "manchester city",
         "chelsea",
         "tottenham",
-        "real madrid",
-        "barcelona",
         "nottingham forest",
         "premiership",
         "transfer window",
@@ -95,6 +93,12 @@ EXCLUSIVE_KEYWORDS = {
         "pistons",
         "qualifying offer",
         "exhibit 10",
+        "rebounds",
+        "field goal",
+        "three-pointer",
+        "liga acb",
+        "liga endesa",
+        "wnba",
     ),
 }
 
@@ -120,7 +124,10 @@ def _norm(text: str) -> str:
 def exclusive_score(text: str, sport: str) -> int:
     blob = _norm(text)
     score = 0
+    blocked = {"barcelona", "barca", "real madrid"}
     for alias in EXCLUSIVE_KEYWORDS.get(sport, ()):
+        if alias.strip() in blocked:
+            continue
         if alias in blob:
             score += max(2, len(alias.strip().split()))
     return score
@@ -144,36 +151,29 @@ def article_text_blob(article) -> str:
     return article_title_blob(article)
 
 
-def belongs_to_sport(article, sport: str, *, strict: bool = True) -> bool:
+def belongs_to_sport(article, sport: str, *, strict: bool = True, resolution=None) -> bool:
     """True when the article may appear on a public sport/league page."""
     if not sport:
         return True
+    from taxonomy_resolver import MIN_SPORT_CONFIDENCE, resolve_article_competition
+
+    resolved = resolution if resolution is not None else resolve_article_competition(article)
     if sport == "other":
-        stored = getattr(article, "sport", None)
-        return stored not in MAIN_SPORTS
-    title = article_title_blob(article)
-    stored = getattr(article, "sport", None)
-
-    own = exclusive_score(title, sport)
-    foreign = {key: exclusive_score(title, key) for key in EXCLUSIVE_KEYWORDS if key != sport}
-    best_foreign = max(foreign.values()) if foreign else 0
-    other_marker = any(marker in _norm(title) for marker in OTHER_SPORT_MARKERS)
-
-    if best_foreign >= 2 and best_foreign >= own:
+        return not resolved.sport or resolved.sport not in MAIN_SPORTS
+    if not resolved.sport:
         return False
-    if other_marker and own < 2:
+    if resolved.sport != sport:
         return False
-    if own >= 2 and own > best_foreign:
-        return True
-    if not strict and stored == sport and best_foreign == 0 and not other_marker:
-        return True
-    if strict:
+    if strict and resolved.sport_confidence < MIN_SPORT_CONFIDENCE:
         return False
-    return stored == sport and best_foreign == 0
+    return True
 
 
-def isolation_ok(article, sport: Optional[str] = None, *, strict: bool = True) -> bool:
-    target = sport or getattr(article, "sport", None)
+def isolation_ok(article, sport: Optional[str] = None, *, strict: bool = True, resolution=None) -> bool:
+    from taxonomy_resolver import resolve_article_competition
+
+    resolved = resolution if resolution is not None else resolve_article_competition(article)
+    target = sport or resolved.sport
     if not target:
-        return True
-    return belongs_to_sport(article, target, strict=strict)
+        return not strict
+    return belongs_to_sport(article, target, strict=strict, resolution=resolved)

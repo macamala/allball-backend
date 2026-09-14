@@ -57,7 +57,7 @@ def rank_related(
             continue
         if not quality_ok(row):
             continue
-        if not isolation_ok(row, source_resolution.sport, strict=True):
+        if not isolation_ok(row, source_resolution.sport, strict=True, resolution=other):
             continue
         value = related_score(source_article, source_resolution, row, other)
         if value < MIN_RELATED_SCORE:

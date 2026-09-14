@@ -9,12 +9,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
-from bot.taxonomy import COMPETITIONS, SPORT_ALIASES, canonical_competition_key
+from bot.taxonomy import COMPETITIONS, SPORT_ALIASES, TEAMS, canonical_competition_key
 from editorial import sanitize_body, sanitize_summary, sanitize_title
-from sport_match import EXCLUSIVE_KEYWORDS, MAIN_SPORTS, exclusive_score
+from sport_match import EXCLUSIVE_KEYWORDS, MAIN_SPORTS
 
-RESOLVER_VERSION = "4.1.2"
+RESOLVER_VERSION = "4.3.1"
 MIN_COMPETITION_CONFIDENCE = 0.72
+MIN_SPORT_CONFIDENCE = 0.72
 BODY_EXCERPT_CHARS = 1400
 SUMMARY_CHARS = 600
 
@@ -50,9 +51,108 @@ NBA_FRANCHISE = (
     "thunder",
     "pelicans",
     "timberwolves",
+    "pistons",
     "kawhi",
     "lebron",
 )
+
+# Club names that exist in more than one sport. Never treat them as exclusive.
+AMBIGUOUS_CLUBS = (
+    "barcelona",
+    "barca",
+    "real madrid",
+    "partizan",
+    "crvena zvezda",
+    "red star",
+)
+
+SPORT_TERMS = {
+    "football": (
+        "goalkeeper",
+        "striker",
+        "midfielder",
+        "centre back",
+        "center back",
+        "clean sheet",
+        "transfer window",
+        "offside",
+        "premier league",
+        "champions league",
+        "serie a",
+        "la liga",
+        "bundesliga",
+        "ligue 1",
+        "hat trick",
+        "hat-trick",
+        "own goal",
+        "penalty kick",
+    ),
+    "basketball": (
+        "rebounds",
+        "assists",
+        "field goal",
+        "three-pointer",
+        "three pointer",
+        "free throw",
+        "point guard",
+        "shooting guard",
+        "power forward",
+        "small forward",
+        "euroleague",
+        "wnba",
+        "ncaa basketball",
+        "basquet",
+        "bàsquet",
+        "box score",
+        "shot clock",
+        "the paint",
+        "triple-double",
+        "alley-oop",
+        "qualifying offer",
+        "exhibit 10",
+        "training camp roster",
+    ),
+    "tennis": (
+        "break point",
+        "match point",
+        "grand slam",
+        "first serve",
+        "double fault",
+        "tiebreak",
+        "tie-break",
+        "wimbledon",
+        "roland garros",
+        " atp ",
+        " wta ",
+        "set point",
+    ),
+    "motorsport": (
+        "formula 1",
+        "formula one",
+        "pole position",
+        "pit stop",
+        "constructor",
+        "motogp",
+        "qualifying lap",
+        "qualifying session",
+        "grid penalty",
+        " f1 ",
+    ),
+}
+
+GOLF_MARKERS = (
+    " golf ",
+    " pga ",
+    "birdie",
+    "bogey",
+    "fairway",
+    "augusta",
+    "pinehurst",
+    "oakmont",
+    "masters tournament",
+)
+
+EUROLEAGUE_MARKERS = ("euroleague", "euroliga", "evroliga")
 
 DISCOUNT_PATTERNS = (
     "regardless of {alias}",
@@ -151,28 +251,107 @@ def _pick_competition(scores: Dict[str, float]) -> Tuple[Optional[str], float, L
     return None, 0.0, ["weak-competition"]
 
 
-def _resolve_sport(title: str, stored: Optional[str]) -> Tuple[Optional[str], float, List[str]]:
-    title_blob = title
-    own_scores = {sport: exclusive_score(title_blob, sport) for sport in EXCLUSIVE_KEYWORDS}
-    best_sport = max(own_scores, key=own_scores.get)
-    best = own_scores[best_sport]
-    ranked = sorted(own_scores.values(), reverse=True)
-    second = ranked[1] if len(ranked) > 1 else 0
-    if best >= 2 and best > second:
-        return best_sport, 0.94, [f"title-sport:{best_sport}"]
-    alias_scores = {}
-    blob = _norm(title_blob)
-    for sport, aliases in SPORT_ALIASES.items():
-        alias_scores[sport] = _alias_hits(blob, aliases)
-    if alias_scores:
-        alias_best = max(alias_scores, key=alias_scores.get)
-        if alias_scores[alias_best] >= 2:
-            others = [score for key, score in alias_scores.items() if key != alias_best]
-            if alias_scores[alias_best] > (max(others) if others else 0):
-                return alias_best, 0.86, [f"alias-sport:{alias_best}"]
-    if stored in MAIN_SPORTS and best == 0 and second == 0:
-        return stored, 0.55, ["stored-sport-signal"]
-    if stored and stored not in MAIN_SPORTS:
+def _term_hits(blob: str, terms: Sequence[str]) -> float:
+    score = 0.0
+    for term in terms:
+        needle = term if term.startswith(" ") or term.endswith(" ") else f" {term.strip()} "
+        if needle in blob:
+            score += max(2.0, len(term.strip().split()) * 1.5)
+    return score
+
+
+def _exclusive_aliases(sport: str) -> Tuple[str, ...]:
+    blocked = {item.strip() for item in AMBIGUOUS_CLUBS}
+    return tuple(
+        alias
+        for alias in EXCLUSIVE_KEYWORDS.get(sport, ())
+        if alias.strip() not in blocked
+    )
+
+
+def _score_sports(title: str, summary: str, body: str) -> Dict[str, float]:
+    title_blob = _norm(title)
+    summary_blob = _norm(summary)
+    body_blob = _norm(body)
+    scores = {sport: 0.0 for sport in MAIN_SPORTS}
+
+    for sport in MAIN_SPORTS:
+        for alias in _exclusive_aliases(sport):
+            padded = alias if alias.startswith(" ") else f" {alias.strip()} "
+            if padded in title_blob:
+                scores[sport] += max(2.0, len(alias.strip().split())) * 4.0
+            elif padded in summary_blob:
+                scores[sport] += max(2.0, len(alias.strip().split())) * 2.0
+            elif padded in body_blob:
+                scores[sport] += max(2.0, len(alias.strip().split())) * 0.8
+        scores[sport] += _term_hits(title_blob, SPORT_TERMS.get(sport, ())) * 4.0
+        scores[sport] += _term_hits(summary_blob, SPORT_TERMS.get(sport, ())) * 2.0
+        scores[sport] += _term_hits(body_blob, SPORT_TERMS.get(sport, ())) * 0.9
+        scores[sport] += _alias_hits(title_blob, SPORT_ALIASES.get(sport, [])) * 3.0
+        scores[sport] += _alias_hits(summary_blob, SPORT_ALIASES.get(sport, [])) * 1.5
+        scores[sport] += _alias_hits(body_blob, SPORT_ALIASES.get(sport, [])) * 0.6
+
+    combined = _norm(f"{title} {summary} {body}")
+    for team in TEAMS:
+        team_sport = team.get("sport")
+        if team_sport not in scores:
+            continue
+        hit = _alias_hits(combined, team.get("aliases") or [])
+        if not hit:
+            continue
+        if team.get("ambiguous_sport"):
+            # Ambiguous clubs only count if that sport already has independent evidence.
+            if scores[team_sport] < 4:
+                continue
+            scores[team_sport] += hit * 0.6
+        else:
+            scores[team_sport] += hit * 2.2
+
+    if any(marker in combined for marker in GOLF_MARKERS) and "us open" in combined:
+        scores["tennis"] = min(scores["tennis"], 1.0)
+    if "qualifying offer" in combined or "exhibit 10" in combined:
+        scores["basketball"] += 8.0
+        scores["motorsport"] = max(0.0, scores["motorsport"] - 8.0)
+    if any(marker in combined for marker in ("qualifying session", "qualifying lap", "pole position")):
+        scores["motorsport"] += 8.0
+    elif " qualifying " in combined and scores["motorsport"] < 6 and scores["basketball"] < 6:
+        scores["motorsport"] = max(0.0, scores["motorsport"] - 4.0)
+    if any(marker in combined for marker in EUROLEAGUE_MARKERS):
+        scores["basketball"] += 8.0
+        if " nba " not in title_blob:
+            scores["basketball"] += 2.0
+    if any(token in title_blob for token in NBA_FRANCHISE) and "euroleague" not in combined:
+        scores["basketball"] += 6.0
+
+    # Ambiguous clubs never decide sport by themselves.
+    for club in AMBIGUOUS_CLUBS:
+        if f" {club} " in title_blob and max(scores.values()) < 6:
+            for sport in MAIN_SPORTS:
+                scores[sport] = max(0.0, scores[sport] - 1.0)
+    return scores
+
+
+def _resolve_sport(
+    title: str,
+    summary: str,
+    body: str,
+    stored: Optional[str],
+) -> Tuple[Optional[str], float, List[str]]:
+    scores = _score_sports(title, summary, body)
+    ordered = sorted(scores.items(), key=lambda item: item[1], reverse=True)
+    best_sport, best = ordered[0]
+    second = ordered[1][1] if len(ordered) > 1 else 0.0
+    evidence = [f"sport-score:{best_sport}:{best:.1f}"]
+    if best >= 10 and best >= second * 1.2:
+        return best_sport, min(0.97, 0.78 + best / 80.0), evidence + ["strong-context"]
+    if best >= 6 and best > second:
+        return best_sport, min(0.9, 0.72 + best / 90.0), evidence + ["context"]
+    if best >= 4 and best > second * 1.25:
+        return best_sport, 0.74, evidence + ["narrow-context"]
+    # Stored metadata is a weak hint only when the article is otherwise silent.
+    if stored in MAIN_SPORTS and best < 3 and second < 3:
+        return None, 0.0, ["stored-sport-insufficient"]
+    if stored and stored not in MAIN_SPORTS and best < 3:
         return stored, 0.5, ["stored-other-sport"]
     return None, 0.0, ["unknown-sport"]
 
@@ -181,7 +360,7 @@ def resolve_article_competition(article) -> TaxonomyResolution:
     title, summary, body = _blob_parts(article)
     stored_sport = getattr(article, "sport", None)
     stored_league = canonical_competition_key(getattr(article, "league", None))
-    sport, sport_conf, sport_evidence = _resolve_sport(title, stored_sport)
+    sport, sport_conf, sport_evidence = _resolve_sport(title, summary, body, stored_sport)
     title_blob = _norm(title)
     summary_blob = _norm(summary)
     body_blob = _norm(body)

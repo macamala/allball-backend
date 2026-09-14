@@ -55,11 +55,24 @@ def classify_article(
         hit = _score_aliases(text, team["aliases"])
         if hit:
             team_hits.append((hit, team))
+            if team.get("ambiguous_sport"):
+                continue
             sport_scores[team["sport"]] = sport_scores.get(team["sport"], 0) + hit * 2
 
     # Ambiguous clubs: Real Madrid / Barcelona / Partizan can be basketball.
     basketball_context = sport_scores.get("basketball", 0) >= 2 or any(
-        token in text for token in (" acb ", "euroleague", "evroliga", "košarka", "kosarka", "nba")
+        token in text
+        for token in (
+            " acb ",
+            "euroleague",
+            "evroliga",
+            "euroliga",
+            "košarka",
+            "kosarka",
+            "nba",
+            "liga endesa",
+            "baloncesto",
+        )
     )
     tennis_context = sport_scores.get("tennis", 0) >= 2
     motorsport_context = sport_scores.get("motorsport", 0) >= 2
@@ -71,6 +84,8 @@ def classify_article(
         sport_scores["basketball"] = min(sport_scores.get("basketball", 0), 1)
     if motorsport_context:
         sport_scores["football"] = 0
+    if any(token in text for token in (" golf ", " pga ", "birdie", "bogey", "fairway")) and "us open" in text:
+        sport_scores["tennis"] = 0
 
     sport = None
     best_sport = max(sport_scores.values()) if sport_scores else 0
