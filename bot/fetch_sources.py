@@ -212,6 +212,22 @@ def _ingest_item(db: Session, item: Dict, use_ai: bool, max_ai_chars: int, ai_bu
             logger.info("[fetch_sources] skip english brief: %s", reason_en)
             return None, False
 
+    from taxonomy_resolver import resolve_article_competition
+
+    class _Probe:
+        pass
+
+    probe = _Probe()
+    probe.title = story_title
+    probe.summary = story_summary
+    probe.content = story_body
+    probe.ai_content = story_body if used_ai else None
+    probe.sport = tags.sport
+    probe.league = tags.league
+    resolved = resolve_article_competition(probe)
+    stamp_sport = resolved.sport or tags.sport
+    stamp_league = resolved.public_competition
+
     image_url = item.get("image") or extracted_image
     if image_url and len(image_url) > 500:
         image_url = image_url[:500]
@@ -220,8 +236,8 @@ def _ingest_item(db: Session, item: Dict, use_ai: bool, max_ai_chars: int, ai_bu
         external_id=source_url[:500],
         title=story_title,
         slug=slug,
-        sport=tags.sport,
-        league=tags.league,
+        sport=stamp_sport,
+        league=stamp_league,
         country=tags.country,
         division=1,
         image_url=image_url,
@@ -236,6 +252,13 @@ def _ingest_item(db: Session, item: Dict, use_ai: bool, max_ai_chars: int, ai_bu
     db.add(article)
     db.commit()
     db.refresh(article)
+    try:
+        from taxonomy_resolver import persist_resolution
+
+        persist_resolution(db, article, resolved)
+        db.commit()
+    except Exception:
+        db.rollback()
     return article, used_ai
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import os
 import re
 import secrets
 import time
@@ -15,7 +16,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from database import SessionLocal
-from models import SavedArticle, User, UserFavorite, UserSession
+from models import SavedArticle, SocialIdentity, User, UserFavorite, UserSession
 from editorial import sanitize_title
 
 SESSION_COOKIE = "ninko_session"
@@ -270,12 +271,24 @@ def update_profile(
     return {"user": public_user(user)}
 
 
+def _normalize_league_value(value: str) -> str:
+    from bot.taxonomy import COMPETITIONS, canonical_competition_key, scoped_competition_id
+
+    key = canonical_competition_key(value)
+    meta = COMPETITIONS.get(key) if key else None
+    sport = meta.get("sport") if meta else None
+    return scoped_competition_id(sport, key) or str(value)[:120]
+
+
 def _fav_payload(db: Session, user: User) -> dict:
     rows = db.query(UserFavorite).filter(UserFavorite.user_id == user.id).all()
     out = {"sports": [], "leagues": [], "teams": []}
     for row in rows:
-        if row.kind in out and row.value not in out[row.kind]:
-            out[row.kind].append(row.value)
+        value = row.value
+        if row.kind == "leagues":
+            value = _normalize_league_value(value)
+        if row.kind in out and value not in out[row.kind]:
+            out[row.kind].append(value)
     return out
 
 
@@ -295,7 +308,13 @@ def merge_favorites(
     existing = _fav_payload(db, user)
     merged = {
         "sports": sorted(set(existing["sports"] + list(payload.sports or []))),
-        "leagues": sorted(set(existing["leagues"] + list(payload.leagues or []))),
+        "leagues": sorted(
+            {
+                _normalize_league_value(item)
+                for item in (existing["leagues"] + list(payload.leagues or []))
+                if item
+            }
+        ),
         "teams": sorted(set(existing["teams"] + list(payload.teams or []))),
     }
     db.query(UserFavorite).filter(UserFavorite.user_id == user.id).delete()
@@ -360,3 +379,261 @@ def unsave_article(
     ).delete()
     db.commit()
     return {"saved": False}
+
+
+def _provider_enabled(name: str) -> bool:
+    if name == "google":
+        return bool(os.getenv("GOOGLE_CLIENT_ID") and os.getenv("GOOGLE_CLIENT_SECRET"))
+    if name == "facebook":
+        return bool(os.getenv("FACEBOOK_APP_ID") and os.getenv("FACEBOOK_APP_SECRET"))
+    return False
+
+
+@router.get("/providers")
+def auth_providers():
+    return {
+        "password": True,
+        "google": _provider_enabled("google"),
+        "facebook": _provider_enabled("facebook"),
+        "google_callback": os.getenv("GOOGLE_REDIRECT_URI") or "/auth/google/callback",
+        "facebook_callback": os.getenv("FACEBOOK_REDIRECT_URI") or "/auth/facebook/callback",
+    }
+
+
+OAUTH_STATE_COOKIE = "ninko_oauth_state"
+
+
+def _unusable_password() -> str:
+    return hash_password(secrets.token_urlsafe(32))
+
+
+def _set_oauth_state(response: Response, request: Request) -> str:
+    state = secrets.token_urlsafe(24)
+    response.set_cookie(
+        OAUTH_STATE_COOKIE,
+        state,
+        max_age=600,
+        **_cookie_flags(request, True),
+    )
+    return state
+
+
+def _check_oauth_state(request: Request, state: Optional[str]) -> None:
+    expected = request.cookies.get(OAUTH_STATE_COOKIE)
+    if not expected or not state or not hmac.compare_digest(expected, state):
+        raise HTTPException(status_code=400, detail="Invalid sign-in state.")
+
+
+def _json_request(url: str, data: Optional[bytes] = None, headers: Optional[dict] = None) -> dict:
+    from urllib.request import Request as UrlRequest, urlopen
+
+    req = UrlRequest(url, data=data, headers=headers or {"Accept": "application/json"})
+    with urlopen(req, timeout=12) as resp:
+        import json
+
+        return json.loads(resp.read().decode("utf-8"))
+
+
+def _finish_social_login(
+    db: Session,
+    response: Response,
+    request: Request,
+    *,
+    provider: str,
+    provider_user_id: str,
+    email: Optional[str],
+    email_verified: bool,
+    display_name: str,
+):
+    from sqlalchemy import func
+
+    identity = (
+        db.query(SocialIdentity)
+        .filter(
+            SocialIdentity.provider == provider,
+            SocialIdentity.provider_user_id == str(provider_user_id),
+        )
+        .first()
+    )
+    if not provider_user_id:
+        raise HTTPException(status_code=401, detail="Social sign-in failed.")
+    user = db.query(User).filter(User.id == identity.user_id).first() if identity else None
+    if user is None and email_verified and email:
+        user = db.query(User).filter(func.lower(User.email) == email.lower()).first()
+        if user:
+            db.add(
+                SocialIdentity(
+                    user_id=user.id,
+                    provider=provider,
+                    provider_user_id=str(provider_user_id),
+                )
+            )
+    if user is None:
+        placeholder = email if (email_verified and email) else f"{provider}-{provider_user_id}@users.ninkosports.invalid"
+        existing = db.query(User).filter(func.lower(User.email) == placeholder.lower()).first()
+        user = existing or User(
+            email=placeholder,
+            password_hash=_unusable_password(),
+            display_name=(display_name or provider.title())[:80],
+            email_verified=bool(email_verified and email),
+        )
+        if existing is None:
+            db.add(user)
+            db.flush()
+        db.add(
+            SocialIdentity(
+                user_id=user.id,
+                provider=provider,
+                provider_user_id=str(provider_user_id),
+            )
+        )
+    db.commit()
+    raw = create_session(db, user)
+    response.set_cookie(
+        SESSION_COOKIE,
+        raw,
+        max_age=SESSION_DAYS * 86400,
+        **_cookie_flags(request, True),
+    )
+    csrf = set_csrf_cookie(response, request)
+    response.delete_cookie(OAUTH_STATE_COOKIE, path="/")
+    return {"user": public_user(user), "csrf": csrf}
+
+
+@router.get("/google/start")
+def google_start(request: Request, response: Response):
+    if not _provider_enabled("google"):
+        raise HTTPException(status_code=503, detail="Google sign-in is not configured.")
+    redirect = os.getenv("GOOGLE_REDIRECT_URI")
+    if not redirect:
+        raise HTTPException(status_code=503, detail="Google sign-in is not configured.")
+    from urllib.parse import urlencode
+
+    state = _set_oauth_state(response, request)
+    params = urlencode(
+        {
+            "client_id": os.getenv("GOOGLE_CLIENT_ID"),
+            "redirect_uri": redirect,
+            "response_type": "code",
+            "scope": "openid email profile",
+            "state": state,
+            "access_type": "online",
+        }
+    )
+    return {"authorize_url": f"https://accounts.google.com/o/oauth2/v2/auth?{params}"}
+
+
+@router.get("/google/callback")
+def google_callback(
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+    code: Optional[str] = None,
+    state: Optional[str] = None,
+):
+    if not _provider_enabled("google"):
+        raise HTTPException(status_code=503, detail="Google sign-in is not configured.")
+    if not code:
+        raise HTTPException(status_code=400, detail="Missing authorization code.")
+    _check_oauth_state(request, state)
+    redirect = os.getenv("GOOGLE_REDIRECT_URI")
+    from urllib.parse import urlencode
+
+    token = _json_request(
+        "https://oauth2.googleapis.com/token",
+        data=urlencode(
+            {
+                "code": code,
+                "client_id": os.getenv("GOOGLE_CLIENT_ID"),
+                "client_secret": os.getenv("GOOGLE_CLIENT_SECRET"),
+                "redirect_uri": redirect,
+                "grant_type": "authorization_code",
+            }
+        ).encode("utf-8"),
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    access = token.get("access_token")
+    if not access:
+        raise HTTPException(status_code=401, detail="Google sign-in failed.")
+    profile = _json_request(
+        "https://openidconnect.googleapis.com/v1/userinfo",
+        headers={"Authorization": f"Bearer {access}", "Accept": "application/json"},
+    )
+    return _finish_social_login(
+        db,
+        response,
+        request,
+        provider="google",
+        provider_user_id=str(profile.get("sub") or ""),
+        email=profile.get("email"),
+        email_verified=bool(profile.get("email_verified")),
+        display_name=profile.get("name") or "Google user",
+    )
+
+
+@router.get("/facebook/start")
+def facebook_start(request: Request, response: Response):
+    if not _provider_enabled("facebook"):
+        raise HTTPException(status_code=503, detail="Facebook login is not configured.")
+    redirect = os.getenv("FACEBOOK_REDIRECT_URI")
+    if not redirect:
+        raise HTTPException(status_code=503, detail="Facebook login is not configured.")
+    from urllib.parse import urlencode
+
+    state = _set_oauth_state(response, request)
+    params = urlencode(
+        {
+            "client_id": os.getenv("FACEBOOK_APP_ID"),
+            "redirect_uri": redirect,
+            "response_type": "code",
+            "scope": "email,public_profile",
+            "state": state,
+        }
+    )
+    return {"authorize_url": f"https://www.facebook.com/v21.0/dialog/oauth?{params}"}
+
+
+@router.get("/facebook/callback")
+def facebook_callback(
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+    code: Optional[str] = None,
+    state: Optional[str] = None,
+):
+    if not _provider_enabled("facebook"):
+        raise HTTPException(status_code=503, detail="Facebook login is not configured.")
+    if not code:
+        raise HTTPException(status_code=400, detail="Missing authorization code.")
+    _check_oauth_state(request, state)
+    redirect = os.getenv("FACEBOOK_REDIRECT_URI")
+    from urllib.parse import urlencode
+
+    token = _json_request(
+        "https://graph.facebook.com/v21.0/oauth/access_token?"
+        + urlencode(
+            {
+                "client_id": os.getenv("FACEBOOK_APP_ID"),
+                "client_secret": os.getenv("FACEBOOK_APP_SECRET"),
+                "redirect_uri": redirect,
+                "code": code,
+            }
+        )
+    )
+    access = token.get("access_token")
+    if not access:
+        raise HTTPException(status_code=401, detail="Facebook login failed.")
+    profile = _json_request(
+        "https://graph.facebook.com/me?"
+        + urlencode({"fields": "id,name,email", "access_token": access})
+    )
+    return _finish_social_login(
+        db,
+        response,
+        request,
+        provider="facebook",
+        provider_user_id=str(profile.get("id") or ""),
+        email=profile.get("email"),
+        email_verified=False,
+        display_name=profile.get("name") or "Facebook user",
+    )

@@ -165,6 +165,7 @@ COMPETITIONS: Dict[str, Competition] = {
         "country": "international",
             "label": "UEFA Champions League",
         "aliases": [
+            "uefa champions league",
             "champions league",
             "liga sampiona",
             "lige sampiona",
@@ -180,7 +181,7 @@ COMPETITIONS: Dict[str, Competition] = {
         "sport": "football",
         "country": "international",
         "label": "Europa League",
-        "aliases": ["europa league"],
+        "aliases": ["uefa europa league", "europa league"],
     },
     "uefa-conference-league": {
         "sport": "football",
@@ -210,13 +211,18 @@ COMPETITIONS: Dict[str, Competition] = {
         "sport": "basketball",
         "country": "usa",
         "label": "NBA",
-        "aliases": [" nba", "nba ", "national basketball association"],
+        "aliases": ["nba", "national basketball association"],
     },
     "euroleague": {
         "sport": "basketball",
         "country": "international",
         "label": "EuroLeague",
-        "aliases": ["euroleague", "evroliga", "euro league basketball"],
+        "aliases": [
+            "turkish airlines euroleague",
+            "euroleague",
+            "evroliga",
+            "euro league basketball",
+        ],
     },
     "ncaa-basketball": {
         "sport": "basketball",
@@ -257,13 +263,25 @@ COMPETITIONS: Dict[str, Competition] = {
         "sport": "tennis",
         "country": "international",
         "label": "ATP Tour",
-        "aliases": ["atp tour", "atp finals"],
+        "aliases": ["atp tour", "atp finals", " atp "],
+    },
+    "wta-tour": {
+        "sport": "tennis",
+        "country": "international",
+        "label": "WTA",
+        "aliases": [" wta ", "wta tour"],
+    },
+    "australian-open": {
+        "sport": "tennis",
+        "country": "international",
+        "label": "Australian Open",
+        "aliases": ["australian open"],
     },
     "formula-1": {
         "sport": "motorsport",
         "country": "international",
         "label": "Formula 1",
-        "aliases": ["formula 1", "formula one", " f1 ", "grand prix"],
+        "aliases": ["formula 1", "formula one", "f1"],
     },
 }
 
@@ -521,3 +539,39 @@ def country_label(slug: Optional[str]) -> str:
     if not slug:
         return ""
     return COUNTRY_LABELS.get(slug, slug.replace("-", " ").title())
+
+
+# Public URL slugs and compact IDs that map onto COMPETITIONS keys.
+PUBLIC_COMPETITION_ALIASES = {
+    "premier-league": "england-premier-league",
+    "champions-league": "uefa-champions-league",
+    "uefa-champions-league": "uefa-champions-league",
+    "la-liga": "spain-la-liga",
+    "serie-a": "italy-serie-a",
+    "bundesliga": "germany-bundesliga",
+    "ligue-1": "france-ligue-1",
+    "europa-league": "uefa-europa-league",
+    "conference-league": "uefa-conference-league",
+    "ncaa": "ncaa-basketball",
+    "world-cup": "fifa-world-cup",
+}
+
+
+def canonical_competition_key(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    raw = value.strip()
+    if ":" in raw:
+        raw = raw.split(":", 1)[1]
+    if raw in COMPETITIONS:
+        return raw
+    return PUBLIC_COMPETITION_ALIASES.get(raw, raw)
+
+
+def scoped_competition_id(sport: Optional[str], competition: Optional[str]) -> Optional[str]:
+    key = canonical_competition_key(competition)
+    if not key:
+        return None
+    meta = COMPETITIONS.get(key)
+    sport_key = sport or (meta.get("sport") if meta else None) or "other"
+    return f"{sport_key}:{key}"

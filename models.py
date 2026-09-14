@@ -178,3 +178,44 @@ class ArticleTranslation(Base):
     model_name = Column(String(80), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=True)
+
+
+class ArticleTaxonomyResolution(Base):
+    """Additive derived taxonomy. Regenerable. Never overwrites Article source fields."""
+
+    __tablename__ = "article_taxonomy_resolutions"
+    __table_args__ = (
+        UniqueConstraint("article_id", name="uq_article_taxonomy_resolution"),
+        Index(
+            "ix_taxonomy_resolved_comp",
+            "resolver_version",
+            "resolved_sport",
+            "resolved_competition",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    article_id = Column(Integer, ForeignKey("articles.id"), index=True, nullable=False)
+    resolved_sport = Column(String(50), nullable=True)
+    resolved_competition = Column(String(120), nullable=True)
+    sport_confidence = Column(String(20), nullable=True)
+    competition_confidence = Column(String(20), nullable=True)
+    resolver_version = Column(String(20), nullable=False, default="4.1.0")
+    resolved_at = Column(DateTime, default=datetime.utcnow)
+
+
+class SocialIdentity(Base):
+    """Maps a verified Google/Facebook identity to a NinkoSports user."""
+
+    __tablename__ = "social_identities"
+    __table_args__ = (
+        UniqueConstraint("provider", "provider_user_id", name="uq_social_identity"),
+        Index("ix_social_user", "user_id"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    provider = Column(String(40), nullable=False)
+    provider_user_id = Column(String(200), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=True)

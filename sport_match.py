@@ -148,16 +148,12 @@ def belongs_to_sport(article, sport: str, *, strict: bool = True) -> bool:
         return stored not in MAIN_SPORTS
     title = article_title_blob(article)
     stored = getattr(article, "sport", None)
-    league = getattr(article, "league", None)
-    mapped = league_sport(league)
 
     own = exclusive_score(title, sport)
     foreign = {key: exclusive_score(title, key) for key in EXCLUSIVE_KEYWORDS if key != sport}
     best_foreign = max(foreign.values()) if foreign else 0
     other_marker = any(marker in _norm(title) for marker in OTHER_SPORT_MARKERS)
 
-    if mapped and mapped != sport:
-        return False
     if best_foreign >= 2 and best_foreign >= own:
         return False
     if other_marker and own < 2:

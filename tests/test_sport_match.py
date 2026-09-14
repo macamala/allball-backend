@@ -172,7 +172,7 @@ def test_sport_pages_isolate_mismatches():
         assert any(row["slug"] == "clean-football" for row in football)
         assert all(row["slug"] != "f1-on-tennis" for row in tennis)
         assert all(row["slug"] != "haaland-on-tennis" for row in tennis)
-        assert all(row["slug"] != "nba-on-football" for row in basketball)
+        assert any(row["slug"] == "nba-on-football" for row in basketball)
         search = client.get("/search?q=Arsenal").json()
         assert any(row["slug"] == "pl-on-motorsport" for row in search)
         for row in football + motorsport:
