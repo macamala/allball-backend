@@ -340,3 +340,28 @@ def test_sport_sections_do_not_leak_football_into_tennis():
         assert all("Liverpool" not in row["title"] for row in motorsport)
         football = client.get("/articles/by-sport/tennis").json()
         assert all(row["sport"] == "tennis" for row in football)
+
+
+def test_editorial_score_accepts_date_only_published_at():
+    from datetime import date
+
+    from homepage_compose import editorial_score
+
+    article = type("A", (), {})()
+    article.published_at = date(2026, 9, 14)
+    article.created_at = date(2026, 9, 13)
+    article.image_url = "https://example.com/x.jpg"
+    article.is_breaking = False
+    article.view_count = 4
+    resolution = type("R", (), {})()
+    resolution.sport = "football"
+    resolution.public_competition = "england-premier-league"
+    resolution.sport_confidence = 0.9
+    resolution.competition_confidence = 0.8
+    ranked = editorial_score(
+        article,
+        resolution,
+        {"word_count": 80, "ok": True},
+        extract_entities("Liverpool hold Chelsea in the Premier League"),
+    )
+    assert ranked.score > 0

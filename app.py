@@ -43,6 +43,7 @@ from taxonomy_resolver import (
 )
 from entities import extract_entities
 from homepage_compose import (
+    _article_stamp,
     competition_modules,
     editorial_score,
     most_read_truthful,
@@ -390,7 +391,7 @@ def _neighbor(db: Session, article: Article, newer: bool, resolved) -> Optional[
         merged[row.id] = row
     rows = sorted(
         merged.values(),
-        key=lambda item: item.published_at or item.created_at or datetime.min,
+        key=lambda item: _article_stamp(item),
         reverse=not newer,
     )
     resolutions = resolve_many(db, rows)
@@ -627,7 +628,7 @@ def articles_by_sport(
         merged[row.id] = row
     rows = sorted(
         merged.values(),
-        key=lambda item: item.published_at or item.created_at or datetime.min,
+        key=lambda item: _article_stamp(item),
         reverse=True,
     )
     resolutions = resolve_many(db, rows)
@@ -719,7 +720,7 @@ def portal_home(
     breaking_used = set(prominent)
     for item in sorted(
         breaking_ranked,
-        key=lambda row: row.article.published_at or row.article.created_at or datetime.min,
+        key=lambda row: _article_stamp(row.article),
         reverse=True,
     ):
         if item.id in breaking_used:
@@ -733,7 +734,7 @@ def portal_home(
     latest_items = []
     for item in sorted(
         ranked,
-        key=lambda row: row.article.published_at or row.article.created_at or datetime.min,
+        key=lambda row: _article_stamp(row.article),
         reverse=True,
     ):
         if item.id in latest_used:

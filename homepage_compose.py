@@ -7,7 +7,7 @@ Internal scores stay private — serialize only public article payloads.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from math import log
 from typing import Dict, Iterable, List, Optional, Sequence, Set
 
@@ -70,14 +70,26 @@ class RankedStory:
         return teams[0] if teams else None
 
 
-def _hours_old(article) -> float:
-    stamp = getattr(article, "published_at", None) or getattr(article, "created_at", None)
+def _aware(stamp) -> datetime:
+    """Normalize date/datetime/naive/aware values for ranking and recency."""
     if stamp is None:
-        return 72.0
-    if stamp.tzinfo is None:
-        stamp = stamp.replace(tzinfo=timezone.utc)
+        return datetime(1970, 1, 1, tzinfo=timezone.utc)
+    if isinstance(stamp, datetime):
+        if stamp.tzinfo is None:
+            return stamp.replace(tzinfo=timezone.utc)
+        return stamp.astimezone(timezone.utc)
+    if isinstance(stamp, date):
+        return datetime(stamp.year, stamp.month, stamp.day, tzinfo=timezone.utc)
+    return datetime(1970, 1, 1, tzinfo=timezone.utc)
+
+
+def _article_stamp(article) -> datetime:
+    return _aware(getattr(article, "published_at", None) or getattr(article, "created_at", None))
+
+
+def _hours_old(article) -> float:
     now = datetime.now(timezone.utc)
-    return max(0.0, (now - stamp).total_seconds() / 3600.0)
+    return max(0.0, (now - _article_stamp(article)).total_seconds() / 3600.0)
 
 
 def editorial_score(article, resolution, quality: dict, entities: ArticleEntities) -> RankedStory:
@@ -223,9 +235,7 @@ def take_unused(candidates: Sequence[RankedStory], limit: int, used: Set[int]) -
 def chronological(candidates: Sequence[RankedStory]) -> List[RankedStory]:
     return sorted(
         candidates,
-        key=lambda item: item.article.published_at
-        or item.article.created_at
-        or datetime.min,
+        key=lambda item: _article_stamp(item.article),
         reverse=True,
     )
 
@@ -243,7 +253,7 @@ def most_read_truthful(
     ranked.sort(
         key=lambda item: (
             int(getattr(item.article, "view_count", 0) or 0),
-            item.article.published_at or item.article.created_at or datetime.min,
+            _article_stamp(item.article),
         ),
         reverse=True,
     )
