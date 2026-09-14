@@ -13,7 +13,7 @@ from bot.taxonomy import COMPETITIONS, SPORT_ALIASES, canonical_competition_key
 from editorial import sanitize_body, sanitize_summary, sanitize_title
 from sport_match import EXCLUSIVE_KEYWORDS, MAIN_SPORTS, exclusive_score
 
-RESOLVER_VERSION = "4.1.0"
+RESOLVER_VERSION = "4.1.1"
 MIN_COMPETITION_CONFIDENCE = 0.72
 BODY_EXCERPT_CHARS = 1400
 SUMMARY_CHARS = 600
@@ -185,8 +185,21 @@ def resolve_article_competition(article) -> TaxonomyResolution:
     title_blob = _norm(title)
     summary_blob = _norm(summary)
     body_blob = _norm(body)
-    scores = _competition_scores(title_blob, summary_blob, body_blob, sport)
+    title_scores = _competition_scores(title_blob, "", "", sport)
+    if title_scores:
+        scores = title_scores
+        source = "title"
+    else:
+        summary_scores = _competition_scores(title_blob, summary_blob, "", sport)
+        if summary_scores:
+            scores = summary_scores
+            source = "summary"
+        else:
+            scores = _competition_scores(title_blob, summary_blob, body_blob, sport)
+            source = "body"
     competition, comp_conf, comp_evidence = _pick_competition(scores)
+    if source:
+        comp_evidence = [f"source:{source}"] + comp_evidence
 
     if competition and sport:
         meta = COMPETITIONS.get(competition)

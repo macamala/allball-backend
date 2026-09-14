@@ -86,6 +86,17 @@ def test_nba_and_euroleague_not_mixed():
     assert resolve_article_competition(euro).public_competition == "euroleague"
 
 
+def test_serie_a_title_ignores_champions_league_body_chrome():
+    row = _Row(
+        title="Serie A official line-ups: Napoli vs. Bologna",
+        summary="Napoli host Bologna in Serie A.",
+        content="Related: Champions League Liveblog Fenerbahce vs Roma and Como vs Leipzig. " + LONG,
+        league="england-premier-league",
+        sport="football",
+    )
+    assert resolve_article_competition(row).public_competition == "italy-serie-a"
+
+
 def test_ambiguous_article_has_no_competition():
     row = _Row(title="A busy night across Europe", sport="football", league="england-premier-league")
     assert resolve_article_competition(row).public_competition is None

@@ -200,7 +200,7 @@ class ArticleTaxonomyResolution(Base):
     resolved_competition = Column(String(120), nullable=True)
     sport_confidence = Column(String(20), nullable=True)
     competition_confidence = Column(String(20), nullable=True)
-    resolver_version = Column(String(20), nullable=False, default="4.1.0")
+    resolver_version = Column(String(20), nullable=False, default="4.1.1")
     resolved_at = Column(DateTime, default=datetime.utcnow)
 
 
