@@ -50,6 +50,60 @@ NAV_MARKERS = (
     "cookie consent",
 )
 
+# Website chrome that must never appear as NinkoSports prose.
+CHROME_PHRASES = (
+    "required fields are marked",
+    "notify me of follow-up comments",
+    "notify me of new comments",
+    "notify me of new posts",
+    "leave a reply",
+    "leave a comment",
+    "your email address will not be published",
+    "save my name, email, and website",
+    "save my name, email and website",
+    "post comment",
+    "post a comment",
+    "submit comment",
+    "log in to comment",
+    "login to comment",
+    "register to comment",
+    "sign in to comment",
+    "logged in as",
+    "you must be logged in",
+    "subscribe to our newsletter",
+    "sign up for our newsletter",
+    "sign up to our newsletter",
+    "newsletter signup",
+    "accept cookies",
+    "we use cookies",
+    "cookie policy",
+    "privacy policy",
+    "terms of use",
+    "terms and conditions",
+    "follow us on",
+    "share this article",
+    "share this post",
+    "related posts",
+    "you may also like",
+    "latest italian football news",
+    "latest football news",
+    "all rights reserved",
+    "copyright ©",
+    "powered by wordpress",
+    "this website uses cookies",
+    "manage consent",
+    "view comments",
+    "no comments yet",
+    "comments are closed",
+    "search for:",
+    "skip to footer",
+)
+
+CHROME_LABEL_RE = re.compile(
+    r"^(?:name|email|website|comment|message|subject)\s*\*?\s*:?\s*$",
+    re.IGNORECASE,
+)
+
 # Distinctive letters that almost never appear in English sports copy
 # except occasional surnames. Thresholds keep player names from tripping this.
 SLAVIC_LETTER_RE = re.compile(r"[řěůťďňščžąćęłńśźżŘĚŮŤĎŇŠČŽĄĆĘŁŃŚŹŻ]")
@@ -74,6 +128,69 @@ def strip_cdata(text: str) -> str:
     text = CDATA_OPEN_RE.sub("", text)
     text = CDATA_CLOSE_RE.sub("", text)
     return text
+
+
+def is_chrome_paragraph(text: str) -> bool:
+    raw = (text or "").strip()
+    if not raw:
+        return True
+    lower = raw.lower()
+    if CHROME_LABEL_RE.match(raw):
+        return True
+    if any(phrase in lower for phrase in CHROME_PHRASES):
+        return True
+    if MENU_ESPN_RE.search(raw) or SKIP_NAV_RE.search(raw) or COOKIE_RE.search(raw):
+        return True
+    if FOOTER_RE.search(raw):
+        return True
+    if VIDEO_CHROME_RE.search(raw):
+        return True
+    if lower in {"name *", "email *", "website", "comment", "comments", "menu"}:
+        return True
+    return False
+
+
+def chrome_is_interleaved(raw_body: str) -> bool:
+    """True when nav/chrome sits in the opening of the article, not only as a trailer."""
+    raw = raw_body or ""
+    head = raw[:400]
+    if MENU_ESPN_RE.search(head) or SKIP_NAV_RE.search(head):
+        return True
+    if "-->" in head and "menu" in head.lower():
+        return True
+    words = 0
+    for para in restore_paragraphs(strip_contamination(raw)):
+        if is_chrome_paragraph(para):
+            return words < 40
+        words += _word_count(para)
+    return False
+
+
+def cut_trailing_chrome(paragraphs: Sequence[str]) -> List[str]:
+    """Drop website chrome that follows a real article. Keep legitimate paragraphs."""
+    items = [part.strip() for part in paragraphs if part and part.strip()]
+    if not items:
+        return []
+    cut_at = len(items)
+    real_words = 0
+    consecutive = 0
+    for idx, para in enumerate(items):
+        chrome = is_chrome_paragraph(para)
+        if chrome:
+            if real_words >= 40:
+                consecutive += 1
+                if consecutive == 1:
+                    cut_at = min(cut_at, idx)
+                if consecutive >= 1:
+                    break
+            else:
+                consecutive = 0
+        else:
+            consecutive = 0
+            real_words += _word_count(para)
+            cut_at = len(items)
+    kept = items[:cut_at]
+    return [para for para in kept if not is_chrome_paragraph(para)]
 
 
 def strip_contamination(text: str) -> str:
@@ -188,8 +305,9 @@ def _is_heading(text: str, marker: Optional[str] = None) -> bool:
 def to_blocks(text: str, title: Optional[str] = None) -> List[Dict]:
     cleaned = strip_contamination(text or "")
     cleaned = _strip_leading_title(cleaned, title)
+    paragraphs = cut_trailing_chrome(restore_paragraphs(cleaned))
     blocks: List[Dict] = []
-    for para in restore_paragraphs(cleaned):
+    for para in paragraphs:
         if _is_list_block(para):
             items = [re.sub(r"^([-*•]|\d+[.)])\s+", "", line).strip() for line in para.split("\n")]
             blocks.append({"type": "list", "items": [item for item in items if item]})
@@ -277,18 +395,19 @@ def evaluate_quality(
     raw_title = title or ""
     raw_summary = summary or ""
     raw_body = body or ""
-    combined = " ".join([raw_title, raw_summary, raw_body])
     flags: List[str] = []
     if title_is_malformed(raw_title):
         flags.append("malformed_title")
-    if has_cdata(combined):
-        flags.append("cdata")
-    if has_nav_contamination(combined):
-        flags.append("navigation")
-    if has_truncation(combined):
-        flags.append("truncation")
-    cleaned_body = sanitize_body(raw_body, title=raw_title)
     cleaned_title = sanitize_title(raw_title)
+    cleaned_summary = sanitize_summary(raw_summary, title=raw_title)
+    cleaned_body = sanitize_body(raw_body, title=raw_title)
+    combined_clean = " ".join([cleaned_title, cleaned_summary, cleaned_body])
+    if has_cdata(combined_clean):
+        flags.append("cdata")
+    if has_nav_contamination(combined_clean) or chrome_is_interleaved(raw_body):
+        flags.append("navigation")
+    if has_truncation(combined_clean):
+        flags.append("truncation")
     if _word_count(cleaned_body) < 40:
         flags.append("weak_body")
     if looks_non_english(cleaned_body) or looks_non_english(cleaned_title):

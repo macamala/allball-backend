@@ -228,6 +228,12 @@ def _ingest_item(db: Session, item: Dict, use_ai: bool, max_ai_chars: int, ai_bu
     stamp_sport = resolved.sport or tags.sport
     stamp_league = resolved.public_competition
 
+    from editorial import sanitize_body as _sanitize_body, sanitize_summary as _sanitize_summary, sanitize_title as _sanitize_title
+
+    story_title = _sanitize_title(story_title)
+    story_body = _sanitize_body(story_body, title=story_title)
+    story_summary = _sanitize_summary(story_summary, title=story_title)
+
     image_url = item.get("image") or extracted_image
     if image_url and len(image_url) > 500:
         image_url = image_url[:500]
