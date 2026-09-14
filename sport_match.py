@@ -67,7 +67,9 @@ EXCLUSIVE_KEYWORDS = {
         " f1 ",
         "motogp",
         "grand prix",
-        "qualifying",
+        "f1 qualifying",
+        "qualifying session",
+        "qualifying lap",
         "pit stop",
         "formula-1",
         "motorsport",
@@ -90,6 +92,9 @@ EXCLUSIVE_KEYWORDS = {
         "grizzlies",
         "clippers",
         "olympiacos",
+        "pistons",
+        "qualifying offer",
+        "exhibit 10",
     ),
 }
 

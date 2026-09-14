@@ -61,6 +61,17 @@ def test_formula_one_rejected_from_tennis():
     assert belongs_to_sport(row, "motorsport") is True
 
 
+def test_nba_qualifying_offer_rejected_from_motorsport():
+    row = _Row(
+        title="Jalen Duren considers playing on qualifying offer",
+        summary="The Pistons forward can sign the one-year qualifying offer.",
+        league="formula-1",
+        sport="motorsport",
+    )
+    assert belongs_to_sport(row, "motorsport", strict=True) is False
+    assert belongs_to_sport(row, "basketball", strict=True) is True
+
+
 def test_football_tagged_formula_one_rejected_from_motorsport():
     row = _Row(
         title="Who has your Premiership club brought in this summer",

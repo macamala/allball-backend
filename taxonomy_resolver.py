@@ -13,7 +13,7 @@ from bot.taxonomy import COMPETITIONS, SPORT_ALIASES, canonical_competition_key
 from editorial import sanitize_body, sanitize_summary, sanitize_title
 from sport_match import EXCLUSIVE_KEYWORDS, MAIN_SPORTS, exclusive_score
 
-RESOLVER_VERSION = "4.1.1"
+RESOLVER_VERSION = "4.1.2"
 MIN_COMPETITION_CONFIDENCE = 0.72
 BODY_EXCERPT_CHARS = 1400
 SUMMARY_CHARS = 600
