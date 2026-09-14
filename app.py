@@ -517,21 +517,21 @@ def list_articles(
         )[offset : offset + limit]
         return _serialize_rows(db, rows)
     if isolated:
-        fetch = min(400, max(limit * 25, offset + limit * 20, 120))
-        recent = db.query(Article).order_by(order).limit(fetch).all()
+        fetch = min(160, max(limit * 12, offset + limit * 8, 80))
         cached_ids = db.query(ArticleTaxonomyResolution.article_id).filter(
             ArticleTaxonomyResolution.resolver_version == RESOLVER_VERSION,
             ArticleTaxonomyResolution.resolved_sport == sport,
         )
-        extra = (
+        tagged = (
             db.query(Article)
-            .filter(Article.id.in_(cached_ids))
+            .filter(or_(Article.sport == sport, Article.id.in_(cached_ids)))
             .order_by(order)
             .limit(fetch)
             .all()
         )
-        merged = {row.id: row for row in recent}
-        for row in extra:
+        recent = db.query(Article).order_by(order).limit(80).all()
+        merged = {row.id: row for row in tagged}
+        for row in recent:
             merged[row.id] = row
         rows = sorted(
             merged.values(),
@@ -655,21 +655,27 @@ def articles_by_sport(
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
 ):
-    fetch = min(400, max(limit * 25, offset + limit * 20, 120))
-    recent = db.query(Article).order_by(_sort_expr().desc()).limit(fetch).all()
-    cached_ids = db.query(ArticleTaxonomyResolution.article_id).filter(
-        ArticleTaxonomyResolution.resolver_version == RESOLVER_VERSION,
-        ArticleTaxonomyResolution.resolved_sport == sport,
-    )
-    extra = (
+    fetch = min(160, max(limit * 12, offset + limit * 8, 80))
+    tagged = (
         db.query(Article)
-        .filter(Article.id.in_(cached_ids))
+        .filter(
+            or_(
+                Article.sport == sport,
+                Article.id.in_(
+                    db.query(ArticleTaxonomyResolution.article_id).filter(
+                        ArticleTaxonomyResolution.resolver_version == RESOLVER_VERSION,
+                        ArticleTaxonomyResolution.resolved_sport == sport,
+                    )
+                ),
+            )
+        )
         .order_by(_sort_expr().desc())
         .limit(fetch)
         .all()
     )
-    merged = {row.id: row for row in recent}
-    for row in extra:
+    recent = db.query(Article).order_by(_sort_expr().desc()).limit(80).all()
+    merged = {row.id: row for row in tagged}
+    for row in recent:
         merged[row.id] = row
     rows = sorted(
         merged.values(),
