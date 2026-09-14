@@ -182,8 +182,8 @@ def test_sanitizer_strips_category_and_duplicate_openers():
     title = "Hosts complete a stunning European debut"
     body = (
         "Basketball\n\n"
-        f"{title}\n\n"
-        f"{title}\n\n"
+        "Domestic Leagues "
+        f"{title} "
         "The visiting side could not recover after half-time and the hosts closed the night "
         "with a complete team performance in front of a loud home crowd. "
         "Coaches later talked about concentration and how the next assignment already looms.\n\n"
@@ -192,7 +192,10 @@ def test_sanitizer_strips_category_and_duplicate_openers():
     )
     cleaned = sanitize_body(body, title=title)
     assert "required fields" not in cleaned.lower()
+    assert "domestic leagues" not in cleaned.lower()
     assert cleaned.lower().count(title.lower()) <= 1
+    assert classify_media_url("https://cdn.example.com/uploads/2026/01/valencia-696x464.webp") == "CREST_OR_LOGO"
+    assert classify_media_url("https://cdn.example.com/photos/getty-match-night-1600x900.jpg") == "EDITORIAL_PHOTO"
     blocks = to_blocks(body, title=title)
     assert blocks
     assert all("required fields" not in (block.get("text") or "").lower() for block in blocks)

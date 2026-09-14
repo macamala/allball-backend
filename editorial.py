@@ -269,6 +269,16 @@ def strip_contamination(text: str) -> str:
     return _collapse_spaces(text)
 
 
+def _strip_leading_kicker(text: str) -> str:
+    current = (text or "").strip()
+    for _ in range(2):
+        updated = LEADING_KICKER_RE.sub("", current, count=1).strip()
+        if updated == current:
+            break
+        current = updated
+    return current
+
+
 def _strip_leading_title(text: str, title: Optional[str]) -> str:
     if not text or not title:
         return text
@@ -279,7 +289,7 @@ def _strip_leading_title(text: str, title: Optional[str]) -> str:
         r"^(?:" + re.escape(title_clean) + r")(?:\s*[.!?–—-])?\s+",
         re.IGNORECASE,
     )
-    current = text.strip()
+    current = _strip_leading_kicker(text.strip())
     for _ in range(3):
         updated = pattern.sub("", current, count=1).strip()
         if updated == current:
@@ -507,6 +517,30 @@ LEADING_CATEGORY_RE = re.compile(
     r"formula\s*1|formula one)\s*$",
     re.IGNORECASE,
 )
+LEADING_KICKER_RE = re.compile(
+    r"^(?:domestic leagues|international(?: news)?|transfer(?:s| news)?|"
+    r"breaking(?: news)?|latest(?: news)?|top stories|featured|"
+    r"opinion|analysis|rumou?rs|in brief|must read|live blog)\s+",
+    re.IGNORECASE,
+)
+PHOTO_NAME_MARKERS = (
+    "photo",
+    "getty",
+    "match",
+    "player",
+    "action",
+    "crowd",
+    "arena",
+    "court",
+    "pitch",
+    "celeb",
+    "press",
+    "wire",
+)
+STEM_DIM_RE = re.compile(
+    r"^(?P<stem>[a-z0-9]+(?:[-_][a-z0-9]+){0,2})-\d{2,4}x\d{2,4}$",
+    re.IGNORECASE,
+)
 
 
 def image_is_usable(url: Optional[str]) -> bool:
@@ -533,6 +567,12 @@ def classify_media_url(url: Optional[str]) -> str:
         return "CREST_OR_LOGO"
     if MEDIA_GRAPHIC_RE.search(lower):
         return "GRAPHIC"
+    filename = path.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+    dim_match = STEM_DIM_RE.match(filename)
+    if dim_match:
+        stem = dim_match.group("stem").replace("_", " ").replace("-", " ")
+        if not any(marker in stem for marker in PHOTO_NAME_MARKERS):
+            return "CREST_OR_LOGO"
     if re.search(r"\.(?:jpe?g|png|webp|gif)(?:$|\?)", path):
         return "EDITORIAL_PHOTO"
     return "UNKNOWN"
