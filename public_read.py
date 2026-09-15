@@ -13,8 +13,8 @@ from editorial import (
     lift_hero_caption,
     maybe_related_insert,
     public_media_items,
+    public_summary,
     sanitize_body,
-    sanitize_summary,
     sanitize_title,
     scrub_public_blocks,
     to_blocks,
@@ -154,7 +154,7 @@ def serialize_card(article: Article, tax: ArticleTaxonomyResolution) -> dict:
         "country": article.country,
         "division": article.division,
         "image_url": image,
-        "summary": sanitize_summary(article.summary, title=article.title) or "",
+        "summary": public_summary(article.summary, title=article.title),
         "created_at": article.created_at,
         "published_at": article.published_at or article.created_at,
         "ai_generated": bool(getattr(article, "ai_generated", False)),
@@ -193,7 +193,7 @@ def serialize_detail(
     resolved = stored_resolution(article, tax)
     raw_body = article.ai_content or article.content or article.summary
     title = sanitize_title(article.title)
-    summary = sanitize_summary(article.summary, title=article.title)
+    summary = public_summary(article.summary, title=article.title)
     body = sanitize_body(raw_body, title=article.title)
     if summary and body:
         prefix = summary[: min(48, len(summary))].lower()

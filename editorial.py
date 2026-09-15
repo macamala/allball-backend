@@ -374,6 +374,23 @@ def _is_heading(text: str, marker: Optional[str] = None) -> bool:
     return False
 
 
+def public_summary(text: Optional[str], title: Optional[str] = None) -> str:
+    """Card/deck text only. Never publish Getty/location photo credits."""
+    cleaned = sanitize_summary(text, title=title) or ""
+    _, rest = split_photo_caption(cleaned)
+    cleaned = (rest or "").strip()
+    cleaned = re.sub(
+        r"^.*?(?:\(Photo by [^)]+\)|\(Getty Images\))\s*",
+        "",
+        cleaned,
+        count=1,
+        flags=re.IGNORECASE | re.DOTALL,
+    ).strip()
+    if is_photo_credit_text(cleaned):
+        return ""
+    return cleaned
+
+
 def split_photo_caption(text: str) -> Tuple[Optional[str], str]:
     """Separate Getty/location credits from the following editorial paragraph."""
     raw = (text or "").strip()

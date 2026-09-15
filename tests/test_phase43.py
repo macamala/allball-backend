@@ -68,6 +68,29 @@ def test_sanitize_body_omits_photo_caption():
     assert "jeered off" in cleaned
 
 
+def test_public_summary_drops_getty_credit_but_keeps_rest():
+    from editorial import public_summary
+
+    raw = (
+        "COMO, ITALY - SEPTEMBER 10: Players celebrate (Photo by Marco Bertorello/Getty Images) "
+        "Como completed a stunning Champions League debut."
+    )
+    cleaned = public_summary(raw, title="Como 4-1 RB Leipzig")
+    assert "Getty Images" not in cleaned
+    assert "Photo by" not in cleaned
+    assert "Champions League debut" in cleaned
+
+    country_only = (
+        "ITALY - SEPTEMBER 14: Jacobo Ramon (Photo by Marco Luzzani/Getty Images) "
+        "Como weren't as sharp as they had been."
+    )
+    deck = public_summary(country_only, title="Como 2-1 Parma")
+    assert "Getty Images" not in deck
+    assert "Photo by" not in deck
+    assert "ITALY" not in deck
+    assert "weren't as sharp" in deck
+
+
 def test_legitimate_website_sentence_survives():
     body = (
         "Como completed a stunning Champions League debut with a 4-1 win over RB Leipzig. "
