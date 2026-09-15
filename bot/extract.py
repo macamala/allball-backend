@@ -1,5 +1,6 @@
 """Fetch and extract article text from a canonical source URL."""
 
+import json
 import logging
 import re
 from datetime import datetime
@@ -9,13 +10,20 @@ from typing import List, Optional, Tuple
 
 import httpx
 
+from .quality import is_substantial_source
 from .site_chrome import is_site_chrome_text, strip_site_chrome
-from .textutil import clean_text
+from .textutil import clean_text, word_count
 
 logger = logging.getLogger(__name__)
 
 USER_AGENT = (
-    "NinkoSportsBot/1.0 (+https://ninkosports.com; editorial extraction)"
+    "Mozilla/5.0 (compatible; NinkoSportsBot/1.0; +https://ninkosports.com)"
+)
+ARTICLE_TAGS = {"p", "h2", "h3", "blockquote"}
+MAX_PARAGRAPHS = 40
+JSON_LD_RE = re.compile(
+    r'<script[^>]*type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
+    re.IGNORECASE | re.DOTALL,
 )
 
 CHROME_TAGS = {
@@ -109,7 +117,7 @@ class _ArticleExtractor(HTMLParser):
         attrs_map = _attr_map(attrs)
         if tag in {"article", "main"} or attrs_map.get("role", "").lower() == "main":
             self.in_main += 1
-        if tag in {"p", "h2"}:
+        if tag in ARTICLE_TAGS:
             self.in_p += 1
             self.buf = []
 
@@ -118,7 +126,7 @@ class _ArticleExtractor(HTMLParser):
         if self.ignore:
             self.ignore = max(0, self.ignore - 1)
             return
-        if tag in {"p", "h2"} and self.in_p:
+        if tag in ARTICLE_TAGS and self.in_p:
             self.in_p -= 1
             text = clean_text("".join(self.buf))
             self.buf = []
@@ -175,7 +183,7 @@ def paragraphs_from_html(html: str) -> str:
             continue
         seen.add(key)
         cleaned.append(text)
-        if len(cleaned) >= 20:
+        if len(cleaned) >= MAX_PARAGRAPHS:
             break
     return "\n\n".join(cleaned)
 
@@ -198,10 +206,33 @@ def parse_feed_datetime(entry) -> Optional[datetime]:
     return None
 
 
-def extract_from_url(url: str, timeout: float = 12.0) -> Tuple[str, Optional[str]]:
+def _json_ld_article_body(html: str) -> str:
+    """Same article prose from JSON-LD; never a different story or RSS blurb."""
+    for raw in JSON_LD_RE.findall(html or ""):
+        try:
+            data = json.loads(raw)
+        except Exception:
+            continue
+        items = data if isinstance(data, list) else [data]
+        if isinstance(data, dict) and isinstance(data.get("@graph"), list):
+            items = data["@graph"]
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            body = item.get("articleBody")
+            if not body or not isinstance(body, str):
+                continue
+            text = strip_site_chrome(clean_text(body)) or clean_text(body)
+            if text and not is_site_chrome_text(text) and word_count(text) >= 80:
+                return text
+    return ""
+
+
+def extract_from_url(url: str, timeout: float = 18.0) -> Tuple[str, Optional[str]]:
     """
     Returns (article_text, image_url_or_none).
     Empty text means extraction failed; caller must not invent facts.
+    Never substitutes og:description / RSS metadata for the article body.
     """
     if not url:
         return "", None
@@ -221,10 +252,8 @@ def extract_from_url(url: str, timeout: float = 12.0) -> Tuple[str, Optional[str
     text = strip_site_chrome(text) or text
     if is_site_chrome_text(text):
         text = ""
-    if len(text) < 80:
-        desc = _og(html, "og:description")
-        if desc:
-            desc = strip_site_chrome(clean_text(desc))
-            if desc and not is_site_chrome_text(desc):
-                text = desc
+    if not is_substantial_source(text):
+        ld_body = _json_ld_article_body(html)
+        if word_count(ld_body) > word_count(text):
+            text = ld_body
     return text, image

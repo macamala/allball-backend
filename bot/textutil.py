@@ -16,6 +16,10 @@ PUBLISHER_FOOTER_RE = re.compile(
 )
 
 
+def word_count(text: Optional[str]) -> int:
+    return len(re.findall(r"[A-Za-zÀ-ÿ']+", text or ""))
+
+
 def strip_truncation_markers(text: str) -> str:
     if not text:
         return ""

@@ -15,7 +15,12 @@ from .dedupe import existing_by_url, existing_near_duplicate
 from .extract import extract_from_url, parse_feed_datetime, paragraphs_from_html
 from .feeds import enabled_feeds
 from .media_url import collect_feed_image_candidates, pick_source_image
-from .quality import enough_for_brief, is_english_enough, quality_check
+from .quality import (
+    enough_for_brief,
+    is_dramatic_shortening,
+    is_english_enough,
+    quality_check,
+)
 from .site_chrome import is_site_chrome_text, strip_site_chrome
 from .rewrite_ai import (
     openai_rate_limited,
@@ -47,15 +52,58 @@ def clean_html_text(text: str) -> str:
 
 def select_facts(extracted: str, rss_text: str) -> str:
     """Prefer extracted article prose. Never keep publisher chrome as facts."""
+    facts, _origin = source_article_facts(extracted, rss_text, source_url="")
+    return facts
+
+
+def source_article_facts(
+    extracted: str,
+    rss_text: str,
+    source_url: str = "",
+) -> tuple:
+    """
+    RSS is discovery metadata when a real article page exists.
+    Returns (facts, origin) where origin is source|rss|missing-source|none.
+    """
     extracted_clean = strip_site_chrome(extracted or "") or (extracted or "")
     rss_clean = strip_site_chrome(rss_text or "") or (rss_text or "")
     extracted_ok = bool(extracted_clean) and not is_site_chrome_text(extracted_clean)
     rss_ok = bool(rss_clean) and not is_site_chrome_text(rss_clean)
     if extracted_ok:
-        return extracted_clean
+        return extracted_clean, "source"
+    if (source_url or "").strip().startswith("http"):
+        return "", "missing-source"
     if rss_ok:
-        return rss_clean
-    return ""
+        return rss_clean, "rss"
+    return "", "none"
+
+
+def _ai_story(title: str, facts: str, sport: str, league: str, max_ai_chars: int) -> tuple:
+    """Returns (parsed_dict_or_None, reason). reason is ok|empty|too-short."""
+    payload = facts[: max(1, max_ai_chars)]
+    raw = write_ninkosports_story(title=title, facts=payload, sport=sport, league=league)
+    parsed = parse_ai_output(raw or "")
+    body = parsed.get("body") or ""
+    if not body:
+        return None, "empty"
+    if is_dramatic_shortening(facts, body):
+        raw = write_ninkosports_story(
+            title=title,
+            facts=payload,
+            sport=sport,
+            league=league,
+            retry_for_length=True,
+        )
+        parsed = parse_ai_output(raw or "")
+        body = parsed.get("body") or ""
+        if not body or is_dramatic_shortening(facts, body):
+            logger.info(
+                "[fetch_sources] reject summary-sized rewrite of substantial source: %s",
+                title[:80],
+            )
+            return None, "too-short"
+        parsed["body"] = body
+    return parsed, "ok"
 
 
 def _extract_image_url(entry) -> Optional[str]:
@@ -142,10 +190,14 @@ def _ingest_item(db: Session, item: Dict, use_ai: bool, max_ai_chars: int, ai_bu
 
     rss_text = item.get("summary") or ""
     extracted, extracted_image = extract_from_url(source_url)
-    facts = select_facts(extracted, rss_text)
+    facts, origin = source_article_facts(extracted, rss_text, source_url)
     facts = strip_truncation_markers(facts)
-    if not facts or is_site_chrome_text(facts) or not enough_for_brief(item["title"], facts):
-        logger.info("[fetch_sources] skip insufficient facts: %s", item["title"][:80])
+    if origin == "missing-source" or not facts or is_site_chrome_text(facts) or not enough_for_brief(item["title"], facts):
+        logger.info(
+            "[fetch_sources] skip %s facts: %s",
+            origin or "insufficient",
+            item["title"][:80],
+        )
         return None, False
 
     feed = item.get("feed") or {}
@@ -167,16 +219,22 @@ def _ingest_item(db: Session, item: Dict, use_ai: bool, max_ai_chars: int, ai_bu
     story_summary = facts[:400]
     used_ai = False
     if use_ai and ai_budget > 0 and not openai_rate_limited():
-        raw = write_ninkosports_story(
+        parsed, rewrite_reason = _ai_story(
             title=item["title"],
-            facts=facts[:max_ai_chars],
+            facts=facts,
             sport=tags.sport or "sports",
             league=tags.league or "",
+            max_ai_chars=max_ai_chars,
         )
-        parsed = parse_ai_output(raw or "")
-        body = parsed.get("body") or ""
-        title = parsed.get("title") or item["title"]
-        ok_ai, reason_ai = quality_check(title, body, tags.sport, require_english=True)
+        if rewrite_reason == "too-short":
+            logger.info(
+                "[fetch_sources] skip substantial source with summary-only rewrite: %s",
+                item["title"][:80],
+            )
+            return None, False
+        body = (parsed or {}).get("body") or ""
+        title = (parsed or {}).get("title") or item["title"]
+        ok_ai, reason_ai = quality_check(title, body, tags.sport, require_english=True) if body else (False, "empty-rewrite")
         if ok_ai:
             story_title = title
             story_body = body
@@ -293,7 +351,7 @@ def fetch_and_store_all_articles(
     max_per_league: int = 3,
     hard_limit: Optional[int] = None,
     use_ai: bool = True,
-    max_ai_chars: int = 3000,
+    max_ai_chars: int = 6000,
     max_ai_articles: Optional[int] = None,
 ) -> int:
     """

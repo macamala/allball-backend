@@ -1,6 +1,7 @@
 from bot.fetch_sources import _extract_image_url
 from bot.media_url import (
     image_stem,
+    image_url_for_display,
     pick_source_image,
     upgrade_hero_image_url,
     width_from_url,
@@ -19,6 +20,8 @@ def test_hero_upgrades_cdn_width_token_not_unrelated_url():
     query = "https://cdn.example.com/photo.jpg?w=320&crop=faces"
     assert "w=1600" in upgrade_hero_image_url(query)
     assert width_from_url(thumb) == 240
+    assert "/1280/" in image_url_for_display(thumb, "featured")
+    assert "/320/" in image_url_for_display(thumb, "thumb")
 
 
 def test_public_detail_uses_upgraded_hero_cards_keep_stored():

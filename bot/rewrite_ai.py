@@ -26,8 +26,13 @@ SYSTEM_PROMPT = """You are a staff writer for NinkoSports, an English-language s
 Write an ORIGINAL news story from the provided facts.
 - English only. Natural sports journalism. No clickbait.
 - Do not translate word-for-word or copy the source paragraph-for-paragraph.
-- Do not invent scores, quotes, fees, injuries, statistics, dates, or unnamed details.
-- If facts are thin, write a short accurate brief. Prefer short and true over long and guessed.
+- Preserve the important facts, context, quotes and developments from the source.
+- Reconstruct readable paragraph structure: intro, context/details, quotes or extra facts, further context, then the current situation, as the material supports.
+- Do not merge the story into one giant paragraph.
+- Do not invent scores, quotes, fees, injuries, statistics, dates, unnamed sources, or extra context.
+- Do not pad with filler, speculation, or repeated sentences to hit a word count.
+- If the source facts are a substantial news article, write a proper multi-paragraph piece of about 350-700 words using only those facts.
+- If the source facts are a short breaking item, write a short accurate brief. Prefer short and true over long and guessed.
 - Never mention AI, translation, or the original publisher.
 - Never include URLs, source names, or attribution lines.
 - Never include HTML or markers like [+123 chars].
@@ -37,8 +42,14 @@ Line 1: headline (plain text, no quotes, no markdown)
 Line 2: blank
 Line 3: one-sentence summary
 Line 4: blank
-Then 2-6 short paragraphs of article body.
+Then the article body as multiple paragraphs separated by blank lines.
 """
+
+LENGTH_RETRY_HINT = (
+    "The previous draft was only a short summary of a substantial source article. "
+    "Rewrite a full multi-paragraph NinkoSports story using the important facts, "
+    "context, quotes and developments. Do not invent anything. Do not pad with filler."
+)
 
 
 def reset_openai_rate_limit() -> None:
@@ -101,7 +112,7 @@ def _call_openai(prompt: str) -> Optional[str]:
                             {"role": "user", "content": prompt},
                         ],
                         "temperature": 0.35,
-                        "max_tokens": 700,
+                        "max_tokens": 1800,
                     },
                 )
             if resp.status_code == 429:
@@ -145,6 +156,7 @@ def write_ninkosports_story(
     facts: str,
     sport: str = "sports",
     league: str = "",
+    retry_for_length: bool = False,
 ) -> Optional[str]:
     if openai_rate_limited():
         return None
@@ -152,8 +164,8 @@ def write_ninkosports_story(
     title = (title or "").strip()
     if not title and not facts:
         return None
-    if len(facts) > 3500:
-        facts = facts[:3500]
+    if len(facts) > 8000:
+        facts = facts[:8000]
     prompt = (
         f"SPORT: {sport}\n"
         f"COMPETITION: {league or 'unspecified'}\n\n"
@@ -161,6 +173,8 @@ def write_ninkosports_story(
         "VERIFIED SOURCE FACTS (may be another language; use only what is stated):\n"
         f"{facts}\n"
     )
+    if retry_for_length:
+        prompt = f"{LENGTH_RETRY_HINT}\n\n{prompt}"
     return _call_openai(prompt)
 
 

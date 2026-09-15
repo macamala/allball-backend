@@ -154,3 +154,134 @@ def repair_contaminated(
         stats["hidden"],
     )
     return stats
+
+
+def _stored_body(article: Article) -> str:
+    return article.ai_content or article.content or article.summary or ""
+
+
+def repair_summary_one(db: Session, article: Article) -> str:
+    """Rewrite a summary-only public article from its source page. Returns rewritten|skipped|clean."""
+    from bot.fetch_sources import _ai_story
+    from bot.quality import (
+        is_dramatic_shortening,
+        is_english_enough,
+        needs_full_source_repair,
+        quality_check,
+    )
+    from bot.rewrite_ai import openai_rate_limited
+    from editorial import sanitize_body, sanitize_summary, sanitize_title
+
+    stored = _stored_body(article)
+    source = (article.source_url or article.external_id or "").strip()
+    if not source.startswith("http"):
+        return "skipped"
+    extracted, _image = extract_from_url(source)
+    extracted = strip_site_chrome(extracted or "") or (extracted or "")
+    if is_site_chrome_text(extracted):
+        extracted = ""
+    if not needs_full_source_repair(stored, extracted):
+        return "clean"
+    if openai_rate_limited():
+        return "skipped"
+    parsed, reason = _ai_story(
+        title=article.title or "",
+        facts=extracted,
+        sport=article.sport or "sports",
+        league=article.league or "",
+        max_ai_chars=6000,
+    )
+    body = (parsed or {}).get("body") or ""
+    title = (parsed or {}).get("title") or article.title
+    if reason == "too-short" or not body:
+        return "skipped"
+    ok, _why = quality_check(title, body, article.sport, require_english=True)
+    if not ok or not is_english_enough(body):
+        return "skipped"
+    title = sanitize_title(title)
+    body = sanitize_body(body, title=title)
+    if not body or is_dramatic_shortening(extracted, body):
+        return "skipped"
+    article.title = title
+    article.content = body
+    article.ai_content = body
+    article.ai_generated = True
+    summary = (parsed or {}).get("summary") or ""
+    article.summary = sanitize_summary(summary or body, title=title)[:280]
+    persist_public_article(db, article)
+    return "rewritten"
+
+
+def repair_summary_only(
+    db: Optional[Session] = None,
+    *,
+    page_size: int = 80,
+    max_pages: int = 8,
+    max_rewrite: int = 8,
+) -> dict:
+    """Background pass for summary-sized public articles. Never called from GET."""
+    from database import SessionLocal
+
+    stats = {"scanned": 0, "candidates": 0, "rewritten": 0, "skipped": 0}
+    own = db is None
+    session = db or SessionLocal()
+    try:
+        offset = 0
+        for _ in range(max_pages):
+            if stats["rewritten"] >= max_rewrite:
+                break
+            batch = (
+                session.query(Article)
+                .join(
+                    ArticleTaxonomyResolution,
+                    ArticleTaxonomyResolution.article_id == Article.id,
+                )
+                .filter(
+                    ArticleTaxonomyResolution.public_ok == True,  # noqa: E712
+                    ArticleTaxonomyResolution.resolver_version == RESOLVER_VERSION,
+                )
+                .order_by(Article.id.desc())
+                .offset(offset)
+                .limit(page_size)
+                .all()
+            )
+            if not batch:
+                break
+            offset += page_size
+            for article in batch:
+                if stats["rewritten"] >= max_rewrite:
+                    break
+                stats["scanned"] += 1
+                stored = _stored_body(article)
+                from bot.quality import MIN_SOURCE_WORDS, word_count
+
+                if word_count(stored) >= MIN_SOURCE_WORDS:
+                    continue
+                source = (article.source_url or article.external_id or "").strip()
+                if not source.startswith("http"):
+                    continue
+                stats["candidates"] += 1
+                result = repair_summary_one(session, article)
+                if result == "rewritten":
+                    stats["rewritten"] += 1
+                elif result == "skipped":
+                    stats["skipped"] += 1
+            if len(batch) < page_size:
+                break
+        session.commit()
+        if stats["rewritten"]:
+            bump_public_cache()
+    except Exception:
+        session.rollback()
+        logger.exception("summary-only repair failed")
+    finally:
+        if own:
+            session.close()
+    logger.info(
+        "summary repair scanned=%s candidates=%s rewritten=%s skipped=%s",
+        stats["scanned"],
+        stats["candidates"],
+        stats["rewritten"],
+        stats["skipped"],
+    )
+    return stats

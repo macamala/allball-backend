@@ -4,11 +4,34 @@ import re
 from typing import Optional, Tuple
 
 from .site_chrome import is_site_chrome_text
-from .textutil import TRUNCATION_RE, clean_text, looks_like_garbage, normalize_title
+from .textutil import TRUNCATION_RE, clean_text, looks_like_garbage, normalize_title, word_count
 
 
 MIN_FACT_CHARS = 80
 MIN_BRIEF_CHARS = 40
+MIN_SOURCE_WORDS = 180
+MIN_BRIEF_WORDS = 60
+SUMMARY_MAX_WORDS = 140
+
+
+def is_substantial_source(text: Optional[str]) -> bool:
+    return word_count(text) >= MIN_SOURCE_WORDS
+
+
+def is_summary_sized(text: Optional[str]) -> bool:
+    return word_count(text) < SUMMARY_MAX_WORDS
+
+
+def is_dramatic_shortening(source: Optional[str], output: Optional[str]) -> bool:
+    """True when a full source article collapsed into an RSS-sized stub."""
+    return is_substantial_source(source) and is_summary_sized(output)
+
+
+def needs_full_source_repair(stored: Optional[str], extracted: Optional[str]) -> bool:
+    """Existing public copy looks like a feed stub; source page has a real article."""
+    stored_n = word_count(stored)
+    extracted_n = word_count(extracted)
+    return stored_n < MIN_SOURCE_WORDS and extracted_n >= 250 and extracted_n >= max(stored_n * 2, 250)
 
 
 def has_truncation(text: str) -> bool:

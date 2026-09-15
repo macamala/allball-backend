@@ -6,7 +6,14 @@ import re
 from typing import List, Optional, Sequence, Tuple
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-HERO_TARGET_WIDTH = 1600
+# Display roles → target CSS-pixel width of the SAME image.
+DISPLAY_WIDTHS = {
+    "thumb": 320,
+    "card": 800,
+    "featured": 1280,
+    "hero": 1600,
+}
+HERO_TARGET_WIDTH = DISPLAY_WIDTHS["hero"]
 QUERY_WIDTH_KEYS = {
     "w",
     "width",
@@ -18,7 +25,6 @@ QUERY_WIDTH_KEYS = {
     "fitw",
 }
 
-# Size sits in a dedicated CDN folder, not an article id path.
 PATH_WIDTH_RE = re.compile(
     r"(?P<pre>/(?:ace/(?:standard|ws)|news|iplayer)/)(?P<w>\d{2,4})(?=/)",
     re.IGNORECASE,
@@ -68,16 +74,23 @@ def image_stem(url: Optional[str]) -> str:
     return urlunsplit((parsed.scheme.lower(), parsed.netloc.lower(), path, urlencode(query), ""))
 
 
-def upgrade_hero_image_url(url: Optional[str]) -> Optional[str]:
-    """Prefer a larger same-image CDN variant for article heroes. No fetch."""
+def image_url_for_display(url: Optional[str], role: str = "card") -> Optional[str]:
+    """Same photo, sized for the UI surface. Never invents a different image."""
     raw = (url or "").strip()
     if not raw:
         return raw
+    target = DISPLAY_WIDTHS.get(role, DISPLAY_WIDTHS["card"])
     current = width_from_url(raw)
-    if current <= 0 or current >= HERO_TARGET_WIDTH:
+    if current <= 0:
         return raw
-    upgraded = _replace_width(raw, HERO_TARGET_WIDTH)
+    if current == target:
+        return raw
+    upgraded = _replace_width(raw, target)
     return upgraded or raw
+
+
+def upgrade_hero_image_url(url: Optional[str]) -> Optional[str]:
+    return image_url_for_display(url, "hero")
 
 
 def _replace_width(url: str, width: int) -> str:
@@ -97,7 +110,7 @@ def _replace_width(url: str, width: int) -> str:
             (parsed.scheme, parsed.netloc, parsed.path, urlencode(pairs), parsed.fragment)
         )
     crop = WP_CROP_RE.search(parsed.path)
-    if crop and int(crop.group("w")) < 800:
+    if crop and int(crop.group("w")) < width and width >= 800:
         return urlunsplit(
             (
                 parsed.scheme,

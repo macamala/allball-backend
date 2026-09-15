@@ -30,7 +30,7 @@ def job():
             max_per_league=3,
             hard_limit=None,
             use_ai=True,
-            max_ai_chars=3000,
+            max_ai_chars=6000,
             max_ai_articles=MAX_AI_ARTICLES,
         )
         from database import SessionLocal
@@ -46,21 +46,27 @@ def job():
                     break
         finally:
             db.close()
-        from repair_content import repair_contaminated
         from public_cache import bump_public_cache
+        from repair_content import repair_contaminated, repair_summary_only
 
         repaired = repair_contaminated()
+        summaries = repair_summary_only()
         bump_public_cache()
         logger.info(
             "NinkoSports pipeline finished successfully. "
             "AI rewrote %s articles; public index backfilled %s rows; "
-            "content repair scanned=%s detected=%s repaired=%s hidden=%s.",
+            "content repair scanned=%s detected=%s repaired=%s hidden=%s; "
+            "summary repair scanned=%s candidates=%s rewritten=%s skipped=%s.",
             rewritten,
             indexed,
             repaired.get("scanned"),
             repaired.get("detected"),
             repaired.get("repaired"),
             repaired.get("hidden"),
+            summaries.get("scanned"),
+            summaries.get("candidates"),
+            summaries.get("rewritten"),
+            summaries.get("skipped"),
         )
     except Exception as e:
         logger.exception(f"NinkoSports pipeline failed: {e}")
