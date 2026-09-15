@@ -143,6 +143,7 @@ CHROME_PHRASES = (
     "download our app",
     "subscribe now",
     "sign up for breaking news",
+    "give us your thoughts using the comments form at the bottom of this page",
     "give us your thoughts using the comments form",
     "comments form at the bottom of this page",
 )

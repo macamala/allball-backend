@@ -111,6 +111,17 @@ def test_flat_blob_splits_on_sentences_not_character_count():
     assert "Unai Emery" in paras[1]
 
 
-def test_strip_leading_cms_does_not_eat_title_case_prose():
+def test_comments_form_chrome_is_removed_as_a_whole_phrase():
+    title = "Who has made the team of the week?"
+    raw = (
+        "After every round of matches this season, the pundit will give his team of the week. "
+        "Give us your thoughts using the comments form at the bottom of this page. "
+        "Gianluigi Donnarumma is one of the best goalkeepers in the world."
+    )
+    body = sanitize_body(raw, title=title)
+    assert "comments form" not in body.lower()
+    assert "bottom of this page" not in body.lower()
+    assert "Gianluigi Donnarumma" in body
+    assert "pundit will give his team" in body
     text = "Manchester United beat Liverpool after a late header in the derby."
     assert strip_leading_cms_chrome(text, title="A late header decides the derby") == text
