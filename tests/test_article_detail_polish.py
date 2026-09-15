@@ -6,7 +6,7 @@ from bot.media_url import (
     width_from_url,
 )
 from bot.site_chrome import strip_leading_cms_chrome
-from editorial import public_media_items, sanitize_body, to_blocks
+from editorial import public_media_items, sanitize_body, sanitize_title, to_blocks
 
 
 def test_hero_upgrades_cdn_width_token_not_unrelated_url():
@@ -123,5 +123,13 @@ def test_comments_form_chrome_is_removed_as_a_whole_phrase():
     assert "bottom of this page" not in body.lower()
     assert "Gianluigi Donnarumma" in body
     assert "pundit will give his team" in body
+
+
+def test_strip_leading_cms_does_not_eat_title_case_prose():
     text = "Manchester United beat Liverpool after a late header in the derby."
     assert strip_leading_cms_chrome(text, title="A late header decides the derby") == text
+
+
+def test_title_case_headlines_are_not_treated_as_nav_chrome():
+    title = "UCL | City 3-1 Leipzig: Perfect Champions League debut"
+    assert sanitize_title(title) == title

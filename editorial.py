@@ -324,9 +324,14 @@ def _strip_leading_title(text: str, title: Optional[str]) -> str:
 
 
 def sanitize_title(title: Optional[str]) -> str:
-    cleaned = strip_contamination(title or "")
-    cleaned = re.sub(r"^[\s\-–—:]+", "", cleaned)
-    return cleaned.strip()
+    raw = title or ""
+    raw = strip_cdata(raw)
+    raw = HTML_TAG_RE.sub(" ", raw)
+    raw = TRUNCATION_RE.sub(" ", raw)
+    raw = ELLIPSIS_MARK_RE.sub(" ", raw)
+    raw = _collapse_spaces(raw)
+    raw = re.sub(r"^[\s\-–—:]+", "", raw)
+    return raw.strip()
 
 
 def sanitize_summary(summary: Optional[str], title: Optional[str] = None) -> str:

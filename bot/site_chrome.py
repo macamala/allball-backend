@@ -128,6 +128,7 @@ def is_site_chrome_text(text: Optional[str]) -> bool:
         and run >= len(tokens) - 1
         and _stop_ratio(raw) < 0.08
         and "." not in raw
+        and not re.search(r"[\d|:?!]", raw)
     ):
         return True
     return False
