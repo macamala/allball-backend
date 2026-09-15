@@ -12,8 +12,9 @@ from models import Article
 
 from .classify import classify_article
 from .dedupe import existing_by_url, existing_near_duplicate
-from .extract import extract_from_url, parse_feed_datetime
+from .extract import extract_from_url, parse_feed_datetime, paragraphs_from_html
 from .feeds import enabled_feeds
+from .media_url import collect_feed_image_candidates, pick_source_image
 from .quality import enough_for_brief, is_english_enough, quality_check
 from .site_chrome import is_site_chrome_text, strip_site_chrome
 from .rewrite_ai import (
@@ -58,31 +59,7 @@ def select_facts(extracted: str, rss_text: str) -> str:
 
 
 def _extract_image_url(entry) -> Optional[str]:
-    media_content = entry.get("media_content")
-    if media_content and isinstance(media_content, list):
-        for m in media_content:
-            url = m.get("url")
-            if url:
-                return url
-    media_thumb = entry.get("media_thumbnail")
-    if media_thumb and isinstance(media_thumb, list):
-        for m in media_thumb:
-            url = m.get("url")
-            if url:
-                return url
-    links = entry.get("links") or []
-    for link in links:
-        if link.get("rel") == "enclosure" and str(link.get("type", "")).startswith("image"):
-            url = link.get("href")
-            if url:
-                return url
-    summary = entry.get("summary") or entry.get("description") or ""
-    import re
-
-    match = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', summary)
-    if match:
-        return match.group(1)
-    return None
+    return pick_source_image(collect_feed_image_candidates(entry))
 
 
 def _slugify(title: str, fallback: str = "") -> str:
@@ -131,8 +108,10 @@ def _fetch_feed_entries(feed_cfg: Dict, max_articles: int) -> List[Dict]:
     items = []
     for entry in entries[: max(1, max_articles)]:
         title = strip_truncation_markers(clean_text(entry.get("title") or ""))
+        raw_summary = entry.get("summary") or entry.get("description") or ""
+        parsed_summary = paragraphs_from_html(raw_summary)
         summary = strip_truncation_markers(
-            clean_text(entry.get("summary") or entry.get("description") or "")
+            parsed_summary or clean_text(raw_summary)
         )
         link = (entry.get("link") or "").strip()
         if not link or not title or looks_like_garbage(title):
@@ -164,7 +143,7 @@ def _ingest_item(db: Session, item: Dict, use_ai: bool, max_ai_chars: int, ai_bu
     rss_text = item.get("summary") or ""
     extracted, extracted_image = extract_from_url(source_url)
     facts = select_facts(extracted, rss_text)
-    facts = strip_truncation_markers(clean_text(facts))
+    facts = strip_truncation_markers(facts)
     if not facts or is_site_chrome_text(facts) or not enough_for_brief(item["title"], facts):
         logger.info("[fetch_sources] skip insufficient facts: %s", item["title"][:80])
         return None, False

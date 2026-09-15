@@ -9,7 +9,13 @@ from __future__ import annotations
 import re
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
-from bot.site_chrome import is_site_chrome_text, strip_site_chrome
+from bot.media_url import upgrade_hero_image_url
+from bot.site_chrome import (
+    is_site_chrome_text,
+    is_standalone_cms_fragment,
+    strip_leading_cms_chrome,
+    strip_site_chrome,
+)
 
 TRUNCATION_RE = re.compile(
     r"\[(?:\s*)\+\s*\d+\s*chars?(?:\s*)\]",
@@ -137,6 +143,8 @@ CHROME_PHRASES = (
     "download our app",
     "subscribe now",
     "sign up for breaking news",
+    "give us your thoughts using the comments form",
+    "comments form at the bottom of this page",
 )
 
 CHROME_LABEL_RE = re.compile(
@@ -185,6 +193,8 @@ def strip_inline_chrome(text: str) -> str:
 def is_chrome_paragraph(text: str) -> bool:
     raw = (text or "").strip()
     if not raw:
+        return True
+    if is_standalone_cms_fragment(raw):
         return True
     if is_site_chrome_text(raw):
         return True
@@ -320,6 +330,7 @@ def sanitize_title(title: Optional[str]) -> str:
 
 def sanitize_summary(summary: Optional[str], title: Optional[str] = None) -> str:
     cleaned = strip_contamination(summary or "")
+    cleaned = strip_leading_cms_chrome(cleaned, title)
     cleaned = _strip_leading_title(cleaned, title)
     title_clean = sanitize_title(title)
     if title_clean and cleaned.lower() == title_clean.lower():
@@ -335,7 +346,7 @@ def split_sentences(text: str) -> List[str]:
 
 
 def restore_paragraphs(text: str) -> List[str]:
-    """Restore paragraphs using newlines and sentence groups. Never by character count."""
+    """Keep stored paragraph boundaries. Never invent breaks by character count."""
     cleaned = (text or "").strip()
     if not cleaned:
         return []
@@ -346,25 +357,11 @@ def restore_paragraphs(text: str) -> List[str]:
         lined = [part.strip() for part in re.split(r"\n+", chunks[0]) if part.strip()]
         if len(lined) > 1:
             chunks = lined
-    paragraphs: List[str] = []
-    for chunk in chunks:
-        if len(chunk) < 420:
-            paragraphs.append(chunk)
-            continue
-        sentences = split_sentences(chunk)
-        if len(sentences) <= 1:
-            paragraphs.append(chunk)
-            continue
-        buf: List[str] = []
-        for sentence in sentences:
-            buf.append(sentence)
-            joined = " ".join(buf)
-            if len(buf) >= 3 or len(joined) >= 280:
-                paragraphs.append(joined)
-                buf = []
-        if buf:
-            paragraphs.append(" ".join(buf))
-    return paragraphs
+    if len(chunks) == 1:
+        sentences = split_sentences(chunks[0])
+        if len(sentences) > 1:
+            return sentences
+    return chunks
 
 
 def _is_quote(text: str) -> bool:
@@ -426,13 +423,20 @@ def split_photo_caption(text: str) -> Tuple[Optional[str], str]:
 
 def to_blocks(text: str, title: Optional[str] = None) -> List[Dict]:
     cleaned = strip_contamination(text or "")
+    cleaned = strip_leading_cms_chrome(cleaned, title)
     cleaned = _strip_leading_title(cleaned, title)
-    paragraphs = cut_trailing_chrome(restore_paragraphs(cleaned))
+    leading_caption, remainder = split_photo_caption(cleaned)
+    body_text = remainder if leading_caption else cleaned
+    paragraphs = cut_trailing_chrome(restore_paragraphs(body_text))
     blocks: List[Dict] = []
     caption_emitted = False
+    if leading_caption:
+        blocks.append({"type": "caption", "text": leading_caption})
+        caption_emitted = True
     seen_norm = set()
     title_norm = _collapse_spaces(sanitize_title(title)).lower()
     for para in paragraphs:
+        para = strip_leading_cms_chrome(para, title)
         para = _strip_leading_title(para, title)
         if is_chrome_paragraph(para):
             continue
@@ -718,14 +722,15 @@ def public_media_items(
         if not image_is_usable(url):
             continue
         kind = classify_media_url(url)
+        is_hero = bool(getattr(row, "is_hero", False))
         items.append(
             {
                 "id": getattr(row, "id", None),
                 "media_type": getattr(row, "media_type", None) or "image",
-                "url": url,
+                "url": upgrade_hero_image_url(url) if is_hero else url,
                 "caption": sanitize_summary(getattr(row, "caption", None)),
                 "sort_order": int(getattr(row, "sort_order", 0) or 0),
-                "is_hero": bool(getattr(row, "is_hero", False)),
+                "is_hero": is_hero,
                 "presentation": kind,
                 "media_kind": kind,
             }
@@ -737,7 +742,7 @@ def public_media_items(
             {
                 "id": None,
                 "media_type": "image",
-                "url": image_url,
+                "url": upgrade_hero_image_url(image_url),
                 "caption": "",
                 "sort_order": 0,
                 "is_hero": True,

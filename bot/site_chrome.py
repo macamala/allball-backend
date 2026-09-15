@@ -42,6 +42,17 @@ JS_VIDEO_RE = re.compile(
 )
 TOKEN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9'’&+.-]{0,24}")
 NAV_TOKEN_RE = re.compile(r"^[A-Z0-9][A-Za-z0-9'’+.-]{0,22}$")
+IMAGE_CAPTION_PREFIX_RE = re.compile(r"^image captions?\s*[,:\-–—]?\s*", re.IGNORECASE)
+PUBLISHED_AGO_PREFIX_RE = re.compile(
+    r"^(?:published|updated)\s+\d+\s+(?:minute|hour|day|week)s?\s+ago\s*",
+    re.IGNORECASE,
+)
+STANDALONE_CMS_RE = re.compile(
+    r"^(?:image captions?|top scorers(?:\s+gossip)?|scorers(?:\s+gossip)?|gossip|"
+    r"scores?\s*(?:&|and)\s*fixtures|live scores?|match reports?|"
+    r"(?:published|updated)\s+\d+\s+(?:minute|hour|day|week)s?\s+ago)$",
+    re.IGNORECASE,
+)
 
 PROSE_STOP = {
     "the", "a", "an", "and", "of", "to", "in", "for", "with", "on", "at",
@@ -164,3 +175,37 @@ def strip_site_chrome(text: Optional[str]) -> str:
     if is_site_chrome_text(rest) and nav_label_run(rest) >= 10:
         return ""
     return rest
+
+
+def is_standalone_cms_fragment(text: Optional[str]) -> bool:
+    """True for a whole paragraph that is only CMS chrome, not a real sentence."""
+    raw = (text or "").strip().rstrip(".,;:")
+    return bool(raw) and bool(STANDALONE_CMS_RE.match(raw))
+
+
+def is_cms_kicker_prefix(prefix: Optional[str]) -> bool:
+    """Title-case nav labels with no sentence punctuation — not mid-sentence words."""
+    raw = (prefix or "").strip()
+    if not raw or len(raw) > 80 or re.search(r"[.!?]", raw):
+        return False
+    tokens = TOKEN_RE.findall(raw)
+    if not 1 <= len(tokens) <= 6:
+        return False
+    return all(_is_nav_token(token) or token.lower() in {"and", "&"} for token in tokens)
+
+
+def strip_leading_cms_chrome(text: Optional[str], title: Optional[str] = None) -> str:
+    """Drop leading CMS crumbs and Image caption prefixes. Preserve later prose."""
+    raw = (text or "").strip()
+    if not raw:
+        return ""
+    raw = IMAGE_CAPTION_PREFIX_RE.sub("", raw, count=1).strip()
+    raw = PUBLISHED_AGO_PREFIX_RE.sub("", raw, count=1).strip()
+    title_clean = re.sub(r"\s+", " ", (title or "").strip())
+    if title_clean and len(title_clean) >= 8:
+        idx = raw.lower().find(title_clean.lower())
+        if 0 < idx <= 80:
+            prefix = raw[:idx].strip()
+            if is_cms_kicker_prefix(prefix) or is_standalone_cms_fragment(prefix):
+                raw = raw[idx:].strip()
+    return raw
