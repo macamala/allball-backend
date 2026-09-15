@@ -26,6 +26,12 @@ def job():
     """
     logger.info("Running NinkoSports pipeline (scheduled job)...")
     try:
+        from bot.rewrite_ai import reset_openai_rate_limit
+        from public_cache import bump_public_cache
+        from repair_content import repair_contaminated, repair_summary_only
+
+        reset_openai_rate_limit()
+        summaries = repair_summary_only()
         rewritten = fetch_and_store_all_articles(
             max_per_league=3,
             hard_limit=None,
@@ -46,11 +52,7 @@ def job():
                     break
         finally:
             db.close()
-        from public_cache import bump_public_cache
-        from repair_content import repair_contaminated, repair_summary_only
-
         repaired = repair_contaminated()
-        summaries = repair_summary_only()
         bump_public_cache()
         logger.info(
             "NinkoSports pipeline finished successfully. "

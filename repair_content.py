@@ -168,6 +168,7 @@ def repair_summary_one(db: Session, article: Article) -> str:
         is_english_enough,
         needs_full_source_repair,
         quality_check,
+        word_count,
     )
     from bot.rewrite_ai import openai_rate_limited
     from editorial import sanitize_body, sanitize_summary, sanitize_title
@@ -180,9 +181,19 @@ def repair_summary_one(db: Session, article: Article) -> str:
     extracted = strip_site_chrome(extracted or "") or (extracted or "")
     if is_site_chrome_text(extracted):
         extracted = ""
+    extracted_n = word_count(extracted)
+    stored_n = word_count(stored)
     if not needs_full_source_repair(stored, extracted):
+        if extracted_n >= 80:
+            logger.info(
+                "summary-repair skip slug=%s stored_words=%s extracted_words=%s",
+                article.slug,
+                stored_n,
+                extracted_n,
+            )
         return "clean"
     if openai_rate_limited():
+        logger.info("summary-repair ai-limited slug=%s", article.slug)
         return "skipped"
     parsed, reason = _ai_story(
         title=article.title or "",
@@ -209,6 +220,13 @@ def repair_summary_one(db: Session, article: Article) -> str:
     summary = (parsed or {}).get("summary") or ""
     article.summary = sanitize_summary(summary or body, title=title)[:280]
     persist_public_article(db, article)
+    logger.info(
+        "summary-repair rewritten slug=%s stored_words=%s extracted_words=%s output_words=%s",
+        article.slug,
+        word_count(stored),
+        word_count(extracted),
+        word_count(body),
+    )
     return "rewritten"
 
 

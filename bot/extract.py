@@ -17,8 +17,15 @@ from .textutil import clean_text, word_count
 logger = logging.getLogger(__name__)
 
 USER_AGENT = (
-    "Mozilla/5.0 (compatible; NinkoSportsBot/1.0; +https://ninkosports.com)"
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36 "
+    "(compatible; NinkoSportsBot/1.0; +https://ninkosports.com)"
 )
+EXTRACT_HEADERS = {
+    "User-Agent": USER_AGENT,
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-GB,en;q=0.9",
+}
 ARTICLE_TAGS = {"p", "h2", "h3", "blockquote"}
 MAX_PARAGRAPHS = 40
 JSON_LD_RE = re.compile(
@@ -237,7 +244,7 @@ def extract_from_url(url: str, timeout: float = 18.0) -> Tuple[str, Optional[str
     if not url:
         return "", None
     try:
-        with httpx.Client(timeout=timeout, follow_redirects=True, headers={"User-Agent": USER_AGENT}) as client:
+        with httpx.Client(timeout=timeout, follow_redirects=True, headers=EXTRACT_HEADERS) as client:
             resp = client.get(url)
             if resp.status_code >= 400:
                 logger.info("[extract] HTTP %s for %s", resp.status_code, url)
@@ -256,4 +263,9 @@ def extract_from_url(url: str, timeout: float = 18.0) -> Tuple[str, Optional[str
         ld_body = _json_ld_article_body(html)
         if word_count(ld_body) > word_count(text):
             text = ld_body
+    logger.info(
+        "[extract] %s words=%s",
+        url[:120],
+        word_count(text),
+    )
     return text, image
