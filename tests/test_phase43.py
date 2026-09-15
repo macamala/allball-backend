@@ -90,6 +90,12 @@ def test_public_summary_drops_getty_credit_but_keeps_rest():
     assert "ITALY" not in deck
     assert "weren't as sharp" in deck
 
+    location_only = (
+        "MADRID, SPAIN - SEPTEMBER 08: Kylian Mbappe of Real Madrid interacts "
+        "with Jose Mourinho, Head Coach of Real Madrid as he is substituted off"
+    )
+    assert public_summary(location_only, title="Mourinho eight goals") == ""
+
 
 def test_legitimate_website_sentence_survives():
     body = (

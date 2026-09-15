@@ -51,6 +51,10 @@ LOCATION_CAPTION_RE = re.compile(
     r"\s*(?P<body>.*)$",
     re.DOTALL,
 )
+LOCATION_PREFIX_RE = re.compile(
+    r"^(?:[A-Z][A-Z .'-]{1,48},\s+)?[A-Z][A-Z .'-]{1,40}"
+    r"\s+[-–—]\s+[A-Z]{3,9}\s+\d{1,2}:\s*"
+)
 STANDALONE_CREDIT_RE = re.compile(
     r"^(?:photo(?:graph)?(?:\s+by)?\s*:?\s+.+|"
     r"getty images.*|"
@@ -453,6 +457,8 @@ def is_photo_credit_text(text: Optional[str]) -> bool:
     if STANDALONE_CREDIT_RE.match(raw) and _word_count(raw) < 28:
         return True
     if LOCATION_CAPTION_RE.match(raw):
+        return True
+    if LOCATION_PREFIX_RE.match(raw):
         return True
     lower = raw.lower()
     if "(photo by " in lower or "getty images" in lower:
