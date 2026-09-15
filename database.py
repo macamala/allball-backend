@@ -57,3 +57,59 @@ def ensure_schema(bind=None):
         with bind.begin() as conn:
             for stmt in additions:
                 conn.execute(text(stmt))
+
+    index_stmts = [
+        "CREATE INDEX IF NOT EXISTS ix_articles_sport_published ON articles (sport, published_at)",
+        "CREATE INDEX IF NOT EXISTS ix_articles_league_published ON articles (league, published_at)",
+        "CREATE INDEX IF NOT EXISTS ix_articles_published_at ON articles (published_at)",
+        "CREATE INDEX IF NOT EXISTS ix_articles_breaking_published ON articles (is_breaking, published_at)",
+        "CREATE INDEX IF NOT EXISTS ix_articles_view_count ON articles (view_count)",
+        "CREATE INDEX IF NOT EXISTS ix_articles_stamp ON articles (COALESCE(published_at, created_at))",
+    ]
+    with bind.begin() as conn:
+        for stmt in index_stmts:
+            conn.execute(text(stmt))
+        tables = set(insp.get_table_names())
+        if "article_taxonomy_resolutions" in tables:
+            tax_cols = {col["name"] for col in insp.get_columns("article_taxonomy_resolutions")}
+            tax_adds = []
+            if "quality_ok" not in tax_cols:
+                tax_adds.append(
+                    "ALTER TABLE article_taxonomy_resolutions ADD COLUMN quality_ok BOOLEAN DEFAULT 0"
+                    if dialect != "postgresql"
+                    else "ALTER TABLE article_taxonomy_resolutions ADD COLUMN quality_ok BOOLEAN DEFAULT FALSE"
+                )
+            if "public_ok" not in tax_cols:
+                tax_adds.append(
+                    "ALTER TABLE article_taxonomy_resolutions ADD COLUMN public_ok BOOLEAN DEFAULT 0"
+                    if dialect != "postgresql"
+                    else "ALTER TABLE article_taxonomy_resolutions ADD COLUMN public_ok BOOLEAN DEFAULT FALSE"
+                )
+            if "hero_media_kind" not in tax_cols:
+                tax_adds.append(
+                    "ALTER TABLE article_taxonomy_resolutions ADD COLUMN hero_media_kind VARCHAR(40)"
+                )
+            if "word_count" not in tax_cols:
+                tax_adds.append(
+                    "ALTER TABLE article_taxonomy_resolutions ADD COLUMN word_count INTEGER DEFAULT 0"
+                )
+            for stmt in tax_adds:
+                conn.execute(text(stmt))
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_taxonomy_resolved_comp_lookup "
+                    "ON article_taxonomy_resolutions (resolver_version, resolved_competition)"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_taxonomy_public_sport "
+                    "ON article_taxonomy_resolutions (resolver_version, public_ok, resolved_sport)"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_taxonomy_public_comp "
+                    "ON article_taxonomy_resolutions (resolver_version, public_ok, resolved_competition)"
+                )
+            )

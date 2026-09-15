@@ -8,6 +8,7 @@ from editorial import evaluate_quality, sanitize_body
 from entities import extract_entities
 from models import Article, Base
 from related import related_score
+from public_index import persist_public_article
 from taxonomy_resolver import resolve_article_competition
 
 
@@ -55,6 +56,8 @@ def _make(**kwargs):
         )
         db.add(article)
         db.commit()
+        db.refresh(article)
+        persist_public_article(db, article, commit=True)
         db.refresh(article)
         return article
     finally:

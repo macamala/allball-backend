@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from app import app, _recent_views
 from database import SessionLocal, engine, ensure_schema
 from models import Article, Base
+from public_index import persist_public_article
 
 
 def setup_module():
@@ -39,6 +40,8 @@ def _make_article(**kwargs):
         db.add(article)
         db.commit()
         db.flush()
+        db.refresh(article)
+        persist_public_article(db, article, commit=True)
         db.refresh(article)
         return article
     finally:
@@ -137,12 +140,12 @@ def test_search_title_and_no_full_scan_on_short_query():
 def test_breaking_defaults_false_and_only_flagged_rows_returned():
     _make_article(
         slug="normal-news",
-        title="Normal news",
+        title="Arsenal hold Liverpool in a Premier League stalemate",
         external_id="https://example.com/normal-news",
     )
     _make_article(
         slug="breaking-news",
-        title="Breaking news",
+        title="Manchester City win a dramatic Premier League title race",
         is_breaking=True,
         external_id="https://example.com/breaking-news",
     )
@@ -159,7 +162,7 @@ def test_breaking_defaults_false_and_only_flagged_rows_returned():
 def test_most_read_does_not_fabricate_and_view_dedupes():
     _make_article(
         slug="viewed-story",
-        title="Viewed story",
+        title="Aston Villa earn a late Premier League point",
         view_count=0,
         external_id="https://example.com/viewed-story",
     )

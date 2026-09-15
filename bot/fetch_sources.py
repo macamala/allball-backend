@@ -259,10 +259,9 @@ def _ingest_item(db: Session, item: Dict, use_ai: bool, max_ai_chars: int, ai_bu
     db.commit()
     db.refresh(article)
     try:
-        from taxonomy_resolver import persist_resolution
+        from public_index import persist_public_article
 
-        persist_resolution(db, article, resolved)
-        db.commit()
+        persist_public_article(db, article, resolved, commit=True)
     except Exception:
         db.rollback()
     return article, used_ai

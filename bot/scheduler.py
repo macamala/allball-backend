@@ -33,10 +33,24 @@ def job():
             max_ai_chars=3000,
             max_ai_articles=MAX_AI_ARTICLES,
         )
+        from database import SessionLocal
+        from public_index import index_missing
+
+        db = SessionLocal()
+        indexed = 0
+        try:
+            while True:
+                batch = index_missing(db, limit=400)
+                indexed += batch
+                if batch < 400:
+                    break
+        finally:
+            db.close()
         logger.info(
             "NinkoSports pipeline finished successfully. "
-            "AI rewrote %s articles in this run.",
+            "AI rewrote %s articles; public index backfilled %s rows.",
             rewritten,
+            indexed,
         )
     except Exception as e:
         logger.exception(f"NinkoSports pipeline failed: {e}")

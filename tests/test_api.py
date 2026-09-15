@@ -1,3 +1,5 @@
+from public_index import persist_public_article
+
 from datetime import datetime, timedelta
 
 from fastapi.testclient import TestClient
@@ -23,13 +25,21 @@ def _make_article(**kwargs):
             league=kwargs.get("league", "england-premier-league"),
             country=kwargs.get("country", "england"),
             summary=kwargs.get("summary", "Summary"),
-            content=kwargs.get("content", "Body text for the article."),
+            content=kwargs.get(
+                "content",
+                "Aston Villa earned a late point against Arsenal in the Premier League. "
+                "Unai Emery's side defended with discipline after the break and created "
+                "enough chances to take something from the match. The result keeps both "
+                "clubs in the mix as the season gathers pace in England.",
+            ),
             created_at=kwargs.get("created_at", datetime.utcnow()),
             published_at=kwargs.get("published_at"),
             source_url=kwargs.get("source_url", "https://example.com/hidden"),
         )
         db.add(article)
         db.commit()
+        db.refresh(article)
+        persist_public_article(db, article, commit=True)
         db.refresh(article)
         return article
     finally:
@@ -59,14 +69,14 @@ def test_published_at_preferred_and_created_at_fallback():
     newer_source = datetime.utcnow() - timedelta(hours=1)
     _make_article(
         slug="with-published",
-        title="Has source timestamp",
+        title="Aston Villa earn a late Premier League point",
         created_at=older_created,
         published_at=newer_source,
         external_id="https://example.com/with-published",
     )
     _make_article(
         slug="legacy-created",
-        title="Legacy uses created_at",
+        title="Arsenal hold Liverpool in a Premier League stalemate",
         created_at=datetime.utcnow(),
         published_at=None,
         external_id="https://example.com/legacy-created",
@@ -80,7 +90,7 @@ def test_published_at_preferred_and_created_at_fallback():
         assert by_slug["legacy-created"]["published_at"] == by_slug["legacy-created"]["created_at"]
         detail = client.get("/articles/with-published").json()
         assert detail["published_at"]
-        assert "Has source timestamp" in detail["title"]
+        assert "Aston Villa earn a late Premier League point" in detail["title"]
         related = client.get("/articles/with-published/related")
         assert related.status_code == 200
 
@@ -101,3 +111,35 @@ def test_articles_schema_compatible():
         sports = client.get("/meta/sports").json()
         assert isinstance(sports, list)
         assert all(isinstance(s, str) for s in sports)
+
+
+def test_list_payload_omits_full_article_body():
+    body = (
+        "Aston Villa earned a late point against Arsenal in the Premier League. "
+        "Unai Emery's side defended with discipline after the break and created "
+        "enough chances to take something from the match. The result keeps both "
+        "clubs in the mix as the season gathers pace in England."
+    )
+    _make_article(
+        slug="list-payload-check",
+        title="Aston Villa earn a point against Arsenal",
+        summary="Villa hold Arsenal after a disciplined display.",
+        content=body,
+        external_id="https://example.com/list-payload-check",
+    )
+    with TestClient(app) as client:
+        listed = client.get("/articles?limit=50").json()
+        row = next(item for item in listed if item["slug"] == "list-payload-check")
+        assert "content" not in row
+        assert "blocks" not in row
+        assert "media" not in row
+        assert row["title"]
+        assert row["image_url"] is None or isinstance(row.get("image_url"), str)
+        detail = client.get("/articles/list-payload-check").json()
+        assert "content" in detail
+        assert "blocks" in detail
+        assert "Premier League" in (detail.get("content") or "")
+        home = client.get("/portal/home").json()
+        for bucket in (home.get("featured") or []) + (home.get("latest") or []):
+            assert "content" not in bucket
+            assert "blocks" not in bucket

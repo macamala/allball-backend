@@ -7,6 +7,7 @@ from auth import hash_password, verify_password
 from comments_api import sanitize_comment
 from database import SessionLocal, engine, ensure_schema
 from models import Article, Base, User
+from public_index import persist_public_article
 
 
 def setup_module():
@@ -40,6 +41,8 @@ def _article(**kwargs):
         )
         db.add(article)
         db.commit()
+        db.refresh(article)
+        persist_public_article(db, article, commit=True)
         db.refresh(article)
         return article
     finally:

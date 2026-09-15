@@ -46,7 +46,10 @@ def test_hero_caption_moves_to_media_not_prose():
     media = [{"url": "https://example.com/hero.jpg", "caption": "", "is_hero": True}]
     rest, media = lift_hero_caption(blocks, media)
     assert rest[0]["type"] == "paragraph"
-    assert "Getty Images" in media[0]["caption"]
+    assert "Getty Images" not in (media[0].get("caption") or "")
+    assert "Photo by" not in (media[0].get("caption") or "")
+    prose = " ".join(block.get("text") or "" for block in rest)
+    assert "Getty Images" not in prose
     assert "jeered off" in rest[0]["text"]
 
 
@@ -56,6 +59,13 @@ def test_twitter_chrome_is_removed_from_public_body():
     assert "@footballontnt" not in cleaned.lower()
     assert "Watch now on" not in cleaned
     assert "Champions League debut" in cleaned
+
+
+def test_sanitize_body_omits_photo_caption():
+    cleaned = sanitize_body(DE_ZERBI_OPENER, title="De Zerbi under pressure")
+    assert "Getty Images" not in cleaned
+    assert "Photo by" not in cleaned
+    assert "jeered off" in cleaned
 
 
 def test_legitimate_website_sentence_survives():

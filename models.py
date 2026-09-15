@@ -17,6 +17,13 @@ Base = declarative_base()
 
 class Article(Base):
     __tablename__ = "articles"
+    __table_args__ = (
+        Index("ix_articles_sport_published", "sport", "published_at"),
+        Index("ix_articles_league_published", "league", "published_at"),
+        Index("ix_articles_published_at", "published_at"),
+        Index("ix_articles_breaking_published", "is_breaking", "published_at"),
+        Index("ix_articles_view_count", "view_count"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
 
@@ -192,6 +199,18 @@ class ArticleTaxonomyResolution(Base):
             "resolved_sport",
             "resolved_competition",
         ),
+        Index(
+            "ix_taxonomy_public_sport",
+            "resolver_version",
+            "public_ok",
+            "resolved_sport",
+        ),
+        Index(
+            "ix_taxonomy_public_comp",
+            "resolver_version",
+            "public_ok",
+            "resolved_competition",
+        ),
     )
 
     id = Column(Integer, primary_key=True)
@@ -202,6 +221,10 @@ class ArticleTaxonomyResolution(Base):
     competition_confidence = Column(String(20), nullable=True)
     resolver_version = Column(String(20), nullable=False, default="4.1.1")
     resolved_at = Column(DateTime, default=datetime.utcnow)
+    quality_ok = Column(Boolean, default=False)
+    public_ok = Column(Boolean, default=False)
+    hero_media_kind = Column(String(40), nullable=True)
+    word_count = Column(Integer, default=0)
 
 
 class SocialIdentity(Base):

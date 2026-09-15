@@ -429,29 +429,61 @@ def to_blocks(text: str, title: Optional[str] = None) -> List[Dict]:
     return blocks
 
 
+def is_photo_credit_text(text: Optional[str]) -> bool:
+    raw = _collapse_spaces(text or "")
+    if not raw:
+        return False
+    if STANDALONE_CREDIT_RE.match(raw) and _word_count(raw) < 28:
+        return True
+    if LOCATION_CAPTION_RE.match(raw):
+        return True
+    lower = raw.lower()
+    if "(photo by " in lower or "getty images" in lower:
+        return True
+    return False
+
+
+def scrub_public_media(media: Sequence[Dict]) -> List[Dict]:
+    """Drop Getty/location credits from public media captions. Keep URLs."""
+    out = []
+    for item in media or []:
+        row = dict(item)
+        caption = (row.get("caption") or "").strip()
+        if row.get("is_hero") or is_photo_credit_text(caption):
+            row["caption"] = ""
+        out.append(row)
+    return out
+
+
 def lift_hero_caption(blocks: List[Dict], media: Sequence[Dict]) -> Tuple[List[Dict], List[Dict]]:
-    """Move a leading caption block onto the hero image instead of article prose."""
-    media_out = [dict(item) for item in media]
-    if not blocks or blocks[0].get("type") != "caption":
-        return list(blocks), media_out
-    caption = (blocks[0].get("text") or "").strip()
-    rest = list(blocks[1:])
-    if caption:
-        placed = False
-        for item in media_out:
-            if item.get("is_hero") and not (item.get("caption") or "").strip():
-                item["caption"] = caption
-                placed = True
-                break
-        if not placed and media_out and not (media_out[0].get("caption") or "").strip():
-            media_out[0]["caption"] = caption
-    return rest, media_out
+    """Remove leading photo-credit blocks from prose. Do not publish them as captions."""
+    rest = list(blocks or [])
+    if rest and rest[0].get("type") == "caption":
+        rest = rest[1:]
+    return rest, scrub_public_media(media)
+
+
+def scrub_public_blocks(blocks: Sequence[Dict]) -> List[Dict]:
+    """Never let photo credits leak into public prose or caption blocks."""
+    out = []
+    for block in blocks or []:
+        btype = block.get("type")
+        if btype == "caption":
+            continue
+        if btype == "paragraph" and is_photo_credit_text(block.get("text")):
+            continue
+        out.append(block)
+    return out
 
 
 def sanitize_body(text: Optional[str], title: Optional[str] = None) -> str:
     blocks = to_blocks(text or "", title=title)
     parts = []
     for block in blocks:
+        if block["type"] == "caption":
+            continue
+        if block["type"] == "paragraph" and is_photo_credit_text(block.get("text")):
+            continue
         if block["type"] == "list":
             parts.append("\n".join(f"- {item}" for item in block["items"]))
         else:

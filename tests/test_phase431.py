@@ -8,6 +8,7 @@ from bot.classify import classify_article
 from database import SessionLocal, engine, ensure_schema
 from editorial import classify_media_url, sanitize_body, suitable_for_lead_hero, to_blocks
 from models import Article, Base
+from public_index import persist_public_article
 from sport_match import belongs_to_sport
 from taxonomy_audit import audit_article_sample
 from taxonomy_resolver import MIN_SPORT_CONFIDENCE, resolve_article_competition
@@ -297,6 +298,8 @@ def _make(**kwargs):
         )
         db.add(article)
         db.commit()
+        db.refresh(article)
+        persist_public_article(db, article, commit=True)
         db.refresh(article)
         return article
     finally:

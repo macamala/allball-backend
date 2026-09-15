@@ -14,6 +14,7 @@ from editorial import (
     to_blocks,
 )
 from models import Article, ArticleMedia, Base
+from public_index import persist_public_article
 
 
 def setup_module():
@@ -199,6 +200,8 @@ def _make_article(**kwargs):
         )
         db.add(article)
         db.commit()
+        db.refresh(article)
+        persist_public_article(db, article, commit=True)
         db.refresh(article)
         return article
     finally:

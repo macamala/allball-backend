@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from app import app
 from database import SessionLocal, engine, ensure_schema
 from models import Article, ArticleTranslation, Base
+from public_index import persist_public_article
 from sport_match import belongs_to_sport
 
 
@@ -126,6 +127,8 @@ def _make(**kwargs):
         )
         db.add(article)
         db.commit()
+        db.refresh(article)
+        persist_public_article(db, article, commit=True)
         db.refresh(article)
         return article
     finally:
