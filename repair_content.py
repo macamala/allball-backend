@@ -166,6 +166,7 @@ def repair_summary_one(db: Session, article: Article) -> str:
     from bot.quality import (
         is_dramatic_shortening,
         is_english_enough,
+        is_substantial_source,
         needs_full_source_repair,
         quality_check,
         word_count,
@@ -192,7 +193,33 @@ def repair_summary_one(db: Session, article: Article) -> str:
                 extracted_n,
             )
         return "clean"
+
+    def _store(body: str, *, used_ai: bool, title: str) -> bool:
+        title = sanitize_title(title)
+        body = sanitize_body(body, title=title)
+        if not body or is_dramatic_shortening(extracted, body):
+            return False
+        if not is_english_enough(body):
+            return False
+        article.title = title
+        article.content = body
+        article.ai_content = body if used_ai else None
+        article.ai_generated = used_ai
+        article.summary = sanitize_summary(body, title=title)[:280]
+        persist_public_article(db, article)
+        logger.info(
+            "summary-repair stored slug=%s used_ai=%s stored_words=%s extracted_words=%s output_words=%s",
+            article.slug,
+            used_ai,
+            stored_n,
+            extracted_n,
+            word_count(body),
+        )
+        return True
+
     if openai_rate_limited():
+        if is_substantial_source(extracted) and _store(extracted, used_ai=False, title=article.title):
+            return "rewritten"
         logger.info("summary-repair ai-limited slug=%s", article.slug)
         return "skipped"
     parsed, reason = _ai_story(
@@ -204,30 +231,14 @@ def repair_summary_one(db: Session, article: Article) -> str:
     )
     body = (parsed or {}).get("body") or ""
     title = (parsed or {}).get("title") or article.title
-    if reason == "too-short" or not body:
-        return "skipped"
-    ok, _why = quality_check(title, body, article.sport, require_english=True)
-    if not ok or not is_english_enough(body):
-        return "skipped"
-    title = sanitize_title(title)
-    body = sanitize_body(body, title=title)
-    if not body or is_dramatic_shortening(extracted, body):
-        return "skipped"
-    article.title = title
-    article.content = body
-    article.ai_content = body
-    article.ai_generated = True
-    summary = (parsed or {}).get("summary") or ""
-    article.summary = sanitize_summary(summary or body, title=title)[:280]
-    persist_public_article(db, article)
-    logger.info(
-        "summary-repair rewritten slug=%s stored_words=%s extracted_words=%s output_words=%s",
-        article.slug,
-        word_count(stored),
-        word_count(extracted),
-        word_count(body),
-    )
-    return "rewritten"
+    if reason == "ok" and body:
+        ok, _why = quality_check(title, body, article.sport, require_english=True)
+        if ok and _store(body, used_ai=True, title=title):
+            return "rewritten"
+    if is_substantial_source(extracted) and is_english_enough(extracted):
+        if _store(extracted, used_ai=False, title=article.title):
+            return "rewritten"
+    return "skipped"
 
 
 def repair_summary_only(
