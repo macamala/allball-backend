@@ -46,11 +46,21 @@ def job():
                     break
         finally:
             db.close()
+        from repair_content import repair_contaminated
+        from public_cache import bump_public_cache
+
+        repaired = repair_contaminated()
+        bump_public_cache()
         logger.info(
             "NinkoSports pipeline finished successfully. "
-            "AI rewrote %s articles; public index backfilled %s rows.",
+            "AI rewrote %s articles; public index backfilled %s rows; "
+            "content repair scanned=%s detected=%s repaired=%s hidden=%s.",
             rewritten,
             indexed,
+            repaired.get("scanned"),
+            repaired.get("detected"),
+            repaired.get("repaired"),
+            repaired.get("hidden"),
         )
     except Exception as e:
         logger.exception(f"NinkoSports pipeline failed: {e}")

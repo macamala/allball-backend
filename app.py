@@ -29,6 +29,7 @@ from bot.taxonomy import (
 )
 from homepage_compose import HOMEPAGE_COMPETITIONS, editorial_score, select_diverse
 from entities import extract_entities
+from public_cache import cache_generation
 from public_index import index_missing, load_cached_resolution
 from public_read import (
     apply_scope,
@@ -74,6 +75,9 @@ def _startup_index():
                 break
     finally:
         db.close()
+    from repair_content import repair_contaminated
+
+    repair_contaminated()
 
 
 @asynccontextmanager
@@ -106,7 +110,7 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(comments_router)
 
-PUBLIC_CACHE = "public, max-age=30, s-maxage=60, stale-while-revalidate=120"
+PUBLIC_CACHE = "public, max-age=5, s-maxage=10, stale-while-revalidate=20"
 
 
 @app.middleware("http")
@@ -206,6 +210,7 @@ def _resolve_league_key(value: Optional[str]) -> Optional[str]:
 
 def _cache_headers(response: Response, pairs_or_article=None):
     response.headers["Cache-Control"] = PUBLIC_CACHE
+    gen = cache_generation()
     if isinstance(pairs_or_article, list) and pairs_or_article:
         row = (
             pairs_or_article[0][0]
@@ -213,10 +218,12 @@ def _cache_headers(response: Response, pairs_or_article=None):
             else pairs_or_article[0]
         )
         stamp = getattr(row, "published_at", None) or getattr(row, "created_at", None)
-        response.headers["ETag"] = f'W/"{getattr(row, "id", "x")}-{stamp}"'
+        response.headers["ETag"] = f'W/"{gen}-{getattr(row, "id", "x")}-{stamp}"'
     elif pairs_or_article is not None and getattr(pairs_or_article, "id", None):
         stamp = pairs_or_article.published_at or pairs_or_article.created_at
-        response.headers["ETag"] = f'W/"{pairs_or_article.id}-{stamp}"'
+        response.headers["ETag"] = f'W/"{gen}-{pairs_or_article.id}-{stamp}"'
+    else:
+        response.headers["ETag"] = f'W/"home-{gen}"'
 
 
 def _search_public(db: Session, q: str, sport: Optional[str], league: Optional[str], limit: int):

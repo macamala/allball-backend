@@ -15,6 +15,7 @@ from .dedupe import existing_by_url, existing_near_duplicate
 from .extract import extract_from_url, parse_feed_datetime
 from .feeds import enabled_feeds
 from .quality import enough_for_brief, is_english_enough, quality_check
+from .site_chrome import is_site_chrome_text, strip_site_chrome
 from .rewrite_ai import (
     openai_rate_limited,
     parse_ai_output,
@@ -41,6 +42,19 @@ LEAGUE_CONFIG: List[Dict] = [
 
 def clean_html_text(text: str) -> str:
     return clean_text(text)
+
+
+def select_facts(extracted: str, rss_text: str) -> str:
+    """Prefer extracted article prose. Never keep publisher chrome as facts."""
+    extracted_clean = strip_site_chrome(extracted or "") or (extracted or "")
+    rss_clean = strip_site_chrome(rss_text or "") or (rss_text or "")
+    extracted_ok = bool(extracted_clean) and not is_site_chrome_text(extracted_clean)
+    rss_ok = bool(rss_clean) and not is_site_chrome_text(rss_clean)
+    if extracted_ok:
+        return extracted_clean
+    if rss_ok:
+        return rss_clean
+    return ""
 
 
 def _extract_image_url(entry) -> Optional[str]:
@@ -149,11 +163,9 @@ def _ingest_item(db: Session, item: Dict, use_ai: bool, max_ai_chars: int, ai_bu
 
     rss_text = item.get("summary") or ""
     extracted, extracted_image = extract_from_url(source_url)
-    facts = extracted if len(extracted) >= len(rss_text) else "\n\n".join(
-        p for p in (extracted, rss_text) if p
-    )
+    facts = select_facts(extracted, rss_text)
     facts = strip_truncation_markers(clean_text(facts))
-    if not enough_for_brief(item["title"], facts):
+    if not facts or is_site_chrome_text(facts) or not enough_for_brief(item["title"], facts):
         logger.info("[fetch_sources] skip insufficient facts: %s", item["title"][:80])
         return None, False
 
@@ -262,6 +274,9 @@ def _ingest_item(db: Session, item: Dict, use_ai: bool, max_ai_chars: int, ai_bu
         from public_index import persist_public_article
 
         persist_public_article(db, article, resolved, commit=True)
+        from public_cache import bump_public_cache
+
+        bump_public_cache()
     except Exception:
         db.rollback()
     return article, used_ai

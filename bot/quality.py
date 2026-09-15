@@ -3,6 +3,7 @@
 import re
 from typing import Optional, Tuple
 
+from .site_chrome import is_site_chrome_text
 from .textutil import TRUNCATION_RE, clean_text, looks_like_garbage, normalize_title
 
 
@@ -51,6 +52,8 @@ def quality_check(
         r"cookie (policy|settings)|subscribe to our newsletter|appeared first on|skip to main content|skip to navigation",
         body.lower(),
     ):
+        return False, "boilerplate"
+    if is_site_chrome_text(body) or is_site_chrome_text(title):
         return False, "boilerplate"
     return True, "ok"
 

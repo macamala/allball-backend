@@ -9,6 +9,8 @@ from __future__ import annotations
 import re
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
+from bot.site_chrome import is_site_chrome_text, strip_site_chrome
+
 TRUNCATION_RE = re.compile(
     r"\[(?:\s*)\+\s*\d+\s*chars?(?:\s*)\]",
     re.IGNORECASE,
@@ -77,6 +79,10 @@ NAV_MARKERS = (
     "skip to content",
     "skip to navigation",
     "cookie consent",
+    "accessibility help",
+    "your account",
+    "more menu",
+    "close menu",
 )
 
 # Website chrome that must never appear as NinkoSports prose.
@@ -180,6 +186,8 @@ def is_chrome_paragraph(text: str) -> bool:
     raw = (text or "").strip()
     if not raw:
         return True
+    if is_site_chrome_text(raw):
+        return True
     lower = raw.lower()
     if CHROME_LABEL_RE.match(raw):
         return True
@@ -270,6 +278,8 @@ def strip_contamination(text: str) -> str:
     text = SOCIAL_URL_RE.sub(" ", text)
     text = WATCH_NOW_RE.sub(" ", text)
     text = HANDLE_STAMP_RE.sub(" ", text)
+    text = _collapse_spaces(text)
+    text = strip_site_chrome(text)
     return _collapse_spaces(text)
 
 
@@ -391,6 +401,8 @@ def public_summary(text: Optional[str], title: Optional[str] = None) -> str:
         flags=re.IGNORECASE | re.DOTALL,
     ).strip()
     if is_photo_credit_text(cleaned):
+        return ""
+    if is_site_chrome_text(cleaned):
         return ""
     return cleaned
 
@@ -543,10 +555,13 @@ def title_is_malformed(title: Optional[str]) -> bool:
 
 
 def has_nav_contamination(text: Optional[str]) -> bool:
-    lower = (text or "").lower()
-    if MENU_ESPN_RE.search(text or ""):
+    raw = text or ""
+    lower = raw.lower()
+    if MENU_ESPN_RE.search(raw):
         return True
-    return any(marker in lower for marker in NAV_MARKERS)
+    if any(marker in lower for marker in NAV_MARKERS):
+        return True
+    return is_site_chrome_text(raw)
 
 
 def has_truncation(text: Optional[str]) -> bool:
@@ -658,6 +673,15 @@ def evaluate_quality(
         flags.append("cdata")
     if has_nav_contamination(combined_clean) or chrome_is_interleaved(raw_body):
         flags.append("navigation")
+    if (
+        is_site_chrome_text(raw_summary)
+        or is_site_chrome_text(raw_body)
+    ) and (
+        is_site_chrome_text(cleaned_body)
+        or _word_count(cleaned_body) < 40
+    ):
+        if "navigation" not in flags:
+            flags.append("navigation")
     if has_truncation(combined_clean):
         flags.append("truncation")
     if _word_count(cleaned_body) < 40:
