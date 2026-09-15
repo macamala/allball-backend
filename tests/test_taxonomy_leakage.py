@@ -137,6 +137,39 @@ def test_chrome_only_body_does_not_place_article_on_a_sport_page():
     assert not belongs_to_sport(row, "football", resolution=resolved)
 
 
+def test_shared_event_names_need_matching_sport_evidence():
+    efl = _Row(
+        title="Wimbledon Manager Johnnie Jackson Reflects on Season Start and EFL Challenges",
+        summary="The Dons start life in the Championship.",
+        content="The EFL campaign is the focus after promotion.",
+        sport="tennis",
+        league="wimbledon",
+    )
+    resolved = resolve_article_competition(efl)
+    assert resolved.sport != "tennis"
+    assert resolved.public_competition != "wimbledon"
+    golf = _Row(
+        title="Rory McIlroy Leads Charge at Australian Open as Global Golf Tours Unfold",
+        summary="A birdie binge on the fairway kept McIlroy ahead at Royal Melbourne Golf Club.",
+        content="McIlroy made birdie after birdie in the PGA-supported Australian Open golf tournament.",
+        sport="tennis",
+        league="australian-open",
+    )
+    resolved = resolve_article_competition(golf)
+    assert resolved.sport == "golf"
+    assert resolved.sport != "tennis"
+    tennis = _Row(
+        title="Carlos Alcaraz wins Wimbledon quarter-final in four sets",
+        summary="Alcaraz converted match point after a late break.",
+        content="Alcaraz saved break point then closed out the tie-break.",
+        sport=None,
+        league=None,
+    )
+    resolved = resolve_article_competition(tennis)
+    assert resolved.sport == "tennis"
+    assert resolved.public_competition == "wimbledon"
+
+
 def test_promo_and_brand_graphics_are_rejected_as_heroes():
     promo = "https://ichef.bbci.co.uk/images/ic/1024xn/p0sounds-72plus-promo.jpg"
     bbc_rss_thumb = "https://ichef.bbci.co.uk/images/ic/240x135/p0p3n9ks.jpg"

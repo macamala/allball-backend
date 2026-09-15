@@ -21,7 +21,7 @@ from bot.taxonomy import (
 from editorial import sanitize_body, sanitize_summary, sanitize_title
 from sport_match import EXCLUSIVE_KEYWORDS, MAIN_SPORTS
 
-RESOLVER_VERSION = "4.4.0"
+RESOLVER_VERSION = "4.4.1"
 MIN_COMPETITION_CONFIDENCE = 0.72
 MIN_SPORT_CONFIDENCE = 0.72
 BODY_EXCERPT_CHARS = 1400
@@ -94,6 +94,9 @@ SPORT_TERMS = {
         "hat-trick",
         "own goal",
         "penalty kick",
+        " efl ",
+        "league one",
+        "league two",
     ),
     "basketball": (
         "rebounds",
@@ -154,7 +157,13 @@ GOLF_MARKERS = (
     "pinehurst",
     "oakmont",
     "masters tournament",
+    "golf tournament",
+    "golf club",
+    "golf tours",
 )
+GOLF_OPENS = ("us open", "australian open", "the open")
+TABLE_TENNIS_MARKERS = ("table tennis", " wtt ", "ittf")
+WIMBLEDON_FOOTBALL_MARKERS = (" efl ", " league one ", " league two ", " afc wimbledon ")
 
 EUROLEAGUE_MARKERS = ("euroleague", "euroliga", "evroliga")
 
@@ -395,10 +404,15 @@ def _score_sports(title: str, summary: str, body: str) -> Dict[str, float]:
         else:
             scores[team_sport] += hit
 
-    if any(marker in combined for marker in GOLF_MARKERS) and "us open" in combined:
+    if any(marker in combined for marker in GOLF_MARKERS) and any(name in combined for name in GOLF_OPENS):
         scores["tennis"] = min(scores.get("tennis", 0.0), 1.0)
-        if " golf " in title_blob or " pga " in title_blob:
+        if " golf " in title_blob or " pga " in title_blob or "golf tournament" in combined or "golf club" in combined:
             scores["golf"] = scores.get("golf", 0.0) + 8.0
+    if any(marker in combined for marker in TABLE_TENNIS_MARKERS):
+        scores["tennis"] = min(scores.get("tennis", 0.0), 1.0)
+    if " wimbledon " in combined and any(marker in combined for marker in WIMBLEDON_FOOTBALL_MARKERS):
+        scores["football"] = scores.get("football", 0.0) + 8.0
+        scores["tennis"] = min(scores.get("tennis", 0.0), 1.0)
     if "qualifying offer" in combined or "exhibit 10" in combined:
         scores["basketball"] += 8.0
         scores["motorsport"] = max(0.0, scores.get("motorsport", 0.0) - 8.0)
