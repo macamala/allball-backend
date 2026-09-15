@@ -9,7 +9,12 @@ from __future__ import annotations
 import re
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
-from bot.media_url import upgrade_hero_image_url
+from bot.media_url import (
+    PATH_WIDTH_RE,
+    height_from_url,
+    upgrade_hero_image_url,
+    width_from_url,
+)
 from bot.site_chrome import (
     is_site_chrome_text,
     is_standalone_cms_fragment,
@@ -655,6 +660,8 @@ def classify_media_url(
     lower = value.lower()
     path = lower.split("?", 1)[0]
     blob = " ".join([lower, (alt or "").lower(), (source or "").lower()])
+    width = int(width or 0) or width_from_url(value)
+    height = int(height or 0) or height_from_url(value)
     if path.endswith(".svg") or ".svg/" in path:
         return "CREST_OR_LOGO"
     if MEDIA_CREST_RE.search(path) or MEDIA_CREST_RE.search(blob):
@@ -663,9 +670,14 @@ def classify_media_url(
         return "GRAPHIC"
     if "/sounds/" in path or "/iplayer/" in path or "/programmes/" in path:
         return "GRAPHIC"
-    if width and width < 240:
+    # BBC programme/RSS stills live under /images/ic/{recipe}/pid — not cpsprodpb photos.
+    if "/images/ic/" in path:
         return "GRAPHIC"
-    if height and height < 140:
+    # Small assets that cannot be rewritten to a display role are not heroes.
+    upgradable = bool(PATH_WIDTH_RE.search(value))
+    if width and width < 320 and not upgradable:
+        return "GRAPHIC"
+    if height and height < 140 and not upgradable:
         return "GRAPHIC"
     if width and height:
         ratio = width / max(height, 1)
@@ -800,6 +812,8 @@ def public_media_items(
         if not image_is_usable(url):
             continue
         kind = classify_media_url(url)
+        if kind in {"GRAPHIC", "CREST_OR_LOGO", "MISSING"}:
+            continue
         is_hero = bool(getattr(row, "is_hero", False))
         items.append(
             {
@@ -816,18 +830,19 @@ def public_media_items(
     items.sort(key=lambda item: (not item["is_hero"], item["sort_order"], item["id"] or 0))
     if not items and image_is_usable(image_url):
         kind = classify_media_url(image_url)
-        items.append(
-            {
-                "id": None,
-                "media_type": "image",
-                "url": upgrade_hero_image_url(image_url),
-                "caption": "",
-                "sort_order": 0,
-                "is_hero": True,
-                "presentation": kind,
-                "media_kind": kind,
-            }
-        )
+        if kind in {"EDITORIAL_PHOTO", "UNKNOWN"}:
+            items.append(
+                {
+                    "id": None,
+                    "media_type": "image",
+                    "url": upgrade_hero_image_url(image_url),
+                    "caption": "",
+                    "sort_order": 0,
+                    "is_hero": True,
+                    "presentation": kind,
+                    "media_kind": kind,
+                }
+            )
     seen_urls = set()
     unique: List[Dict] = []
     for item in items:

@@ -11,7 +11,7 @@ from fastapi import FastAPI, Depends, Query, HTTPException, Request
 from fastapi.responses import HTMLResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import func, or_, text
+from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
 from database import SessionLocal, engine, ensure_schema
@@ -240,12 +240,7 @@ def _search_public(db: Session, q: str, sport: Optional[str], league: Optional[s
             sport=sport,
             competition=_resolve_league_key(league),
         )
-        .filter(
-            or_(
-                func.lower(Article.title).like(like),
-                func.lower(func.coalesce(Article.summary, "")).like(like),
-            )
-        )
+        .filter(func.lower(Article.title).like(like))
         .order_by(_sort_expr().desc())
         .limit(limit)
         .all()

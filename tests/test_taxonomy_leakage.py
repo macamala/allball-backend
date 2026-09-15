@@ -139,16 +139,22 @@ def test_chrome_only_body_does_not_place_article_on_a_sport_page():
 
 def test_promo_and_brand_graphics_are_rejected_as_heroes():
     promo = "https://ichef.bbci.co.uk/images/ic/1024xn/p0sounds-72plus-promo.jpg"
+    bbc_rss_thumb = "https://ichef.bbci.co.uk/images/ic/240x135/p0p3n9ks.jpg"
     logo = "https://cdn.example.com/brand/site-logo.png"
     photo = "https://ichef.bbci.co.uk/ace/standard/976/cpsprodpb/live/match-photo.jpg"
     assert classify_media_url(promo) == "GRAPHIC"
+    assert classify_media_url(bbc_rss_thumb) == "GRAPHIC"
     assert classify_media_url(logo) == "CREST_OR_LOGO"
     picked = pick_article_image(
         [
             {"url": promo, "source": "rss", "width": 1024},
+            {"url": bbc_rss_thumb, "source": "rss", "width": 240, "height": 135},
             {"url": logo, "source": "og", "width": 400},
             {"url": photo, "source": "body", "width": 976, "in_article": True},
         ]
     )
     assert picked == photo
     assert pick_article_image([{"url": promo, "source": "og", "width": 1024}]) is None
+    assert pick_article_image([{"url": bbc_rss_thumb, "source": "rss"}]) is None
+    editorial_thumb = "https://ichef.bbci.co.uk/ace/standard/240/cpsprodpb/live/match-photo.jpg"
+    assert classify_media_url(editorial_thumb) == "EDITORIAL_PHOTO"

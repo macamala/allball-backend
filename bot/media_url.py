@@ -29,6 +29,14 @@ PATH_WIDTH_RE = re.compile(
     r"(?P<pre>/(?:ace/(?:standard|ws)|news|iplayer)/)(?P<w>\d{2,4})(?=/)",
     re.IGNORECASE,
 )
+ICHEF_IC_RE = re.compile(
+    r"/images/ic/(?P<w>\d{2,4})x(?P<h>\d{2,4}|n)(?=/)",
+    re.IGNORECASE,
+)
+PATH_DIM_RE = re.compile(
+    r"/(?P<w>\d{2,4})x(?P<h>\d{2,4})(?=/|$)",
+    re.IGNORECASE,
+)
 WP_CROP_RE = re.compile(
     r"-(?P<w>\d{2,4})x(?P<h>\d{2,4})(?=\.(?:jpe?g|png|webp|gif)(?:$|\?))",
     re.IGNORECASE,
@@ -41,6 +49,24 @@ ATTR_RE = re.compile(
 ATTR_BARE_WIDTH_RE = re.compile(r"""\bwidth=['"]?(\d+)""", re.IGNORECASE)
 
 
+def _path_dimensions(url: Optional[str]) -> Tuple[int, int]:
+    raw = (url or "").strip()
+    if not raw:
+        return 0, 0
+    ichef = ICHEF_IC_RE.search(raw)
+    if ichef:
+        height_raw = ichef.group("h")
+        height = int(height_raw) if str(height_raw).isdigit() else 0
+        return int(ichef.group("w")), height
+    path_dim = PATH_DIM_RE.search(urlsplit(raw).path)
+    if path_dim:
+        return int(path_dim.group("w")), int(path_dim.group("h"))
+    crop = WP_CROP_RE.search(urlsplit(raw).path)
+    if crop:
+        return int(crop.group("w")), int(crop.group("h"))
+    return 0, 0
+
+
 def width_from_url(url: Optional[str]) -> int:
     raw = (url or "").strip()
     if not raw:
@@ -48,13 +74,24 @@ def width_from_url(url: Optional[str]) -> int:
     match = PATH_WIDTH_RE.search(raw)
     if match:
         return int(match.group("w"))
+    width, _height = _path_dimensions(raw)
+    if width:
+        return width
     parsed = urlsplit(raw)
     for key, value in parse_qsl(parsed.query, keep_blank_values=True):
         if key.lower() in QUERY_WIDTH_KEYS and str(value).isdigit():
             return int(value)
-    crop = WP_CROP_RE.search(parsed.path)
-    if crop:
-        return int(crop.group("w"))
+    return 0
+
+
+def height_from_url(url: Optional[str]) -> int:
+    _width, height = _path_dimensions(url)
+    if height:
+        return height
+    parsed = urlsplit((url or "").strip())
+    for key, value in parse_qsl(parsed.query, keep_blank_values=True):
+        if key.lower() in {"h", "height", "maxheight", "max_height"} and str(value).isdigit():
+            return int(value)
     return 0
 
 

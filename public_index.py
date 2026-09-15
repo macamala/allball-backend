@@ -36,6 +36,11 @@ def persist_public_article(db: Session, article: Article, resolution=None, commi
         if meta.get("country"):
             article.country = meta.get("country")
     db.add(article)
+    media_kind = classify_media_url(article.image_url)
+    if media_kind in {"CREST_OR_LOGO", "GRAPHIC"}:
+        article.image_url = None
+        media_kind = "MISSING"
+        db.add(article)
     quality = evaluate_quality(
         title=article.title,
         summary=article.summary,
@@ -62,7 +67,7 @@ def persist_public_article(db: Session, article: Article, resolution=None, commi
         return resolved
     row.quality_ok = bool(quality.get("ok"))
     row.public_ok = public
-    row.hero_media_kind = classify_media_url(article.image_url)
+    row.hero_media_kind = media_kind
     row.word_count = int(quality.get("word_count") or 0)
     db.add(row)
     if commit:
@@ -82,6 +87,7 @@ def index_missing(db: Session, limit: int = 400) -> int:
             (ArticleTaxonomyResolution.id.is_(None))
             | (ArticleTaxonomyResolution.resolver_version != RESOLVER_VERSION)
             | (ArticleTaxonomyResolution.hero_media_kind.is_(None))
+            | (Article.image_url.ilike("%/images/ic/%"))
         )
         .order_by(Article.id.desc())
         .limit(limit)

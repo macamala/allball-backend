@@ -119,3 +119,20 @@ def test_sport_filter_uses_indexed_taxonomy_join():
         assert all(tax.resolved_sport == "football" for _, tax in pairs)
     finally:
         db.close()
+
+
+def test_bbc_programme_still_is_not_public_hero():
+    article = _make(
+        slug="bbc-graphic-hero",
+        title="Liverpool hold Chelsea in the Premier League",
+        image_url="https://ichef.bbci.co.uk/images/ic/240x135/p0p3n9ks.jpg",
+        external_id="https://example.com/bbc-graphic-hero",
+    )
+    with TestClient(app) as client:
+        detail = client.get(f"/articles/{article.slug}").json()
+        assert detail["image_url"] in {None, ""}
+        assert detail["hero_media_kind"] in {"GRAPHIC", "MISSING"}
+        listed = client.get("/articles?sport=football&limit=50").json()
+        row = next((item for item in listed if item["slug"] == article.slug), None)
+        if row:
+            assert row["image_url"] in {None, ""}

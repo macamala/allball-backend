@@ -141,10 +141,17 @@ def fetch_public(
     return query.offset(offset).limit(limit).all()
 
 
+def _display_media_kind(image_url: Optional[str], cached: Optional[str] = None) -> str:
+    live = classify_media_url(image_url)
+    if live in {"GRAPHIC", "CREST_OR_LOGO", "MISSING"}:
+        return live
+    return cached or live or "UNKNOWN"
+
+
 def serialize_card(article: Article, tax: ArticleTaxonomyResolution) -> dict:
     sport = tax.resolved_sport
     competition = tax.resolved_competition
-    kind = tax.hero_media_kind or "UNKNOWN"
+    kind = _display_media_kind(article.image_url, tax.hero_media_kind)
     image = article.image_url if kind in {"EDITORIAL_PHOTO", "UNKNOWN"} else None
     country = None
     if competition:
@@ -204,10 +211,10 @@ def serialize_detail(
     blocks = maybe_related_insert(blocks, related_insert)
     blocks = scrub_public_blocks(blocks)
     hero = next((item for item in media if item.get("is_hero")), media[0] if media else None)
-    hero_kind = (
+    hero_kind = _display_media_kind(
+        (hero or {}).get("url") or article.image_url,
         (tax.hero_media_kind if tax is not None else None)
-        or (hero or {}).get("presentation")
-        or classify_media_url(article.image_url)
+        or (hero or {}).get("presentation"),
     )
     words = len((body or "").split())
     inline = sum(1 for item in media if not item.get("is_hero"))
