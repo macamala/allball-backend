@@ -42,26 +42,33 @@ def classify_article(
     feed_league: Optional[str] = None,
     feed_country: Optional[str] = None,
 ) -> Classification:
+    title_text = _norm(title or "")
+    body_text = _norm(body or "")
     text = _norm(f"{title or ''} {body or ''}")
     if text.strip() == "":
         return Classification(None, None, None, "low", "empty-text")
 
     sport_scores: Dict[str, int] = {}
     for sport, aliases in SPORT_ALIASES.items():
-        sport_scores[sport] = _score_aliases(text, aliases)
+        title_score = _score_aliases(title_text, aliases)
+        body_score = _score_aliases(body_text, aliases)
+        sport_scores[sport] = title_score * 3 + max(0, body_score - title_score)
 
     team_hits = []
     for team in TEAMS:
-        hit = _score_aliases(text, team["aliases"])
-        if hit:
-            team_hits.append((hit, team))
+        title_hit = _score_aliases(title_text, team["aliases"])
+        hit = title_hit or _score_aliases(text, team["aliases"])
+        if title_hit:
+            team_hits.append((title_hit, team))
             if team.get("ambiguous_sport"):
                 continue
-            sport_scores[team["sport"]] = sport_scores.get(team["sport"], 0) + hit * 2
+            sport_scores[team["sport"]] = sport_scores.get(team["sport"], 0) + title_hit * 2
+        elif hit:
+            # Body-only team mentions are often related-link chrome.
+            continue
 
-    # Ambiguous clubs: Real Madrid / Barcelona / Partizan can be basketball.
-    basketball_context = sport_scores.get("basketball", 0) >= 2 or any(
-        token in text
+    basketball_context = sport_scores.get("basketball", 0) >= 4 or any(
+        token in title_text
         for token in (
             " acb ",
             "euroleague",
@@ -74,16 +81,16 @@ def classify_article(
             "baloncesto",
         )
     )
-    tennis_context = sport_scores.get("tennis", 0) >= 2
-    motorsport_context = sport_scores.get("motorsport", 0) >= 2
+    tennis_context = _score_aliases(title_text, SPORT_ALIASES.get("tennis", [])) >= 2
+    motorsport_context = _score_aliases(title_text, SPORT_ALIASES.get("motorsport", [])) >= 2
 
     if basketball_context:
         sport_scores["football"] = max(0, sport_scores.get("football", 0) - 3)
     if tennis_context:
-        sport_scores["football"] = 0
+        sport_scores["football"] = min(sport_scores.get("football", 0), sport_scores.get("football", 0))
         sport_scores["basketball"] = min(sport_scores.get("basketball", 0), 1)
-    if motorsport_context:
-        sport_scores["football"] = 0
+    if motorsport_context and not basketball_context:
+        pass
     if any(token in text for token in (" golf ", " pga ", "birdie", "bogey", "fairway")) and "us open" in text:
         sport_scores["tennis"] = 0
 
@@ -93,15 +100,16 @@ def classify_article(
         ranked = sorted(sport_scores.items(), key=lambda kv: kv[1], reverse=True)
         sport = ranked[0][0]
         if len(ranked) > 1 and ranked[1][1] == ranked[0][1]:
-            # Prefer non-football on ties when mixed context exists.
             non_fb = [s for s, sc in ranked if sc == ranked[0][1] and s != "football"]
             if non_fb:
                 sport = non_fb[0]
+        if len(ranked) > 1 and ranked[1][1] > 0 and ranked[0][1] < ranked[1][1] * 1.15:
+            sport = None
 
     if not sport:
         # Genuine league feeds may hint sport only when the article itself is silent.
         # Mixed/national firehoses must not inherit a bucket.
-        if feed_kind == "league" and feed_sport:
+        if feed_kind == "league" and feed_sport and best_sport == 0:
             sport = feed_sport
         else:
             return Classification(None, None, None, "low", "unknown-sport")
@@ -152,11 +160,11 @@ def classify_article(
             )
 
     if sport == "tennis":
-        if "us open" in text or "u.s. open" in text:
+        if "us open" in title_text or "u.s. open" in title_text:
             league_scores["us-open"] = league_scores.get("us-open", 0) + 12
-        elif "wimbledon" in text:
+        elif "wimbledon" in title_text:
             league_scores["wimbledon"] = league_scores.get("wimbledon", 0) + 12
-        elif "roland garros" in text or "french open" in text:
+        elif "roland garros" in title_text or "french open" in title_text:
             league_scores["roland-garros"] = league_scores.get("roland-garros", 0) + 12
 
     best_league = None

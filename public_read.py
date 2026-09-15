@@ -6,7 +6,7 @@ from typing import List, Optional, Sequence, Tuple
 
 from sqlalchemy.orm import Session, load_only
 
-from bot.taxonomy import competition_label, country_label, sport_label
+from bot.taxonomy import competition_label, country_label, sport_label, COMPETITIONS
 from editorial import (
     attach_inline_media,
     classify_media_url,
@@ -21,11 +21,12 @@ from editorial import (
 )
 from models import Article, ArticleTaxonomyResolution
 from related import rank_related
-from sport_match import MAIN_SPORTS
+from sport_match import MAIN_SPORTS, isolation_ok as sport_isolation_ok
 from taxonomy_resolver import (
     RESOLVER_VERSION,
     TaxonomyResolution,
     cache_row_to_resolution,
+    resolve_article_competition,
 )
 
 LIST_FIELDS = (
@@ -82,8 +83,8 @@ def apply_scope(
 ):
     if sport == "other":
         query = query.filter(
-            (ArticleTaxonomyResolution.resolved_sport.is_(None))
-            | (ArticleTaxonomyResolution.resolved_sport.notin_(MAIN_SPORTS))
+            ArticleTaxonomyResolution.resolved_sport.isnot(None),
+            ArticleTaxonomyResolution.resolved_sport.notin_(MAIN_SPORTS),
         )
     elif sport:
         query = query.filter(ArticleTaxonomyResolution.resolved_sport == sport)
@@ -144,14 +145,18 @@ def serialize_card(article: Article, tax: ArticleTaxonomyResolution) -> dict:
     sport = tax.resolved_sport
     competition = tax.resolved_competition
     kind = tax.hero_media_kind or "UNKNOWN"
-    image = article.image_url if kind != "MISSING" else None
+    image = article.image_url if kind in {"EDITORIAL_PHOTO", "UNKNOWN"} else None
+    country = None
+    if competition:
+        meta = COMPETITIONS.get(competition) or {}
+        country = meta.get("country")
     return {
         "id": article.id,
         "title": sanitize_title(article.title),
         "slug": article.slug,
         "sport": sport,
         "league": competition,
-        "country": article.country,
+        "country": country,
         "division": article.division,
         "image_url": image,
         "summary": public_summary(article.summary, title=article.title),
@@ -161,7 +166,7 @@ def serialize_card(article: Article, tax: ArticleTaxonomyResolution) -> dict:
         "is_breaking": bool(getattr(article, "is_breaking", False)),
         "sport_label": sport_label(sport) if sport else None,
         "league_label": competition_label(competition) if competition else None,
-        "country_label": country_label(article.country),
+        "country_label": country_label(country),
         "quality_ok": bool(tax.quality_ok),
         "sport_match_ok": bool(tax.public_ok),
         "hero_media_kind": kind,
@@ -175,13 +180,7 @@ def serialize_cards(pairs: Sequence[PublicPair]) -> List[dict]:
 def stored_resolution(article: Article, tax: Optional[ArticleTaxonomyResolution]):
     if tax is not None:
         return cache_row_to_resolution(tax)
-    return TaxonomyResolution(
-        sport=getattr(article, "sport", None),
-        competition=getattr(article, "league", None),
-        sport_confidence=0.5 if getattr(article, "sport", None) else 0.0,
-        competition_confidence=0.0,
-        evidence=["stored-unindexed"],
-    )
+    return resolve_article_competition(article)
 
 
 def serialize_detail(
@@ -218,17 +217,20 @@ def serialize_detail(
         presentation = "major"
     else:
         presentation = "standard"
-    quality_ok = bool(tax.quality_ok) if tax is not None else True
-    sport_match_ok = bool(tax.public_ok) if tax is not None else bool(resolved.sport)
+    quality_ok = bool(tax.quality_ok) if tax is not None else False
+    sport_match_ok = bool(tax.public_ok) if tax is not None else False
+    country = None
+    if resolved.public_competition:
+        country = (COMPETITIONS.get(resolved.public_competition) or {}).get("country")
     return {
         "id": article.id,
         "title": title,
         "slug": article.slug,
         "sport": resolved.sport,
         "league": resolved.public_competition,
-        "country": article.country,
+        "country": country,
         "division": article.division,
-        "image_url": hero["url"] if hero and hero_kind != "MISSING" else None,
+        "image_url": hero["url"] if hero and hero_kind in {"EDITORIAL_PHOTO", "UNKNOWN"} else None,
         "summary": summary,
         "created_at": article.created_at,
         "published_at": article.published_at or article.created_at,
@@ -238,7 +240,7 @@ def serialize_detail(
         "league_label": competition_label(resolved.public_competition)
         if resolved.public_competition
         else None,
-        "country_label": country_label(article.country),
+        "country_label": country_label(country),
         "quality_ok": quality_ok,
         "sport_match_ok": sport_match_ok,
         "hero_media_kind": hero_kind,
@@ -308,7 +310,7 @@ def related_cards(db: Session, article: Article, tax: Optional[ArticleTaxonomyRe
         pool,
         resolutions,
         quality_ok=lambda _row: True,
-        isolation_ok=lambda row, sport, strict=True, resolution=None: True,
+        isolation_ok=sport_isolation_ok,
         limit=limit,
     )
     by_id = {row.id: other for row, other in pairs}

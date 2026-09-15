@@ -585,11 +585,17 @@ def has_cdata(text: Optional[str]) -> bool:
 
 MEDIA_CREST_RE = re.compile(
     r"(?:^|[/?._~-])(?:logo|crest|badge|escudo|wordmark|coat[-_]?of[-_]?arms|"
-    r"club[-_]?mark|team[-_]?logo)(?:[/?._~-]|$)",
+    r"club[-_]?mark|team[-_]?logo|favicon|apple[-_]?touch|site[-_]?icon|"
+    r"avatar|author[-_]?photo|byline|profile[-_]?pic)(?:[/?._~-]|$)",
     re.IGNORECASE,
 )
 MEDIA_GRAPHIC_RE = re.compile(
-    r"(?:infographic|og[-_]?default|placeholder|sprite|watermark|site[-_]?icon)",
+    r"(?:infographic|og[-_]?default|placeholder|sprite|watermark|site[-_]?icon|"
+    r"promo(?:tional)?|brand(?:ing)?|podcast|sounds|newsletter|subscribe|"
+    r"social[-_]?(?:share|image)|sharing[-_]?image|default[-_]?social|"
+    r"app[-_]?download|app[-_]?icon|tile|tracking|pixel|related[-_]?thumb|"
+    r"programme[-_]?brand|72[-_]?plus|72plus|football[-_]?daily|"
+    r"masthead|identity|wordmark)",
     re.IGNORECASE,
 )
 LEADING_CATEGORY_RE = re.compile(
@@ -635,18 +641,36 @@ def image_is_usable(url: Optional[str]) -> bool:
     return True
 
 
-def classify_media_url(url: Optional[str]) -> str:
+def classify_media_url(
+    url: Optional[str],
+    *,
+    alt: Optional[str] = None,
+    source: Optional[str] = None,
+    width: int = 0,
+    height: int = 0,
+) -> str:
     value = (url or "").strip()
     if not value or not image_is_usable(value):
         return "MISSING"
     lower = value.lower()
     path = lower.split("?", 1)[0]
+    blob = " ".join([lower, (alt or "").lower(), (source or "").lower()])
     if path.endswith(".svg") or ".svg/" in path:
         return "CREST_OR_LOGO"
-    if MEDIA_CREST_RE.search(path) or MEDIA_CREST_RE.search(lower):
+    if MEDIA_CREST_RE.search(path) or MEDIA_CREST_RE.search(blob):
         return "CREST_OR_LOGO"
-    if MEDIA_GRAPHIC_RE.search(lower):
+    if MEDIA_GRAPHIC_RE.search(blob):
         return "GRAPHIC"
+    if "/sounds/" in path or "/iplayer/" in path or "/programmes/" in path:
+        return "GRAPHIC"
+    if width and width < 240:
+        return "GRAPHIC"
+    if height and height < 140:
+        return "GRAPHIC"
+    if width and height:
+        ratio = width / max(height, 1)
+        if ratio > 3.5 or ratio < 0.35:
+            return "GRAPHIC"
     filename = path.rsplit("/", 1)[-1].rsplit(".", 1)[0]
     dim_match = STEM_DIM_RE.match(filename)
     if dim_match:
@@ -656,6 +680,54 @@ def classify_media_url(url: Optional[str]) -> str:
     if re.search(r"\.(?:jpe?g|png|webp|gif)(?:$|\?)", path):
         return "EDITORIAL_PHOTO"
     return "UNKNOWN"
+
+
+def score_image_candidate(candidate: Dict) -> float:
+    url = candidate.get("url")
+    kind = classify_media_url(
+        url,
+        alt=candidate.get("alt"),
+        source=candidate.get("source"),
+        width=int(candidate.get("width") or 0),
+        height=int(candidate.get("height") or 0),
+    )
+    if kind in {"MISSING", "CREST_OR_LOGO", "GRAPHIC"}:
+        return -1.0
+    score = 8.0
+    source = candidate.get("source") or ""
+    if source == "body" and candidate.get("in_article"):
+        score += 14.0
+    elif source == "jsonld":
+        score += 9.0
+    elif source == "og":
+        score += 5.0
+    elif source == "twitter":
+        score += 3.0
+    elif source == "rss":
+        score += 1.0
+    width = int(candidate.get("width") or 0)
+    if width >= 1000:
+        score += 6.0
+    elif width >= 640:
+        score += 3.0
+    if kind == "EDITORIAL_PHOTO":
+        score += 2.0
+    return score
+
+
+def pick_article_image(candidates: Optional[Sequence[Dict]] = None) -> Optional[str]:
+    best = None
+    best_score = -1.0
+    for candidate in candidates or []:
+        if not isinstance(candidate, dict):
+            continue
+        score = score_image_candidate(candidate)
+        if score > best_score:
+            best_score = score
+            best = candidate
+    if best is None or best_score < 0:
+        return None
+    return (best.get("url") or "").strip() or None
 
 
 def suitable_for_lead_hero(url: Optional[str]) -> bool:

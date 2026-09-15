@@ -15,7 +15,7 @@ from sqlalchemy import func, or_, text
 from sqlalchemy.orm import Session
 
 from database import SessionLocal, engine, ensure_schema
-from models import Article, ArticleMedia, ArticleTranslation, Base
+from models import Article, ArticleMedia, ArticleTaxonomyResolution, ArticleTranslation, Base
 from editorial import classify_media_url, sanitize_title
 from auth import router as auth_router
 from comments_api import router as comments_router
@@ -26,6 +26,7 @@ from bot.taxonomy import (
     PUBLIC_COMPETITION_ALIASES,
     canonical_competition_key,
     competition_label,
+    sport_catalog,
     sport_label,
 )
 from homepage_compose import HOMEPAGE_COMPETITIONS, editorial_score, select_diverse
@@ -42,6 +43,7 @@ from public_read import (
     serialize_cards,
     serialize_detail,
 )
+from taxonomy_resolver import RESOLVER_VERSION, cache_row_to_resolution
 from sports_provider import (
     empty_competitions_payload,
     empty_events_payload,
@@ -54,7 +56,6 @@ from sports_provider import (
     partition_score_events,
     provider_status,
 )
-from taxonomy_resolver import cache_row_to_resolution
 
 CANONICAL_SITE = "https://ninkosports.com"
 MAIN_SPORTS = ("football", "basketball", "tennis", "motorsport")
@@ -162,12 +163,7 @@ def serialize_article(
     resolution=None,
 ) -> dict:
     """Auth/saved compatibility. Public list/detail use public_read serializers."""
-    tax = (
-        resolution
-        if getattr(resolution, "resolved_sport", None) is not None
-        and hasattr(resolution, "public_ok")
-        else None
-    )
+    tax = resolution if hasattr(resolution, "public_ok") else None
     if include_content:
         return serialize_detail(
             article, tax, media_rows=media_rows, related_insert=related_insert
@@ -175,11 +171,11 @@ def serialize_article(
     if tax is not None:
         return serialize_card(article, tax)
     stub = SimpleNamespace(
-        resolved_sport=article.sport,
-        resolved_competition=article.league,
+        resolved_sport=None,
+        resolved_competition=None,
         hero_media_kind=classify_media_url(article.image_url),
-        quality_ok=True,
-        public_ok=True,
+        quality_ok=False,
+        public_ok=False,
     )
     return serialize_card(article, stub)
 
@@ -609,14 +605,85 @@ def list_leagues():
 
 @app.get("/meta/sports")
 def list_sports():
-    return sorted({cfg["sport"] for cfg in LEAGUE_CONFIG})
+    return [row["sport"] for row in sport_catalog()]
+
+
+@app.get("/meta/taxonomy")
+def taxonomy_meta(db: Session = Depends(get_db)):
+    counts = dict(
+        db.query(
+            ArticleTaxonomyResolution.resolved_sport,
+            func.count(ArticleTaxonomyResolution.id),
+        )
+        .filter(
+            ArticleTaxonomyResolution.resolver_version == RESOLVER_VERSION,
+            ArticleTaxonomyResolution.public_ok == True,
+        )
+        .group_by(ArticleTaxonomyResolution.resolved_sport)
+        .all()
+    )
+    competition_counts = dict(
+        db.query(
+            ArticleTaxonomyResolution.resolved_competition,
+            func.count(ArticleTaxonomyResolution.id),
+        )
+        .filter(
+            ArticleTaxonomyResolution.resolver_version == RESOLVER_VERSION,
+            ArticleTaxonomyResolution.public_ok == True,
+            ArticleTaxonomyResolution.resolved_competition.isnot(None),
+        )
+        .group_by(ArticleTaxonomyResolution.resolved_competition)
+        .all()
+    )
+    sports = []
+    for row in sport_catalog():
+        slug = row["sport"]
+        competitions = []
+        for key, meta in COMPETITIONS.items():
+            if meta.get("sport") != slug:
+                continue
+            competitions.append(
+                {
+                    "competition": key,
+                    "label": meta.get("label") or competition_label(key),
+                    "country": meta.get("country"),
+                    "article_count": int(competition_counts.get(key) or 0),
+                }
+            )
+        sports.append(
+            {
+                **row,
+                "article_count": int(counts.get(slug) or 0),
+                "competitions": competitions,
+            }
+        )
+    return {"sports": sports, "league_aliases": LEAGUE_PATH_ALIASES}
 
 
 @app.get("/meta/navigation")
 def navigation(db: Session = Depends(get_db)):
     counts = dict(
-        db.query(Article.league, func.count(Article.id))
-        .group_by(Article.league)
+        db.query(
+            ArticleTaxonomyResolution.resolved_competition,
+            func.count(ArticleTaxonomyResolution.id),
+        )
+        .filter(
+            ArticleTaxonomyResolution.resolver_version == RESOLVER_VERSION,
+            ArticleTaxonomyResolution.public_ok == True,
+        )
+        .group_by(ArticleTaxonomyResolution.resolved_competition)
+        .all()
+    )
+    sport_counts = dict(
+        db.query(
+            ArticleTaxonomyResolution.resolved_sport,
+            func.count(ArticleTaxonomyResolution.id),
+        )
+        .filter(
+            ArticleTaxonomyResolution.resolver_version == RESOLVER_VERSION,
+            ArticleTaxonomyResolution.public_ok == True,
+        )
+        .group_by(ArticleTaxonomyResolution.resolved_sport)
         .all()
     )
     sports = []
@@ -638,12 +705,7 @@ def navigation(db: Session = Depends(get_db)):
                 "sport": sport,
                 "label": sport_label(sport),
                 "path": SPORT_PATHS.get(sport, f"/{sport}"),
-                "article_count": int(
-                    db.query(func.count(Article.id))
-                    .filter(Article.sport == sport)
-                    .scalar()
-                    or 0
-                ),
+                "article_count": int(sport_counts.get(sport) or 0),
                 "leagues": leagues,
             }
         )
@@ -736,13 +798,29 @@ def sports_data_team(slug: str):
 def sitemap(db: Session = Depends(get_db)):
     rows = (
         db.query(Article.slug, Article.published_at, Article.created_at)
+        .join(
+            ArticleTaxonomyResolution,
+            ArticleTaxonomyResolution.article_id == Article.id,
+        )
+        .filter(
+            ArticleTaxonomyResolution.resolver_version == RESOLVER_VERSION,
+            ArticleTaxonomyResolution.public_ok == True,
+        )
         .order_by(_sort_expr().desc())
         .limit(5000)
         .all()
     )
     league_rows = (
-        db.query(Article.sport, Article.league)
-        .filter(Article.league.isnot(None), Article.league != "")
+        db.query(
+            ArticleTaxonomyResolution.resolved_sport,
+            ArticleTaxonomyResolution.resolved_competition,
+        )
+        .filter(
+            ArticleTaxonomyResolution.resolver_version == RESOLVER_VERSION,
+            ArticleTaxonomyResolution.public_ok == True,
+            ArticleTaxonomyResolution.resolved_competition.isnot(None),
+            ArticleTaxonomyResolution.resolved_competition != "",
+        )
         .distinct()
         .all()
     )
@@ -781,6 +859,8 @@ def sitemap(db: Session = Depends(get_db)):
         sport_slug = sport if sport in SPORT_PATHS else None
         if sport_slug:
             urls.append(url_xml(f"/{sport_slug}/{escape(league_key)}", "hourly"))
+        else:
+            urls.append(url_xml(f"/{escape(sport or 'other-sports')}", "daily"))
     for slug, published_at, created_at in rows:
         if not slug:
             continue

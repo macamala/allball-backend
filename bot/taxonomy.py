@@ -291,6 +291,48 @@ COMPETITIONS: Dict[str, Competition] = {
         "label": "Formula 1",
         "aliases": ["formula 1", "formula one", "f1"],
     },
+    "nfl": {
+        "sport": "american-football",
+        "country": "usa",
+        "label": "NFL",
+        "aliases": [" nfl ", "national football league"],
+    },
+    "nhl": {
+        "sport": "ice-hockey",
+        "country": "usa",
+        "label": "NHL",
+        "aliases": [" nhl ", "national hockey league"],
+    },
+    "mlb": {
+        "sport": "baseball",
+        "country": "usa",
+        "label": "MLB",
+        "aliases": [" mlb ", "major league baseball"],
+    },
+    "six-nations": {
+        "sport": "rugby",
+        "country": "international",
+        "label": "Six Nations",
+        "aliases": ["six nations", "rugby world cup"],
+    },
+    "indian-premier-league": {
+        "sport": "cricket",
+        "country": "india",
+        "label": "IPL",
+        "aliases": ["indian premier league", " ipl "],
+    },
+    "pga-tour": {
+        "sport": "golf",
+        "country": "international",
+        "label": "PGA Tour",
+        "aliases": ["pga tour", "the masters", "the open championship"],
+    },
+    "ufc": {
+        "sport": "mma",
+        "country": "international",
+        "label": "UFC",
+        "aliases": [" ufc ", "ultimate fighting championship"],
+    },
 }
 
 SPORT_ALIASES: Dict[str, List[str]] = {
@@ -352,6 +394,55 @@ SPORT_ALIASES: Dict[str, List[str]] = {
         "world cup",
         "mundijal",
     ],
+    "american-football": [
+        "american football",
+        "nfl",
+        "touchdown",
+        "quarterback",
+        "super bowl",
+    ],
+    "ice-hockey": [
+        "ice hockey",
+        "nhl",
+        "power play",
+        "stanley cup",
+        "hockey",
+    ],
+    "baseball": [
+        "baseball",
+        "mlb",
+        "home run",
+        "world series",
+        "pitcher",
+    ],
+    "rugby": [
+        "rugby",
+        "six nations",
+        "rugby world cup",
+        "scrum",
+        "try scorer",
+    ],
+    "cricket": [
+        "cricket",
+        "test match",
+        "wicket",
+        "indian premier league",
+        "ashes",
+    ],
+    "volleyball": ["volleyball", "fivb"],
+    "handball": ["handball", "ihf"],
+    "golf": [
+        "golf",
+        "pga tour",
+        "birdie",
+        "bogey",
+        "fairway",
+        "the masters",
+    ],
+    "boxing": ["boxing", "heavyweight title", "bout"],
+    "mma": ["mma", "ufc", "octagon", "mixed martial"],
+    "cycling": ["cycling", "tour de france", "peloton", "uci world"],
+    "snooker": ["snooker", "147 break", "crucible"],
 }
 
 TEAMS: List[Dict[str, object]] = [
@@ -382,6 +473,29 @@ TEAMS: List[Dict[str, object]] = [
         ],
         "sport": "football",
         "league": "england-premier-league",
+        "country": "england",
+    },
+    {
+        "aliases": [
+            "burnley",
+            "leeds",
+            "leicester",
+            "southampton",
+            "ipswich",
+            "watford",
+            "norwich",
+            "sheffield united",
+            "luton",
+            "west brom",
+            "middlesbrough",
+            "sunderland",
+            "coventry",
+            "millwall",
+            "wycombe",
+            "efl championship",
+        ],
+        "sport": "football",
+        "league": "england-championship",
         "country": "england",
     },
     {
@@ -500,6 +614,7 @@ COUNTRY_LABELS: Dict[str, str] = {
     "poland": "Poland",
     "czech-republic": "Czech Republic",
     "usa": "USA",
+    "india": "India",
     "brazil": "Brazil",
     "argentina": "Argentina",
     "international": "International",
@@ -507,12 +622,32 @@ COUNTRY_LABELS: Dict[str, str] = {
     "global": "International",
 }
 
-SPORT_LABELS: Dict[str, str] = {
-    "football": "Football",
-    "basketball": "Basketball",
-    "tennis": "Tennis",
-    "motorsport": "Motorsport",
+SPORTS: Dict[str, Dict[str, str]] = {
+    "football": {"label": "Football", "group": "main", "path": "/football"},
+    "basketball": {"label": "Basketball", "group": "main", "path": "/basketball"},
+    "tennis": {"label": "Tennis", "group": "main", "path": "/tennis"},
+    "motorsport": {"label": "Motorsport", "group": "main", "path": "/motorsport"},
+    "american-football": {
+        "label": "American Football",
+        "group": "other",
+        "path": "/american-football",
+    },
+    "ice-hockey": {"label": "Ice Hockey", "group": "other", "path": "/ice-hockey"},
+    "baseball": {"label": "Baseball", "group": "other", "path": "/baseball"},
+    "rugby": {"label": "Rugby", "group": "other", "path": "/rugby"},
+    "cricket": {"label": "Cricket", "group": "other", "path": "/cricket"},
+    "volleyball": {"label": "Volleyball", "group": "other", "path": "/volleyball"},
+    "handball": {"label": "Handball", "group": "other", "path": "/handball"},
+    "golf": {"label": "Golf", "group": "other", "path": "/golf"},
+    "boxing": {"label": "Boxing", "group": "other", "path": "/boxing"},
+    "mma": {"label": "MMA", "group": "other", "path": "/mma"},
+    "cycling": {"label": "Cycling", "group": "other", "path": "/cycling"},
+    "snooker": {"label": "Snooker", "group": "other", "path": "/snooker"},
 }
+
+SPORT_LABELS: Dict[str, str] = {slug: meta["label"] for slug, meta in SPORTS.items()}
+MAIN_SPORT_SLUGS = tuple(slug for slug, meta in SPORTS.items() if meta["group"] == "main")
+DIRECTORY_SPORT_SLUGS = tuple(slug for slug, meta in SPORTS.items() if meta["group"] == "other")
 
 BROAD_LEAGUE = {
     "football": "football-international",
@@ -556,6 +691,44 @@ def country_label(slug: Optional[str]) -> str:
     if not slug:
         return ""
     return COUNTRY_LABELS.get(slug, slug.replace("-", " ").title())
+
+
+def competition_sport(competition: Optional[str]) -> Optional[str]:
+    key = canonical_competition_key(competition)
+    if not key:
+        return None
+    meta = COMPETITIONS.get(key)
+    return meta.get("sport") if meta else None
+
+
+def compatible_competition(sport: Optional[str], competition: Optional[str]) -> Optional[str]:
+    """Return competition only when it belongs to the resolved sport."""
+    key = canonical_competition_key(competition)
+    if not key:
+        return None
+    meta = COMPETITIONS.get(key)
+    if not meta:
+        return None
+    owner = meta.get("sport")
+    if sport and owner and owner != sport:
+        return None
+    return key
+
+
+def sport_catalog(group: Optional[str] = None) -> List[Dict[str, str]]:
+    rows = []
+    for slug, meta in SPORTS.items():
+        if group and meta.get("group") != group:
+            continue
+        rows.append(
+            {
+                "sport": slug,
+                "label": meta.get("label") or sport_label(slug),
+                "group": meta.get("group") or "other",
+                "path": meta.get("path") or f"/{slug}",
+            }
+        )
+    return rows
 
 
 # Public URL slugs and compact IDs that map onto COMPETITIONS keys.

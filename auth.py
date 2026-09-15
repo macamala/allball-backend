@@ -298,39 +298,39 @@ def get_favorites(db: Session = Depends(get_db), user: User = Depends(require_us
 
 
 @router.put("/favorites")
-def merge_favorites(
+def replace_favorites(
     payload: FavoritesIn,
     request: Request,
     db: Session = Depends(get_db),
     user: User = Depends(require_user),
 ):
     require_csrf(request)
-    existing = _fav_payload(db, user)
-    merged = {
-        "sports": sorted(set(existing["sports"] + list(payload.sports or []))),
+    next_state = {
+        "sports": sorted({str(item) for item in (payload.sports or []) if item}),
         "leagues": sorted(
             {
                 _normalize_league_value(item)
-                for item in (existing["leagues"] + list(payload.leagues or []))
+                for item in (payload.leagues or [])
                 if item
             }
         ),
-        "teams": sorted(set(existing["teams"] + list(payload.teams or []))),
+        "teams": sorted({str(item) for item in (payload.teams or []) if item}),
     }
     db.query(UserFavorite).filter(UserFavorite.user_id == user.id).delete()
-    for kind, values in merged.items():
+    for kind, values in next_state.items():
         for value in values:
             if not value:
                 continue
             db.add(UserFavorite(user_id=user.id, kind=kind, value=str(value)[:120]))
     db.commit()
-    return merged
+    return next_state
 
 
 @router.get("/saved")
 def list_saved(db: Session = Depends(get_db), user: User = Depends(require_user)):
     from app import serialize_article
     from models import Article
+    from public_index import load_cached_resolution
 
     rows = (
         db.query(SavedArticle, Article)
@@ -339,7 +339,7 @@ def list_saved(db: Session = Depends(get_db), user: User = Depends(require_user)
         .order_by(SavedArticle.created_at.desc())
         .all()
     )
-    return [serialize_article(article) for _, article in rows]
+    return [serialize_article(article, resolution=load_cached_resolution(db, article)) for _, article in rows]
 
 
 @router.put("/saved/{article_id}")

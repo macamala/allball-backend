@@ -136,7 +136,8 @@ def test_favorites_merge_and_saved_articles():
             headers=_headers(token),
         )
         body = again.json()
-        assert body["sports"] == ["basketball", "football", "tennis"]
+        assert body["sports"] == ["basketball", "football"]
+        assert "tennis" not in body["sports"]
         saved = client.put(f"/auth/saved/{article.id}", headers=_headers(token))
         assert saved.status_code == 200
         listed = client.get("/auth/saved").json()

@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from editorial import classify_media_url, evaluate_quality
 from models import Article, ArticleTaxonomyResolution
 from sport_match import MAIN_SPORTS, isolation_ok
+from bot.taxonomy import COMPETITIONS
 from taxonomy_resolver import (
     MIN_SPORT_CONFIDENCE,
     RESOLVER_VERSION,
@@ -28,6 +29,13 @@ def persist_public_article(db: Session, article: Article, resolution=None, commi
     resolved = resolution or resolve_article_competition(article)
     persist_resolution(db, article, resolved)
     db.flush()
+    article.sport = resolved.sport
+    article.league = resolved.public_competition
+    if resolved.public_competition:
+        meta = COMPETITIONS.get(resolved.public_competition) or {}
+        if meta.get("country"):
+            article.country = meta.get("country")
+    db.add(article)
     quality = evaluate_quality(
         title=article.title,
         summary=article.summary,

@@ -14,7 +14,7 @@ from .classify import classify_article
 from .dedupe import existing_by_url, existing_near_duplicate
 from .extract import extract_from_url, parse_feed_datetime, paragraphs_from_html
 from .feeds import enabled_feeds
-from .media_url import collect_feed_image_candidates, pick_source_image
+from .media_url import collect_feed_image_candidates, pick_source_image, width_from_url
 from .quality import (
     enough_for_brief,
     is_dramatic_shortening,
@@ -110,6 +110,22 @@ def _extract_image_url(entry) -> Optional[str]:
     return pick_source_image(collect_feed_image_candidates(entry))
 
 
+def _extract_image_candidates(entry) -> list:
+    candidates = []
+    for url, width in collect_feed_image_candidates(entry):
+        if not url:
+            continue
+        candidates.append(
+            {
+                "url": url,
+                "source": "rss",
+                "width": width or width_from_url(url),
+                "in_article": False,
+            }
+        )
+    return candidates
+
+
 def _slugify(title: str, fallback: str = "") -> str:
     import re
 
@@ -170,6 +186,7 @@ def _fetch_feed_entries(feed_cfg: Dict, max_articles: int) -> List[Dict]:
                 "summary": summary,
                 "url": link,
                 "image": _extract_image_url(entry),
+                "image_candidates": _extract_image_candidates(entry),
                 "published_at": parse_feed_datetime(entry),
                 "feed": feed_cfg,
             }
@@ -274,7 +291,7 @@ def _ingest_item(db: Session, item: Dict, use_ai: bool, max_ai_chars: int, ai_bu
     probe.sport = tags.sport
     probe.league = tags.league
     resolved = resolve_article_competition(probe)
-    stamp_sport = resolved.sport or tags.sport
+    stamp_sport = resolved.sport
     stamp_league = resolved.public_competition
 
     from editorial import sanitize_body as _sanitize_body, sanitize_summary as _sanitize_summary, sanitize_title as _sanitize_title
@@ -283,7 +300,16 @@ def _ingest_item(db: Session, item: Dict, use_ai: bool, max_ai_chars: int, ai_bu
     story_body = _sanitize_body(story_body, title=story_title)
     story_summary = _sanitize_summary(story_summary, title=story_title)
 
-    image_url = item.get("image") or extracted_image
+    from editorial import pick_article_image
+
+    image_url = pick_article_image(
+        list(item.get("image_candidates") or [])
+        + (
+            [{"url": extracted_image, "source": "og", "in_article": False}]
+            if extracted_image
+            else []
+        )
+    )
     if image_url and len(image_url) > 500:
         image_url = image_url[:500]
     slug = _make_unique_slug(db, _slugify(story_title))

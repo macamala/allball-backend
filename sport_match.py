@@ -159,7 +159,7 @@ def belongs_to_sport(article, sport: str, *, strict: bool = True, resolution=Non
 
     resolved = resolution if resolution is not None else resolve_article_competition(article)
     if sport == "other":
-        return not resolved.sport or resolved.sport not in MAIN_SPORTS
+        return bool(resolved.sport) and resolved.sport not in MAIN_SPORTS
     if not resolved.sport:
         return False
     if resolved.sport != sport:

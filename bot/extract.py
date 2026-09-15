@@ -82,6 +82,138 @@ def _og(html: str, prop: str) -> Optional[str]:
     return match.group(1).strip() if match else None
 
 
+def _meta_name(html: str, name: str) -> Optional[str]:
+    match = re.search(
+        rf'<meta[^>]+name=["\']{re.escape(name)}["\'][^>]+content=["\']([^"\']+)',
+        html,
+        re.IGNORECASE,
+    )
+    if match:
+        return match.group(1).strip()
+    match = re.search(
+        rf'<meta[^>]+content=["\']([^"\']+)["\'][^>]+name=["\']{re.escape(name)}["\']',
+        html,
+        re.IGNORECASE,
+    )
+    return match.group(1).strip() if match else None
+
+
+def _json_ld_images(html: str) -> List[dict]:
+    out: List[dict] = []
+    for raw in JSON_LD_RE.findall(html or ""):
+        try:
+            data = json.loads(raw)
+        except Exception:
+            continue
+        items = data if isinstance(data, list) else [data]
+        if isinstance(data, dict) and isinstance(data.get("@graph"), list):
+            items = data["@graph"]
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            image = item.get("image")
+            rows = image if isinstance(image, list) else [image]
+            for row in rows:
+                url = ""
+                width = 0
+                height = 0
+                if isinstance(row, str):
+                    url = row
+                elif isinstance(row, dict):
+                    url = row.get("url") or row.get("@id") or ""
+                    try:
+                        width = int(row.get("width") or 0)
+                    except (TypeError, ValueError):
+                        width = 0
+                    try:
+                        height = int(row.get("height") or 0)
+                    except (TypeError, ValueError):
+                        height = 0
+                if url:
+                    out.append(
+                        {
+                            "url": url,
+                            "source": "jsonld",
+                            "width": width,
+                            "height": height,
+                            "in_article": True,
+                        }
+                    )
+    return out
+
+
+class _LeadImageExtractor(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.ignore = 0
+        self.in_main = 0
+        self.images: List[dict] = []
+
+    def handle_starttag(self, tag, attrs):
+        tag = tag.lower()
+        if self.ignore:
+            self.ignore += 1
+            return
+        if _is_chrome_open(tag, attrs):
+            self.ignore = 1
+            return
+        attrs_map = _attr_map(attrs)
+        if tag in {"article", "main"} or attrs_map.get("role", "").lower() == "main":
+            self.in_main += 1
+        if tag != "img":
+            return
+        src = attrs_map.get("src") or attrs_map.get("data-src") or ""
+        if not src:
+            return
+        width = 0
+        height = 0
+        try:
+            width = int(attrs_map.get("width") or 0)
+        except (TypeError, ValueError):
+            width = 0
+        try:
+            height = int(attrs_map.get("height") or 0)
+        except (TypeError, ValueError):
+            height = 0
+        self.images.append(
+            {
+                "url": src,
+                "source": "body",
+                "width": width,
+                "height": height,
+                "alt": attrs_map.get("alt") or "",
+                "in_article": bool(self.in_main),
+            }
+        )
+
+    def handle_endtag(self, tag):
+        tag = tag.lower()
+        if self.ignore:
+            self.ignore = max(0, self.ignore - 1)
+            return
+        if tag in {"article", "main"} and self.in_main:
+            self.in_main -= 1
+
+
+def collect_page_image_candidates(html: str) -> List[dict]:
+    candidates: List[dict] = []
+    og = _og(html, "og:image")
+    if og:
+        candidates.append({"url": og, "source": "og", "in_article": False})
+    twitter = _meta_name(html, "twitter:image") or _meta_name(html, "twitter:image:src")
+    if twitter:
+        candidates.append({"url": twitter, "source": "twitter", "in_article": False})
+    candidates.extend(_json_ld_images(html))
+    parser = _LeadImageExtractor()
+    try:
+        parser.feed(html or "")
+        parser.close()
+    except Exception:
+        parser.images = []
+    candidates.extend(parser.images[:8])
+    return candidates
+
+
 def _attr_map(attrs) -> dict:
     return {str(key).lower(): str(value or "") for key, value in attrs}
 
@@ -254,7 +386,13 @@ def extract_from_url(url: str, timeout: float = 18.0) -> Tuple[str, Optional[str
         logger.info("[extract] failed %s: %s", url, e)
         return "", None
 
-    image = _og(html, "og:image")
+    image = None
+    try:
+        from editorial import pick_article_image
+
+        image = pick_article_image(collect_page_image_candidates(html))
+    except Exception:
+        image = _og(html, "og:image")
     text = paragraphs_from_html(html)
     text = strip_site_chrome(text) or text
     if is_site_chrome_text(text):

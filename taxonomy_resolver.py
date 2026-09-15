@@ -9,11 +9,19 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
-from bot.taxonomy import COMPETITIONS, SPORT_ALIASES, TEAMS, canonical_competition_key
+from bot.taxonomy import (
+    COMPETITIONS,
+    DIRECTORY_SPORT_SLUGS,
+    SPORT_ALIASES,
+    TEAMS,
+    canonical_competition_key,
+    compatible_competition,
+    competition_sport,
+)
 from editorial import sanitize_body, sanitize_summary, sanitize_title
 from sport_match import EXCLUSIVE_KEYWORDS, MAIN_SPORTS
 
-RESOLVER_VERSION = "4.3.1"
+RESOLVER_VERSION = "4.4.0"
 MIN_COMPETITION_CONFIDENCE = 0.72
 MIN_SPORT_CONFIDENCE = 0.72
 BODY_EXCERPT_CHARS = 1400
@@ -113,18 +121,14 @@ SPORT_TERMS = {
         "training camp roster",
     ),
     "tennis": (
+        "set point",
+        "double fault",
+        "first serve",
         "break point",
         "match point",
         "grand slam",
-        "first serve",
-        "double fault",
         "tiebreak",
         "tie-break",
-        "wimbledon",
-        "roland garros",
-        " atp ",
-        " wta ",
-        "set point",
     ),
     "motorsport": (
         "formula 1",
@@ -158,6 +162,59 @@ DISCOUNT_PATTERNS = (
     "regardless of {alias}",
     "not the {alias}",
     "outside the {alias}",
+)
+
+# Publisher chrome / section nav labels. These may appear in related-link
+# blocks and must never decide sport from summary or body alone.
+CHROME_NAV_ALIASES = {
+    "football": (
+        "football",
+        "soccer",
+        "premier league",
+        "champions league",
+        "la liga",
+        "serie a",
+        "bundesliga",
+        "ligue 1",
+        "europa league",
+        "world cup",
+    ),
+    "tennis": (
+        "tennis",
+        "tenis",
+        "wimbledon",
+        "roland garros",
+        "us open",
+        "australian open",
+        "atp",
+        "wta",
+        "grand slam",
+    ),
+    "basketball": (
+        "basketball",
+        "nba",
+        "euroleague",
+        "ncaa",
+        "wnba",
+    ),
+    "motorsport": (
+        "formula 1",
+        "formula one",
+        "f1",
+        "motogp",
+        "motorsport",
+        "grand prix",
+    ),
+    "golf": ("golf", "pga"),
+    "cricket": ("cricket",),
+    "rugby": ("rugby",),
+    "ice-hockey": ("hockey", "nhl", "ice hockey"),
+    "american-football": ("nfl", "american football"),
+    "baseball": ("baseball", "mlb"),
+}
+
+SCORED_SPORTS = tuple(
+    dict.fromkeys((*MAIN_SPORTS, *DIRECTORY_SPORT_SLUGS, *SPORT_ALIASES.keys()))
 )
 
 
@@ -212,6 +269,21 @@ def _alias_hits(blob: str, aliases: Sequence[str]) -> int:
     return score
 
 
+def _is_chrome_alias(sport: str, alias: str) -> bool:
+    needle = alias.strip().lower()
+    return needle in {item.strip().lower() for item in CHROME_NAV_ALIASES.get(sport, ())}
+
+
+def _field_weight(sport: str, alias: str, field: str) -> float:
+    if field == "title":
+        return 4.0 if not _is_chrome_alias(sport, alias) else 3.2
+    if _is_chrome_alias(sport, alias):
+        return 0.0
+    if field == "summary":
+        return 0.35
+    return 0.15
+
+
 def _competition_scores(title_blob: str, summary_blob: str, body_blob: str, sport: Optional[str]) -> Dict[str, float]:
     scores: Dict[str, float] = {}
     for slug, meta in COMPETITIONS.items():
@@ -223,7 +295,14 @@ def _competition_scores(title_blob: str, summary_blob: str, body_blob: str, spor
         title_hits = _alias_hits(title_blob, aliases)
         summary_hits = _alias_hits(summary_blob, aliases)
         body_hits = _alias_hits(body_blob, aliases)
-        value = title_hits * 4.0 + summary_hits * 2.0 + body_hits * 0.8
+        nav_like = any(_is_chrome_alias(meta.get("sport") or "", alias) for alias in aliases)
+        if sport:
+            summary_weight = 2.0
+            body_weight = 0.0 if nav_like else 0.8
+        else:
+            summary_weight = 0.15 if nav_like else 2.0
+            body_weight = 0.0
+        value = title_hits * 4.0 + summary_hits * summary_weight + body_hits * body_weight
         if value:
             scores[slug] = value
             if slug in CONTINENTAL and title_hits:
@@ -273,49 +352,60 @@ def _score_sports(title: str, summary: str, body: str) -> Dict[str, float]:
     title_blob = _norm(title)
     summary_blob = _norm(summary)
     body_blob = _norm(body)
-    scores = {sport: 0.0 for sport in MAIN_SPORTS}
+    scores = {sport: 0.0 for sport in SCORED_SPORTS}
 
-    for sport in MAIN_SPORTS:
+    for sport in SCORED_SPORTS:
         for alias in _exclusive_aliases(sport):
             padded = alias if alias.startswith(" ") else f" {alias.strip()} "
             if padded in title_blob:
-                scores[sport] += max(2.0, len(alias.strip().split())) * 4.0
+                scores[sport] += max(2.0, len(alias.strip().split())) * _field_weight(sport, alias, "title")
             elif padded in summary_blob:
-                scores[sport] += max(2.0, len(alias.strip().split())) * 2.0
+                scores[sport] += max(2.0, len(alias.strip().split())) * _field_weight(sport, alias, "summary")
             elif padded in body_blob:
-                scores[sport] += max(2.0, len(alias.strip().split())) * 0.8
+                scores[sport] += max(2.0, len(alias.strip().split())) * _field_weight(sport, alias, "body")
         scores[sport] += _term_hits(title_blob, SPORT_TERMS.get(sport, ())) * 4.0
-        scores[sport] += _term_hits(summary_blob, SPORT_TERMS.get(sport, ())) * 2.0
-        scores[sport] += _term_hits(body_blob, SPORT_TERMS.get(sport, ())) * 0.9
+        scores[sport] += _term_hits(summary_blob, SPORT_TERMS.get(sport, ())) * 0.4
+        scores[sport] += _term_hits(body_blob, SPORT_TERMS.get(sport, ())) * 0.2
         scores[sport] += _alias_hits(title_blob, SPORT_ALIASES.get(sport, [])) * 3.0
-        scores[sport] += _alias_hits(summary_blob, SPORT_ALIASES.get(sport, [])) * 1.5
-        scores[sport] += _alias_hits(body_blob, SPORT_ALIASES.get(sport, [])) * 0.6
+        chrome_aliases = [alias for alias in SPORT_ALIASES.get(sport, []) if _is_chrome_alias(sport, alias)]
+        content_aliases = [alias for alias in SPORT_ALIASES.get(sport, []) if not _is_chrome_alias(sport, alias)]
+        scores[sport] += _alias_hits(summary_blob, content_aliases) * 0.5
+        scores[sport] += _alias_hits(body_blob, content_aliases) * 0.2
+        # Chrome aliases in summary/body are ignored unless the title already supports the sport.
+        if scores[sport] >= 4:
+            scores[sport] += _alias_hits(summary_blob, chrome_aliases) * 0.15
+            scores[sport] += _alias_hits(body_blob, chrome_aliases) * 0.05
 
     combined = _norm(f"{title} {summary} {body}")
+    title_only = title_blob
     for team in TEAMS:
         team_sport = team.get("sport")
         if team_sport not in scores:
             continue
-        hit = _alias_hits(combined, team.get("aliases") or [])
-        if not hit:
+        title_hit = _alias_hits(title_only, team.get("aliases") or [])
+        body_hit = _alias_hits(combined, team.get("aliases") or [])
+        hit = title_hit * 2.8 + (0.0 if not title_hit else body_hit * 0.4)
+        if not title_hit:
+            # Teams mentioned only in related-link chrome must not decide sport.
             continue
         if team.get("ambiguous_sport"):
-            # Ambiguous clubs only count if that sport already has independent evidence.
             if scores[team_sport] < 4:
                 continue
             scores[team_sport] += hit * 0.6
         else:
-            scores[team_sport] += hit * 2.2
+            scores[team_sport] += hit
 
     if any(marker in combined for marker in GOLF_MARKERS) and "us open" in combined:
-        scores["tennis"] = min(scores["tennis"], 1.0)
+        scores["tennis"] = min(scores.get("tennis", 0.0), 1.0)
+        if " golf " in title_blob or " pga " in title_blob:
+            scores["golf"] = scores.get("golf", 0.0) + 8.0
     if "qualifying offer" in combined or "exhibit 10" in combined:
         scores["basketball"] += 8.0
-        scores["motorsport"] = max(0.0, scores["motorsport"] - 8.0)
+        scores["motorsport"] = max(0.0, scores.get("motorsport", 0.0) - 8.0)
     if any(marker in combined for marker in ("qualifying session", "qualifying lap", "pole position")):
         scores["motorsport"] += 8.0
-    elif " qualifying " in combined and scores["motorsport"] < 6 and scores["basketball"] < 6:
-        scores["motorsport"] = max(0.0, scores["motorsport"] - 4.0)
+    elif " qualifying " in combined and scores.get("motorsport", 0.0) < 6 and scores.get("basketball", 0.0) < 6:
+        scores["motorsport"] = max(0.0, scores.get("motorsport", 0.0) - 4.0)
     if any(marker in combined for marker in EUROLEAGUE_MARKERS):
         scores["basketball"] += 8.0
         if " nba " not in title_blob:
@@ -325,8 +415,8 @@ def _score_sports(title: str, summary: str, body: str) -> Dict[str, float]:
 
     # Ambiguous clubs never decide sport by themselves.
     for club in AMBIGUOUS_CLUBS:
-        if f" {club} " in title_blob and max(scores.values()) < 6:
-            for sport in MAIN_SPORTS:
+        if f" {club} " in title_blob and max(scores.values() or [0]) < 6:
+            for sport in SCORED_SPORTS:
                 scores[sport] = max(0.0, scores[sport] - 1.0)
     return scores
 
@@ -342,18 +432,18 @@ def _resolve_sport(
     best_sport, best = ordered[0]
     second = ordered[1][1] if len(ordered) > 1 else 0.0
     evidence = [f"sport-score:{best_sport}:{best:.1f}"]
+    if second > 0 and best < second * 1.15:
+        return None, 0.0, evidence + ["contradictory-sport"]
     if best >= 10 and best >= second * 1.2:
         return best_sport, min(0.97, 0.78 + best / 80.0), evidence + ["strong-context"]
     if best >= 6 and best > second:
         return best_sport, min(0.9, 0.72 + best / 90.0), evidence + ["context"]
     if best >= 4 and best > second * 1.25:
         return best_sport, 0.74, evidence + ["narrow-context"]
-    # Stored metadata is a weak hint only when the article is otherwise silent.
-    if stored in MAIN_SPORTS and best < 3 and second < 3:
-        return None, 0.0, ["stored-sport-insufficient"]
-    if stored and stored not in MAIN_SPORTS and best < 3:
-        return stored, 0.5, ["stored-other-sport"]
-    return None, 0.0, ["unknown-sport"]
+    # Stored metadata and feed buckets are never proof.
+    if stored:
+        evidence.append("stored-sport-ignored")
+    return None, 0.0, evidence + ["unknown-sport"]
 
 
 def resolve_article_competition(article) -> TaxonomyResolution:
@@ -361,6 +451,14 @@ def resolve_article_competition(article) -> TaxonomyResolution:
     stored_sport = getattr(article, "sport", None)
     stored_league = canonical_competition_key(getattr(article, "league", None))
     sport, sport_conf, sport_evidence = _resolve_sport(title, summary, body, stored_sport)
+    if not sport:
+        return TaxonomyResolution(
+            sport=None,
+            competition=None,
+            sport_confidence=0.0,
+            competition_confidence=0.0,
+            evidence=sport_evidence + ["no-sport-no-competition"],
+        )
     title_blob = _norm(title)
     summary_blob = _norm(summary)
     body_blob = _norm(body)
@@ -381,10 +479,20 @@ def resolve_article_competition(article) -> TaxonomyResolution:
         comp_evidence = [f"source:{source}"] + comp_evidence
 
     if competition and sport:
-        meta = COMPETITIONS.get(competition)
-        if meta and meta.get("sport") != sport:
+        kept = compatible_competition(sport, competition)
+        if kept != competition:
             competition, comp_conf = None, 0.0
             comp_evidence = ["competition-sport-mismatch"]
+        else:
+            owner = competition_sport(competition)
+            if owner and owner != sport:
+                competition, comp_conf = None, 0.0
+                comp_evidence = ["competition-sport-mismatch"]
+
+    if source == "body" and competition and not _competition_scores(title_blob, "", "", sport):
+        # Body-only competition hits are too often related-story chrome.
+        competition, comp_conf = None, 0.0
+        comp_evidence = ["body-only-competition-ignored"]
 
     if (
         sport == "basketball"
