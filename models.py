@@ -4,6 +4,7 @@ from sqlalchemy import (
     String,
     Boolean,
     DateTime,
+    Float,
     Text,
     ForeignKey,
     UniqueConstraint,
@@ -225,6 +226,42 @@ class ArticleTaxonomyResolution(Base):
     public_ok = Column(Boolean, default=False)
     hero_media_kind = Column(String(40), nullable=True)
     word_count = Column(Integer, default=0)
+
+
+class SportsPrediction(Base):
+    """Immutable prediction snapshot for one event and model version.
+
+    Probabilities and evidence are written once at prediction time. After the
+    match finishes, only evaluation columns are filled — historical odds are
+    never rewritten. Losing predictions are never deleted.
+    """
+
+    __tablename__ = "sports_predictions"
+    __table_args__ = (
+        Index("ix_sports_pred_event", "event_id"),
+        Index("ix_sports_pred_sport_time", "sport", "predicted_at"),
+        Index("ix_sports_pred_model", "model_version"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    event_id = Column(String(120), nullable=False, index=True)
+    sport = Column(String(50), nullable=False)
+    competition_key = Column(String(120), nullable=True)
+    market = Column(String(40), nullable=False)
+    model_version = Column(String(80), nullable=False)
+    predicted_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    home_win_pct = Column(Float, nullable=True)
+    draw_pct = Column(Float, nullable=True)
+    away_win_pct = Column(Float, nullable=True)
+    predicted_outcome = Column(String(40), nullable=True)
+    predicted_score_home = Column(Integer, nullable=True)
+    predicted_score_away = Column(Integer, nullable=True)
+    confidence = Column(String(20), nullable=True)
+    evidence_json = Column(Text, nullable=True)
+    explanation = Column(Text, nullable=True)
+    evaluated_at = Column(DateTime, nullable=True)
+    actual_outcome = Column(String(40), nullable=True)
+    was_correct = Column(Boolean, nullable=True)
 
 
 class SocialIdentity(Base):

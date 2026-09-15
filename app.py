@@ -19,6 +19,7 @@ from models import Article, ArticleMedia, ArticleTranslation, Base
 from editorial import classify_media_url, sanitize_title
 from auth import router as auth_router
 from comments_api import router as comments_router
+from predictions_api import router as predictions_router
 from bot.fetch_sources import LEAGUE_CONFIG
 from bot.taxonomy import (
     COMPETITIONS,
@@ -42,10 +43,15 @@ from public_read import (
     serialize_detail,
 )
 from sports_provider import (
+    empty_competitions_payload,
+    empty_events_payload,
     empty_match_payload,
     empty_scores_payload,
     empty_standings_payload,
     empty_team_payload,
+    events_to_legacy_matches,
+    get_active_provider,
+    partition_score_events,
     provider_status,
 )
 from taxonomy_resolver import cache_row_to_resolution
@@ -109,6 +115,7 @@ app.add_middleware(
 
 app.include_router(auth_router)
 app.include_router(comments_router)
+app.include_router(predictions_router)
 
 PUBLIC_CACHE = "public, max-age=5, s-maxage=10, stale-while-revalidate=20"
 
@@ -645,22 +652,79 @@ def navigation(db: Session = Depends(get_db)):
 
 @app.get("/sports-data/status")
 def sports_data_status():
-    return provider_status()
+    return get_active_provider().status()
 
 
 @app.get("/sports-data/scores")
 def sports_data_scores():
-    return empty_scores_payload()
+    provider = get_active_provider()
+    payload = empty_scores_payload()
+    payload.update(provider.status())
+    events = provider.get_events()
+    live = provider.get_live_events()
+    payload["events"] = events
+    payload["matches"] = events_to_legacy_matches(events)
+    buckets = partition_score_events(events)
+    payload["live"] = events_to_legacy_matches(live) or buckets["live"]
+    payload["today"] = buckets["today"]
+    payload["tomorrow"] = buckets["tomorrow"]
+    payload["finished"] = buckets["finished"]
+    return payload
 
 
 @app.get("/sports-data/standings")
 def sports_data_standings(league: Optional[str] = Query(None)):
-    return empty_standings_payload(_resolve_league_key(league))
+    provider = get_active_provider()
+    payload = empty_standings_payload(_resolve_league_key(league))
+    payload.update(provider.status())
+    payload["rows"] = provider.get_standings(_resolve_league_key(league))
+    return payload
+
+
+@app.get("/sports-data/competitions")
+def sports_data_competitions(sport: Optional[str] = Query(None)):
+    provider = get_active_provider()
+    payload = empty_competitions_payload(sport)
+    payload.update(provider.status())
+    payload["competitions"] = provider.get_competitions(sport)
+    return payload
+
+
+@app.get("/sports-data/events")
+def sports_data_events(
+    sport: Optional[str] = Query(None),
+    competition: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
+):
+    provider = get_active_provider()
+    payload = empty_events_payload(sport, competition, status)
+    payload.update(provider.status())
+    events = provider.get_events(
+        sport=sport,
+        competition=competition,
+        status=status,
+        date_from=date_from,
+        date_to=date_to,
+    )
+    payload["events"] = events
+    payload["matches"] = events_to_legacy_matches(events)
+    return payload
 
 
 @app.get("/sports-data/matches/{match_id}")
 def sports_data_match(match_id: str):
-    return empty_match_payload(match_id)
+    provider = get_active_provider()
+    payload = empty_match_payload(match_id)
+    payload.update(provider.status())
+    event = provider.get_event(match_id)
+    if event:
+        payload["event"] = event
+        payload["header"] = event
+        payload["statistics"] = provider.get_statistics(match_id)
+        payload["availability"] = provider.get_availability(match_id) or []
+    return payload
 
 
 @app.get("/sports-data/teams/{slug}")
@@ -707,6 +771,7 @@ def sitemap(db: Session = Depends(get_db)):
         url_xml("/motorsport", "hourly"),
         url_xml("/other-sports", "daily"),
         url_xml("/live-scores", "hourly"),
+        url_xml("/predictions", "hourly"),
         url_xml("/search", "weekly"),
         url_xml("/my-sports", "weekly"),
     ]
