@@ -23,12 +23,22 @@ from predictions_api import router as predictions_router
 from bot.fetch_sources import LEAGUE_CONFIG
 from bot.taxonomy import (
     COMPETITIONS,
+    MAIN_SPORT_SLUGS,
     PUBLIC_COMPETITION_ALIASES,
     canonical_competition_key,
     competition_label,
     sport_catalog,
     sport_label,
 )
+from sports_registry.api import (
+    competitions_payload,
+    geography_payload,
+    providers_payload,
+    registry_payload,
+)
+from sports_registry.schema import CATEGORY_LABELS, SPORT_CATEGORIES
+from sports_registry.sports import get_sport as registry_get_sport
+from sports_registry.sports import sitemap_sport_paths
 from homepage_compose import HOMEPAGE_COMPETITIONS, editorial_score, select_diverse
 from entities import extract_entities
 from public_cache import cache_generation
@@ -58,15 +68,13 @@ from sports_provider import (
 )
 
 CANONICAL_SITE = "https://ninkosports.com"
-MAIN_SPORTS = ("football", "basketball", "tennis", "motorsport")
+MAIN_SPORTS = MAIN_SPORT_SLUGS
 VIEW_DEDUP_SECONDS = 30 * 60
 _recent_views = {}
 
 SPORT_PATHS = {
-    "football": "/football",
-    "basketball": "/basketball",
-    "tennis": "/tennis",
-    "motorsport": "/motorsport",
+    slug: (registry_get_sport(slug) or {}).get("path") or f"/{slug}"
+    for slug in MAIN_SPORTS
 }
 
 # Public URL slugs that map onto stored competition keys.
@@ -652,7 +660,14 @@ def taxonomy_meta(db: Session = Depends(get_db)):
                 "competitions": competitions,
             }
         )
-    return {"sports": sports, "league_aliases": LEAGUE_PATH_ALIASES}
+    return {
+        "sports": sports,
+        "league_aliases": LEAGUE_PATH_ALIASES,
+        "categories": [
+            {"id": key, "label": CATEGORY_LABELS[key]} for key in SPORT_CATEGORIES
+        ],
+        "registry": registry_payload(),
+    }
 
 
 @app.get("/meta/navigation")
@@ -705,6 +720,26 @@ def navigation(db: Session = Depends(get_db)):
             }
         )
     return {"sports": sports, "league_aliases": LEAGUE_PATH_ALIASES}
+
+
+@app.get("/registry/sports")
+def registry_sports(sport: Optional[str] = Query(None)):
+    return registry_payload(sport)
+
+
+@app.get("/registry/geography")
+def registry_geography():
+    return geography_payload()
+
+
+@app.get("/registry/competitions")
+def registry_competitions(sport: Optional[str] = Query(None)):
+    return competitions_payload(sport)
+
+
+@app.get("/registry/providers")
+def registry_providers():
+    return providers_payload()
 
 
 @app.get("/sports-data/status")
@@ -848,6 +883,23 @@ def sitemap(db: Session = Depends(get_db)):
         url_xml("/search", "weekly"),
         url_xml("/my-sports", "weekly"),
     ]
+    seen_paths = {
+        "/",
+        "/football",
+        "/basketball",
+        "/tennis",
+        "/motorsport",
+        "/other-sports",
+        "/live-scores",
+        "/predictions",
+        "/search",
+        "/my-sports",
+    }
+    for path in sitemap_sport_paths():
+        if path in seen_paths:
+            continue
+        seen_paths.add(path)
+        urls.append(url_xml(path, "daily"))
     for sport, league_key in league_rows:
         if not league_key:
             continue

@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from typing import Optional
 
-from bot.taxonomy import COMPETITIONS
+from bot.taxonomy import COMPETITIONS, MAIN_SPORT_SLUGS
 from editorial import sanitize_title
 
-MAIN_SPORTS = ("football", "basketball", "tennis", "motorsport")
+MAIN_SPORTS = MAIN_SPORT_SLUGS
 
 EXCLUSIVE_KEYWORDS = {
     "football": (

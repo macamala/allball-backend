@@ -170,6 +170,29 @@ def test_shared_event_names_need_matching_sport_evidence():
     assert resolved.public_competition == "wimbledon"
 
 
+def test_afc_wimbledon_and_roland_garros_aliases():
+    afc = _Row(
+        title="AFC Wimbledon grind out a League One win",
+        summary="The Dons stay in the EFL mix after a late goal.",
+        content="AFC Wimbledon remain in League One after the Championship-bound season start.",
+        sport="tennis",
+        league="wimbledon",
+    )
+    resolved = resolve_article_competition(afc)
+    assert resolved.sport != "tennis"
+    assert resolved.public_competition != "wimbledon"
+    tennis = _Row(
+        title="Iga Swiatek wins the French Open at Roland Garros",
+        summary="Swiatek closed out the final in straight sets on clay.",
+        content="The WTA champion lifted the Roland Garros trophy after a late break.",
+        sport=None,
+        league=None,
+    )
+    resolved = resolve_article_competition(tennis)
+    assert resolved.sport == "tennis"
+    assert resolved.public_competition == "roland-garros"
+
+
 def test_promo_and_brand_graphics_are_rejected_as_heroes():
     promo = "https://ichef.bbci.co.uk/images/ic/1024xn/p0sounds-72plus-promo.jpg"
     bbc_rss_thumb = "https://ichef.bbci.co.uk/images/ic/240x135/p0p3n9ks.jpg"

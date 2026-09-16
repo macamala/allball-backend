@@ -1,6 +1,19 @@
-"""Maintainable sports / competition / team knowledge for classification."""
+"""Maintainable sports / competition / team knowledge for classification.
+
+Sport slugs, labels, groups and paths come from the Sports Registry.
+Competition alias lists used by the news resolver stay here so public
+taxonomy behaviour is not rewritten.
+"""
 
 from typing import Dict, List, Optional, TypedDict
+
+from sports_registry.news_aliases import extra_sport_aliases
+from sports_registry.sports import (
+    catalog_rows,
+    directory_sport_slugs,
+    main_sport_slugs,
+    taxonomy_sports_map,
+)
 
 
 class Competition(TypedDict):
@@ -445,6 +458,10 @@ SPORT_ALIASES: Dict[str, List[str]] = {
     "snooker": ["snooker", "147 break", "crucible"],
 }
 
+for _slug, _aliases in extra_sport_aliases().items():
+    if _slug not in SPORT_ALIASES:
+        SPORT_ALIASES[_slug] = list(_aliases)
+
 TEAMS: List[Dict[str, object]] = [
     {
         "aliases": ["aston villa", "unai emery"],
@@ -622,32 +639,11 @@ COUNTRY_LABELS: Dict[str, str] = {
     "global": "International",
 }
 
-SPORTS: Dict[str, Dict[str, str]] = {
-    "football": {"label": "Football", "group": "main", "path": "/football"},
-    "basketball": {"label": "Basketball", "group": "main", "path": "/basketball"},
-    "tennis": {"label": "Tennis", "group": "main", "path": "/tennis"},
-    "motorsport": {"label": "Motorsport", "group": "main", "path": "/motorsport"},
-    "american-football": {
-        "label": "American Football",
-        "group": "other",
-        "path": "/american-football",
-    },
-    "ice-hockey": {"label": "Ice Hockey", "group": "other", "path": "/ice-hockey"},
-    "baseball": {"label": "Baseball", "group": "other", "path": "/baseball"},
-    "rugby": {"label": "Rugby", "group": "other", "path": "/rugby"},
-    "cricket": {"label": "Cricket", "group": "other", "path": "/cricket"},
-    "volleyball": {"label": "Volleyball", "group": "other", "path": "/volleyball"},
-    "handball": {"label": "Handball", "group": "other", "path": "/handball"},
-    "golf": {"label": "Golf", "group": "other", "path": "/golf"},
-    "boxing": {"label": "Boxing", "group": "other", "path": "/boxing"},
-    "mma": {"label": "MMA", "group": "other", "path": "/mma"},
-    "cycling": {"label": "Cycling", "group": "other", "path": "/cycling"},
-    "snooker": {"label": "Snooker", "group": "other", "path": "/snooker"},
-}
+SPORTS: Dict[str, Dict[str, str]] = taxonomy_sports_map()
 
 SPORT_LABELS: Dict[str, str] = {slug: meta["label"] for slug, meta in SPORTS.items()}
-MAIN_SPORT_SLUGS = tuple(slug for slug, meta in SPORTS.items() if meta["group"] == "main")
-DIRECTORY_SPORT_SLUGS = tuple(slug for slug, meta in SPORTS.items() if meta["group"] == "other")
+MAIN_SPORT_SLUGS = main_sport_slugs()
+DIRECTORY_SPORT_SLUGS = directory_sport_slugs()
 
 BROAD_LEAGUE = {
     "football": "football-international",
@@ -690,7 +686,11 @@ def sport_label(slug: Optional[str]) -> str:
 def country_label(slug: Optional[str]) -> str:
     if not slug:
         return ""
-    return COUNTRY_LABELS.get(slug, slug.replace("-", " ").title())
+    if slug in COUNTRY_LABELS:
+        return COUNTRY_LABELS[slug]
+    from sports_registry.geography import label_for
+
+    return label_for(slug)
 
 
 def competition_sport(competition: Optional[str]) -> Optional[str]:
@@ -703,32 +703,13 @@ def competition_sport(competition: Optional[str]) -> Optional[str]:
 
 def compatible_competition(sport: Optional[str], competition: Optional[str]) -> Optional[str]:
     """Return competition only when it belongs to the resolved sport."""
-    key = canonical_competition_key(competition)
-    if not key:
-        return None
-    meta = COMPETITIONS.get(key)
-    if not meta:
-        return None
-    owner = meta.get("sport")
-    if sport and owner and owner != sport:
-        return None
-    return key
+    from sports_registry.compatibility import compatible_competition as registry_compatible
+
+    return registry_compatible(sport, competition)
 
 
-def sport_catalog(group: Optional[str] = None) -> List[Dict[str, str]]:
-    rows = []
-    for slug, meta in SPORTS.items():
-        if group and meta.get("group") != group:
-            continue
-        rows.append(
-            {
-                "sport": slug,
-                "label": meta.get("label") or sport_label(slug),
-                "group": meta.get("group") or "other",
-                "path": meta.get("path") or f"/{slug}",
-            }
-        )
-    return rows
+def sport_catalog(group: Optional[str] = None) -> List[Dict[str, object]]:
+    return catalog_rows(group)
 
 
 # Public URL slugs and compact IDs that map onto COMPETITIONS keys.

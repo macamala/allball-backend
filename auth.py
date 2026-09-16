@@ -271,6 +271,17 @@ def update_profile(
     return {"user": public_user(user)}
 
 
+def _normalize_sport_value(value: str) -> str:
+    from sports_registry.sports import canonical_sport_slug, get_sport
+
+    key = canonical_sport_slug(value) or str(value).strip().lower()[:120]
+    if key == "other":
+        return "other"
+    if get_sport(key):
+        return key
+    return str(value)[:120]
+
+
 def _normalize_league_value(value: str) -> str:
     from bot.taxonomy import COMPETITIONS, canonical_competition_key, scoped_competition_id
 
@@ -287,6 +298,8 @@ def _fav_payload(db: Session, user: User) -> dict:
         value = row.value
         if row.kind == "leagues":
             value = _normalize_league_value(value)
+        if row.kind == "sports":
+            value = _normalize_sport_value(value)
         if row.kind in out and value not in out[row.kind]:
             out[row.kind].append(value)
     return out
@@ -306,7 +319,13 @@ def replace_favorites(
 ):
     require_csrf(request)
     next_state = {
-        "sports": sorted({str(item) for item in (payload.sports or []) if item}),
+        "sports": sorted(
+            {
+                _normalize_sport_value(item)
+                for item in (payload.sports or [])
+                if item
+            }
+        ),
         "leagues": sorted(
             {
                 _normalize_league_value(item)

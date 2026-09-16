@@ -68,15 +68,22 @@ class EventScore(TypedDict, total=False):
 
 
 class NormalizedEvent(TypedDict, total=False):
-    """Shared match/event object for Live Scores and Predictions."""
+    """Shared match/event object for Live Scores and Predictions.
+
+    Team-match events use home/away. Other families add their own fields and
+    set event_family. Missing participants must stay empty — never invented.
+    """
 
     id: str
     sport: str
     competition: str
     competition_key: str
     season: Optional[str]
+    event_family: str
     home: Participant
     away: Participant
+    participant_a: Participant
+    participant_b: Participant
     start_time: Optional[str]
     status: str
     score: EventScore
@@ -263,11 +270,12 @@ def get_active_provider() -> SportsDataProvider:
     3. Keep returning NormalizedEvent / empty helpers — never raw vendor JSON.
 
     Until an adapter is registered, production always returns honest empties.
+    Providers that require public branding are never selected.
     """
+    from sports_registry.router import get_sports_data_provider
+
     _configured = (os.getenv("SPORTS_DATA_PROVIDER") or "").strip()
-    # No adapters are registered in this phase. Unknown env values must not
-    # invent fixtures; keep the disconnected provider.
-    return DisconnectedSportsDataProvider()
+    return get_sports_data_provider()
 
 
 def normalize_legacy_match(row: Dict[str, Any]) -> NormalizedEvent:
@@ -295,6 +303,9 @@ def normalize_legacy_match(row: Dict[str, Any]) -> NormalizedEvent:
         "provider": row.get("provider"),
         "provider_id": row.get("provider_id"),
         "updated_at": row.get("updated_at"),
+        "event_family": row.get("event_family") or "",
+        "participant_a": row.get("participant_a") or {},
+        "participant_b": row.get("participant_b") or {},
     }
 
 

@@ -92,6 +92,11 @@ def get_prediction_engine() -> PredictionEngine:
 
 
 def market_for_sport(sport: str) -> Optional[str]:
+    from sports_registry.sports import prediction_market
+
+    market = prediction_market(sport)
+    if market:
+        return market
     return SPORT_MARKETS.get(sport)
 
 
