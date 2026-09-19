@@ -22,7 +22,7 @@ from collector.wta_orientation import orient_wta_match
 BASE = "https://api.wtatennis.com/tennis"
 DEFAULT_TOURNAMENTS = [(901, 2026)]
 CALENDAR_TTL_S = 12 * 3600
-LIVE_MATCH_TTL_S = 15 * 60
+LIVE_MATCH_TTL_S = 45
 PAST_MATCH_TTL_S = 12 * 3600
 MAX_MATCH_FETCHES = 6
 WINDOW_PAST_DAYS = 14
