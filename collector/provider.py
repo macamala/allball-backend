@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from datetime import datetime
+from datetime import datetime, timedelta, timedelta
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import and_, or_
@@ -360,7 +360,9 @@ class NinkoCollectedSportsDataProvider:
     def get_status_delta(self, since: Optional[str] = None, sport: Optional[str] = None) -> List[Dict[str, Any]]:
         db = _session(self._session_factory)
         try:
-            bound = _parse_bound(since) or datetime.utcnow()
+            bound = _parse_bound(since)
+            if bound is None:
+                bound = datetime.utcnow() - timedelta(minutes=2)
             query = db.query(SportsEvent).filter(SportsEvent.canonical_event_id.is_(None))
             query = query.filter(SportsEvent.updated_at >= bound)
             if sport:
