@@ -115,6 +115,12 @@ EXTRA_PERSIST_KEYS = (
     "status_inferred",
     "live_class",
     "provider_conflicts",
+    "fetch_started_at",
+    "fetch_completed_at",
+    "parsed_at",
+    "persisted_at",
+    "canonical_updated_at",
+    "field_freshness",
 )
 
 _DATE = re.compile(

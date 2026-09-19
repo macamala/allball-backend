@@ -151,29 +151,49 @@ def merge_event_fields(
     live_wins = volatile_incoming_wins(
         current, incoming, incoming_is_higher_priority=incoming_is_higher_priority
     )
+    freshness = dict(current.get("field_freshness") or {})
+    stamp = incoming.get("source_fetch_time") or incoming.get("observed_at") or incoming.get("fetch_completed_at")
 
     if live_wins and _filled(incoming.get("status")):
         out["status"] = canonical_status(incoming.get("status") or current.get("status"))
         if incoming_source_id:
             provenance["status"] = incoming_source_id
+            freshness["status"] = {"source": incoming_source_id, "at": stamp}
     cur_score = current.get("score") or {}
     inc_score = incoming.get("score") or {}
-    score_from_incoming = live_wins and (
-        _filled(inc_score.get("home")) or _filled(inc_score.get("away")) or _filled(inc_score.get("period"))
-    )
-    if not score_from_incoming and not _filled(cur_score.get("home")) and _filled(inc_score.get("home")):
-        score_from_incoming = True
-    out["score"] = {key: _prefer(cur_score.get(key), inc_score.get(key), score_from_incoming) for key in VOLATILE_SCORE_KEYS}
-    if score_from_incoming and incoming_source_id:
-        provenance["score"] = incoming_source_id
-    if score_from_incoming and _filled(incoming.get("periods")):
-        out["periods"] = incoming.get("periods")
+    if live_wins:
+        out["score"] = dict(cur_score)
+        for key in VOLATILE_SCORE_KEYS:
+            if key in inc_score:
+                out["score"][key] = inc_score.get(key)
         if incoming_source_id:
-            provenance["periods"] = incoming_source_id
-    elif not _filled(current.get("periods")) and _filled(incoming.get("periods")):
-        out["periods"] = incoming.get("periods")
-        if incoming_source_id:
-            provenance["periods"] = incoming_source_id
+            provenance["score"] = incoming_source_id
+            freshness["score"] = {"source": incoming_source_id, "at": stamp}
+            if inc_score.get("clock") is not None or inc_score.get("minute") is not None:
+                freshness["clock"] = {"source": incoming_source_id, "at": stamp}
+        if "periods" in incoming:
+            out["periods"] = incoming.get("periods")
+            if incoming_source_id:
+                provenance["periods"] = incoming_source_id
+                freshness["periods"] = {"source": incoming_source_id, "at": stamp}
+        if "incidents" in incoming:
+            out["incidents"] = incoming.get("incidents")
+            if incoming_source_id:
+                provenance["incidents"] = incoming_source_id
+                freshness["incidents"] = {"source": incoming_source_id, "at": stamp}
+    else:
+        score_from_incoming = False
+        if not _filled(cur_score.get("home")) and _filled(inc_score.get("home")):
+            score_from_incoming = True
+        out["score"] = {key: _prefer(cur_score.get(key), inc_score.get(key), score_from_incoming) for key in VOLATILE_SCORE_KEYS}
+        if score_from_incoming and incoming_source_id:
+            provenance["score"] = incoming_source_id
+            freshness["score"] = {"source": incoming_source_id, "at": stamp}
+        if not _filled(current.get("periods")) and _filled(incoming.get("periods")):
+            out["periods"] = incoming.get("periods")
+            if incoming_source_id:
+                provenance["periods"] = incoming_source_id
+                freshness["periods"] = {"source": incoming_source_id, "at": stamp}
     for key in (
         "venue",
         "season",
@@ -200,6 +220,8 @@ def merge_event_fields(
         "location",
         "result_type",
     ):
+        if key == "incidents" and live_wins and "incidents" in incoming:
+            continue
         volatile_stats = key in {"statistics", "incidents"} and live_wins
         had = _filled(current.get(key))
         out[key] = _prefer(current.get(key), incoming.get(key), volatile_stats or incoming_is_higher_priority)
@@ -239,6 +261,7 @@ def merge_event_fields(
     if not b_name:
         out["participant_b"] = {**(out.get("away") or {}), "side": "b"}
     out["field_sources"] = provenance
+    out["field_freshness"] = freshness
     out["source_status"] = current.get("source_status") or incoming.get("source_status") or current.get("status")
     if incoming.get("source_status") and live_wins:
         out["source_status_incoming"] = incoming.get("source_status")
@@ -297,6 +320,21 @@ def apply_row_fields(row, merged: Dict[str, Any], source_id: str, higher: bool) 
         ids.append(incoming_id)
         extra["source_event_ids"] = ids
     extra["field_sources"] = merged.get("field_sources") or extra.get("field_sources") or {}
+    extra["field_freshness"] = merged.get("field_freshness") or extra.get("field_freshness") or {}
+    now = datetime.utcnow()
+    merged["persisted_at"] = now.isoformat() + "Z"
+    merged["canonical_updated_at"] = now.isoformat() + "Z"
+    extra["persisted_at"] = merged["persisted_at"]
+    extra["canonical_updated_at"] = merged["canonical_updated_at"]
+    extra["fetch_started_at"] = merged.get("fetch_started_at") or extra.get("fetch_started_at")
+    extra["fetch_completed_at"] = merged.get("fetch_completed_at") or extra.get("fetch_completed_at")
+    extra["parsed_at"] = merged.get("parsed_at") or extra.get("parsed_at")
+    try:
+        from collector.latency import record_observation_latency
+
+        record_observation_latency(merged)
+    except Exception:
+        pass
     kickoffs = extra.get("source_kickoffs") or []
     stamp = merged.get("source_local_datetime") or merged.get("start_time")
     if stamp:

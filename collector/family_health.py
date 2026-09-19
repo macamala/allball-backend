@@ -107,6 +107,25 @@ def family_access_blocked(family: str) -> bool:
     return time.monotonic() < float(row.get("blocked_until_mono") or 0)
 
 
+def family_stale_or_empty(family: str) -> bool:
+    if not family:
+        return False
+    row = _STATE.get(family)
+    if not row:
+        return False
+    return row.get("status") in {"empty", "degraded"} and int(row.get("consecutive_failures") or 0) >= 2
+
+
+def family_needs_failover(family: str) -> bool:
+    from collector.family_caps import family_caps
+
+    if family_rate_limited(family) or family_access_blocked(family):
+        return True
+    if family_caps(family).get("production_status") == "ACCESS_BLOCKED":
+        return True
+    return family_stale_or_empty(family)
+
+
 def family_from_host(host: str) -> Optional[str]:
     return HOST_FAMILY.get((host or "").lower())
 

@@ -8,8 +8,9 @@ from typing import Any, Dict, Optional
 # Seconds. Provider-family minimums still win in cadence_for().
 URGENCY_SECONDS = {
     "LIVE": 45,
+    "LIVE_CANDIDATE": 90,
     "IMMINENT": 120,
-    "RECENTLY_FINISHED": 300,
+    "RECENTLY_FINISHED": 180,
     "TODAY": 600,
     "NEAR_FUTURE": 3600,
     "FUTURE": 21600,
@@ -21,15 +22,16 @@ URGENCY_SECONDS = {
 
 URGENCY_PRIORITY = {
     "LIVE": 1,
-    "IMMINENT": 2,
-    "RECENTLY_FINISHED": 3,
-    "TODAY": 4,
-    "NEAR_FUTURE": 5,
-    "FUTURE": 6,
-    "LONG_FUTURE": 7,
-    "HISTORICAL": 8,
-    "DISCOVERY_ACTIVE": 9,
-    "DISCOVERY_QUIET": 10,
+    "LIVE_CANDIDATE": 2,
+    "IMMINENT": 3,
+    "RECENTLY_FINISHED": 4,
+    "TODAY": 5,
+    "NEAR_FUTURE": 6,
+    "FUTURE": 7,
+    "LONG_FUTURE": 8,
+    "HISTORICAL": 9,
+    "DISCOVERY_ACTIVE": 10,
+    "DISCOVERY_QUIET": 11,
 }
 
 
@@ -69,8 +71,30 @@ def classify_event(status: Optional[str], start_time: Optional[datetime], *, now
     return "LONG_FUTURE"
 
 
-def capability_for_urgency(urgency: str) -> str:
+WORKLOAD_CONFIRMED_LIVE = "CONFIRMED_LIVE"
+WORKLOAD_LIVE_CANDIDATE = "LIVE_CANDIDATE"
+WORKLOAD_RECENTLY_FINISHED = "RECENTLY_FINISHED"
+WORKLOAD_FIXTURE = "FIXTURE_REFRESH"
+WORKLOAD_DISCOVERY = "DISCOVERY"
+WORKLOAD_ENRICHMENT = "ENRICHMENT"
+
+
+def workload_for_urgency(urgency: str) -> str:
     if urgency == "LIVE":
+        return WORKLOAD_CONFIRMED_LIVE
+    if urgency in {"LIVE_CANDIDATE", "IMMINENT"}:
+        return WORKLOAD_LIVE_CANDIDATE
+    if urgency == "RECENTLY_FINISHED":
+        return WORKLOAD_RECENTLY_FINISHED
+    if urgency.startswith("DISCOVERY"):
+        return WORKLOAD_DISCOVERY
+    if urgency == "ENRICHMENT":
+        return WORKLOAD_ENRICHMENT
+    return WORKLOAD_FIXTURE
+
+
+def capability_for_urgency(urgency: str) -> str:
+    if urgency in {"LIVE", "LIVE_CANDIDATE"}:
         return "live_scores"
     if urgency == "RECENTLY_FINISHED":
         return "results"
@@ -87,5 +111,6 @@ def job_dict(*, competition_id: str, family: str, urgency: str, reason: str, **e
         "reason": reason,
         "priority": URGENCY_PRIORITY.get(urgency, 50),
         "capability": capability_for_urgency(urgency),
+        "workload": extra.get("workload") or workload_for_urgency(urgency),
         **extra,
     }

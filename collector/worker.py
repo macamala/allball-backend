@@ -93,6 +93,10 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
                 bootstrap_registry(db)
                 db.commit()
                 db.info["registry_bootstrapped"] = True
+            from collector.watch_set import rebuild_watch_set
+
+            rebuild_watch_set(db)
+            db.commit()
             if not collection_enabled():
                 logger.info("Collection disabled; holding lock idle")
             elif enabled_source_count(db) == 0:

@@ -158,6 +158,8 @@ class SportsEvent(Base):
         Index("ix_sports_event_live", "live"),
         Index("ix_sports_event_public_start", "sport_id", "start_time", "display_eligible"),
         Index("ix_sports_event_canonical", "canonical_event_id"),
+        Index("ix_sports_event_status_start", "status", "start_time"),
+        Index("ix_sports_event_updated", "updated_at"),
     )
 
     event_id = Column(String(160), primary_key=True)
@@ -409,4 +411,23 @@ class SportsSchedulerSlot(Base):
     last_status = Column(String(40), nullable=True)
     http_calls = Column(Integer, default=0)
     events_changed = Column(Integer, default=0)
+
+
+class SportsLiveWatch(Base):
+    """Polling watch set. Membership is not canonical LIVE."""
+
+    __tablename__ = "sports_live_watch"
+    __table_args__ = (
+        Index("ix_live_watch_comp", "competition_id"),
+        Index("ix_live_watch_sport", "sport_id"),
+        Index("ix_live_watch_expires", "expires_at"),
+    )
+
+    event_id = Column(String(160), primary_key=True)
+    competition_id = Column(String(120), nullable=True)
+    sport_id = Column(String(50), nullable=True)
+    reason = Column(String(40), nullable=False)
+    entered_at = Column(DateTime, default=datetime.utcnow)
+    expires_at = Column(DateTime, nullable=True)
+    last_polled_at = Column(DateTime, nullable=True)
 

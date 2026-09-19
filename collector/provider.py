@@ -116,6 +116,42 @@ def _public_value(value: Any) -> Any:
 def public_event(payload: Dict[str, Any]) -> Dict[str, Any]:
     return _public_value(payload)
 
+
+LIVE_PUBLIC_KEYS = (
+    "id",
+    "sport",
+    "competition",
+    "competition_key",
+    "event_family",
+    "home",
+    "away",
+    "participant_a",
+    "participant_b",
+    "start_time",
+    "status",
+    "score",
+    "live",
+    "live_class",
+    "periods",
+    "start_precision",
+    "updated_at",
+    "current_set",
+)
+
+
+def live_public_event(payload: Dict[str, Any]) -> Dict[str, Any]:
+    score = payload.get("score") if isinstance(payload.get("score"), dict) else {}
+    lean_score = {
+        key: score.get(key)
+        for key in ("home", "away", "minute", "clock", "period", "quarter", "set", "inning", "inning_half", "overs", "wickets", "runs")
+        if score.get(key) is not None
+    }
+    row = {key: payload.get(key) for key in LIVE_PUBLIC_KEYS if payload.get(key) is not None}
+    row["score"] = lean_score
+    if payload.get("periods"):
+        row["periods"] = payload.get("periods")
+    return row
+
 CORE_ROW_KEYS = {
     "id",
     "sport",
@@ -309,10 +345,42 @@ class NinkoCollectedSportsDataProvider:
                     if _start_within_to(row.get("start_time"), date_to)
                 ]
             if status == "live":
-                events = [row for row in events if public_live_visible(row)]
+                events = [
+                    row
+                    for row in events
+                    if public_live_visible(row) and row.get("live_class") == "CONFIRMED_LIVE"
+                ]
+                events = [live_public_event(row) for row in events]
             cache_set(db, cache_key, events, "upcoming_fixtures" if status != "live" else "live_events")
             db.commit()
             return events
+        finally:
+            db.close()
+
+    def get_status_delta(self, since: Optional[str] = None, sport: Optional[str] = None) -> List[Dict[str, Any]]:
+        db = _session(self._session_factory)
+        try:
+            bound = _parse_bound(since) or datetime.utcnow()
+            query = db.query(SportsEvent).filter(SportsEvent.canonical_event_id.is_(None))
+            query = query.filter(SportsEvent.updated_at >= bound)
+            if sport:
+                query = query.filter_by(sport_id=sport)
+            rows = query.order_by(SportsEvent.updated_at.asc()).limit(400).all()
+            out = []
+            for row in rows:
+                extra = load_json(row.extra_json, {}) or {}
+                out.append(
+                    {
+                        "id": row.event_id,
+                        "sport": row.sport_id,
+                        "competition": row.competition_id,
+                        "status": row.status,
+                        "live_class": extra.get("live_class"),
+                        "score": load_json(row.score_json, {}) or {},
+                        "updated_at": isoformat(row.updated_at),
+                    }
+                )
+            return out
         finally:
             db.close()
 

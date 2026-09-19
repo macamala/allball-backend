@@ -8,7 +8,8 @@ from collector.urgency import URGENCY_SECONDS
 
 # Seconds. Provider observed 429/cooldown always wins over these.
 CADENCE_SECONDS = {
-    "LIVE": 90,
+    "LIVE": 45,
+    "LIVE_CANDIDATE": 90,
     "TODAY": 600,
     "FUTURE": 3600,
     "HISTORICAL": 21600,
@@ -26,6 +27,8 @@ def operational_class(family: str, polling_class: str | None = None) -> str:
     poll = (polling_class or "").upper()
     if poll == "LIVE":
         return "LIVE"
+    if poll == "LIVE_CANDIDATE":
+        return "LIVE_CANDIDATE"
     if poll in {"NEAR_LIVE", "NORMAL"}:
         return "TODAY"
     if poll == "SLOW":
@@ -42,8 +45,8 @@ def cadence_seconds_for(family: str, polling_class: str | None = None) -> int:
 def interval_for(family: str, urgency: str) -> int:
     base = int(URGENCY_SECONDS.get(urgency) or URGENCY_SECONDS["TODAY"])
     floor = min_safe_interval(family)
-    if is_static_family(family) and urgency in {"LIVE", "IMMINENT", "RECENTLY_FINISHED", "TODAY"}:
+    if is_static_family(family) and urgency in {"LIVE", "LIVE_CANDIDATE", "IMMINENT", "RECENTLY_FINISHED", "TODAY"}:
         return max(floor, URGENCY_SECONDS["HISTORICAL"])
-    if urgency == "LIVE" and not supports_live(family):
+    if urgency in {"LIVE", "LIVE_CANDIDATE"} and not supports_live(family):
         return max(floor, URGENCY_SECONDS["TODAY"])
     return max(base, floor)

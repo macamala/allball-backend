@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from collector.cadence import interval_for
 from collector.family_caps import family_caps, is_static_family, supports_live
-from collector.family_health import family_access_blocked, family_rate_limited, family_state
+from collector.family_health import family_access_blocked, family_needs_failover, family_rate_limited, family_state
 from collector.http import STATS
 from collector.metrics import incr, set_metric, snapshot
 from collector.models import (
@@ -20,12 +20,15 @@ from collector.models import (
     SportsSource,
     SportsSourceCompetition,
 )
-from collector.urgency import URGENCY_PRIORITY, capability_for_urgency, classify_event, job_dict
+from collector.urgency import URGENCY_PRIORITY, capability_for_urgency, classify_event, job_dict, workload_for_urgency
+from collector.watch_set import in_kickoff_watch_window, rebuild_watch_set
 from collector.util import load_json
 
 
 MAX_LOGICAL = 80
 MAX_PHYSICAL = 12
+MAX_LIVE_PHYSICAL = 8
+MAX_BACKGROUND_PHYSICAL = 4
 VERIFICATION_EVERY = 12
 STARVE_SECONDS = 600
 AGE_BAND_SECONDS = 600
@@ -143,6 +146,7 @@ def _fallback_family(db: Session, competition_id: str, primary_family: str) -> T
 
 def build_due_jobs(db: Session, *, now: Optional[datetime] = None, limit: Optional[int] = None) -> List[Dict[str, Any]]:
     now = now or _now()
+    rebuild_watch_set(db, now=now)
     horizon = now + timedelta(days=30)
     past = now - timedelta(hours=FINISHED_LOOKBACK_HOURS)
     events = (
@@ -166,6 +170,8 @@ def build_due_jobs(db: Session, *, now: Optional[datetime] = None, limit: Option
             mapping, source = _primary_family(db, row.competition_id)
             mappings = [mapping] if mapping is not None else []
         urgency = classify_event(row.status, row.start_time, now=now)
+        if urgency != "LIVE" and in_kickoff_watch_window(row, now=now):
+            urgency = "LIVE_CANDIDATE"
         if urgency == "LIVE":
             live_jobs += 1
         for mapping in mappings:
@@ -183,7 +189,10 @@ def build_due_jobs(db: Session, *, now: Optional[datetime] = None, limit: Option
             if family_urgency == "LIVE":
                 if is_static_family(family) or not supports_live(family):
                     family_urgency = "TODAY"
-            if family_urgency == "LIVE" and family_rate_limited(family):
+            if family_urgency == "LIVE_CANDIDATE":
+                if is_static_family(family) or not supports_live(family):
+                    family_urgency = "TODAY"
+            if family_urgency in {"LIVE", "LIVE_CANDIDATE"} and family_needs_failover(family):
                 fb_map, fb_src = _fallback_family(db, row.competition_id, family)
                 if fb_map and fb_src and supports_live(_mapping_family(fb_map, fb_src)) and not is_static_family(_mapping_family(fb_map, fb_src)):
                     mapping, source, family = fb_map, fb_src, _mapping_family(fb_map, fb_src)
@@ -195,7 +204,7 @@ def build_due_jobs(db: Session, *, now: Optional[datetime] = None, limit: Option
             if not _due(slot, interval, now, family):
                 continue
             seen_key = (row.competition_id, family)
-            if seen_key in seen_comp_family and family_urgency not in {"LIVE", "IMMINENT", "RECENTLY_FINISHED"}:
+            if seen_key in seen_comp_family and family_urgency not in {"LIVE", "LIVE_CANDIDATE", "IMMINENT", "RECENTLY_FINISHED"}:
                 continue
             seen_comp_family.add(seen_key)
             jobs.append(
@@ -210,6 +219,7 @@ def build_due_jobs(db: Session, *, now: Optional[datetime] = None, limit: Option
                     interval=interval,
                     use_fallback=False,
                     sport=row.sport_id,
+                    workload=workload_for_urgency(family_urgency),
                     last_run_at=slot.last_run_at if slot else None,
                     next_due_at=slot.next_due_at if slot else None,
                     last_status=slot.last_status if slot else None,
@@ -256,6 +266,7 @@ def build_due_jobs(db: Session, *, now: Optional[datetime] = None, limit: Option
                 last_status=slot.last_status if slot else None,
                 last_attempt_at=health.last_attempt_at if health else None,
                 last_success_at=health.last_success_at if health else None,
+                workload=workload_for_urgency(urgency),
             )
         )
         comps_seen.add((cid, family))
@@ -324,10 +335,9 @@ def select_fair_groups(
 ) -> Tuple[List[List[Dict[str, Any]]], Dict[str, Any]]:
     """Pick up to max_physical request groups from the full due set.
 
-    LIVE/IMMINENT/RECENTLY_FINISHED first. Remaining slots rotate through
-    never-run and starved families so alphabetical first-N cannot starve
-    mapped providers. Non-live families are capped at one group per tick
-    unless they are starved.
+    LIVE/IMMINENT/RECENTLY_FINISHED first within a reserved live budget.
+    Background discovery cannot consume unused live slots.
+    Live work may borrow unused background slots.
     """
     global _family_rr
     ranked = sorted(jobs, key=lambda row: job_sort_key(row, now))
@@ -359,10 +369,19 @@ def select_fair_groups(
 
     liveish_groups = [group for group in groups if _liveish(group)]
     other_groups = [group for group in groups if not _liveish(group)]
+    live_cap = min(MAX_LIVE_PHYSICAL, max_physical)
+    live_taken = 0
     for group in liveish_groups:
-        if len(selected) >= max_physical:
+        if live_taken >= live_cap:
             break
         _take(group)
+        live_taken += 1
+    background_cap = min(MAX_BACKGROUND_PHYSICAL, max(0, max_physical - live_taken))
+    leftover_live = [group for group in liveish_groups if group not in selected]
+    while leftover_live and background_cap:
+        _take(leftover_live.pop(0))
+        background_cap -= 1
+        live_taken += 1
 
     best_for_family: Dict[str, List[Dict[str, Any]]] = {}
     family_order: List[str] = []
@@ -377,8 +396,9 @@ def select_fair_groups(
         index = _family_rr % len(coverage)
         _family_rr += 1
         coverage = coverage[index:] + coverage[:index]
+    background_taken = 0
     for family in coverage + remainder:
-        if len(selected) >= max_physical:
+        if background_taken >= background_cap:
             break
         group = best_for_family[family]
         if (
@@ -387,6 +407,7 @@ def select_fair_groups(
         ):
             continue
         _take(group)
+        background_taken += 1
 
     never_run = sum(1 for job in jobs if job_never_run(job))
     real_waits = [job_wait_seconds(job, now) for job in jobs if job.get("last_run_at") or job.get("next_due_at")]
@@ -413,6 +434,7 @@ def select_fair_groups(
         "families_selected": sorted({job.get("family") for group in selected for job in group if job.get("family")}),
         "sports_selected": sorted({job.get("sport") for group in selected for job in group if job.get("sport")}),
         "urgencies_selected": sorted({job.get("urgency") for group in selected for job in group if job.get("urgency")}),
+        "live_groups_selected": live_taken,
     }
     return selected, stats
 
@@ -465,11 +487,7 @@ def run_incremental_tick(db: Session, *, sleeper=None, now: Optional[datetime] =
         for job in group:
             job = dict(job)
             family = job["family"]
-            if (
-                family_rate_limited(family)
-                or family_access_blocked(family)
-                or family_caps(family).get("production_status") == "ACCESS_BLOCKED"
-            ):
+            if family_needs_failover(family) or family_caps(family).get("production_status") == "ACCESS_BLOCKED":
                 fb_map, fb_src = _fallback_family(db, job["competition_id"], family)
                 if not (
                     fb_map

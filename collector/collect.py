@@ -45,6 +45,8 @@ from collector.identity import ensure_entity, remember_mapping
 from collector.limits import is_rate_limited, mark_rate_limited, record_hit, retry_call
 from collector.live_state import reconcile_live_status
 from collector.merge import apply_row_fields, merge_event_fields
+from collector.status_transitions import apply_or_reject
+from collector.latency import record_observation_latency
 from collector.normalize import fingerprint, normalize_event
 from collector.family_health import family_access_blocked, family_rate_limited
 from collector.family_plan import family_priority
@@ -139,12 +141,23 @@ def _fetch(
     if sleeper is not None:
         kwargs["sleeper"] = sleeper
     begin_budget(max_requests=8, max_seconds=18)
+    started = datetime.utcnow()
     try:
-        return retry_call(_call, **kwargs)
+        result = retry_call(_call, **kwargs)
     except Exception as exc:
         return FetchResult(ok=False, error=str(exc), http_status=0, classification="NETWORK_FAILURE")
     finally:
         end_budget()
+    completed = datetime.utcnow()
+    stamp = {
+        "fetch_started_at": started.isoformat() + "Z",
+        "fetch_completed_at": completed.isoformat() + "Z",
+        "parsed_at": completed.isoformat() + "Z",
+    }
+    for event in result.events or []:
+        if isinstance(event, dict):
+            event.update({k: v for k, v in stamp.items() if not event.get(k)})
+    return result
 
 
 def _upsert_event(
@@ -249,6 +262,7 @@ def _upsert_event(
         incoming["source_fetch_time"] = incoming.get("source_fetch_time") or fetch_now
         incoming["retrieved_at"] = incoming.get("source_fetch_time")
         incoming["sport"] = incoming.get("sport") or sport_id
+        incoming = apply_or_reject(current, incoming)
         merged = merge_event_fields(
             current,
             incoming,

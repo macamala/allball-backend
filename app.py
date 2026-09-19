@@ -913,7 +913,36 @@ def sports_data_live(
         date_to=date_to,
     )
     payload["events"] = events
-    payload["matches"] = events_to_legacy_matches(events)
+    payload["matches"] = [
+        {
+            "id": row.get("id"),
+            "sport": row.get("sport"),
+            "competition": row.get("competition"),
+            "home": (row.get("home") or {}).get("name") if isinstance(row.get("home"), dict) else row.get("home"),
+            "away": (row.get("away") or {}).get("name") if isinstance(row.get("away"), dict) else row.get("away"),
+            "home_score": (row.get("score") or {}).get("home"),
+            "away_score": (row.get("score") or {}).get("away"),
+            "status": row.get("status"),
+            "live": row.get("live"),
+            "live_class": row.get("live_class"),
+            "updated_at": row.get("updated_at"),
+        }
+        for row in events
+    ]
+    payload["generated_at"] = datetime.utcnow().isoformat() + "Z"
+    return payload
+
+
+@app.get("/sports-data/status-delta")
+def sports_data_status_delta(
+    since: Optional[str] = Query(None),
+    sport: Optional[str] = Query(None),
+):
+    provider = get_active_provider()
+    payload = empty_events_payload(sport, None, None)
+    payload.update(provider.status())
+    payload["events"] = provider.get_status_delta(since=since, sport=sport)
+    payload["generated_at"] = datetime.utcnow().isoformat() + "Z"
     return payload
 
 
@@ -983,12 +1012,24 @@ def internal_recompute_status(request: Request, db: Session = Depends(get_db)):
 def internal_collector_health(request: Request, db: Session = Depends(get_db)):
     if not _internal_ok(request):
         raise HTTPException(status_code=404, detail="Not found")
+    from collector.live_health import live_health_payload
+
     return {
         "sources": source_health_payload(db),
         "competitions": competition_health_payload(db),
         "freshness": freshness_payload(db),
         "results": results_health_payload(db),
+        "live": live_health_payload(db),
     }
+
+
+@app.get("/internal/collector/live-health")
+def internal_live_health(request: Request, db: Session = Depends(get_db)):
+    if not _internal_ok(request):
+        raise HTTPException(status_code=404, detail="Not found")
+    from collector.live_health import live_health_payload
+
+    return live_health_payload(db)
 
 
 @app.get("/sports-data/matches/{match_id}")

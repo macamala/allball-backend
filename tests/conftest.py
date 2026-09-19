@@ -39,6 +39,7 @@ def reset_collector_state():
         SportsIngestionError,
         SportsSchedulerLease,
         SportsSchedulerSlot,
+        SportsLiveWatch,
     )
 
     Base.metadata.create_all(bind=engine)
@@ -62,6 +63,7 @@ def reset_collector_state():
             SportsIngestionRun,
             SportsSchedulerLease,
             SportsSchedulerSlot,
+            SportsLiveWatch,
             SportsCompetitionHealth,
             SportsEventDetail,
             SportsEvent,

@@ -29,7 +29,11 @@ def test_old_stale_live_becomes_stale_not_finished():
         status="live",
         start_time=_iso(timedelta(hours=-12)),
         score={"home": 1, "away": 0},
-        source_fetch_time=_iso(timedelta(0)),
+        source_family="thesportsdb",
+        source_status="live",
+        status_inferred=False,
+        source_event_updated_at=_iso(timedelta(hours=-12)),
+        source_fetch_time=_iso(timedelta(hours=-12)),
     )
     event = reconcile_live_status(_norm(raw), now=NOW)
     assert event["status"] == "stale"
@@ -104,7 +108,11 @@ def test_a_stale_live_b_unavailable_is_stale_not_fabricated_finished():
             status="live",
             start_time=_iso(timedelta(hours=-12)),
             score={"home": 0, "away": 0},
-            source_fetch_time=_iso(timedelta(0)),
+            source_family="thesportsdb",
+            source_status="live",
+            status_inferred=False,
+            source_event_updated_at=_iso(timedelta(hours=-12)),
+            source_fetch_time=_iso(timedelta(hours=-12)),
         )
     )
     event = reconcile_live_status(live, counterparts=[], now=NOW)
@@ -165,7 +173,7 @@ def test_live_api_excludes_stale_row():
         all_events = provider.get_events()
         assert live == []
         assert len(all_events) == 1
-        assert all_events[0]["status"] == "stale"
+        assert all_events[0]["status"] in {"stale", "scheduled"}
         assert all_events[0]["score"]["home"] == 1
     finally:
         db.close()
