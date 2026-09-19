@@ -1,0 +1,1341 @@
+{
+  "pairs": {
+    "afc-champions-league|afc-web": {
+      "status": "RESTRICTED",
+      "events": 0,
+      "reason": "RESTRICTED"
+    },
+    "argentina-primera|liga-profesional-web": {
+      "status": "EMPTY_ARCHIVE",
+      "events": 0,
+      "reason": "PARSER_COULD_NOT_EXTRACT",
+      "http_status": 200,
+      "url": "https://www.ligaprofesional.ar"
+    },
+    "atp-tour|sackmann-tennis": {
+      "status": "NETWORK_UNAVAILABLE",
+      "events": 0,
+      "reason": "request budget exceeded",
+      "http_status": 0
+    },
+    "australia-a-league|a-league-web": {
+      "status": "NETWORK_UNAVAILABLE",
+      "events": 0,
+      "reason": "<urlopen error timed out>",
+      "http_status": 0
+    },
+    "australia-a-league-women|a-league-web": {
+      "status": "NETWORK_UNAVAILABLE",
+      "events": 0,
+      "reason": "<urlopen error timed out>",
+      "http_status": 0
+    },
+    "bha-meetings|bha-web": {
+      "status": "EMPTY_ARCHIVE",
+      "events": 0,
+      "reason": "PARSER_COULD_NOT_EXTRACT",
+      "http_status": 200,
+      "url": "https://www.britishhorseracing.com/racing/results/"
+    },
+    "bha-meetings|sporting-life": {
+      "status": "WORKING",
+      "events": 2,
+      "sample": "Crowned vs Southwell 2026-09-17",
+      "reason": "sportinglife.com racing results",
+      "verified_at": "2026-09-18T11:07:28.493166+00:00"
+    },
+    "biathlon|ibu-web": {
+      "status": "WORKING",
+      "events": 32,
+      "sample": "Para Regional Event vs Oberhof 2026-10-02",
+      "reason": "biathlonresults.com SportAPI Events",
+      "verified_at": "2026-09-18T13:14:01.838239+00:00"
+    },
+    "brazil-lnf|futsalplanet": {
+      "status": "WORKING",
+      "events": 3,
+      "sample": "Tubar\u00e3o Futsal vs Jaragu\u00e1 Futsal 2026-09-02",
+      "reason": "futsalplanet.com LNF com=2737",
+      "verified_at": "2026-09-18T08:49:16.982112+00:00"
+    },
+    "bwf-and-national-events|tournamentsoftware": {
+      "status": "EMPTY_ARCHIVE",
+      "events": 0,
+      "reason": "SOURCE_HEALTHY_NO_EVENTS",
+      "http_status": 200,
+      "url": "https://www.tournamentsoftware.com/sport/tournaments"
+    },
+    "bwf-and-national-events|nba-japan-web": {
+      "status": "EMPTY_ARCHIVE",
+      "events": 0,
+      "reason": "PARSER_COULD_NOT_EXTRACT",
+      "http_status": 200,
+      "url": "https://badminton.or.jp"
+    },
+    "caf-champions-league|caf-web": {
+      "status": "EMPTY_ARCHIVE",
+      "events": 0,
+      "reason": "PARSER_COULD_NOT_EXTRACT",
+      "http_status": 200,
+      "url": "https://www.cafonline.com/caf-champions-league/"
+    },
+    "cdl-majors|cdl-web": {
+      "status": "WORKING",
+      "events": 15,
+      "reason": "canonical events from mapped public path",
+      "sample": "PAR vs TOR",
+      "url": "https://callofdutyleague.com",
+      "http_status": 200
+    },
+    "cev-eurovolley-men|cev-web": {
+      "status": "EMPTY_ARCHIVE",
+      "events": 0,
+      "reason": "SOURCE_HEALTHY_NO_EVENTS",
+      "http_status": 200,
+      "url": "https://www.cev.eu/calendar/"
+    },
+    "copa-libertadores|conmebol-web": {
+      "status": "EMPTY_ARCHIVE",
+      "events": 0,
+      "reason": "PARSER_COULD_NOT_EXTRACT",
+      "http_status": 200,
+      "url": "https://www.conmebol.com/es/copa-libertadores/"
+    },
+    "copa-sudamericana|conmebol-web": {
+      "status": "EMPTY_ARCHIVE",
+      "events": 0,
+      "reason": "PARSER_COULD_NOT_EXTRACT",
+      "http_status": 200,
+      "url": "https://www.conmebol.com/es/copa-sudamericana/"
+    },
+    "czech-first-league|fortuna-liga-cz-web": {
+      "status": "RESTRICTED",
+      "events": 0,
+      "reason": "http 403",
+      "http_status": 403
+    },
+    "denmark-superliga|denmark-superliga-web": {
+      "status": "EMPTY_ARCHIVE",
+      "events": 0,
+      "reason": "PARSER_COULD_NOT_EXTRACT",
+      "http_status": 200,
+      "url": "https://www.superliga.dk/kampprogram"
+    },
+    "ettu-events|ettu-web": {
+      "status": "EMPTY_ARCHIVE",
+      "events": 0,
+      "sample": "",
+      "reason": "ettu.org/past-events + results.ettu.site",
+      "verified_at": "2026-09-18T08:49:15.182975+00:00"
+    },
+    "fifa-futsal-when-listed|fifa-digital": {
+      "status": "EMPTY_ARCHIVE",
+      "events": 0,
+      "sample": "",
+      "reason": "FIFA Digital calendar futsal filter",
+      "verified_at": "2026-09-18T12:54:55.661055+00:00"
+    },
+    "fifa-futsal-when-listed|futsalplanet": {
+      "status": "EMPTY_ARCHIVE",
+      "events": 0,
+      "reason": "PARSER_COULD_NOT_EXTRACT",
+      "http_status": 200,
+      "url": "https://futsalplanet.com"
+    },
+    "fih-eurohockey|fih-web": {
+      "status": "EMPTY_ARCHIVE",
+      "events": 0,
+      "reason": "PARSER_COULD_NOT_EXTRACT",
+      "http_status": 200,
+      "url": "https://www.fih.hockey"
+    },
+    "finland-liiga|liiga-web": {
+      "status": "EMPTY_ARCHIVE",
+      "events": 0,
+      "reason": "SOURCE_HEALTHY_NO_EVENTS",
+      "http_status": 200,
+      "url": "https://liiga.fi"
+    },
+    "fis-disciplines|fis-web": {
+      "status": "WORKING",
+      "events": 1,
+      "sample": "Sabine Payer vs FIS race 2025-12-13",
+      "reason": "fis-ski.com DB results raceid 24016",
+      "verified_at": "2026-09-18T08:58:01.606032+00:00"
+    },
+    "formula-e|formula-e-web": {
+      "status": "WORKING",
+      "events": 1,
+      "sample": "Taylor Barnard vs Nyck De Vries 2025-12-06",
+      "reason": "fiaformulae.com results-and-standings",
+      "verified_at": "2026-09-18T08:48:39.546084+00:00"
+    },
+    "france-pro-d2|lnr-web": {
+      "status": "NETWORK_UNAVAILABLE",
+      "events": 0,
+      "reason": "<urlopen error [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate (_ssl.c:1028)>",
+      "http_status": 0
+    },
+    "france-top-14|lnr-web": {
+      "status": "NETWORK_UNAVAILABLE",
+      "events": 0,
+      "reason": "<urlopen error [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate (_ssl.c:1028)>",
+      "http_status": 0
+    },
+    "futsalplanet-leagues-cups|futsalplanet": {
+      "status": "EMPTY_ARCHIVE",
+      "events": 0,
+      "reason": "PARSER_COULD_NOT_EXTRACT",
+      "http_status": 200,
+      "url": "https://futsalplanet.com"
+    },
+    "gbgb-meetings|gbgb-web": {
+      "status": "WORKING",
+      "events": 20,
+      "sample": "Race 12 vs Newcastle 2026-09-17",
+      "reason": "api.gbgb.org.uk/api/results",
+      "verified_at": "2026-09-18T08:49:18.507121+00:00"
+    },
+    "gbgb-meetings|sporting-life": {
+      "status": "WORKING",
+      "events": 10,
+      "sample": "Nottingham meeting vs Nottingham 2026-09-17",
+      "reason": "sportinglife.com greyhound results",
+      "verified_at": "2026-09-18T11:07:29.424215+00:00"
+    },
+    "germany-click-tt|click-tt": {
+      "status": "RESTRICTED",
+      "events": 0,
+      "sample": "",
+      "reason": "LICENSING_BLOCKER: click-TT terms restrict automated parsing/reuse",
+      "verified_at": "2026-09-18T12:20:07.769698+00:00"
+    },
+    "germany-click-tt|tischtennislive": {
+      "status": "WORKING",
+      "events": 1,
+      "sample": "Ajax Berlin vs Olympischer SC 2026-09-02",
+      "reason": "bettv.tischtennislive.de Spielbericht",
+      "verified_at": "2026-09-18T12:24:14.191870+00:00"
+    },
+    "germany-handball-bundesliga|hbl-web": {
+      "status": "WORKING",
+      "events": 9,
+      "sample": "THW Kiel vs TBV Lemgo Lippe 2026-08-28",
+      "reason": "official HBL 2026/27 schedule article",
+      "verified_at": "2026-09-18T10:05:40.438817+00:00"
+    },
+    "germany-handball-bundesliga|thesportsdb": {
+      "status": "WORKING",
+      "events": 2,
+      "sample": "HBW Balingen-Weilstetten vs TVB 1898 Stuttgart 2026-09-18",
+      "reason": "TheSportsDB eventsnextleague id=4533 German Handball-Bundesliga",
+      "verified_at": "2026-09-18T10:06:30.000000+00:00"
+    },
+    "india-super-league|isl-web": {
+      "status": "NETWORK_UNAVAILABLE",
+      "events": 0,
+      "reason": "<urlopen error [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: certificate has expired (_ssl.c:1028)>",
+      "http_status": 0
+    },
+    "brazil-lnf|lnf-web": {
+      "status": "WORKING",
+      "events": 10,
+      "sample": "S\u00e3o Jos\u00e9 vs Atl\u00e2ntico 2026-07-27",
+      "reason": "lnfoficial.com.br tabela de jogos",
+      "verified_at": "2026-09-18T11:49:38.217194+00:00"
+    },
+    "canada-standardbred-meetings|standardbred-canada-web": {
+      "status": "WORKING",
+      "events": 1,
+      "sample": "Charlottetown vs Race 1 2026-07-09",
+      "reason": "standardbredcanada.ca results",
+      "verified_at": "2026-09-18T11:49:26.352869+00:00"
+    },
+    "ettu-events|sport-de-web": {
+      "status": "EMPTY_ARCHIVE",
+      "events": 0,
+      "reason": "reachable; no extractable events in fixtures/results path",
+      "http_status": 200,
+      "url": "https://sport.de"
+    },
+    "fih-eurohockey|altiusrt": {
+      "status": "EMPTY_ARCHIVE",
+      "events": 0,
+      "reason": "reachable; no extractable events in fixtures/results path",
+      "http_status": 200,
+      "url": "https://www.altiusrt.com"
+    },
+    "france-letrot-meetings|letrot-web": {
+      "status": "WORKING",
+      "events": 8,
+      "sample": "Vincennes vs Race 1 2026-09-17",
+      "reason": "letrot.com resultats",
+      "verified_at": "2026-09-18T11:49:28.939403+00:00"
+    },
+    "france-letrot-meetings|equidia-web": {
+      "status": "WORKING",
+      "events": 34,
+      "sample": "Enghien vs Le Graal 2026-07-01",
+      "reason": "equidia.fr arrivees",
+      "verified_at": "2026-09-18T11:49:33.860473+00:00"
+    },
+    "futsalplanet-leagues-cups|lnf-oficial-web": {
+      "status": "WORKING",
+      "events": 1,
+      "reason": "canonical events from mapped public path",
+      "sample": "Gols vs F. C.",
+      "url": "https://lnfoficial.com.br",
+      "http_status": 200
+    },
+    "italy-superlega|dataproject-wcm": {
+      "status": "WORKING",
+      "events": 1,
+      "reason": "canonical events from mapped public path",
+      "sample": "Vero Volley Monza - Itas Trentino vs La Autopancotti Vero Volley Monza conquis",
+      "url": "https://www.legavolley.it/calendario",
+      "http_status": 200
+    },
+    "italy-superlega|volleyballworld": {
+      "status": "WORKING",
+      "events": 1,
+      "sample": "Sir Susa Scai Perugia vs Cucine Lube Civitanova 2026-05-06",
+      "reason": "en.volleyballworld.com superlega 27232",
+      "verified_at": "2026-09-18T11:08:35.738003+00:00"
+    },
+    "malaysia-super-league|futbol24-web": {
+      "status": "EMPTY_ARCHIVE",
+      "events": 0,
+      "reason": "PARSER_COULD_NOT_EXTRACT",
+      "http_status": 200,
+      "url": "https://futbol24.com"
+    },
+    "mexico-liga-mx|liga-mx-web": {
+      "status": "WORKING",
+      "events": 71,
+      "reason": "canonical events from mapped public path",
+      "sample": "Todos --> vs Local",
+      "url": "https://ligamx.net",
+      "http_status": 200
+    },
+    "mexico-lnbp|lnbp-web": {
+      "status": "EMPTY_ARCHIVE",
+      "events": 0,
+      "sample": "",
+      "reason": "LNBP official",
+      "verified_at": "2026-09-18T08:49:21.046369+00:00"
+    },
+    "motogp|pulselive": {
+      "status": "WORKING",
+      "events": 29,
+      "reason": "canonical events from mapped public path",
+      "sample": "GRAND PRIX OF THAILAND vs Chang International Circuit",
+      "url": "https://api.motogp.pulselive.com/motogp/v1/results/seasons",
+      "http_status": 200
+    },
+    "motogp|crash-net": {
+      "status": "EMPTY_ARCHIVE",
+      "events": 0,
+      "reason": "PARSER_COULD_NOT_EXTRACT",
+      "http_status": 200,
+      "url": "https://Crash.net"
+    },
+    "national-and-club|tournamentsoftware": {
+      "status": "EMPTY_ARCHIVE",
+      "events": 0,
+      "reason": "SOURCE_HEALTHY_NO_EVENTS",
+      "http_status": 200,
+      "url": "https://www.tournamentsoftware.com/sport/tournaments"
+    },
+    "national-and-club|rankedin": {
+      "status": "EMPTY_ARCHIVE",
+      "events": 0,
+      "reason": "SOURCE_HEALTHY_NO_EVENTS",
+      "http_status": 200,
+      "url": "https://rankedin.com/en/tournament"
+    },
+    "nll|nll-web": {
+      "status": "WORKING",
+      "events": 18,
+      "sample": "Halifax Thunderbirds vs Vancouver Warriors 2026-04-24",
+      "reason": "nll.com/schedule/scores",
+      "verified_at": "2026-09-18T09:27:59.595713+00:00"
+    },
+    "nordic-water-polo-league|cetus-web": {
+      "status": "WORKING",
+      "events": 6,
+      "sample": "Zaibas Elektrenai vs SSK Slagelse 2025-12-05",
+      "reason": "cetus.fi NWPL ottelut",
+      "verified_at": "2026-09-18T12:54:56.612991+00:00"
+    },
+    "nordic-water-polo-league|nordic-wpl-web": {
+      "status": "EMPTY_ARCHIVE",
+      "events": 0,
+      "sample": "",
+      "reason": "Nordic WPL results",
+      "verified_at": "2026-09-18T08:49:40.296146+00:00"
+    },
+    "nrl|nrl-web": {
+      "status": "EMPTY_ARCHIVE",
+      "events": 0,
+      "reason": "PARSER_COULD_NOT_EXTRACT",
+      "http_status": 200,
+      "url": "https://nrl.com/draw"
+    },
+    "nrl|abc-sport": {
+      "status": "WORKING",
+      "events": 1,
+      "reason": "canonical events from mapped public path",
+      "sample": "helping Cleveland secure a crucial vs win over the Chicago White Sox in its bat",
+      "url": "https://www.abc.net.au/news/sport",
+      "http_status": 200
+    },
+    "nsw-hrnsw-meetings|hrnsw-web": {
+      "status": "WORKING",
+      "events": 28,
+      "sample": "Riverina Paceway vs Race 1 2026-09-18",
+      "reason": "hrnsw.com.au results",
+      "verified_at": "2026-09-18T12:24:10.412957+00:00"
+    },
+    "plusliga|plusliga-web": {
+      "status": "RESTRICTED",
+      "events": 0,
+      "reason": "RESTRICTED"
+    },
+    "serbia-superliga|superliga-web": {
+      "status": "WORKING",
+      "events": 166,
+      "sample": "Crvena zvezda vs Ma\u010dva 2026-07-17",
+      "reason": "superliga.rs raspored + FSS Mozzart Bet 26/27",
+      "verified_at": "2026-09-17T14:05:24.666684+00:00"
+    },
+    "slovakia-super-liga|futbalnet": {
+      "status": "WORKING",
+      "events": 8,
+      "sample": "\u0160K Slovan Bratislava futbal vs M\u0160K \u017dilina 2026-09-13",
+      "reason": "sportnet.sme.sk futbalnet nike-liga vysledky",
+      "verified_at": "2026-09-17T14:03:48.674619+00:00"
+    },
+    "spain-acb|acb-web": {
+      "status": "WORKING",
+      "events": 306,
+      "sample": "Surne Bilbao vs Kids&Us Manresa 2026-09-26",
+      "reason": "acb.com/es/liga/calendario Liga Endesa",
+      "verified_at": "2026-09-18T08:48:39.419488+00:00"
+    },
+    "ssn-australia|netball-australia-web": {
+      "status": "SOURCE_CHANGED",
+      "events": 0,
+      "reason": "http 404",
+      "http_status": 404
+    },
+    "super-league|super-league-web": {
+      "status": "NETWORK_UNAVAILABLE",
+      "events": 0,
+      "reason": "<urlopen error [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: Hostname mismatch, certificate is not valid for 'superleague.co.uk'. (_ssl.c:1028)>",
+      "http_status": 0
+    },
+    "super-rugby|super-rugby-web": {
+      "status": "RESTRICTED",
+      "events": 0,
+      "reason": "RESTRICTED"
+    },
+    "sweden-allsvenskan|allsvenskan-web": {
+      "status": "EMPTY_ARCHIVE",
+      "events": 0,
+      "reason": "SOURCE_HEALTHY_NO_EVENTS",
+      "http_status": 200,
+      "url": "https://www.allsvenskan.se/matcher"
+    },
+    "thai-league-1|thaileague-web": {
+      "status": "EMPTY_ARCHIVE",
+      "events": 0,
+      "reason": "SOURCE_HEALTHY_NO_EVENTS",
+      "http_status": 200,
+      "url": "https://thaileague.co.th"
+    },
+    "title-fights|sanctioning-bodies": {
+      "status": "NETWORK_UNAVAILABLE",
+      "events": 0,
+      "reason": "<urlopen error [Errno 11001] getaddrinfo failed>",
+      "http_status": 0
+    },
+    "tour-de-france|aso-letour": {
+      "status": "WORKING",
+      "events": 22,
+      "sample": "T. POGACAR vs Tour de France Stage 21 GC 2026-07-26",
+      "reason": "letour.fr/en/rankings",
+      "verified_at": "2026-09-18T11:08:01.369142+00:00"
+    },
+    "tour-de-france|cyclingnews": {
+      "status": "WORKING",
+      "events": 8,
+      "reason": "canonical events from mapped public path",
+      "sample": "Full Calendar vs race",
+      "url": "https://cyclingnews.com",
+      "http_status": 200
+    },
+    "tour-de-france|uci-web": {
+      "status": "EMPTY_ARCHIVE",
+      "events": 0,
+      "reason": "PARSER_COULD_NOT_EXTRACT",
+      "http_status": 200,
+      "url": "https://uci.org"
+    },
+    "uci-calendar|uci-web": {
+      "status": "EMPTY_ARCHIVE",
+      "events": 0,
+      "sample": "",
+      "reason": "UCI calendar",
+      "verified_at": "2026-09-18T08:49:25.410991+00:00"
+    },
+    "uci-calendar|cyclingnews": {
+      "status": "WORKING",
+      "events": 8,
+      "reason": "canonical events from mapped public path",
+      "sample": "Full Calendar vs race",
+      "url": "https://cyclingnews.com",
+      "http_status": 200
+    },
+    "usa-nwsl|nwsl-web": {
+      "status": "EMPTY_ARCHIVE",
+      "events": 0,
+      "reason": "PARSER_COULD_NOT_EXTRACT",
+      "http_status": 200,
+      "url": "https://www.nwslsoccer.com/schedule"
+    },
+    "usa-usl-championship|usl-web": {
+      "status": "SOURCE_CHANGED",
+      "events": 0,
+      "reason": "http 404",
+      "http_status": 404
+    },
+    "usa-usta-meetings|usta-web": {
+      "status": "RESTRICTED",
+      "events": 0,
+      "sample": "",
+      "reason": "LICENSING_BLOCKER: racing.ustrotting.com personal non-commercial use only; not expanded",
+      "verified_at": "2026-09-18T12:20:07.769691+00:00"
+    },
+    "usa-usta-meetings|meadowlands-web": {
+      "status": "WORKING",
+      "events": 1,
+      "sample": "Meadowlands vs Just My Mama 2026-08-21",
+      "reason": "playmeadowlands.com race-day results",
+      "verified_at": "2026-09-18T12:24:31.083265+00:00"
+    },
+    "usa-usta-meetings|delaware-lbj-web": {
+      "status": "WORKING",
+      "events": 1,
+      "reason": "canonical events from mapped public path",
+      "sample": "Event # vs Estimated Purse",
+      "url": "https://littlebrownjug.com",
+      "http_status": 200
+    },
+    "uzbekistan-super-league|championat-asia": {
+      "status": "EMPTY_ARCHIVE",
+      "events": 0,
+      "reason": "SOURCE_HEALTHY_NO_EVENTS",
+      "http_status": 200,
+      "url": "https://www.championat.com"
+    },
+    "vct|valorantesports-web": {
+      "status": "RESTRICTED",
+      "events": 0,
+      "sample": "",
+      "reason": "TECHNICALLY_WORKING public schedule HTML (e.g. Paper Rex 3-1 NRG 2026-03-14); TERMS_RESTRICTED Riot ToS https://www.riotgames.com/en/terms-of-service; ingestion not enabled",
+      "verified_at": "2026-09-18T13:14:22.670604+00:00"
+    },
+    "wa-calendar|world-athletics-web": {
+      "status": "WORKING",
+      "events": 40,
+      "sample": "BOclassic Alto Adige vs Bolzano (ITA) 2026-12-31",
+      "reason": "worldathletics.org calendar-results",
+      "verified_at": "2026-09-18T11:49:22.838818+00:00"
+    },
+    "wta-tour|sportscore": {
+      "status": "WORKING",
+      "events": 15,
+      "sample": "Kayla Day vs Liudmila Samsonova 2026-09-17",
+      "reason": "SportScore tennis widget",
+      "verified_at": "2026-09-17T13:43:19.332643+00:00"
+    },
+    "atp-tour|sportscore": {
+      "status": "WORKING",
+      "events": 23,
+      "sample": "Martin Borisiouk vs Florent Bax 2026-09-17",
+      "reason": "SportScore tennis widget",
+      "verified_at": "2026-09-17T13:43:19.332267+00:00"
+    },
+    "wta-tour|wta-json": {
+      "status": "WORKING",
+      "events": 302,
+      "sample": "Nikola Bartunkova vs Selena Janicijevic 2026-01-11",
+      "reason": "api.wtatennis.com tournaments/901/2026/matches",
+      "verified_at": "2026-09-17T13:43:26.027535+00:00"
+    },
+    "usa-usl-championship|espn-html": {
+      "status": "WORKING",
+      "events": 10,
+      "sample": "FC Tulsa vs Brooklyn FC 2026-09-19",
+      "reason": "ESPN scoreboard with date discovery",
+      "verified_at": "2026-09-17T13:43:26.694180+00:00"
+    },
+    "usa-nwsl|espn-html": {
+      "status": "WORKING",
+      "events": 1,
+      "sample": "Kansas City Current vs San Diego Wave FC 2026-09-19",
+      "reason": "ESPN scoreboard with date discovery",
+      "verified_at": "2026-09-17T13:43:27.606061+00:00"
+    },
+    "copa-libertadores|espn-html": {
+      "status": "WORKING",
+      "events": 1,
+      "sample": "Independiente del Valle vs Flamengo 2026-09-18",
+      "reason": "ESPN scoreboard with date discovery",
+      "verified_at": "2026-09-17T13:43:27.959861+00:00"
+    },
+    "argentina-primera|espn-html": {
+      "status": "WORKING",
+      "events": 2,
+      "sample": "Defensa y Justicia vs Central C\u00f3rdoba (Santiago del Estero) 2026-09-18",
+      "reason": "ESPN scoreboard with date discovery",
+      "verified_at": "2026-09-17T13:43:28.424865+00:00"
+    },
+    "atp-tour|espn-html": {
+      "status": "EMPTY_ARCHIVE",
+      "events": 0,
+      "sample": "",
+      "reason": "ESPN scoreboard with date discovery",
+      "verified_at": "2026-09-17T13:43:30.870744+00:00"
+    },
+    "wta-tour|espn-html": {
+      "status": "EMPTY_ARCHIVE",
+      "events": 0,
+      "sample": "",
+      "reason": "ESPN scoreboard with date discovery",
+      "verified_at": "2026-09-17T13:43:30.871047+00:00"
+    },
+    "czech-first-league|espn-html": {
+      "status": "EMPTY_ARCHIVE",
+      "events": 0,
+      "sample": "h Mark Jackson at the helm has ended in a vs draw with BG Pathum United. 2h Gabriel Ta",
+      "reason": "parsed object failed event quality (sport/competition/participants)",
+      "verified_at": "2026-09-17T13:43:31.273808+00:00"
+    },
+    "denmark-superliga|espn-html": {
+      "status": "WORKING",
+      "events": 1,
+      "sample": "Silkeborg IF vs Lyngby Boldklub 2026-09-18",
+      "reason": "ESPN scoreboard with date discovery",
+      "verified_at": "2026-09-17T13:43:31.689754+00:00"
+    },
+    "sweden-allsvenskan|espn-html": {
+      "status": "WORKING",
+      "events": 3,
+      "sample": "IFK G\u00f6teborg vs IF Brommapojkarna 2026-09-19",
+      "reason": "ESPN scoreboard with date discovery",
+      "verified_at": "2026-09-17T13:43:32.333793+00:00"
+    },
+    "mexico-liga-mx|espn-html": {
+      "status": "WORKING",
+      "events": 2,
+      "sample": "Atlante vs Puebla 2026-09-19",
+      "reason": "ESPN scoreboard with date discovery",
+      "verified_at": "2026-09-17T13:43:32.727231+00:00"
+    },
+    "australia-a-league|espn-html": {
+      "status": "WORKING",
+      "events": 1,
+      "sample": "Western Sydney Wanderers vs Sydney FC 2026-10-16",
+      "reason": "ESPN scoreboard with date discovery",
+      "verified_at": "2026-09-17T13:43:33.325709+00:00"
+    },
+    "france-top-14|espn-html": {
+      "status": "EMPTY_ARCHIVE",
+      "events": 0,
+      "sample": "Dragons vs Benetton Treviso 2026-09-25",
+      "reason": "parsed object failed event quality (sport/competition/participants)",
+      "verified_at": "2026-09-17T13:43:33.743672+00:00"
+    },
+    "world-aquatics-meets|omega-timing": {
+      "status": "WORKING",
+      "events": 7,
+      "sample": "2026 USA Swimming Pro Swim Series vs Austin, USA 2026-01-14",
+      "reason": "omegatiming.com/Sport index",
+      "verified_at": "2026-09-18T08:51:50.478996+00:00"
+    },
+    "world-aquatics-events|omega-timing": {
+      "status": "EMPTY_ARCHIVE",
+      "events": 0,
+      "sample": "",
+      "reason": "Omega Sport index water polo",
+      "verified_at": "2026-09-18T08:49:25.448498+00:00"
+    },
+    "usa-usl-championship|sportscore": {
+      "status": "EMPTY_ARCHIVE",
+      "events": 0,
+      "sample": "",
+      "reason": "SportScore football retest once after cooldown",
+      "verified_at": "2026-09-17T13:43:20.213874+00:00"
+    },
+    "motogp|sporting-events": {
+      "status": "EMPTY_ARCHIVE",
+      "events": 0,
+      "sample": "",
+      "reason": "sporting-events.org dataset",
+      "verified_at": "2026-09-17T13:43:20.913287+00:00"
+    },
+    "nrl|sporting-events": {
+      "status": "EMPTY_ARCHIVE",
+      "events": 0,
+      "sample": "",
+      "reason": "sporting-events.org dataset",
+      "verified_at": "2026-09-17T13:43:22.548612+00:00"
+    },
+    "korean-golf-tour|sporting-events": {
+      "status": "EMPTY_ARCHIVE",
+      "events": 0,
+      "sample": "",
+      "reason": "sporting-events.org dataset",
+      "verified_at": "2026-09-17T13:43:22.787376+00:00"
+    },
+    "afc-champions-league|soccerway": {
+      "status": "WORKING",
+      "events": 160,
+      "sample": "Port MTI FC (Tha) vs Vissel Kobe (Jpn) 2026-09-16",
+      "reason": "soccerway /asia/afc-champions-league/",
+      "verified_at": "2026-09-17T14:02:49.281500+00:00"
+    },
+    "australia-a-league-women|soccerway": {
+      "status": "WORKING",
+      "events": 160,
+      "sample": "Newcastle W vs Perth W 2026-10-17",
+      "reason": "soccerway /australia/a-league-women/",
+      "verified_at": "2026-09-17T14:02:53.589349+00:00"
+    },
+    "caf-champions-league|soccerway": {
+      "status": "WORKING",
+      "events": 160,
+      "sample": "Nouadhibou (Mrt) vs Vipers (Uga) 2026-09-13",
+      "reason": "soccerway /africa/caf-champions-league/",
+      "verified_at": "2026-09-17T14:03:00.039662+00:00"
+    },
+    "copa-sudamericana|soccerway": {
+      "status": "WORKING",
+      "events": 160,
+      "sample": "Atletico-MG (Bra) vs Santos (Bra) 2026-09-16",
+      "reason": "soccerway /south-america/copa-sudamericana/",
+      "verified_at": "2026-09-17T14:03:07.259187+00:00"
+    },
+    "serbia-superliga|soccerway": {
+      "status": "WORKING",
+      "events": 80,
+      "sample": "Zemun vs Radnik 2026-09-14",
+      "reason": "soccerway /serbia/mozzart-bet-super-liga/",
+      "verified_at": "2026-09-17T14:03:15.421273+00:00"
+    },
+    "slovakia-super-liga|soccerway": {
+      "status": "WORKING",
+      "events": 160,
+      "sample": "Slovan Bratislava vs Zilina 2026-09-13",
+      "reason": "soccerway /slovakia/nike-liga/",
+      "verified_at": "2026-09-17T14:03:21.534719+00:00"
+    },
+    "thai-league-1|soccerway": {
+      "status": "WORKING",
+      "events": 160,
+      "sample": "Chonburi vs Rayong FC 2026-09-13",
+      "reason": "soccerway /thailand/thai-league-1/",
+      "verified_at": "2026-09-17T14:03:28.016217+00:00"
+    },
+    "uzbekistan-super-league|soccerway": {
+      "status": "WORKING",
+      "events": 160,
+      "sample": "Buxoro vs Navbahor Namangan 2026-09-11",
+      "reason": "soccerway /uzbekistan/super-league/",
+      "verified_at": "2026-09-17T14:03:33.289707+00:00"
+    },
+    "malaysia-super-league|soccerway": {
+      "status": "WORKING",
+      "events": 160,
+      "sample": "Selangor vs Kuala Lumpur City 2026-09-13",
+      "reason": "soccerway /malaysia/super-league/",
+      "verified_at": "2026-09-17T14:03:38.598337+00:00"
+    },
+    "india-super-league|aiff-web": {
+      "status": "WORKING",
+      "events": 10,
+      "sample": "Chennaiyin FC vs Bengaluru Football Club 2026-05-16",
+      "reason": "the-aiff.com/competitions/isl",
+      "verified_at": "2026-09-17T14:03:40.661761+00:00"
+    },
+    "france-top-14|rte-rugby": {
+      "status": "WORKING",
+      "events": 182,
+      "sample": "Toulouse vs Union Bordeaux Begles 2026-09-13",
+      "reason": "rte.ie rugby top-14 43093 results/fixtures",
+      "verified_at": "2026-09-18T08:12:32.293279+00:00"
+    },
+    "super-rugby|super-rugby-html": {
+      "status": "WORKING",
+      "events": 16,
+      "sample": "Blues vs Chiefs 2026-02-14",
+      "reason": "super.rugby match-centre HTML match-packs",
+      "verified_at": "2026-09-18T08:12:45.103135+00:00"
+    },
+    "finland-liiga|eliteprospects": {
+      "status": "WORKING",
+      "events": 34,
+      "sample": "TPS vs Tappara 2026-09-17",
+      "reason": "eliteprospects.com/league/liiga/scores",
+      "verified_at": "2026-09-18T08:12:46.704764+00:00"
+    },
+    "plusliga|volleyballworld": {
+      "status": "EMPTY_ARCHIVE",
+      "events": 0,
+      "sample": "",
+      "reason": "en.volleyballworld.com competitions/plusliga",
+      "verified_at": "2026-09-18T08:12:52.769450+00:00"
+    },
+    "cev-eurovolley-men|cev-competition-area": {
+      "status": "WORKING",
+      "events": 68,
+      "sample": "ITALY vs SWEDEN 2026-09-10",
+      "reason": "www-old.cev.eu CompetitionView ID=1572",
+      "verified_at": "2026-09-18T08:12:55.107178+00:00"
+    },
+    "france-pro-d2|prod2-web": {
+      "status": "WORKING",
+      "events": 8,
+      "sample": "Stade Aurillacois vs CA Brive 2026-09-17",
+      "reason": "prod2.lnr.fr calendrier-et-resultats",
+      "verified_at": "2026-09-18T08:48:36.330795+00:00"
+    },
+    "fih-eurohockey|eurohockey-web": {
+      "status": "WORKING",
+      "events": 4,
+      "sample": "Scotland vs Italy 2026-07-12",
+      "reason": "eurohockey.org qualifier event table",
+      "verified_at": "2026-09-18T11:07:22.138173+00:00"
+    },
+    "world-netball|world-netball-web": {
+      "status": "WORKING",
+      "events": 71,
+      "sample": "NEW ZEALAND vs SCOTLAND 2026-07-25",
+      "reason": "netball.sport Commonwealth Games fixtures",
+      "verified_at": "2026-09-18T11:07:20.848957+00:00"
+    },
+    "ssn-australia|netballpass": {
+      "status": "WORKING",
+      "events": 60,
+      "sample": "Adelaide Thunderbirds vs Melbourne Vixens 2026-07-04",
+      "reason": "netballpass.com Suncorp Super Netball 2026",
+      "verified_at": "2026-09-18T08:48:41.012294+00:00"
+    },
+    "bwf-and-national-events|bwf-web": {
+      "status": "EMPTY_ARCHIVE",
+      "events": 0,
+      "sample": "",
+      "reason": "BWF calendar HTML is JS template placeholders, not match rows",
+      "verified_at": "2026-09-18T08:58:01.606064+00:00"
+    },
+    "national-and-club|rankedin-web": {
+      "status": "EMPTY_ARCHIVE",
+      "events": 0,
+      "sample": "",
+      "reason": "Rankedin public",
+      "verified_at": "2026-09-18T08:49:30.045211+00:00"
+    },
+    "korean-golf-tour|kpga-web": {
+      "status": "EMPTY_ARCHIVE",
+      "events": 0,
+      "sample": "",
+      "reason": "kpga.co.kr tours/leaderboard",
+      "verified_at": "2026-09-18T13:30:35.745776+00:00"
+    },
+    "world-lacrosse|inside-lacrosse-web": {
+      "status": "EMPTY_ARCHIVE",
+      "events": 0,
+      "sample": "",
+      "reason": "Inside Lacrosse intl",
+      "verified_at": "2026-09-18T08:49:40.679580+00:00"
+    },
+    "canada-standardbred-meetings|woodbine-mohawk-web": {
+      "status": "WORKING",
+      "events": 1,
+      "sample": "Woodbine Mohawk vs Simcoe Stakes 2026-09-16",
+      "reason": "woodbine.com Mohawk Simcoe recap",
+      "verified_at": "2026-09-18T11:49:36.355829+00:00"
+    },
+    "vct|vlr-web": {
+      "status": "RESTRICTED",
+      "events": 0,
+      "sample": "",
+      "reason": "LICENSING_BLOCKER: VLR terms forbid automated access and commercial reuse",
+      "verified_at": "2026-09-18T13:14:22.670599+00:00"
+    },
+    "worlds-msi-regional|lolesports-web": {
+      "status": "RESTRICTED",
+      "events": 0,
+      "sample": "",
+      "reason": "LICENSING_BLOCKER: Riot ToS forbid scrape/expropriate and unauthorized bots/scripts on Riot Services; terms https://www.riotgames.com/en/terms-of-service",
+      "verified_at": "2026-09-18T13:30:44.474630+00:00"
+    },
+    "rlcs|rlcs-web": {
+      "status": "EMPTY_ARCHIVE",
+      "events": 0,
+      "sample": "",
+      "reason": "RLCS official",
+      "verified_at": "2026-09-18T08:49:47.444507+00:00"
+    },
+    "tier1|hltv-web": {
+      "status": "RESTRICTED",
+      "events": 0,
+      "sample": "",
+      "reason": "LICENSING_BLOCKER: HLTV terms forbid scraping and commercial use",
+      "verified_at": "2026-09-18T12:50:06.055237+00:00"
+    },
+    "competitive-ea-fc|easportsfc-web": {
+      "status": "EMPTY_ARCHIVE",
+      "events": 0,
+      "sample": "",
+      "reason": "EA FC compete",
+      "verified_at": "2026-09-18T08:49:48.370399+00:00"
+    },
+    "plusliga|eurosport-volleyball": {
+      "status": "WORKING",
+      "events": 5,
+      "sample": "Aluron CMC Warta Zawiercie vs BOGDANKA LUK Lublin 2026-04-25",
+      "reason": "Eurosport PlusLiga calendar",
+      "verified_at": "2026-09-18T09:28:05.669901+00:00"
+    },
+    "uci-calendar|pcs-web": {
+      "status": "EMPTY_ARCHIVE",
+      "events": 0,
+      "sample": "",
+      "reason": "procyclingstats.com GP Montreal 2026",
+      "verified_at": "2026-09-18T11:49:04.224248+00:00"
+    },
+    "competitive-ea-fc|fcpro-web": {
+      "status": "WORKING",
+      "events": 14,
+      "sample": "PHzin vs Samugamer 2026-07-26",
+      "reason": "EA FC Pro official results",
+      "verified_at": "2026-09-18T09:28:11.013643+00:00"
+    },
+    "nordic-water-polo-league|total-waterpolo": {
+      "status": "EMPTY_ARCHIVE",
+      "events": 0,
+      "sample": "",
+      "reason": "total-waterpolo Nordic League 2024-25 iframe",
+      "verified_at": "2026-09-18T12:54:52.031256+00:00"
+    },
+    "mexico-lnbp|flashscore": {
+      "status": "RESTRICTED",
+      "events": 0,
+      "sample": "",
+      "reason": "LICENSING_BLOCKER: Flashscore ToU forbids copy/download without written authorization",
+      "verified_at": "2026-09-18T11:44:39.248770+00:00"
+    },
+    "rlcs|blast-rlcs": {
+      "status": "RESTRICTED",
+      "events": 0,
+      "sample": "",
+      "reason": "LICENSING_BLOCKER: BLAST.tv ToU forbids copying or exploiting website content",
+      "verified_at": "2026-09-18T10:40:46.299798+00:00"
+    },
+    "tour-de-france|rte-cycling": {
+      "status": "WORKING",
+      "events": 22,
+      "sample": "Tour de France vs UCI WorldTour 2026-07-04",
+      "reason": "rte.ie cycling Tour de France",
+      "verified_at": "2026-09-18T11:07:33.349457+00:00"
+    },
+    "uci-calendar|rte-cycling": {
+      "status": "WORKING",
+      "events": 101,
+      "sample": "Grand Prix Cycliste de Montreal vs UCI WorldTour 2026-09-13",
+      "reason": "rte.ie cycling calendar",
+      "verified_at": "2026-09-18T11:49:22.773078+00:00"
+    },
+    "nrl|nrl-draw-web": {
+      "status": "WORKING",
+      "events": 1,
+      "sample": "Sharks vs Roosters 2026-04-11",
+      "reason": "official NRL 2026 draw",
+      "verified_at": "2026-09-18T11:08:35.794348+00:00"
+    },
+    "fih-eurohockey|england-hockey-web": {
+      "status": "EMPTY_ARCHIVE",
+      "events": 0,
+      "sample": "",
+      "reason": "englandhockey.co.uk international",
+      "verified_at": "2026-09-18T11:07:58.611884+00:00"
+    },
+    "world-lacrosse|lacrosse-canada-web": {
+      "status": "WORKING",
+      "events": 1,
+      "sample": "Canada vs Japan 2026-07-29",
+      "reason": "lacrosse.ca CAN 5 JPN 4 OT",
+      "verified_at": "2026-09-18T11:49:33.954272+00:00"
+    },
+    "formula-2|fiaf2-web": {
+      "status": "WORKING",
+      "events": 28,
+      "sample": "Melbourne Sprint Race vs Formula 2 2026-03-06",
+      "reason": "fiaformula2.com/Standings/Driver",
+      "verified_at": "2026-09-18T11:07:59.761330+00:00"
+    },
+    "formula-3|fiaf3-web": {
+      "status": "WORKING",
+      "events": 18,
+      "sample": "Melbourne Sprint Race vs Formula 3 2026-03-06",
+      "reason": "fiaformula3.com/Standings/Driver",
+      "verified_at": "2026-09-18T11:08:00.826731+00:00"
+    },
+    "biathlon|bbc-sport": {
+      "status": "EMPTY_ARCHIVE",
+      "events": 0,
+      "sample": "",
+      "reason": "live BBC page produced no competition-specific canonical events (family cache not used)",
+      "verified_at": "2026-09-18T10:42:53.857772+00:00"
+    },
+    "wa-calendar|bbc-sport": {
+      "status": "WORKING",
+      "events": 1,
+      "sample": "Trayvon Bromell vs Meeting de Paris 100m 2026-06-28",
+      "reason": "bbc.co.uk Diamond League Paris results",
+      "verified_at": "2026-09-18T11:49:40.273065+00:00"
+    },
+    "nrl|bbc-sport": {
+      "status": "EMPTY_ARCHIVE",
+      "events": 0,
+      "sample": "",
+      "reason": "live BBC page produced no competition-specific canonical events (family cache not used)",
+      "verified_at": "2026-09-18T10:42:53.857772+00:00"
+    },
+    "tour-de-france|bbc-sport": {
+      "status": "EMPTY_ARCHIVE",
+      "events": 0,
+      "sample": "",
+      "reason": "live BBC page produced no competition-specific canonical events (family cache not used)",
+      "verified_at": "2026-09-18T10:42:53.857772+00:00"
+    },
+    "uci-calendar|bbc-sport": {
+      "status": "EMPTY_ARCHIVE",
+      "events": 0,
+      "sample": "",
+      "reason": "live BBC page produced no competition-specific canonical events (family cache not used)",
+      "verified_at": "2026-09-18T10:42:53.857772+00:00"
+    },
+    "formula-2|bbc-sport": {
+      "status": "EMPTY_ARCHIVE",
+      "events": 0,
+      "sample": "",
+      "reason": "live BBC page produced no competition-specific canonical events (family cache not used)",
+      "verified_at": "2026-09-18T10:42:53.857772+00:00"
+    },
+    "formula-3|bbc-sport": {
+      "status": "EMPTY_ARCHIVE",
+      "events": 0,
+      "sample": "",
+      "reason": "live BBC page produced no competition-specific canonical events (family cache not used)",
+      "verified_at": "2026-09-18T10:42:53.857772+00:00"
+    },
+    "formula-2|fia-web": {
+      "status": "WORKING",
+      "events": 2,
+      "sample": "Melbourne Sprint Race vs J. Durksen 2026-03-07",
+      "reason": "fia.com F2 Melbourne sprint classification",
+      "verified_at": "2026-09-18T11:07:59.852186+00:00"
+    },
+    "formula-3|fia-web": {
+      "status": "WORKING",
+      "events": 1,
+      "sample": "Melbourne Sprint Race vs B. Del Pino 2026-03-07",
+      "reason": "fia.com F3 Melbourne sprint classification",
+      "verified_at": "2026-09-18T11:08:00.909512+00:00"
+    },
+    "fih-eurohockey|scottish-hockey-web": {
+      "status": "WORKING",
+      "events": 3,
+      "sample": "Scotland vs T\u00fcrkiye 2026-07-09",
+      "reason": "scottish-hockey.org.uk Rome 6-1",
+      "verified_at": "2026-09-18T11:08:03.390695+00:00"
+    },
+    "uci-calendar|gpcqm-web": {
+      "status": "WORKING",
+      "events": 1,
+      "sample": "Isaac Del Toro vs Grand Prix Cycliste de Montreal 2026-09-13",
+      "reason": "gpcqm.ca Montreal 2026 classement",
+      "verified_at": "2026-09-18T11:49:35.092930+00:00"
+    },
+    "mexico-lnbp|wikipedia-lnbp-web": {
+      "status": "WORKING",
+      "events": 6,
+      "sample": "Abejas vs Correcaminos 2026-09-17",
+      "reason": "es.wikipedia.org LNBP 2026 scores",
+      "verified_at": "2026-09-18T11:49:40.020939+00:00"
+    },
+    "wa-calendar|diamond-league-pdf": {
+      "status": "EMPTY_ARCHIVE",
+      "events": 0,
+      "sample": "",
+      "reason": "Diamond League Paris 2026 official PDF",
+      "verified_at": "2026-09-18T11:49:40.153068+00:00"
+    },
+    "germany-click-tt|ttbl-web": {
+      "status": "WORKING",
+      "events": 2,
+      "sample": "Saarbr\u00fccken vs M\u00fchlhausen 2026-08-21",
+      "reason": "ttbl.de Spielplan 2026/27",
+      "verified_at": "2026-09-18T12:24:11.586694+00:00"
+    },
+    "all-england-open|wikipedia-all-england-web": {
+      "status": "WORKING",
+      "events": 1,
+      "sample": "Lin Chun-Yi vs Lakshya Sen 2026-03-08",
+      "reason": "en.wikipedia.org 2026 All England Open",
+      "verified_at": "2026-09-18T12:24:16.120797+00:00"
+    },
+    "all-england-open|bbc-sport": {
+      "status": "WORKING",
+      "events": 1,
+      "sample": "Lin Chun-Yi vs Lakshya Sen 2026-03-08",
+      "reason": "bbc.co.uk All England live blog",
+      "verified_at": "2026-09-18T12:24:16.227718+00:00"
+    },
+    "indonesia-open|wikipedia-indonesia-open-web": {
+      "status": "WORKING",
+      "events": 1,
+      "sample": "Victor Lai vs Jonatan Christie 2026-06-07",
+      "reason": "en.wikipedia.org 2026 Indonesia Open",
+      "verified_at": "2026-09-18T12:24:18.105663+00:00"
+    },
+    "indonesia-open|kompas-web": {
+      "status": "WORKING",
+      "events": 1,
+      "sample": "Victor Lai vs Jonatan Christie 2026-06-07",
+      "reason": "kompas.com Indonesia Open final",
+      "verified_at": "2026-09-18T12:24:18.817946+00:00"
+    },
+    "uefa-futsal-champions-league|uefa-futsal-web": {
+      "status": "WORKING",
+      "events": 1,
+      "sample": "Sporting CP vs Illes Balears Palma 2026-05-10",
+      "reason": "uefa.com Futsal CL recap",
+      "verified_at": "2026-09-18T12:24:18.890260+00:00"
+    },
+    "uefa-futsal-champions-league|wikipedia-uefa-futsal-web": {
+      "status": "WORKING",
+      "events": 1,
+      "sample": "Sporting CP vs Illes Balears Palma 2026-05-10",
+      "reason": "en.wikipedia.org 2025-26 UEFA Futsal CL",
+      "verified_at": "2026-09-18T12:24:21.070180+00:00"
+    },
+    "fifa-futsal-when-listed|wikipedia-fifa-futsal-web": {
+      "status": "WORKING",
+      "events": 1,
+      "sample": "Brazil vs Argentina 2024-10-06",
+      "reason": "en.wikipedia.org 2024 FIFA Futsal World Cup",
+      "verified_at": "2026-09-18T12:54:54.172855+00:00"
+    },
+    "lol-world-championship|wikipedia-lol-worlds-web": {
+      "status": "WORKING",
+      "events": 1,
+      "sample": "T1 Esports vs KT Rolster 2025-11-09",
+      "reason": "en.wikipedia.org 2025 LoL Worlds",
+      "verified_at": "2026-09-18T12:24:26.485881+00:00"
+    },
+    "lol-world-championship|liquipedia": {
+      "status": "WORKING",
+      "events": 1,
+      "sample": "T1 Esports vs KT Rolster 2025-11-09",
+      "reason": "liquipedia.net World Championship/2025",
+      "verified_at": "2026-09-18T12:24:28.151116+00:00"
+    },
+    "nsw-hrnsw-meetings|club-menangle-web": {
+      "status": "WORKING",
+      "events": 1,
+      "sample": "Club Menangle vs Verbici 2026-07-07",
+      "reason": "clubmenangle.com.au Verbici recap",
+      "verified_at": "2026-09-18T12:24:29.908365+00:00"
+    },
+    "usa-usta-meetings|harrington-web": {
+      "status": "WORKING",
+      "events": 1,
+      "sample": "Harrington Raceway vs Disturbed Hanover 2026-07-01",
+      "reason": "harringtonraceway.com feature recap",
+      "verified_at": "2026-09-18T12:24:32.662893+00:00"
+    },
+    "lol-world-championship|lolesports-web": {
+      "status": "RESTRICTED",
+      "events": 0,
+      "sample": "",
+      "reason": "LICENSING_BLOCKER: Riot ToS forbid scrape/expropriate and unauthorized bots/scripts on Riot Services; terms https://www.riotgames.com/en/terms-of-service",
+      "verified_at": "2026-09-18T12:24:32.662949+00:00"
+    },
+    "fifa-futsal-when-listed|cbf-fifa-futsal-web": {
+      "status": "EMPTY_ARCHIVE",
+      "events": 0,
+      "sample": "",
+      "reason": "cbf.com.br FIFA Futsal World Cup recap",
+      "verified_at": "2026-09-18T12:55:01.735827+00:00"
+    },
+    "fifa-futsal-when-listed|afa-fifa-futsal-web": {
+      "status": "WORKING",
+      "events": 1,
+      "sample": "Brazil vs Argentina 2024-10-06",
+      "reason": "afa.com.ar FIFA Futsal World Cup recap",
+      "verified_at": "2026-09-18T12:55:01.807881+00:00"
+    },
+    "nordic-water-polo-league|nordic-waterpolo-native": {
+      "status": "WORKING",
+      "events": 5,
+      "sample": "White Sharks Hannover vs Rapid Bucuresti 2025-05-31",
+      "reason": "nordicwaterpololeague.com Final Eight native results",
+      "verified_at": "2026-09-18T12:55:03.776146+00:00"
+    },
+    "ettu-events|ettu-news-results": {
+      "status": "WORKING",
+      "events": 1,
+      "sample": "France vs Germany 2026-07-14",
+      "reason": "ettu.org 2026 youth result articles",
+      "verified_at": "2026-09-18T13:14:05.207706+00:00"
+    },
+    "ettu-events|fftt-web": {
+      "status": "EMPTY_ARCHIVE",
+      "events": 0,
+      "sample": "",
+      "reason": "fftt.com CEJ 2026 U15 recap",
+      "verified_at": "2026-09-18T13:14:07.702936+00:00"
+    },
+    "rlcs|rocketleague-recaps": {
+      "status": "EMPTY_ARCHIVE",
+      "events": 0,
+      "sample": "",
+      "reason": "rocketleague.com Paris Major recap",
+      "verified_at": "2026-09-18T13:14:08.140715+00:00"
+    },
+    "rlcs|liquipedia": {
+      "status": "WORKING",
+      "events": 1,
+      "sample": "Karmine Corp vs Twisted Minds",
+      "reason": "liquipedia.net RLCS 2026 Paris Major",
+      "verified_at": "2026-09-18T13:14:09.751085+00:00"
+    },
+    "world-aquatics-events|world-aquatics-web": {
+      "status": "WORKING",
+      "events": 1,
+      "sample": "Montenegro vs Georgia 2026-04-13",
+      "reason": "worldaquatics.com WP World Cup unit results",
+      "verified_at": "2026-09-18T12:55:17.489470+00:00"
+    },
+    "world-aquatics-events|wikipedia-wa-wp-web": {
+      "status": "WORKING",
+      "events": 2,
+      "sample": "France vs Montenegro 2026-04-12",
+      "reason": "en.wikipedia.org 2026 Men's Water Polo World Cup",
+      "verified_at": "2026-09-18T12:55:20.638466+00:00"
+    },
+    "tier1|pgl-web": {
+      "status": "WORKING",
+      "events": 1,
+      "sample": "FUT vs Astralis 2026-04-11",
+      "reason": "pglesports.com PGL Bucharest 2026",
+      "verified_at": "2026-09-18T12:55:20.998024+00:00"
+    },
+    "tier1|liquipedia": {
+      "status": "WORKING",
+      "events": 1,
+      "sample": "FUT Esports vs Astralis",
+      "reason": "liquipedia.net PGL Bucharest 2026",
+      "verified_at": "2026-09-18T12:55:22.553435+00:00"
+    },
+    "vct|liquipedia": {
+      "status": "WORKING",
+      "events": 1,
+      "sample": "Nongshim RedForce vs Paper Rex",
+      "reason": "liquipedia.net Masters Santiago 2026",
+      "verified_at": "2026-09-18T13:14:14.891008+00:00"
+    },
+    "rlcs|wikipedia-rlcs-web": {
+      "status": "WORKING",
+      "events": 1,
+      "sample": "Karmine Corp vs Twisted Minds 2026-05-24",
+      "reason": "en.wikipedia.org RLCS Paris Major",
+      "verified_at": "2026-09-18T13:14:16.554627+00:00"
+    },
+    "vct|wikipedia-vct-web": {
+      "status": "WORKING",
+      "events": 1,
+      "sample": "Nongshim RedForce vs Paper Rex 2026-03-15",
+      "reason": "en.wikipedia.org Valorant Champions Tour Masters Santiago",
+      "verified_at": "2026-09-18T13:14:18.487375+00:00"
+    },
+    "ettu-events|dttb-web": {
+      "status": "WORKING",
+      "events": 1,
+      "sample": "France vs Germany 2026-07-14",
+      "reason": "tischtennis.de Jugend-EM U15 2:3",
+      "verified_at": "2026-09-18T13:14:21.162591+00:00"
+    },
+    "biathlon|skidskytte-web": {
+      "status": "WORKING",
+      "events": 1,
+      "sample": "Lou Jeanmonnot vs Ruhpolding Women's Pursuit 2026-01-18",
+      "reason": "skidskytte.se Ruhpolding jaktstart",
+      "verified_at": "2026-09-18T13:14:22.670560+00:00"
+    },
+    "korean-golf-tour|owgr-web": {
+      "status": "RESTRICTED",
+      "events": 0,
+      "sample": "",
+      "reason": "LICENSING_BLOCKER: OWGR terms forbid reproduction/adaptation/transmission of website material without prior written permission",
+      "verified_at": "2026-09-18T13:30:44.474690+00:00"
+    },
+    "korean-golf-tour|wikipedia-korean-tour-web": {
+      "status": "WORKING",
+      "events": 12,
+      "sample": "Lee Sang-yeop vs DB Insurance Promy Open 2026-04-19",
+      "reason": "en.wikipedia.org 2026 Korean Tour",
+      "verified_at": "2026-09-18T13:30:42.126869+00:00"
+    },
+    "korean-golf-tour|thesportsdb": {
+      "status": "WORKING",
+      "events": 17,
+      "sample": "Golfzon Open vs Korean Tour 2026-09-20",
+      "reason": "TheSportsDB Korean Tour 4766 eventsseason",
+      "verified_at": "2026-09-18T13:30:44.474596+00:00"
+    },
+    "irish-greyhound-derby|gri-web": {
+      "status": "WORKING",
+      "events": 27,
+      "sample": "Cheap Sandwiches vs Irish Greyhound Derby 2025-09-27",
+      "reason": "grireland.ie Irish Greyhound Derby results/history",
+      "verified_at": "2026-09-18T13:49:29.181827+00:00"
+    },
+    "irish-greyhound-derby|wikipedia-irish-greyhound-derby-web": {
+      "status": "WORKING",
+      "events": 2,
+      "sample": "Cheap Sandwiches vs Irish Greyhound Derby 2025-09-27",
+      "reason": "en.wikipedia.org {year}_Irish_Greyhound_Derby",
+      "verified_at": "2026-09-18T13:49:29.181926+00:00"
+    },
+    "owcs-world-finals|liquipedia": {
+      "status": "WORKING",
+      "events": 1,
+      "sample": "Twisted Minds vs Al Qadsiah 2025-11-30",
+      "reason": "Liquipedia World Finals",
+      "verified_at": "2026-09-18T13:49:29.182409+00:00"
+    },
+    "owcs-world-finals|wikipedia-owcs-world-finals-web": {
+      "status": "WORKING",
+      "events": 2,
+      "sample": "Twisted Minds vs Al Qadsiah 2025-11-30",
+      "reason": "en.wikipedia.org Overwatch Champions Series World Finals results",
+      "verified_at": "2026-09-18T13:49:29.182519+00:00"
+    }
+  },
+  "updated": "2026-09-18T13:49:29.182541+00:00"
+}

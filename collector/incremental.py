@@ -1,0 +1,621 @@
+"""Incremental due-queue: urgency jobs, family coalescing, discovery backoff."""
+
+from __future__ import annotations
+
+from datetime import datetime, timedelta
+from typing import Any, Dict, List, Optional, Tuple
+
+from sqlalchemy.orm import Session
+
+from collector.cadence import interval_for
+from collector.family_caps import family_caps, is_static_family, supports_live
+from collector.family_health import family_access_blocked, family_rate_limited, family_state
+from collector.http import STATS
+from collector.metrics import incr, set_metric, snapshot
+from collector.models import (
+    SportsCompetition,
+    SportsCompetitionHealth,
+    SportsEvent,
+    SportsSchedulerSlot,
+    SportsSource,
+    SportsSourceCompetition,
+)
+from collector.urgency import URGENCY_PRIORITY, capability_for_urgency, classify_event, job_dict
+from collector.util import load_json
+
+
+MAX_LOGICAL = 80
+MAX_PHYSICAL = 12
+VERIFICATION_EVERY = 12
+STARVE_SECONDS = 600
+AGE_BAND_SECONDS = 600
+MAX_AGE_BANDS = 2
+MAX_FAMILY_NONLIVE = 1
+FINISHED_LOOKBACK_HOURS = 48
+_family_rr = 0
+FAIL_STATUSES = {
+    "NETWORK_FAILURE",
+    "RATE_LIMITED",
+    "SOURCE_CHANGED",
+    "PARSE_FAILURE",
+    "OTHER_ERROR",
+    "NO_VALID_FALLBACK",
+    "FAILED",
+    "ACCESS_BLOCKED",
+}
+
+
+def _now() -> datetime:
+    return datetime.utcnow()
+
+
+def request_identity(mapping: SportsSourceCompetition, source: SportsSource) -> str:
+    config = load_json(mapping.source_config_json, {}) or {}
+    url = str(config.get("url") or source.attribution_url or "")
+    family = mapping.upstream_family or source.upstream_family or source.source_id
+    if url:
+        return f"{family}|{url}"
+    return f"{family}|{mapping.source_competition_id or mapping.competition_id}"
+
+
+def _slot(db: Session, job_key: str) -> SportsSchedulerSlot:
+    cache = db.info.setdefault("scheduler_slots", {})
+    row = cache.get(job_key)
+    if row is not None:
+        return row
+    row = db.get(SportsSchedulerSlot, job_key)
+    if row is None:
+        for pending in db.new:
+            if isinstance(pending, SportsSchedulerSlot) and pending.job_key == job_key:
+                row = pending
+                break
+    if row is None:
+        row = db.query(SportsSchedulerSlot).filter_by(job_key=job_key).first()
+    if row is None:
+        row = SportsSchedulerSlot(job_key=job_key)
+        db.add(row)
+        try:
+            with db.begin_nested():
+                db.flush()
+        except Exception:
+            row = db.get(SportsSchedulerSlot, job_key) or db.query(SportsSchedulerSlot).filter_by(job_key=job_key).first()
+            if row is None:
+                raise
+    cache[job_key] = row
+    return row
+
+
+def _due(slot: Optional[SportsSchedulerSlot], interval: int, now: datetime, family: str = "") -> bool:
+    if slot is not None and slot.last_status in FAIL_STATUSES and slot.last_run_at is not None:
+        fails = int(family_state(family).get("consecutive_failures") or 1)
+        backoff = min(900, 30 * (2 ** min(max(fails, 1) - 1, 4)))
+        if now < slot.last_run_at + timedelta(seconds=backoff):
+            return False
+    if slot is None or slot.next_due_at is None:
+        if slot is None or slot.last_run_at is None:
+            return True
+        return slot.last_run_at + timedelta(seconds=interval) <= now
+    return slot.next_due_at <= now
+
+
+def _mapping_family(mapping: SportsSourceCompetition, source: Optional[SportsSource]) -> str:
+    return mapping.upstream_family or (source.upstream_family if source else None) or mapping.source_id
+
+
+def _primary_family(db: Session, competition_id: str) -> Tuple[Optional[SportsSourceCompetition], Optional[SportsSource]]:
+    maps = (
+        db.query(SportsSourceCompetition)
+        .filter_by(competition_id=competition_id, enabled=True)
+        .order_by(SportsSourceCompetition.priority.asc())
+        .all()
+    )
+    cache = db.info.setdefault("sources", {})
+    for mapping in maps:
+        source = cache.get(mapping.source_id)
+        if source is None:
+            source = db.query(SportsSource).filter_by(source_id=mapping.source_id).first()
+            if source:
+                cache[mapping.source_id] = source
+        if source and source.enabled:
+            return mapping, source
+    return None, None
+
+
+def _fallback_family(db: Session, competition_id: str, primary_family: str) -> Tuple[Optional[SportsSourceCompetition], Optional[SportsSource]]:
+    maps = (
+        db.query(SportsSourceCompetition)
+        .filter_by(competition_id=competition_id, enabled=True)
+        .order_by(SportsSourceCompetition.priority.asc())
+        .all()
+    )
+    cache = db.info.setdefault("sources", {})
+    for mapping in maps:
+        source = cache.get(mapping.source_id) or db.query(SportsSource).filter_by(source_id=mapping.source_id).first()
+        if source:
+            cache[mapping.source_id] = source
+        family = _mapping_family(mapping, source)
+        if family == primary_family:
+            continue
+        if source and source.enabled:
+            return mapping, source
+    return None, None
+
+
+def build_due_jobs(db: Session, *, now: Optional[datetime] = None, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+    now = now or _now()
+    horizon = now + timedelta(days=30)
+    past = now - timedelta(hours=FINISHED_LOOKBACK_HOURS)
+    events = (
+        db.query(SportsEvent)
+        .filter(
+            (SportsEvent.status.in_(["live", "stale"]))
+            | ((SportsEvent.start_time >= past) & (SportsEvent.start_time <= horizon))
+        )
+        .all()
+    )
+    jobs: List[Dict[str, Any]] = []
+    seen_comp_family: set = set()
+    live_jobs = 0
+    maps_by_comp: Dict[str, List[SportsSourceCompetition]] = {}
+    for mapping in db.query(SportsSourceCompetition).filter_by(enabled=True).all():
+        maps_by_comp.setdefault(mapping.competition_id, []).append(mapping)
+    source_cache = db.info.setdefault("sources", {})
+    for row in events:
+        mappings = maps_by_comp.get(row.competition_id) or []
+        if not mappings:
+            mapping, source = _primary_family(db, row.competition_id)
+            mappings = [mapping] if mapping is not None else []
+        urgency = classify_event(row.status, row.start_time, now=now)
+        if urgency == "LIVE":
+            live_jobs += 1
+        for mapping in mappings:
+            if mapping is None:
+                continue
+            source = source_cache.get(mapping.source_id)
+            if source is None:
+                source = db.query(SportsSource).filter_by(source_id=mapping.source_id).first()
+                if source:
+                    source_cache[mapping.source_id] = source
+            if source is None or not source.enabled:
+                continue
+            family = _mapping_family(mapping, source)
+            family_urgency = urgency
+            if family_urgency == "LIVE":
+                if is_static_family(family) or not supports_live(family):
+                    family_urgency = "TODAY"
+            if family_urgency == "LIVE" and family_rate_limited(family):
+                fb_map, fb_src = _fallback_family(db, row.competition_id, family)
+                if fb_map and fb_src and supports_live(_mapping_family(fb_map, fb_src)) and not is_static_family(_mapping_family(fb_map, fb_src)):
+                    mapping, source, family = fb_map, fb_src, _mapping_family(fb_map, fb_src)
+                else:
+                    continue
+            interval = interval_for(family, family_urgency)
+            job_key = f"refresh:{row.competition_id}:{family}:{capability_for_urgency(family_urgency)}"
+            slot = db.get(SportsSchedulerSlot, job_key)
+            if not _due(slot, interval, now, family):
+                continue
+            seen_key = (row.competition_id, family)
+            if seen_key in seen_comp_family and family_urgency not in {"LIVE", "IMMINENT", "RECENTLY_FINISHED"}:
+                continue
+            seen_comp_family.add(seen_key)
+            jobs.append(
+                job_dict(
+                    competition_id=row.competition_id,
+                    family=family,
+                    urgency=family_urgency,
+                    reason=f"event:{row.event_id}:{family_urgency}",
+                    source_id=source.source_id,
+                    request_key=request_identity(mapping, source),
+                    job_key=job_key,
+                    interval=interval,
+                    use_fallback=False,
+                    sport=row.sport_id,
+                    last_run_at=slot.last_run_at if slot else None,
+                    next_due_at=slot.next_due_at if slot else None,
+                    last_status=slot.last_status if slot else None,
+                )
+            )
+    health_rows = {row.competition_id: row for row in db.query(SportsCompetitionHealth).all()}
+    mapped = (
+        db.query(SportsSourceCompetition)
+        .filter_by(enabled=True)
+        .all()
+    )
+    comps_seen = {(job["competition_id"], job["family"]) for job in jobs}
+    for mapping in mapped:
+        cid = mapping.competition_id
+        source = db.info.setdefault("sources", {}).get(mapping.source_id) or db.query(SportsSource).filter_by(source_id=mapping.source_id).first()
+        if source is None or not source.enabled:
+            continue
+        family = _mapping_family(mapping, source)
+        if (cid, family) in comps_seen:
+            continue
+        health = health_rows.get(cid)
+        empty_streak = 0
+        if health and health.last_classification in {"NO_CURRENT_EVENTS", "EMPTY", "WORKING_EMPTY"}:
+            empty_streak = 1
+        urgency = "DISCOVERY_QUIET" if empty_streak else "DISCOVERY_ACTIVE"
+        interval = interval_for(family, urgency)
+        job_key = f"discover:{cid}:{family}"
+        slot = db.get(SportsSchedulerSlot, job_key)
+        if not _due(slot, interval, now, family):
+            continue
+        jobs.append(
+            job_dict(
+                competition_id=cid,
+                family=family,
+                urgency=urgency,
+                reason="competition_discovery",
+                source_id=source.source_id,
+                request_key=request_identity(mapping, source),
+                job_key=job_key,
+                interval=interval,
+                use_fallback=False,
+                last_run_at=slot.last_run_at if slot else None,
+                next_due_at=slot.next_due_at if slot else None,
+                last_status=slot.last_status if slot else None,
+                last_attempt_at=health.last_attempt_at if health else None,
+                last_success_at=health.last_success_at if health else None,
+            )
+        )
+        comps_seen.add((cid, family))
+    jobs.sort(key=lambda row: (row["priority"], row["competition_id"]))
+    deduped: List[Dict[str, Any]] = []
+    seen_keys: set = set()
+    for job in jobs:
+        key = job["job_key"]
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        deduped.append(job)
+    jobs = deduped
+    set_metric("due_jobs", len(jobs))
+    set_metric("live_jobs", live_jobs)
+    if limit is not None:
+        return jobs[:limit]
+    return jobs
+
+
+def coalesce_jobs(jobs: List[Dict[str, Any]]) -> List[List[Dict[str, Any]]]:
+    groups: Dict[str, List[Dict[str, Any]]] = {}
+    order: List[str] = []
+    for job in jobs:
+        key = job.get("request_key") or job["job_key"]
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append(job)
+    return [groups[key] for key in order]
+
+
+def job_wait_seconds(job: Dict[str, Any], now: datetime) -> float:
+    due = job.get("next_due_at") or job.get("last_run_at")
+    if due is None:
+        return 1_000_000.0
+    if isinstance(due, str):
+        try:
+            due = datetime.fromisoformat(due.replace("Z", ""))
+        except ValueError:
+            return 1_000_000.0
+    return max(0.0, (now - due).total_seconds())
+
+
+def job_never_run(job: Dict[str, Any]) -> bool:
+    return not job.get("last_run_at") and not job.get("next_due_at")
+
+
+def job_sort_key(job: Dict[str, Any], now: datetime) -> Tuple:
+    wait = job_wait_seconds(job, now)
+    rank = int(URGENCY_PRIORITY.get(job.get("urgency") or "", 50))
+    bump = min(MAX_AGE_BANDS, int(wait // AGE_BAND_SECONDS))
+    effective = max(1, rank - bump)
+    liveish = 0 if rank <= URGENCY_PRIORITY["RECENTLY_FINISHED"] else 1
+    never = 0 if job_never_run(job) else 1
+    last = job.get("last_run_at") or datetime.min
+    # Do not tie-break on family name: that stably starves openligadb/wta-json.
+    return (liveish, never, effective, -wait, last, job.get("competition_id") or "")
+
+
+def select_fair_groups(
+    jobs: List[Dict[str, Any]],
+    now: datetime,
+    *,
+    max_physical: int = MAX_PHYSICAL,
+) -> Tuple[List[List[Dict[str, Any]]], Dict[str, Any]]:
+    """Pick up to max_physical request groups from the full due set.
+
+    LIVE/IMMINENT/RECENTLY_FINISHED first. Remaining slots rotate through
+    never-run and starved families so alphabetical first-N cannot starve
+    mapped providers. Non-live families are capped at one group per tick
+    unless they are starved.
+    """
+    global _family_rr
+    ranked = sorted(jobs, key=lambda row: job_sort_key(row, now))
+    groups = coalesce_jobs(ranked)
+    selected: List[List[Dict[str, Any]]] = []
+    family_count: Dict[str, int] = {}
+    selected_keys: set = set()
+
+    def _family(group: List[Dict[str, Any]]) -> str:
+        return str(group[0].get("family") or "")
+
+    def _liveish(group: List[Dict[str, Any]]) -> bool:
+        return min(int(URGENCY_PRIORITY.get(job.get("urgency") or "", 50)) for job in group) <= URGENCY_PRIORITY["RECENTLY_FINISHED"]
+
+    def _wait(group: List[Dict[str, Any]]) -> float:
+        return max(job_wait_seconds(job, now) for job in group)
+
+    def _never(group: List[Dict[str, Any]]) -> bool:
+        return any(job_never_run(job) for job in group)
+
+    def _starved(group: List[Dict[str, Any]]) -> bool:
+        return _never(group) or _wait(group) >= STARVE_SECONDS
+
+    def _take(group: List[Dict[str, Any]]) -> None:
+        selected.append(group)
+        family = _family(group)
+        family_count[family] = family_count.get(family, 0) + 1
+        selected_keys.update(job["job_key"] for job in group)
+
+    liveish_groups = [group for group in groups if _liveish(group)]
+    other_groups = [group for group in groups if not _liveish(group)]
+    for group in liveish_groups:
+        if len(selected) >= max_physical:
+            break
+        _take(group)
+
+    best_for_family: Dict[str, List[Dict[str, Any]]] = {}
+    family_order: List[str] = []
+    for group in other_groups:
+        family = _family(group)
+        if family not in best_for_family:
+            best_for_family[family] = group
+            family_order.append(family)
+    coverage = [family for family in family_order if _starved(best_for_family[family])]
+    remainder = [family for family in family_order if family not in coverage]
+    if coverage:
+        index = _family_rr % len(coverage)
+        _family_rr += 1
+        coverage = coverage[index:] + coverage[:index]
+    for family in coverage + remainder:
+        if len(selected) >= max_physical:
+            break
+        group = best_for_family[family]
+        if (
+            family_count.get(family, 0) >= MAX_FAMILY_NONLIVE
+            and not _starved(group)
+        ):
+            continue
+        _take(group)
+
+    never_run = sum(1 for job in jobs if job_never_run(job))
+    real_waits = [job_wait_seconds(job, now) for job in jobs if job.get("last_run_at") or job.get("next_due_at")]
+    oldest = max(real_waits, default=0.0)
+    starved = 0
+    for job in jobs:
+        if job_never_run(job):
+            if job["job_key"] not in selected_keys:
+                starved += 1
+            continue
+        if job_wait_seconds(job, now) < STARVE_SECONDS:
+            continue
+        if job["job_key"] not in selected_keys:
+            starved += 1
+    due_families = {job.get("family") for job in jobs if job.get("family")}
+    stats = {
+        "due_jobs": len(jobs),
+        "selected_jobs": sum(len(group) for group in selected),
+        "selected_groups": len(selected),
+        "oldest_due_age_s": int(oldest),
+        "never_run": never_run,
+        "jobs_starved": starved,
+        "due_family_count": len(due_families),
+        "families_selected": sorted({job.get("family") for group in selected for job in group if job.get("family")}),
+        "sports_selected": sorted({job.get("sport") for group in selected for job in group if job.get("sport")}),
+        "urgencies_selected": sorted({job.get("urgency") for group in selected for job in group if job.get("urgency")}),
+    }
+    return selected, stats
+
+
+def mark_slot(db: Session, job: Dict[str, Any], *, status: str, http_calls: int = 0, events_changed: int = 0, now: Optional[datetime] = None) -> None:
+    now = now or _now()
+    row = _slot(db, job["job_key"])
+    row.kind = "discover" if job["job_key"].startswith("discover:") else "refresh"
+    row.competition_id = job["competition_id"]
+    row.family = job["family"]
+    row.urgency = job["urgency"]
+    row.reason = job.get("reason")
+    row.last_run_at = now
+    row.last_status = status
+    row.http_calls = http_calls
+    row.events_changed = events_changed
+    row.next_due_at = now + timedelta(seconds=int(job.get("interval") or 600))
+    row.priority = int(job.get("priority") or 50)
+
+
+def run_incremental_tick(db: Session, *, sleeper=None, now: Optional[datetime] = None) -> Dict[str, Any]:
+    """Execute due incremental jobs. Kill switch: scheduler off returns immediately."""
+    import time
+
+    from collector.collect import collect_competition
+    from collector.flags import collection_enabled, scheduler_enabled
+    from collector.http import STATS
+    from collector.models import SportsCompetition
+
+    if not collection_enabled() or not scheduler_enabled():
+        return {"stopped": True, "reason": "kill_switch", "flags": {"scheduler": False}}
+    now = now or _now()
+    started = time.perf_counter()
+    due = build_due_jobs(db, now=now)
+    groups, schedule = select_fair_groups(due, now)
+    incr("cycles")
+    incr("logical_jobs", schedule["selected_jobs"])
+    set_metric("selected_jobs", schedule["selected_jobs"])
+    set_metric("jobs_starved", schedule["jobs_starved"])
+    set_metric("oldest_due_age_s", schedule["oldest_due_age_s"])
+    physical = 0
+    coalesced = 0
+    changed = 0
+    fail_classes = FAIL_STATUSES
+    for group in groups:
+        coalesced += max(0, len(group) - 1)
+        before_req = int(STATS.get("requests") or 0)
+        group_written = 0
+        last_classif = "ok"
+        for job in group:
+            job = dict(job)
+            family = job["family"]
+            if (
+                family_rate_limited(family)
+                or family_access_blocked(family)
+                or family_caps(family).get("production_status") == "ACCESS_BLOCKED"
+            ):
+                fb_map, fb_src = _fallback_family(db, job["competition_id"], family)
+                if not (
+                    fb_map
+                    and fb_src
+                    and supports_live(_mapping_family(fb_map, fb_src))
+                    and not is_static_family(_mapping_family(fb_map, fb_src))
+                    and family_caps(_mapping_family(fb_map, fb_src)).get("production_status") != "ACCESS_BLOCKED"
+                ):
+                    blocked = (
+                        "ACCESS_BLOCKED"
+                        if family_access_blocked(family)
+                        or family_caps(family).get("production_status") == "ACCESS_BLOCKED"
+                        else "RATE_LIMITED"
+                    )
+                    mark_slot(db, job, status=blocked, now=now)
+                    last_classif = blocked
+                    continue
+                incr("b_activations")
+                job["family"] = _mapping_family(fb_map, fb_src)
+                job["use_fallback"] = True
+            competition = db.get(SportsCompetition, job["competition_id"])
+            if competition is None:
+                continue
+            include_fallback = bool(job.get("use_fallback"))
+            try:
+                stats = collect_competition(
+                    db,
+                    competition,
+                    job.get("capability") or "fixtures",
+                    sleeper=sleeper,
+                    include_fallback=include_fallback,
+                    source_family=None if include_fallback else job.get("family"),
+                )
+            except Exception:
+                incr("a_failures")
+                stats = {"classification": "FAILED", "written": 0}
+            classif = stats.get("classification") or "ok"
+            if not include_fallback and classif in fail_classes:
+                incr("a_failures")
+                incr("b_activations")
+                try:
+                    stats = collect_competition(
+                        db,
+                        competition,
+                        job.get("capability") or "fixtures",
+                        sleeper=sleeper,
+                        include_fallback=True,
+                    )
+                except Exception:
+                    stats = {"classification": "FAILED", "written": 0}
+                classif = stats.get("classification") or "FAILED"
+            last_classif = classif
+            written = int(stats.get("written") or 0)
+            group_written += written
+            mark_slot(db, job, status=classif, http_calls=0, events_changed=written, now=now)
+        used = int(STATS.get("requests") or 0) - before_req
+        if used:
+            physical += 1
+            incr("physical_requests")
+        else:
+            incr("cache_hits")
+        if group:
+            row = _slot(db, group[0]["job_key"])
+            row.http_calls = used
+        changed += group_written
+    incr("coalesced", coalesced)
+    incr("events_changed", changed)
+    from collector.http import note_physical_requests, rolling_http_hour
+
+    note_physical_requests(physical)
+    rolling = rolling_http_hour()
+    from collector.canonical_collapse import collapse_canonical_events, promote_observation_enrichment
+
+    collapse = collapse_canonical_events(db)
+    enrichment = promote_observation_enrichment(db)
+    set_metric("enrichment_promoted", int((enrichment or {}).get("copied") or 0))
+    duration = round(time.perf_counter() - started, 3)
+    set_metric("last_cycle_s", duration)
+    set_metric("last_cycle_at", now.isoformat() + "Z")
+    metrics = snapshot()
+    tick = {
+        "due_jobs": schedule["due_jobs"],
+        "selected_jobs": schedule["selected_jobs"],
+        "oldest_due_age_s": schedule["oldest_due_age_s"],
+        "families_selected": schedule["families_selected"],
+        "sports_selected": schedule["sports_selected"],
+        "urgencies_selected": schedule["urgencies_selected"],
+        "events_changed": changed,
+        "periods_persisted": metrics.get("periods_persisted"),
+        "incidents_persisted": metrics.get("incidents_persisted"),
+        "runners_persisted": metrics.get("runners_persisted"),
+        "best_of_persisted": metrics.get("best_of_persisted"),
+        "enrichment_promoted": metrics.get("enrichment_promoted"),
+        "jobs_starved": schedule["jobs_starved"],
+        "never_run": schedule.get("never_run"),
+        "due_family_count": schedule.get("due_family_count"),
+        "physical_requests": physical,
+        "http": {
+            "requests": STATS.get("requests"),
+            "http_403": STATS.get("http_403"),
+            "http_429": STATS.get("http_429"),
+            "timeouts": STATS.get("timeouts"),
+            "by_family": STATS.get("by_family"),
+            "rolling_hour": rolling,
+        },
+        "espn": (STATS.get("espn") or [])[-8:],
+        "wta": {
+            "calendar_http": STATS.get("wta_calendar_http"),
+            "match_http": STATS.get("wta_match_http"),
+            "tournaments_selected": STATS.get("wta_tournaments_selected"),
+            "match_fetches": STATS.get("wta_match_fetches"),
+            "calendar_rows": STATS.get("wta_calendar_rows"),
+        },
+        "duration_s": duration,
+        "stopped": False,
+        "enrichment": enrichment,
+        "collapse": {key: collapse.get(key) for key in ("collapsed", "conflicts", "likely_review")},
+        "metrics": metrics,
+        "logical_jobs": schedule["selected_jobs"],
+        "groups": len(groups),
+        "coalesced": coalesced,
+    }
+    return tick
+
+
+def scheduler_snapshot(db: Session) -> Dict[str, Any]:
+    from collector.family_health import snapshot as family_snapshot
+    from collector.http import STATS as HTTP_STATS
+    from collector.lock import lock_status
+
+    metrics = snapshot()
+    families = family_snapshot()
+    healthy = sum(1 for row in families.values() if row.get("status") in {"healthy", "empty"})
+    degraded = sum(1 for row in families.values() if row.get("status") in {"degraded", "RATE_LIMITED", "ACCESS_BLOCKED"})
+    return {
+        "alive": True,
+        "lease": lock_status(db),
+        "metrics": metrics,
+        "http": {
+            "requests": HTTP_STATS.get("requests"),
+            "cache_hits": HTTP_STATS.get("cache_hits"),
+            "http_429": HTTP_STATS.get("http_429"),
+            "http_403": HTTP_STATS.get("http_403"),
+            "rolling_hour": HTTP_STATS.get("rolling_hour"),
+        },
+        "families": {"tracked": len(families), "healthy": healthy, "degraded": degraded},
+        "due_jobs": metrics.get("due_jobs"),
+        "live_jobs": metrics.get("live_jobs"),
+    }

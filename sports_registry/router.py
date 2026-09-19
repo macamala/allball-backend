@@ -1,7 +1,8 @@
-"""Capability router: request → lookup → primary → fallback → normalized object.
+"""Capability router: request handlers read collected data only.
 
-This phase has no real providers. The disconnected adapter remains the only
-implementation. Providers that require public branding are never selected.
+Collection workers select sources per competition. Providers that require
+on-page logos are never selected for public UI. Attribution credits are
+separate from branding.
 """
 
 from __future__ import annotations
@@ -22,20 +23,17 @@ def select_provider(capability: str, sport: Optional[str] = None):
         sports = row.get("sports_supported") or []
         if sport and sports and sport not in sports:
             continue
-        if row.get("public_attribution_required"):
+        if row.get("public_branding_required") or row.get("public_attribution_required"):
             continue
         return row
     return None
 
 
 def get_sports_data_provider():
-    """Always the disconnected adapter until a real provider is registered."""
-    from sports_provider import DisconnectedSportsDataProvider
+    """Read collected canonical events. Never call source adapters here."""
+    from collector.provider import NinkoCollectedSportsDataProvider
 
-    _selected = select_provider("live_scores")
-    if _selected is None:
-        return DisconnectedSportsDataProvider()
-    return DisconnectedSportsDataProvider()
+    return NinkoCollectedSportsDataProvider()
 
 
 def router_status() -> dict:

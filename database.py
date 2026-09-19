@@ -19,13 +19,26 @@ if DATABASE_URL.startswith("sqlite"):
         "connect_args": {"check_same_thread": False},
         "poolclass": StaticPool,
     }
+else:
+    engine_kwargs = {
+        "pool_pre_ping": True,
+        "pool_recycle": int(os.getenv("DB_POOL_RECYCLE", "1800")),
+        "pool_size": int(os.getenv("DB_POOL_SIZE", "5")),
+        "max_overflow": int(os.getenv("DB_MAX_OVERFLOW", "5")),
+        "pool_timeout": int(os.getenv("DB_POOL_TIMEOUT", "30")),
+    }
 
 engine = create_engine(DATABASE_URL, **engine_kwargs)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
 def ensure_schema(bind=None):
-    """Backward-compatible additive schema only. Never drops or rewrites rows."""
+    """Backward-compatible additive schema only. Never drops or rewrites rows.
+
+    Collector tables are created by Base.metadata.create_all when
+    collector.models is imported. This function only patches older article
+    columns/indexes.
+    """
     bind = bind or engine
     insp = inspect(bind)
     if "articles" not in insp.get_table_names():
@@ -113,3 +126,137 @@ def ensure_schema(bind=None):
                     "ON article_taxonomy_resolutions (resolver_version, public_ok, resolved_competition)"
                 )
             )
+    _ensure_collector_columns(bind)
+
+
+def _ensure_collector_columns(bind):
+    """Additive collector columns for existing Postgres databases."""
+    insp = inspect(bind)
+    tables = set(insp.get_table_names())
+    dialect = bind.dialect.name
+    bool_default = "BOOLEAN DEFAULT FALSE" if dialect == "postgresql" else "BOOLEAN DEFAULT 0"
+    patches = {
+        "sports_sources": [
+            ("upstream_family", "VARCHAR(80)"),
+            ("source_type", "VARCHAR(80)"),
+            ("credential_env", "VARCHAR(120)"),
+            ("independence_status", "VARCHAR(40)"),
+            ("derived_from", "VARCHAR(80)"),
+            ("source_id_original", "TEXT"),
+        ],
+        "sports_source_competitions": [
+            ("coverage_scope", "VARCHAR(20)"),
+            ("coverage_notes", "TEXT"),
+            ("verification", "TEXT"),
+            ("polling_class", "VARCHAR(20)"),
+            ("source_config_json", "TEXT"),
+            ("independence_status", "VARCHAR(40)"),
+            ("derived_from", "VARCHAR(80)"),
+            ("upstream_family", "VARCHAR(80)"),
+        ],
+        "sports_events": [
+            ("retrieved_at", "TIMESTAMP"),
+            ("timezone_name", "VARCHAR(80)"),
+            ("stage", "VARCHAR(120)"),
+            ("gender", "VARCHAR(20)"),
+            ("source_url", "VARCHAR(500)"),
+            ("display_eligible", "BOOLEAN DEFAULT TRUE"),
+            ("canonical_event_id", "VARCHAR(160)"),
+        ],
+        "sports_id_map": [
+            ("source_entity_id_original", "TEXT"),
+        ],
+        "sports_event_observations": [
+            ("source_event_key", "VARCHAR(80)"),
+        ],
+        "sports_ingestion_runs": [
+            ("jobs", "INTEGER"),
+            ("raw_count", "INTEGER"),
+            ("normalized", "INTEGER"),
+            ("inserted", "INTEGER"),
+            ("updated", "INTEGER"),
+            ("rejected", "INTEGER"),
+            ("provider_failures", "INTEGER"),
+            ("db_failures", "INTEGER"),
+        ],
+        "sports_source_health": [
+            ("last_attempt_at", "TIMESTAMP"),
+            ("last_latency_ms", "INTEGER"),
+            ("last_parse_status", "VARCHAR(40)"),
+            ("last_events_returned", "INTEGER"),
+            ("last_error_type", "VARCHAR(40)"),
+            ("last_success_event_at", "TIMESTAMP"),
+        ],
+    }
+    with bind.begin() as conn:
+        for table, columns in patches.items():
+            if table not in tables:
+                continue
+            existing = {col["name"] for col in insp.get_columns(table)}
+            for name, coltype in columns:
+                if name in existing:
+                    continue
+                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {coltype}"))
+        if dialect == "postgresql" and "sports_event_observations" in tables:
+            conn.execute(text("ALTER TABLE sports_event_observations ALTER COLUMN source_event_id TYPE TEXT"))
+        _ = bool_default
+        _ensure_collector_indexes(conn, tables)
+
+
+def _ensure_collector_indexes(conn, tables):
+    """Additive unique indexes only. Never drops rows; skip if duplicates exist."""
+    statements = []
+    if "sports_events" in tables:
+        statements.append(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_sports_event_fingerprint ON sports_events (fingerprint)"
+        )
+    if "sports_entities" in tables:
+        statements.append(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_sports_entity_identity ON sports_entities (sport_id, kind, slug)"
+        )
+    if "sports_competitions" in tables:
+        statements.append(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_sports_comp_sport_slug ON sports_competitions (sport_id, slug)"
+        )
+    if "sports_id_map" in tables:
+        statements.append(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_source_entity ON sports_id_map (entity_kind, source_id, source_entity_id)"
+        )
+    if "sports_events" in tables:
+        statements.append(
+            "CREATE INDEX IF NOT EXISTS ix_sports_event_sport_start ON sports_events (sport_id, start_time)"
+        )
+        statements.append(
+            "CREATE INDEX IF NOT EXISTS ix_sports_event_public_start ON sports_events (sport_id, start_time, display_eligible)"
+        )
+        statements.append(
+            "CREATE INDEX IF NOT EXISTS ix_sports_event_canonical ON sports_events (canonical_event_id)"
+        )
+        statements.append(
+            "CREATE INDEX IF NOT EXISTS ix_sports_event_status_start ON sports_events (status, start_time)"
+        )
+        statements.append(
+            "CREATE INDEX IF NOT EXISTS ix_sports_event_primary_source ON sports_events (primary_source_id)"
+        )
+    if "sports_event_observations" in tables:
+        statements.append(
+            "CREATE INDEX IF NOT EXISTS ix_event_obs_source_key ON sports_event_observations (source_id, source_event_key)"
+        )
+    if "sports_ingestion_runs" in tables:
+        statements.append(
+            "CREATE INDEX IF NOT EXISTS ix_ingest_runs_status ON sports_ingestion_runs (status, started_at)"
+        )
+    if "sports_source_health" in tables:
+        statements.append(
+            "CREATE INDEX IF NOT EXISTS ix_source_health_status ON sports_source_health (status)"
+        )
+    if "sports_scheduler_lease" in tables:
+        statements.append(
+            "CREATE INDEX IF NOT EXISTS ix_scheduler_lease_expires ON sports_scheduler_lease (expires_at)"
+        )
+    for stmt in statements:
+        try:
+            conn.execute(text(stmt))
+        except Exception:
+            # Existing duplicates: keep data, skip the unique index.
+            pass

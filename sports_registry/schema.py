@@ -120,6 +120,10 @@ class ProviderDefinition(TypedDict, total=False):
     name: str
     active: bool
     public_attribution_required: bool
+    public_branding_required: bool
+    attribution_required: bool
+    attribution_text: Optional[str]
+    licensed: bool
     sports_supported: List[str]
     capabilities: Dict[str, bool]
     push: List[str]

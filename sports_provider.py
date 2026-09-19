@@ -1,20 +1,13 @@
 """Provider-independent sports-data contracts.
 
-No paid sports-data API is connected. Empty payloads are intentional: the
-frontend must never receive fake fixtures, scores, or standings.
-
-To plug in a real provider later:
-1. Implement SportsDataProvider (see Protocol below).
-2. Set env SPORTS_DATA_PROVIDER to that class path, or extend get_active_provider().
-3. Map provider IDs onto internal event/participant IDs in NormalizedEvent.
-4. Keep returning the same dict shapes — frontend never consumes raw vendor JSON.
-
-Live Scores and Predictions both read NormalizedEvent objects from this layer.
+Request handlers read through NinkoCollectedSportsDataProvider. Source
+adapters run only in the collector worker. Empty payloads remain honest
+until collected events exist. Licensed sources are optional competition-level
+fallbacks and are not configured in this phase.
 """
 
 from __future__ import annotations
 
-import os
 from typing import Any, Dict, Iterable, List, Optional, Protocol, TypedDict
 
 
@@ -262,19 +255,13 @@ class DisconnectedSportsDataProvider:
 
 
 def get_active_provider() -> SportsDataProvider:
-    """Factory for the live sports-data adapter.
+    """Return the read-side collected-data provider.
 
-    Plug-in point for a paid provider:
-    1. Implement SportsDataProvider (map vendor IDs onto NormalizedEvent).
-    2. Register that class here (SPORTS_DATA_PROVIDER env is reserved).
-    3. Keep returning NormalizedEvent / empty helpers — never raw vendor JSON.
-
-    Until an adapter is registered, production always returns honest empties.
-    Providers that require public branding are never selected.
+    Collection is a separate worker. This factory must not construct source
+    adapters or invent fixtures.
     """
     from sports_registry.router import get_sports_data_provider
 
-    _configured = (os.getenv("SPORTS_DATA_PROVIDER") or "").strip()
     return get_sports_data_provider()
 
 

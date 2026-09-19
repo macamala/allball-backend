@@ -56,6 +56,9 @@ def providers_payload() -> dict:
         "motorsport_series_ids": list(SERIES_IDS),
         "public_branding_rule": (
             "NinkoSports does not display external sports-data provider "
-            "branding, logos, or powered-by attribution on the public site."
+            "branding, logos, or powered-by marks on Live Scores. Legally "
+            "required credits appear only on the Data Sources page."
         ),
+        "attribution_mode": "global-data-sources",
+        "architecture": "sport-to-many-competitions-to-ordered-sources",
     }

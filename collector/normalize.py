@@ -1,0 +1,173 @@
+"""Normalize adapter event dicts onto the SportsDataProvider event families."""
+
+from __future__ import annotations
+
+from typing import Any, Dict, Optional
+
+from collector.live_state import canonical_status, guard_future_status, is_live, reconcile_live_status
+from collector.participant_text import clean_participant_name, fold_for_identity, participant_payload
+from collector.timezones import DATE_ONLY, iso_utc, resolve_event_time
+from collector.util import slugify
+from sports_registry.event_models import event_family_for_sport
+from sports_registry.sports import get_sport
+
+
+def _participant(raw: Any, side: str) -> Dict[str, Any]:
+    payload = participant_payload(raw, side)
+    name = payload.get("name") or ""
+    payload["slug"] = payload.get("slug") or slugify(fold_for_identity(name) or name)
+    if isinstance(raw, dict) and raw.get("logo"):
+        payload["logo"] = raw.get("logo") or raw.get("image")
+    return payload
+
+
+def normalize_event(raw: Dict[str, Any], *, sport_id: str, competition_id: str) -> Dict[str, Any]:
+    sport = get_sport(sport_id) or {}
+    family = raw.get("event_family") or event_family_for_sport(sport_id) or "team_match"
+    inferred = bool(raw.get("status_inferred"))
+    resolved = resolve_event_time(
+        raw.get("start_time") or raw.get("kickoff") or raw.get("date"),
+        competition_id=competition_id,
+        country_id=str(raw.get("country_id") or ""),
+        provider=str(raw.get("source_family") or raw.get("provider") or ""),
+        source_timezone=raw.get("timezone") or raw.get("source_timezone"),
+        venue_timezone=raw.get("venue_timezone"),
+    )
+    canonical_start = iso_utc(resolved)
+    status = guard_future_status(
+        canonical_status(raw.get("status") or "scheduled"),
+        canonical_start or resolved.source_local_datetime,
+        inferred=inferred,
+        sport_id=sport_id,
+    )
+    home = _participant(raw.get("home") or raw.get("participant_a") or raw.get("fighter_a"), "home")
+    away = _participant(raw.get("away") or raw.get("participant_b") or raw.get("fighter_b"), "away")
+    score = raw.get("score") if isinstance(raw.get("score"), dict) else {}
+    event: Dict[str, Any] = {
+        "source_event_id": str(raw.get("source_event_id") or raw.get("id") or ""),
+        "sport": sport_id,
+        "competition": raw.get("competition") or raw.get("competition_name") or competition_id,
+        "competition_key": competition_id,
+        "source_competition_name": raw.get("source_competition_name") or raw.get("competition") or raw.get("competition_name"),
+        "source_competition_id": raw.get("source_competition_id"),
+        "season": raw.get("season"),
+        "event_family": family,
+        "home": home,
+        "away": away,
+        "participant_a": _participant(raw.get("participant_a") or home, "a"),
+        "participant_b": _participant(raw.get("participant_b") or away, "b"),
+        "start_time": canonical_start,
+        "start_date": resolved.start_date,
+        "start_precision": resolved.precision,
+        "source_local_datetime": resolved.source_local_datetime,
+        "source_timezone": resolved.source_timezone,
+        "timezone_resolution_method": resolved.method,
+        "_resolved_time": resolved,
+        "status": status,
+        "score": {
+            "home": score.get("home", raw.get("home_score")),
+            "away": score.get("away", raw.get("away_score")),
+            "period": score.get("period") or raw.get("period"),
+            "minute": score.get("minute") or raw.get("minute"),
+            "clock": score.get("clock") or raw.get("clock"),
+            "set": score.get("set"),
+            "quarter": score.get("quarter"),
+            "hits": score.get("hits"),
+            "errors": score.get("errors"),
+            "runs": score.get("runs"),
+            "wickets": score.get("wickets"),
+            "overs": score.get("overs"),
+        },
+        "venue": raw.get("venue"),
+        "attendance": raw.get("attendance") or raw.get("numberOfViewers"),
+        "referee": raw.get("referee"),
+        "series_id": raw.get("series_id"),
+        "session_type": raw.get("session_type"),
+        "game_id": raw.get("game_id") or (sport_id if sport.get("parent_id") == "esports" else None),
+        "country_id": raw.get("country_id"),
+        "meeting_id": raw.get("meeting_id"),
+        "race_number": raw.get("race_number"),
+        "tournament": raw.get("tournament"),
+        "round": raw.get("round"),
+        "lineups": raw.get("lineups"),
+        "statistics": raw.get("statistics"),
+        "incidents": raw.get("incidents") or raw.get("events"),
+        "availability": raw.get("availability") or [],
+        "live": is_live(status),
+        "stage": raw.get("stage") or raw.get("round"),
+        "gender": raw.get("gender"),
+        "timezone": raw.get("timezone"),
+        "source_url": raw.get("source_url") or raw.get("url"),
+        "source_family": raw.get("source_family"),
+        "athletes": raw.get("athletes") or raw.get("drivers") or raw.get("runners"),
+        "periods": raw.get("periods") or raw.get("sets") or raw.get("quarters"),
+        "maps": raw.get("maps"),
+        "best_of": raw.get("best_of"),
+        "classification": raw.get("classification"),
+        "runners": raw.get("runners"),
+        "leaderboard": raw.get("leaderboard"),
+        "bracket": raw.get("bracket"),
+        "form": raw.get("form"),
+        "race_name": raw.get("race_name"),
+        "trap": raw.get("trap"),
+        "result_type": raw.get("result_type"),
+        "winner": raw.get("winner"),
+        "walkover": raw.get("walkover"),
+        "forfeit": raw.get("forfeit"),
+        "retrieved_at": raw.get("retrieved_at") or raw.get("source_fetch_time"),
+        "source_fetch_time": raw.get("source_fetch_time") or raw.get("retrieved_at"),
+        "source_event_updated_at": raw.get("source_event_updated_at") or raw.get("event_updated_at"),
+        "observed_at": raw.get("observed_at")
+        or raw.get("source_event_updated_at")
+        or raw.get("event_updated_at"),
+        "canonical_last_observed_at": raw.get("canonical_last_observed_at")
+        or raw.get("observed_at")
+        or raw.get("source_event_updated_at"),
+        "source_status": raw.get("source_status") or raw.get("status"),
+        "tournament_id": raw.get("tournament_id"),
+        "tournament_name": raw.get("tournament_name"),
+        "surface": raw.get("surface"),
+        "category": raw.get("category"),
+        "location": raw.get("location"),
+        "orientation_conflict": raw.get("orientation_conflict"),
+        "status_inferred": inferred,
+    }
+    if sport.get("event_model") == "motorsport_race" and not event.get("series_id"):
+        event["series_id"] = raw.get("series_id") or competition_id
+    if sport.get("event_model") == "esports_match":
+        event["game_id"] = event.get("game_id") or sport_id
+        event["parent_sport_id"] = sport.get("parent_id") or "esports"
+    if sport.get("event_model") == "racing":
+        event["country_id"] = event.get("country_id")
+        event["country_based"] = True
+    return reconcile_live_status(event)
+
+
+def fingerprint(event: Dict[str, Any]) -> str:
+    family = event.get("event_family") or ""
+    sport = event.get("sport") or ""
+    comp = event.get("competition_key") or ""
+    start = str(event.get("start_time") or "")[:16]
+    if family == "motorsport_race":
+        parts = [sport, event.get("series_id") or comp, start, event.get("session_type") or "race"]
+    elif family == "racing":
+        parts = [
+            sport,
+            event.get("country_id") or "",
+            event.get("meeting_id") or event.get("venue") or comp,
+            str(event.get("race_number") or event.get("race_name") or start),
+        ]
+    elif family == "tournament":
+        parts = [sport, event.get("tournament") or comp, start, event.get("round") or ""]
+    elif family in {"individual_match", "combat", "esports_match"}:
+        a = (event.get("participant_a") or event.get("home") or {}).get("slug") or ""
+        b = (event.get("participant_b") or event.get("away") or {}).get("slug") or ""
+        extra = event.get("game_id") or ""
+        parts = [sport, extra or comp, start, a, b]
+    else:
+        home = (event.get("home") or {}).get("slug") or ""
+        away = (event.get("away") or {}).get("slug") or ""
+        parts = [sport, comp, start, home, away]
+    from collector.util import sha_id
+
+    return sha_id("", *parts, length=32)

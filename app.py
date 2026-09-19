@@ -16,6 +16,15 @@ from sqlalchemy.orm import Session
 
 from database import SessionLocal, engine, ensure_schema
 from models import Article, ArticleMedia, ArticleTaxonomyResolution, ArticleTranslation, Base
+import collector.models  # noqa: F401 — register collector tables on Base.metadata
+from collector.attribution import attribution_payload
+from collector.diagnostics import (
+    competition_health_payload,
+    coverage_payload,
+    freshness_payload,
+    results_health_payload,
+    source_health_payload,
+)
 from editorial import classify_media_url, sanitize_title
 from auth import router as auth_router
 from comments_api import router as comments_router
@@ -95,12 +104,46 @@ def _startup_index():
     repair_contaminated()
 
 
+def _startup_integrity():
+    # Healthcheck must pass before this job contends with collector writes.
+    time.sleep(int(os.getenv("NINKO_INTEGRITY_DELAY_SEC", "45")))
+    db = SessionLocal()
+    try:
+        from collector.canonical_collapse import apply_phase2
+        from collector.integrity import apply_backfill, plan_backfill
+
+        plan = plan_backfill(db)
+        result = apply_backfill(db, plan)
+        try:
+            phase2 = apply_phase2(db)
+        except Exception:
+            db.rollback()
+            import logging
+
+            logging.getLogger("ninko.integrity").exception("phase2 failed")
+            phase2 = {"error": True}
+        print(
+            "integrity_backfill",
+            result,
+            "phase2",
+            phase2,
+        )
+    except Exception:
+        import logging
+
+        logging.getLogger("ninko.integrity").exception("integrity backfill failed")
+    finally:
+        db.close()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
     ensure_schema(engine)
     if os.getenv("NINKO_SKIP_STARTUP_INDEX") != "1":
         threading.Thread(target=_startup_index, daemon=True).start()
+    if os.getenv("NINKO_SKIP_INTEGRITY_BACKFILL") != "1":
+        threading.Thread(target=_startup_integrity, daemon=True).start()
     yield
 
 
@@ -278,10 +321,21 @@ def health():
         db_ok = True
     except Exception:
         db_ok = False
+    from collector.flags import flags_payload, scheduler_enabled
+    from collector.matrix_guard import matrix_status
+
+    matrix = matrix_status()
     return {
-        "status": "ok" if db_ok else "degraded",
+        "status": "ok" if db_ok and matrix.get("matches_frozen") else "degraded",
         "service": "allball-backend",
         "database": "ok" if db_ok else "error",
+        "matrix": matrix,
+        "results_flags": flags_payload(),
+        "kill_switch": {
+            "RESULTS_SCHEDULER_ENABLED": scheduler_enabled(),
+            "stops_new_scheduled_work": not scheduler_enabled(),
+            "in_flight_tick_may_finish": True,
+        },
     }
 
 
@@ -493,7 +547,7 @@ def portal_home(
         "most_read": serialize_cards(most_read_kept),
         "by_sport": by_sport,
         "by_league": by_league,
-        "sports_data": provider_status(),
+        "sports_data": get_active_provider().status(),
     }
     _cache_headers(response, featured_pairs or latest_pairs)
     return payload
@@ -742,6 +796,11 @@ def registry_providers():
     return providers_payload()
 
 
+@app.get("/registry/data-sources")
+def registry_data_sources(db: Session = Depends(get_db)):
+    return attribution_payload(db)
+
+
 @app.get("/sports-data/status")
 def sports_data_status():
     return get_active_provider().status()
@@ -764,6 +823,11 @@ def sports_data_scores():
     return payload
 
 
+@app.get("/sports-data/attribution")
+def sports_data_attribution(db: Session = Depends(get_db)):
+    return attribution_payload(db)
+
+
 @app.get("/sports-data/standings")
 def sports_data_standings(league: Optional[str] = Query(None)):
     provider = get_active_provider()
@@ -782,27 +846,149 @@ def sports_data_competitions(sport: Optional[str] = Query(None)):
     return payload
 
 
+def _date_bounds(date: Optional[str], date_from: Optional[str], date_to: Optional[str]):
+    """?date=YYYY-MM-DD is a convenience alias for that UTC calendar day."""
+    if date:
+        day = date.strip()[:10]
+        date_from = date_from or f"{day}T00:00:00Z"
+        date_to = date_to or f"{day}T23:59:59Z"
+    return date_from, date_to
+
+
 @app.get("/sports-data/events")
 def sports_data_events(
+    request: Request,
     sport: Optional[str] = Query(None),
     competition: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
+    date: Optional[str] = Query(None),
     date_from: Optional[str] = Query(None),
     date_to: Optional[str] = Query(None),
+    unlimited: Optional[str] = Query(None),
 ):
+    date_from, date_to = _date_bounds(date, date_from, date_to)
     provider = get_active_provider()
     payload = empty_events_payload(sport, competition, status)
     payload.update(provider.status())
+    allow_unfiltered = bool(unlimited) and _internal_ok(request)
     events = provider.get_events(
         sport=sport,
         competition=competition,
         status=status,
         date_from=date_from,
         date_to=date_to,
+        allow_unfiltered=allow_unfiltered,
     )
     payload["events"] = events
     payload["matches"] = events_to_legacy_matches(events)
     return payload
+
+
+def _internal_ok(request: Request) -> bool:
+    token = os.getenv("NINKO_INTERNAL_TOKEN") or ""
+    if not token:
+        return False
+    header = request.headers.get("x-ninko-internal-token") or ""
+    query = request.query_params.get("token") or ""
+    return header == token or query == token
+
+
+@app.get("/sports-data/live")
+def sports_data_live(
+    sport: Optional[str] = Query(None),
+    competition: Optional[str] = Query(None),
+    date: Optional[str] = Query(None),
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
+):
+    date_from, date_to = _date_bounds(date, date_from, date_to)
+    provider = get_active_provider()
+    payload = empty_events_payload(sport, competition, "live")
+    payload.update(provider.status())
+    events = provider.get_events(
+        sport=sport,
+        competition=competition,
+        status="live",
+        date_from=date_from,
+        date_to=date_to,
+    )
+    payload["events"] = events
+    payload["matches"] = events_to_legacy_matches(events)
+    return payload
+
+
+@app.get("/sports-data/upcoming")
+def sports_data_upcoming(
+    sport: Optional[str] = Query(None),
+    competition: Optional[str] = Query(None),
+    date: Optional[str] = Query(None),
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
+):
+    date_from, date_to = _date_bounds(date, date_from, date_to)
+    provider = get_active_provider()
+    payload = empty_events_payload(sport, competition, "scheduled")
+    payload.update(provider.status())
+    events = provider.get_events(
+        sport=sport,
+        competition=competition,
+        status="scheduled",
+        date_from=date_from,
+        date_to=date_to,
+    )
+    payload["events"] = events
+    payload["matches"] = events_to_legacy_matches(events)
+    return payload
+
+
+@app.get("/sports-data/recent")
+def sports_data_recent(
+    sport: Optional[str] = Query(None),
+    competition: Optional[str] = Query(None),
+    date: Optional[str] = Query(None),
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
+):
+    date_from, date_to = _date_bounds(date, date_from, date_to)
+    provider = get_active_provider()
+    payload = empty_events_payload(sport, competition, "finished")
+    payload.update(provider.status())
+    events = provider.get_events(
+        sport=sport,
+        competition=competition,
+        status="finished",
+        date_from=date_from,
+        date_to=date_to,
+    )
+    payload["events"] = events
+    payload["matches"] = events_to_legacy_matches(events)
+    return payload
+
+
+@app.get("/registry/coverage")
+def registry_coverage():
+    return coverage_payload()
+
+
+@app.post("/internal/collector/recompute-status")
+def internal_recompute_status(request: Request, db: Session = Depends(get_db)):
+    if not _internal_ok(request):
+        raise HTTPException(status_code=404, detail="Not found")
+    from collector.recompute_status import recompute_display_eligible_live
+
+    return recompute_display_eligible_live(db)
+
+
+@app.get("/internal/collector/health")
+def internal_collector_health(request: Request, db: Session = Depends(get_db)):
+    if not _internal_ok(request):
+        raise HTTPException(status_code=404, detail="Not found")
+    return {
+        "sources": source_health_payload(db),
+        "competitions": competition_health_payload(db),
+        "freshness": freshness_payload(db),
+        "results": results_health_payload(db),
+    }
 
 
 @app.get("/sports-data/matches/{match_id}")
@@ -813,9 +999,11 @@ def sports_data_match(match_id: str):
     event = provider.get_event(match_id)
     if event:
         payload["event"] = event
-        payload["header"] = event
-        payload["statistics"] = provider.get_statistics(match_id)
-        payload["availability"] = provider.get_availability(match_id) or []
+        payload["header"] = provider.event_header(event)
+        payload["lineups"] = event.get("lineups")
+        payload["statistics"] = event.get("statistics")
+        payload["incidents"] = event.get("incidents")
+        payload["availability"] = event.get("availability") or []
     return payload
 
 

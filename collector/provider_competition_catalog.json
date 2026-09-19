@@ -1,0 +1,1037 @@
+{
+  "providers": [
+    {
+      "provider_family": "thesportsdb",
+      "provider_competition_id": "4328",
+      "sport": "football",
+      "competition_name": "English Premier League",
+      "country": "england",
+      "season": "",
+      "coverage_type": "fixtures/results"
+    },
+    {
+      "provider_family": "thesportsdb",
+      "provider_competition_id": "4335",
+      "sport": "football",
+      "competition_name": "Spanish La Liga",
+      "country": "es",
+      "season": "",
+      "coverage_type": "fixtures/results"
+    },
+    {
+      "provider_family": "thesportsdb",
+      "provider_competition_id": "4331",
+      "sport": "football",
+      "competition_name": "German Bundesliga",
+      "country": "de",
+      "season": "",
+      "coverage_type": "fixtures/results"
+    },
+    {
+      "provider_family": "thesportsdb",
+      "provider_competition_id": "4332",
+      "sport": "football",
+      "competition_name": "Italian Serie A",
+      "country": "it",
+      "season": "",
+      "coverage_type": "fixtures/results"
+    },
+    {
+      "provider_family": "thesportsdb",
+      "provider_competition_id": "4334",
+      "sport": "football",
+      "competition_name": "French Ligue 1",
+      "country": "fr",
+      "season": "",
+      "coverage_type": "fixtures/results"
+    },
+    {
+      "provider_family": "thesportsdb",
+      "provider_competition_id": "4399",
+      "sport": "football",
+      "competition_name": "German 2. Bundesliga",
+      "country": "de",
+      "season": "",
+      "coverage_type": "fixtures/results"
+    },
+    {
+      "provider_family": "thesportsdb",
+      "provider_competition_id": "4480",
+      "sport": "football",
+      "competition_name": "UEFA Champions League",
+      "country": "",
+      "season": "",
+      "coverage_type": "fixtures/results"
+    },
+    {
+      "provider_family": "thesportsdb",
+      "provider_competition_id": "5071",
+      "sport": "football",
+      "competition_name": "UEFA Conference League",
+      "country": "",
+      "season": "",
+      "coverage_type": "fixtures/results"
+    },
+    {
+      "provider_family": "thesportsdb",
+      "provider_competition_id": "4684",
+      "sport": "football",
+      "competition_name": "USL Championship",
+      "country": "us",
+      "season": "",
+      "coverage_type": "fixtures/results"
+    },
+    {
+      "provider_family": "thesportsdb",
+      "provider_competition_id": "5076",
+      "sport": "football",
+      "competition_name": "USL League One",
+      "country": "us",
+      "season": "",
+      "coverage_type": "fixtures/results"
+    },
+    {
+      "provider_family": "thesportsdb",
+      "provider_competition_id": "4845",
+      "sport": "football",
+      "competition_name": "Swedish Division 1 South",
+      "country": "se",
+      "season": "",
+      "coverage_type": "fixtures/results"
+    },
+    {
+      "provider_family": "thesportsdb",
+      "provider_competition_id": "4546",
+      "sport": "basketball",
+      "competition_name": "EuroLeague Basketball",
+      "country": "",
+      "season": "",
+      "coverage_type": "fixtures/results"
+    },
+    {
+      "provider_family": "thesportsdb",
+      "provider_competition_id": "4387",
+      "sport": "basketball",
+      "competition_name": "NBA",
+      "country": "us",
+      "season": "",
+      "coverage_type": "fixtures/results"
+    },
+    {
+      "provider_family": "thesportsdb",
+      "provider_competition_id": "4516",
+      "sport": "basketball",
+      "competition_name": "WNBA",
+      "country": "us",
+      "season": "",
+      "coverage_type": "fixtures/results"
+    },
+    {
+      "provider_family": "thesportsdb",
+      "provider_competition_id": "5119",
+      "sport": "basketball",
+      "competition_name": "Mexican LNBP",
+      "country": "mx",
+      "season": "",
+      "coverage_type": "fixtures/results"
+    },
+    {
+      "provider_family": "thesportsdb",
+      "provider_competition_id": "4391",
+      "sport": "american-football",
+      "competition_name": "NFL",
+      "country": "us",
+      "season": "",
+      "coverage_type": "fixtures/results"
+    },
+    {
+      "provider_family": "thesportsdb",
+      "provider_competition_id": "4479",
+      "sport": "american-football",
+      "competition_name": "NCAA Division 1 Football",
+      "country": "us",
+      "season": "",
+      "coverage_type": "fixtures/results"
+    },
+    {
+      "provider_family": "thesportsdb",
+      "provider_competition_id": "4380",
+      "sport": "ice-hockey",
+      "competition_name": "NHL",
+      "country": "us",
+      "season": "",
+      "coverage_type": "fixtures/results"
+    },
+    {
+      "provider_family": "thesportsdb",
+      "provider_competition_id": "4931",
+      "sport": "ice-hockey",
+      "competition_name": "Finnish Liiga",
+      "country": "fi",
+      "season": "",
+      "coverage_type": "fixtures/results"
+    },
+    {
+      "provider_family": "thesportsdb",
+      "provider_competition_id": "4920",
+      "sport": "ice-hockey",
+      "competition_name": "KHL",
+      "country": "ru",
+      "season": "",
+      "coverage_type": "fixtures/results"
+    },
+    {
+      "provider_family": "thesportsdb",
+      "provider_competition_id": "4424",
+      "sport": "baseball",
+      "competition_name": "MLB",
+      "country": "us",
+      "season": "",
+      "coverage_type": "fixtures/results"
+    },
+    {
+      "provider_family": "thesportsdb",
+      "provider_competition_id": "4591",
+      "sport": "baseball",
+      "competition_name": "Nippon Professional Baseball",
+      "country": "jp",
+      "season": "",
+      "coverage_type": "fixtures/results"
+    },
+    {
+      "provider_family": "thesportsdb",
+      "provider_competition_id": "4830",
+      "sport": "baseball",
+      "competition_name": "KBO League",
+      "country": "kr",
+      "season": "",
+      "coverage_type": "fixtures/results"
+    },
+    {
+      "provider_family": "thesportsdb",
+      "provider_competition_id": "5111",
+      "sport": "baseball",
+      "competition_name": "Chinese Professional Baseball League",
+      "country": "tw",
+      "season": "",
+      "coverage_type": "fixtures/results"
+    },
+    {
+      "provider_family": "thesportsdb",
+      "provider_competition_id": "5172",
+      "sport": "rugby",
+      "competition_name": "French Pro D2",
+      "country": "fr",
+      "season": "",
+      "coverage_type": "fixtures/results"
+    },
+    {
+      "provider_family": "thesportsdb",
+      "provider_competition_id": "5278",
+      "sport": "rugby",
+      "competition_name": "New Zealand NPC",
+      "country": "nz",
+      "season": "",
+      "coverage_type": "fixtures/results"
+    },
+    {
+      "provider_family": "thesportsdb",
+      "provider_competition_id": "4979",
+      "sport": "cricket",
+      "competition_name": "Twenty20 Internationals",
+      "country": "",
+      "season": "",
+      "coverage_type": "fixtures/results"
+    },
+    {
+      "provider_family": "thesportsdb",
+      "provider_competition_id": "5613",
+      "sport": "volleyball",
+      "competition_name": "Men's European Volleyball Championship",
+      "country": "",
+      "season": "",
+      "coverage_type": "fixtures/results"
+    },
+    {
+      "provider_family": "thesportsdb",
+      "provider_competition_id": "4533",
+      "sport": "handball",
+      "competition_name": "German Handball-Bundesliga",
+      "country": "de",
+      "season": "",
+      "coverage_type": "fixtures/results"
+    },
+    {
+      "provider_family": "thesportsdb",
+      "provider_competition_id": "5135",
+      "sport": "handball",
+      "competition_name": "Danish Men's Handball League",
+      "country": "dk",
+      "season": "",
+      "coverage_type": "fixtures/results"
+    },
+    {
+      "provider_family": "thesportsdb",
+      "provider_competition_id": "4980",
+      "sport": "handball",
+      "competition_name": "EHF Champions League",
+      "country": "",
+      "season": "",
+      "coverage_type": "fixtures/results"
+    },
+    {
+      "provider_family": "thesportsdb",
+      "provider_competition_id": "4456",
+      "sport": "australian-rules",
+      "competition_name": "Australian AFL",
+      "country": "au",
+      "season": "",
+      "coverage_type": "fixtures/results"
+    },
+    {
+      "provider_family": "thesportsdb",
+      "provider_competition_id": "5093",
+      "sport": "motorsport",
+      "competition_name": "NASCAR Truck Series",
+      "country": "us",
+      "season": "",
+      "coverage_type": "fixtures/results"
+    },
+    {
+      "provider_family": "thesportsdb",
+      "provider_competition_id": "5094",
+      "sport": "motorsport",
+      "competition_name": "NASCAR ARCA Series",
+      "country": "us",
+      "season": "",
+      "coverage_type": "fixtures/results"
+    },
+    {
+      "provider_family": "thesportsdb",
+      "provider_competition_id": "4758",
+      "sport": "golf",
+      "competition_name": "European Challenge Tour",
+      "country": "",
+      "season": "",
+      "coverage_type": "fixtures/results"
+    },
+    {
+      "provider_family": "thesportsdb",
+      "provider_competition_id": "4766",
+      "sport": "golf",
+      "competition_name": "Korean Tour",
+      "country": "kr",
+      "season": "",
+      "coverage_type": "fixtures/results"
+    },
+    {
+      "provider_family": "thesportsdb",
+      "provider_competition_id": "4763",
+      "sport": "golf",
+      "competition_name": "Korn Ferry Tour",
+      "country": "us",
+      "season": "",
+      "coverage_type": "fixtures/results"
+    },
+    {
+      "provider_family": "thesportsdb",
+      "provider_competition_id": "4554",
+      "sport": "darts",
+      "competition_name": "PDC Darts",
+      "country": "",
+      "season": "",
+      "coverage_type": "fixtures/results"
+    },
+    {
+      "provider_family": "espn-html",
+      "provider_competition_id": "scoreboard",
+      "sport": "",
+      "competition_name": "nfl",
+      "country": "",
+      "season": "",
+      "coverage_type": "scoreboard",
+      "canonical_hint": "nfl"
+    },
+    {
+      "provider_family": "espn-html",
+      "provider_competition_id": "scoreboard",
+      "sport": "",
+      "competition_name": "ncaa football",
+      "country": "",
+      "season": "",
+      "coverage_type": "scoreboard",
+      "canonical_hint": "ncaa-football"
+    },
+    {
+      "provider_family": "espn-html",
+      "provider_competition_id": "schedule",
+      "sport": "",
+      "competition_name": "ufc",
+      "country": "",
+      "season": "",
+      "coverage_type": "scoreboard",
+      "canonical_hint": "ufc"
+    },
+    {
+      "provider_family": "espn-html",
+      "provider_competition_id": "scoreboard",
+      "sport": "",
+      "competition_name": "nascar truck",
+      "country": "",
+      "season": "",
+      "coverage_type": "scoreboard",
+      "canonical_hint": "nascar-truck"
+    },
+    {
+      "provider_family": "espn-html",
+      "provider_competition_id": "scoreboard",
+      "sport": "",
+      "competition_name": "nascar arca",
+      "country": "",
+      "season": "",
+      "coverage_type": "scoreboard",
+      "canonical_hint": "nascar-arca"
+    },
+    {
+      "provider_family": "espn-html",
+      "provider_competition_id": "scoreboard",
+      "sport": "",
+      "competition_name": "nll",
+      "country": "",
+      "season": "",
+      "coverage_type": "scoreboard",
+      "canonical_hint": "nll"
+    },
+    {
+      "provider_family": "espn-html",
+      "provider_competition_id": "scoreboard",
+      "sport": "",
+      "competition_name": "pll",
+      "country": "",
+      "season": "",
+      "coverage_type": "scoreboard",
+      "canonical_hint": "pll"
+    },
+    {
+      "provider_family": "espn-html",
+      "provider_competition_id": "arg.1",
+      "sport": "",
+      "competition_name": "argentina primera",
+      "country": "",
+      "season": "",
+      "coverage_type": "scoreboard",
+      "canonical_hint": "argentina-primera"
+    },
+    {
+      "provider_family": "espn-html",
+      "provider_competition_id": "den.1",
+      "sport": "",
+      "competition_name": "denmark superliga",
+      "country": "",
+      "season": "",
+      "coverage_type": "scoreboard",
+      "canonical_hint": "denmark-superliga"
+    },
+    {
+      "provider_family": "espn-html",
+      "provider_competition_id": "swe.1",
+      "sport": "",
+      "competition_name": "sweden allsvenskan",
+      "country": "",
+      "season": "",
+      "coverage_type": "scoreboard",
+      "canonical_hint": "sweden-allsvenskan"
+    },
+    {
+      "provider_family": "espn-html",
+      "provider_competition_id": "mex.1",
+      "sport": "",
+      "competition_name": "mexico liga mx",
+      "country": "",
+      "season": "",
+      "coverage_type": "scoreboard",
+      "canonical_hint": "mexico-liga-mx"
+    },
+    {
+      "provider_family": "espn-html",
+      "provider_competition_id": "aus.1",
+      "sport": "",
+      "competition_name": "australia a league",
+      "country": "",
+      "season": "",
+      "coverage_type": "scoreboard",
+      "canonical_hint": "australia-a-league"
+    },
+    {
+      "provider_family": "espn-html",
+      "provider_competition_id": "aus.w.1",
+      "sport": "",
+      "competition_name": "australia a league women",
+      "country": "",
+      "season": "",
+      "coverage_type": "scoreboard",
+      "canonical_hint": "australia-a-league-women"
+    },
+    {
+      "provider_family": "espn-html",
+      "provider_competition_id": "usa.nwsl",
+      "sport": "",
+      "competition_name": "usa nwsl",
+      "country": "",
+      "season": "",
+      "coverage_type": "scoreboard",
+      "canonical_hint": "usa-nwsl"
+    },
+    {
+      "provider_family": "espn-html",
+      "provider_competition_id": "usa.usl.1",
+      "sport": "",
+      "competition_name": "usa usl championship",
+      "country": "",
+      "season": "",
+      "coverage_type": "scoreboard",
+      "canonical_hint": "usa-usl-championship"
+    },
+    {
+      "provider_family": "espn-html",
+      "provider_competition_id": "afc.champions",
+      "sport": "",
+      "competition_name": "afc champions league",
+      "country": "",
+      "season": "",
+      "coverage_type": "scoreboard",
+      "canonical_hint": "afc-champions-league"
+    },
+    {
+      "provider_family": "espn-html",
+      "provider_competition_id": "caf.champions",
+      "sport": "",
+      "competition_name": "caf champions league",
+      "country": "",
+      "season": "",
+      "coverage_type": "scoreboard",
+      "canonical_hint": "caf-champions-league"
+    },
+    {
+      "provider_family": "espn-html",
+      "provider_competition_id": "conmebol.libertadores",
+      "sport": "",
+      "competition_name": "copa libertadores",
+      "country": "",
+      "season": "",
+      "coverage_type": "scoreboard",
+      "canonical_hint": "copa-libertadores"
+    },
+    {
+      "provider_family": "espn-html",
+      "provider_competition_id": "conmebol.sudamericana",
+      "sport": "",
+      "competition_name": "copa sudamericana",
+      "country": "",
+      "season": "",
+      "coverage_type": "scoreboard",
+      "canonical_hint": "copa-sudamericana"
+    },
+    {
+      "provider_family": "espn-html",
+      "provider_competition_id": "srb.1",
+      "sport": "",
+      "competition_name": "serbia superliga",
+      "country": "",
+      "season": "",
+      "coverage_type": "scoreboard",
+      "canonical_hint": "serbia-superliga"
+    },
+    {
+      "provider_family": "espn-html",
+      "provider_competition_id": "svk.1",
+      "sport": "",
+      "competition_name": "slovakia super liga",
+      "country": "",
+      "season": "",
+      "coverage_type": "scoreboard",
+      "canonical_hint": "slovakia-super-liga"
+    },
+    {
+      "provider_family": "espn-html",
+      "provider_competition_id": "mas.1",
+      "sport": "",
+      "competition_name": "malaysia super league",
+      "country": "",
+      "season": "",
+      "coverage_type": "scoreboard",
+      "canonical_hint": "malaysia-super-league"
+    },
+    {
+      "provider_family": "espn-html",
+      "provider_competition_id": "tha.1",
+      "sport": "",
+      "competition_name": "thai league 1",
+      "country": "",
+      "season": "",
+      "coverage_type": "scoreboard",
+      "canonical_hint": "thai-league-1"
+    },
+    {
+      "provider_family": "espn-html",
+      "provider_competition_id": "cze.1",
+      "sport": "",
+      "competition_name": "czech first league",
+      "country": "",
+      "season": "",
+      "coverage_type": "scoreboard",
+      "canonical_hint": "czech-first-league"
+    },
+    {
+      "provider_family": "espn-html",
+      "provider_competition_id": "ind.1",
+      "sport": "",
+      "competition_name": "india super league",
+      "country": "",
+      "season": "",
+      "coverage_type": "scoreboard",
+      "canonical_hint": "india-super-league"
+    },
+    {
+      "provider_family": "espn-html",
+      "provider_competition_id": "270557",
+      "sport": "",
+      "competition_name": "france top 14",
+      "country": "",
+      "season": "",
+      "coverage_type": "scoreboard",
+      "canonical_hint": "france-top-14"
+    },
+    {
+      "provider_family": "espn-html",
+      "provider_competition_id": "270559",
+      "sport": "",
+      "competition_name": "france pro d2",
+      "country": "",
+      "season": "",
+      "coverage_type": "scoreboard",
+      "canonical_hint": "france-pro-d2"
+    },
+    {
+      "provider_family": "espn-html",
+      "provider_competition_id": "244293",
+      "sport": "",
+      "competition_name": "super rugby",
+      "country": "",
+      "season": "",
+      "coverage_type": "scoreboard",
+      "canonical_hint": "super-rugby"
+    },
+    {
+      "provider_family": "espn-html",
+      "provider_competition_id": "270559",
+      "sport": "",
+      "competition_name": "super league",
+      "country": "",
+      "season": "",
+      "coverage_type": "scoreboard",
+      "canonical_hint": "super-league"
+    },
+    {
+      "provider_family": "espn-html",
+      "provider_competition_id": "scoreboard",
+      "sport": "",
+      "competition_name": "atp tour",
+      "country": "",
+      "season": "",
+      "coverage_type": "scoreboard",
+      "canonical_hint": "atp-tour"
+    },
+    {
+      "provider_family": "espn-html",
+      "provider_competition_id": "scoreboard",
+      "sport": "",
+      "competition_name": "wta tour",
+      "country": "",
+      "season": "",
+      "coverage_type": "scoreboard",
+      "canonical_hint": "wta-tour"
+    },
+    {
+      "provider_family": "espn-html",
+      "provider_competition_id": "scoreboard",
+      "sport": "",
+      "competition_name": "formula e",
+      "country": "",
+      "season": "",
+      "coverage_type": "scoreboard",
+      "canonical_hint": "formula-e"
+    },
+    {
+      "provider_family": "espn-html",
+      "provider_competition_id": "242041",
+      "sport": "",
+      "competition_name": "nrl",
+      "country": "",
+      "season": "",
+      "coverage_type": "scoreboard",
+      "canonical_hint": "nrl"
+    },
+    {
+      "provider_family": "worldcup26-api",
+      "provider_competition_id": "eng.1",
+      "sport": "football",
+      "competition_name": "English Premier League",
+      "country": "England",
+      "season": "2026",
+      "coverage_type": "fixtures/scoreboard/standings"
+    },
+    {
+      "provider_family": "worldcup26-api",
+      "provider_competition_id": "eng.2",
+      "sport": "football",
+      "competition_name": "English League Championship",
+      "country": "England",
+      "season": "2026",
+      "coverage_type": "fixtures/scoreboard/standings"
+    },
+    {
+      "provider_family": "worldcup26-api",
+      "provider_competition_id": "eng.3",
+      "sport": "football",
+      "competition_name": "English League One",
+      "country": "England",
+      "season": "2026",
+      "coverage_type": "fixtures/scoreboard/standings"
+    },
+    {
+      "provider_family": "worldcup26-api",
+      "provider_competition_id": "eng.4",
+      "sport": "football",
+      "competition_name": "English League Two",
+      "country": "England",
+      "season": "2026",
+      "coverage_type": "fixtures/scoreboard/standings"
+    },
+    {
+      "provider_family": "worldcup26-api",
+      "provider_competition_id": "eng.fa",
+      "sport": "football",
+      "competition_name": "English FA Cup",
+      "country": "England",
+      "season": "2026",
+      "coverage_type": "fixtures/scoreboard/standings"
+    },
+    {
+      "provider_family": "worldcup26-api",
+      "provider_competition_id": "esp.1",
+      "sport": "football",
+      "competition_name": "Spanish LALIGA",
+      "country": "Spain",
+      "season": "2026",
+      "coverage_type": "fixtures/scoreboard/standings"
+    },
+    {
+      "provider_family": "worldcup26-api",
+      "provider_competition_id": "ger.1",
+      "sport": "football",
+      "competition_name": "German Bundesliga",
+      "country": "Germany",
+      "season": "2026",
+      "coverage_type": "fixtures/scoreboard/standings"
+    },
+    {
+      "provider_family": "worldcup26-api",
+      "provider_competition_id": "ita.1",
+      "sport": "football",
+      "competition_name": "Italian Serie A",
+      "country": "Italy",
+      "season": "2026",
+      "coverage_type": "fixtures/scoreboard/standings"
+    },
+    {
+      "provider_family": "worldcup26-api",
+      "provider_competition_id": "fra.1",
+      "sport": "football",
+      "competition_name": "French Ligue 1",
+      "country": "France",
+      "season": "2026",
+      "coverage_type": "fixtures/scoreboard/standings"
+    },
+    {
+      "provider_family": "worldcup26-api",
+      "provider_competition_id": "ned.1",
+      "sport": "football",
+      "competition_name": "Dutch Eredivisie",
+      "country": "Netherlands",
+      "season": "2026",
+      "coverage_type": "fixtures/scoreboard/standings"
+    },
+    {
+      "provider_family": "worldcup26-api",
+      "provider_competition_id": "sco.1",
+      "sport": "football",
+      "competition_name": "Scottish Premiership",
+      "country": "Scotland",
+      "season": "2026",
+      "coverage_type": "fixtures/scoreboard/standings"
+    },
+    {
+      "provider_family": "worldcup26-api",
+      "provider_competition_id": "por.1",
+      "sport": "football",
+      "competition_name": "Portuguese Primeira Liga",
+      "country": "Portugal",
+      "season": "2026",
+      "coverage_type": "fixtures/scoreboard/standings"
+    },
+    {
+      "provider_family": "worldcup26-api",
+      "provider_competition_id": "bel.1",
+      "sport": "football",
+      "competition_name": "Belgian Pro League",
+      "country": "Belgium",
+      "season": "2026",
+      "coverage_type": "fixtures/scoreboard/standings"
+    },
+    {
+      "provider_family": "worldcup26-api",
+      "provider_competition_id": "aut.1",
+      "sport": "football",
+      "competition_name": "Austrian Bundesliga",
+      "country": "Austria",
+      "season": "2026",
+      "coverage_type": "fixtures/scoreboard/standings"
+    },
+    {
+      "provider_family": "worldcup26-api",
+      "provider_competition_id": "tur.1",
+      "sport": "football",
+      "competition_name": "Turkish Super Lig",
+      "country": "Turkey",
+      "season": "2026",
+      "coverage_type": "fixtures/scoreboard/standings"
+    },
+    {
+      "provider_family": "worldcup26-api",
+      "provider_competition_id": "usa.1",
+      "sport": "football",
+      "competition_name": "MLS",
+      "country": "United States",
+      "season": "2026",
+      "coverage_type": "fixtures/scoreboard/standings"
+    },
+    {
+      "provider_family": "worldcup26-api",
+      "provider_competition_id": "mex.1",
+      "sport": "football",
+      "competition_name": "Mexican Liga BBVA MX",
+      "country": "Mexico",
+      "season": "2026",
+      "coverage_type": "fixtures/scoreboard/standings"
+    },
+    {
+      "provider_family": "worldcup26-api",
+      "provider_competition_id": "arg.1",
+      "sport": "football",
+      "competition_name": "Argentine Liga Profesional",
+      "country": "Argentina",
+      "season": "2026",
+      "coverage_type": "fixtures/scoreboard/standings"
+    },
+    {
+      "provider_family": "worldcup26-api",
+      "provider_competition_id": "bra.1",
+      "sport": "football",
+      "competition_name": "Brazilian Serie A",
+      "country": "Brazil",
+      "season": "2026",
+      "coverage_type": "fixtures/scoreboard/standings"
+    },
+    {
+      "provider_family": "worldcup26-api",
+      "provider_competition_id": "jpn.1",
+      "sport": "football",
+      "competition_name": "Japanese J.League",
+      "country": "Japan",
+      "season": "2026",
+      "coverage_type": "fixtures/scoreboard/standings"
+    },
+    {
+      "provider_family": "sportsrc",
+      "provider_competition_id": "WC",
+      "sport": "football",
+      "competition_name": "World Cup",
+      "country": "world",
+      "season": "",
+      "coverage_type": "scores/tables"
+    },
+    {
+      "provider_family": "sportsrc",
+      "provider_competition_id": "CL",
+      "sport": "football",
+      "competition_name": "UEFA Champions League",
+      "country": "europe",
+      "season": "",
+      "coverage_type": "scores/tables"
+    },
+    {
+      "provider_family": "sportsrc",
+      "provider_competition_id": "BL1",
+      "sport": "football",
+      "competition_name": "Bundesliga",
+      "country": "Germany",
+      "season": "",
+      "coverage_type": "scores/tables"
+    },
+    {
+      "provider_family": "sportsrc",
+      "provider_competition_id": "DED",
+      "sport": "football",
+      "competition_name": "Eredivisie",
+      "country": "Netherlands",
+      "season": "",
+      "coverage_type": "scores/tables"
+    },
+    {
+      "provider_family": "sportsrc",
+      "provider_competition_id": "BSA",
+      "sport": "football",
+      "competition_name": "Campeonato Brasileiro S\u00e9rie A",
+      "country": "Brazil",
+      "season": "",
+      "coverage_type": "scores/tables"
+    },
+    {
+      "provider_family": "sportsrc",
+      "provider_competition_id": "PD",
+      "sport": "football",
+      "competition_name": "La Liga",
+      "country": "Spain",
+      "season": "",
+      "coverage_type": "scores/tables"
+    },
+    {
+      "provider_family": "sportsrc",
+      "provider_competition_id": "FL1",
+      "sport": "football",
+      "competition_name": "Ligue 1",
+      "country": "France",
+      "season": "",
+      "coverage_type": "scores/tables"
+    },
+    {
+      "provider_family": "sportsrc",
+      "provider_competition_id": "ELC",
+      "sport": "football",
+      "competition_name": "Championship",
+      "country": "England",
+      "season": "",
+      "coverage_type": "scores/tables"
+    },
+    {
+      "provider_family": "sportsrc",
+      "provider_competition_id": "PPL",
+      "sport": "football",
+      "competition_name": "Primeira Liga",
+      "country": "Portugal",
+      "season": "",
+      "coverage_type": "scores/tables"
+    },
+    {
+      "provider_family": "sportsrc",
+      "provider_competition_id": "EC",
+      "sport": "football",
+      "competition_name": "European Championship",
+      "country": "europe",
+      "season": "",
+      "coverage_type": "scores/tables"
+    },
+    {
+      "provider_family": "sportsrc",
+      "provider_competition_id": "SA",
+      "sport": "football",
+      "competition_name": "Serie A",
+      "country": "Italy",
+      "season": "",
+      "coverage_type": "scores/tables"
+    },
+    {
+      "provider_family": "sportsrc",
+      "provider_competition_id": "PL",
+      "sport": "football",
+      "competition_name": "Premier League",
+      "country": "England",
+      "season": "",
+      "coverage_type": "scores/tables"
+    },
+    {
+      "provider_family": "sporting-events",
+      "provider_competition_id": "football",
+      "sport": "football",
+      "competition_name": "Football",
+      "country": "",
+      "season": "2026",
+      "coverage_type": "mixed-uefa-clubs-and-nations"
+    },
+    {
+      "provider_family": "sporting-events",
+      "provider_competition_id": "rugby-union",
+      "sport": "rugby",
+      "competition_name": "Rugby Union",
+      "country": "world",
+      "season": "2026",
+      "coverage_type": "nations-championship-six-nations"
+    },
+    {
+      "provider_family": "sporting-events",
+      "provider_competition_id": "nrl",
+      "sport": "rugby-league",
+      "competition_name": "NRL",
+      "country": "au",
+      "season": "2026",
+      "coverage_type": "empty-this-fetch"
+    },
+    {
+      "provider_family": "sporting-events",
+      "provider_competition_id": "esports",
+      "sport": "esports",
+      "competition_name": "Esports",
+      "country": "world",
+      "season": "2026",
+      "coverage_type": "tournament-titles-only"
+    },
+    {
+      "provider_family": "sporting-events",
+      "provider_competition_id": "swimming",
+      "sport": "swimming",
+      "competition_name": "Swimming",
+      "country": "world",
+      "season": "2026",
+      "coverage_type": "meet-titles-only"
+    },
+    {
+      "provider_family": "sporting-events",
+      "provider_competition_id": "golf",
+      "sport": "golf",
+      "competition_name": "Golf",
+      "country": "world",
+      "season": "2026",
+      "coverage_type": "pga-dp-world-not-korean-tour"
+    },
+    {
+      "provider_family": "sporting-events",
+      "provider_competition_id": "motogp",
+      "sport": "motorsport",
+      "competition_name": "MotoGP",
+      "country": "world",
+      "season": "2026",
+      "coverage_type": "calendar"
+    },
+    {
+      "provider_family": "sporting-events",
+      "provider_competition_id": "tennis",
+      "sport": "tennis",
+      "competition_name": "Tennis",
+      "country": "world",
+      "season": "2026",
+      "coverage_type": "tour-calendar"
+    }
+  ],
+  "count": 111
+}

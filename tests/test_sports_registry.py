@@ -16,7 +16,8 @@ from sports_registry.sports import (
     prediction_market,
     validate_catalog,
 )
-from sports_provider import DisconnectedSportsDataProvider
+from sports_provider import normalize_legacy_match
+from collector.provider import NinkoCollectedSportsDataProvider
 
 
 REQUIRED_SPORTS = {
@@ -138,7 +139,8 @@ def test_no_provider_returns_honest_empty_registry_and_sports_data():
     assert list_providers() == []
     assert select_provider("live_scores") is None
     provider = get_sports_data_provider()
-    assert isinstance(provider, DisconnectedSportsDataProvider)
+    assert isinstance(provider, NinkoCollectedSportsDataProvider)
+    assert provider.status()["connected"] is False
     assert provider.get_events() == []
     with TestClient(app) as client:
         registry = client.get("/registry/sports").json()

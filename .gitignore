@@ -5,3 +5,17 @@ __pycache__/
 .venv/
 venv/
 .env
+*.db
+ninko-collector-phase2.db
+_dump*.py
+_probe*.py
+_live*.py
+_run_closure.py
+_tmp*
+_html_pass/
+smoke_pass*.json
+pass2_audit.json
+pass3_failure_matrix.json
+pass4_mappings.json
+audit/*.sqlite
+audit/*.db

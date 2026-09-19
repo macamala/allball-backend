@@ -1,8 +1,7 @@
-"""Provider registry. No external sports-data provider is connected.
+"""Source and collector-facing registry metadata.
 
-Public NinkoSports UI must not show provider branding, logos, or
-"Powered by..." attribution. Future providers that require visible
-attribution are rejected for public use.
+Live Scores UI must not show provider logos or "Powered by..." branding.
+Legally required credits are returned as a discreet Data Sources list.
 """
 
 from __future__ import annotations
@@ -43,7 +42,11 @@ PROVIDER_MAPPINGS: Dict[str, Dict[str, Dict[str, str]]] = {
 def list_providers(*, public_ok_only: bool = True) -> List[ProviderDefinition]:
     rows = list(PROVIDERS)
     if public_ok_only:
-        rows = [row for row in rows if not row.get("public_attribution_required")]
+        rows = [
+            row
+            for row in rows
+            if not row.get("public_branding_required")
+        ]
     return rows
 
 
@@ -66,5 +69,6 @@ def empty_provider_status() -> Dict[str, object]:
         "provider": None,
         "providers": [],
         "public_attribution_required": False,
+        "attribution": [],
         "message": "Live sports data will appear when a sports-data provider is connected.",
     }
