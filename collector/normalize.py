@@ -12,8 +12,8 @@ from sports_registry.event_models import event_family_for_sport
 from sports_registry.sports import get_sport
 
 
-def _participant(raw: Any, side: str) -> Dict[str, Any]:
-    payload = participant_payload(raw, side)
+def _participant(raw: Any, side: str, sport_id: str = "") -> Dict[str, Any]:
+    payload = participant_payload(raw, side, sport=sport_id)
     name = payload.get("name") or ""
     payload["slug"] = payload.get("slug") or slugify(fold_for_identity(name) or name)
     if isinstance(raw, dict) and raw.get("logo"):
@@ -40,8 +40,8 @@ def normalize_event(raw: Dict[str, Any], *, sport_id: str, competition_id: str) 
         inferred=inferred,
         sport_id=sport_id,
     )
-    home = _participant(raw.get("home") or raw.get("participant_a") or raw.get("fighter_a"), "home")
-    away = _participant(raw.get("away") or raw.get("participant_b") or raw.get("fighter_b"), "away")
+    home = _participant(raw.get("home") or raw.get("participant_a") or raw.get("fighter_a"), "home", sport_id)
+    away = _participant(raw.get("away") or raw.get("participant_b") or raw.get("fighter_b"), "away", sport_id)
     score = raw.get("score") if isinstance(raw.get("score"), dict) else {}
     event: Dict[str, Any] = {
         "source_event_id": str(raw.get("source_event_id") or raw.get("id") or ""),
@@ -54,8 +54,8 @@ def normalize_event(raw: Dict[str, Any], *, sport_id: str, competition_id: str) 
         "event_family": family,
         "home": home,
         "away": away,
-        "participant_a": _participant(raw.get("participant_a") or home, "a"),
-        "participant_b": _participant(raw.get("participant_b") or away, "b"),
+        "participant_a": _participant(raw.get("participant_a") or home, "a", sport_id),
+        "participant_b": _participant(raw.get("participant_b") or away, "b", sport_id),
         "start_time": canonical_start,
         "start_date": resolved.start_date,
         "start_precision": resolved.precision,

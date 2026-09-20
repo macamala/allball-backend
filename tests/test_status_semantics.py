@@ -165,7 +165,7 @@ def test_live_public_payload_keeps_contact_stamps():
     assert live["source_fetch_time"] == "2026-09-20T04:01:00Z"
 
 
-def test_event_detail_exposes_source_family_without_internal_ids():
+def test_event_detail_does_not_expose_source_family():
     from collector.provider import public_event, public_event_detail
 
     payload = {
@@ -186,11 +186,8 @@ def test_event_detail_exposes_source_family_without_internal_ids():
     assert listed.get("primary_source_id") is None
     assert listed.get("field_sources") is None
     detail = public_event_detail(payload)
-    assert detail["source_family"] == "wta-json"
-    assert detail["provenance"] == {
-        "source_family": "wta-json",
-        "last_contact_at": "2026-09-20T08:22:55Z",
-    }
+    assert detail.get("source_family") is None
+    assert detail.get("provenance") is None
     assert detail.get("primary_source_id") is None
     assert detail.get("field_sources") is None
     assert detail.get("source_event_ids") is None
@@ -254,8 +251,10 @@ def test_upcoming_hides_cross_game_wiki():
         comps = {row.get("competition") for row in upcoming}
         assert "cross-game-wiki" not in comps
         detail = provider.get_event("ninko-evt-lol-keep")
-        assert detail["source_family"] == "lolesports-json"
-        assert detail["provenance"]["source_family"] == "lolesports-json"
+        assert detail.get("source_family") is None
+        assert detail.get("provenance") is None
+        assert detail["competition"] == "League of Legends Worlds"
+        assert detail["geography_label"] == "World"
     finally:
         db.close()
 

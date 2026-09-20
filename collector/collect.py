@@ -168,6 +168,20 @@ def _upsert_event(
     mapping: SportsSourceCompetition,
     existing: Optional[SportsEvent],
 ) -> SportsEvent:
+    if existing is not None and existing.competition_id and existing.competition_id != incoming.get("competition_key"):
+        extra = load_json(existing.extra_json, {}) or {}
+        conflicts = extra.get("provider_conflicts") or []
+        conflicts.append(
+            {
+                "type": "competition_mismatch",
+                "stored": existing.competition_id,
+                "incoming": incoming.get("competition_key"),
+                "source_id": source.source_id,
+            }
+        )
+        extra["provider_conflicts"] = conflicts[-20:]
+        existing.extra_json = dump_json(extra)
+        return existing
     sport_id = incoming["sport"]
     kind = _entity_kind(sport_id)
     home = incoming.get("home") or {}

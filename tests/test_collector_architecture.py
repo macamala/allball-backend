@@ -137,8 +137,8 @@ def test_collect_then_read_does_not_call_adapters_from_api():
     db = _session()
     try:
         _source(db, "mock-primary", "mock-primary", attribution_required=True, attribution_text="Mock Data CC-BY")
-        _competition(db, "mock-league", "football")
-        _map(db, "mock-league", "mock-primary", 10)
+        _competition(db, "england-premier-league", "football")
+        _map(db, "england-premier-league", "mock-primary", 10)
         db.commit()
         summary = run_cycle(db, capabilities=["live_scores"])
         db.commit()

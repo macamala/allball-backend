@@ -28,7 +28,7 @@ def _winner_loser(kind: str, round_token: str, index: str) -> str:
     return f"{role} of {slot}" if slot else TBD
 
 
-def sanitize_participant_name(name: Optional[str]) -> str:
+def sanitize_participant_name(name: Optional[str], sport: Optional[str] = None) -> str:
     raw = str(name or "").strip()
     if not raw:
         return ""
@@ -56,15 +56,17 @@ def sanitize_participant_name(name: Optional[str]) -> str:
         return ""
     from collector.participant_text import clean_participant_name
 
-    return clean_participant_name(raw)
+    return clean_participant_name(raw, sport=sport)
 
 
-def sanitize_side(side: Any) -> Any:
+def sanitize_side(side: Any, sport: Optional[str] = None) -> Any:
     if not isinstance(side, dict):
         if isinstance(side, str):
-            return sanitize_participant_name(side)
+            return sanitize_participant_name(side, sport=sport)
         return side
     out = dict(side)
-    if out.get("name"):
-        out["name"] = sanitize_participant_name(str(out.get("name")))
+    shown = sanitize_participant_name(str(out.get("display_name") or out.get("name") or ""), sport=sport)
+    if shown:
+        out["display_name"] = shown
+        out["name"] = shown
     return out

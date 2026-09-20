@@ -499,7 +499,8 @@ def test_promote_observation_enrichment_does_not_touch_quarantine_or_scores():
         assert event["periods"][0]["home"] == 3
         assert event["incidents"][0]["player"] == "Musiala"
         assert event["incidents"][0].get("provenance") is None
-        assert event["competition"] == "germany-bundesliga"
+        assert event["competition_key"] == "germany-bundesliga"
+        assert event["competition"] == "Bundesliga"
         from collector.models import SportsEvent as EventRow
 
         quarantined = db.query(EventRow).filter_by(event_id="ninko-evt-q-enr").one()

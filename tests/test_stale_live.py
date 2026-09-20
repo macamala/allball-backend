@@ -163,8 +163,8 @@ def test_live_api_excludes_stale_row():
     db = _session()
     try:
         _source(db, "stale-live-src", "stale-live-src")
-        _competition(db, "generic-league", "football")
-        _map(db, "generic-league", "stale-live-src", 10)
+        _competition(db, "england-premier-league", "football")
+        _map(db, "england-premier-league", "stale-live-src", 10)
         db.commit()
         run_cycle(db, capabilities=["live_scores"])
         db.commit()

@@ -487,7 +487,8 @@ def test_incremental_tick_promotes_new_observation(monkeypatch):
         assert result["enrichment"]["copied"] == 1
         event = NinkoCollectedSportsDataProvider().get_event("ninko-evt-keep-tick")
         assert event["score"]["home"] == 2
-        assert event["competition"] == "germany-bundesliga"
+        assert event["competition_key"] == "germany-bundesliga"
+        assert event["competition"] == "Bundesliga"
         assert event["home"]["name"] == "Bayern"
         assert event["periods"][0]["code"] == "HT"
         assert event["incidents"][0]["player"] == "Musiala"

@@ -97,6 +97,10 @@ def test_country_code_not_part_of_display_name():
     assert clean_participant_name("Milton Keynes DonsGB") == "Milton Keynes Dons"
     assert clean_participant_name("BR Independiente del Valle") == "Independiente del Valle"
     assert clean_participant_name("AS Monaco") == "AS Monaco"
+    assert clean_participant_name("AC Milan") == "AC Milan"
+    assert clean_participant_name("US Sassuolo") == "US Sassuolo"
+    assert clean_participant_name("US Chicago White Sox", sport="baseball") == "Chicago White Sox"
+    assert clean_participant_name("US Sassuolo", sport="football") == "US Sassuolo"
     assert clean_participant_name("SK Rapid") == "SK Rapid"
     assert sanitize_participant_name("1. FC Kaiserslautern") == "1. FC Kaiserslautern"
 

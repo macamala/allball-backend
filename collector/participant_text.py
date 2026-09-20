@@ -225,13 +225,48 @@ def strip_flag_abbr_html(html: str) -> str:
     return _FLAG_CLASS.sub(" ", clean)
 
 
+_CLUB_PARTICLES = {"AS", "AC", "FC", "CF", "SC", "SK", "SS", "RC", "CD", "UD"}
+_TRANSPORT_SPORTS = {
+    "baseball",
+    "basketball",
+    "american-football",
+    "ice-hockey",
+    "nfl",
+    "nba",
+    "mlb",
+    "nhl",
+}
+
+
+def strip_transport_country_prefix(name: str, sport: Optional[str] = None) -> str:
+    """Drop ISO transport prefixes without touching club particles (AS Monaco, US Sassuolo)."""
+    raw = str(name or "").strip()
+    match = re.match(r"^([A-Z]{2})\s+(.+)$", raw)
+    if not match:
+        return raw
+    code, rest = match.group(1), match.group(2).strip()
+    if code in _CLUB_PARTICLES:
+        return raw
+    sport_id = str(sport or "").lower()
+    if code == "US":
+        if sport_id in _TRANSPORT_SPORTS:
+            return rest
+        tokens = rest.split()
+        if len(tokens) >= 3:
+            return rest
+        return raw
+    if code in _FLAG_CODES and code not in {"SK", "IN"}:
+        return rest
+    return raw
+
+
 def strip_glued_country_code(name: str) -> str:
     """Repair stored names where a flag code was concatenated, not club initials."""
     raw = str(name or "").strip()
     if len(raw) < 5:
         return raw
     prefix = re.match(r"^([A-Z]{2})(?:\s+|(?=[A-Z][a-z]))(.+)$", raw)
-    if prefix and prefix.group(1) in _FLAG_CODES and prefix.group(1) not in {"SK", "IN"}:
+    if prefix and prefix.group(1) in _FLAG_CODES and prefix.group(1) not in {"SK", "IN", "US"}:
         rest = prefix.group(2).strip()
         if len(rest) >= 3:
             return rest
@@ -258,32 +293,43 @@ def extract_parenthetical_country(name: str) -> tuple[str, Optional[str]]:
     return cleaned or raw, code
 
 
-def clean_participant_name(name: str) -> str:
+def clean_participant_name(name: str, sport: Optional[str] = None) -> str:
     text = repair_mojibake(str(name or "").strip())
     text = re.sub(r"\s+", " ", text)
+    text = strip_transport_country_prefix(text, sport=sport)
     text = strip_glued_country_code(text)
     text, _country = extract_parenthetical_country(text)
     return text
 
 
-def participant_payload(raw: Any, side: str) -> Dict[str, Any]:
+def participant_payload(raw: Any, side: str, sport: Optional[str] = None) -> Dict[str, Any]:
+    sport_id = sport
     if isinstance(raw, dict):
+        sport_id = sport or raw.get("sport")
         country = raw.get("country") or raw.get("countryCode") or raw.get("nationality")
         name = raw.get("name") or raw.get("label") or raw.get("fullName") or raw.get("displayName") or ""
-        name = clean_participant_name(str(name))
+        name = clean_participant_name(str(name), sport=sport_id)
         cleaned, extracted = extract_parenthetical_country(str(raw.get("name") or name))
         if extracted and not country:
             country = extracted
         if cleaned:
-            name = clean_participant_name(cleaned)
+            name = clean_participant_name(cleaned, sport=sport_id)
         return {
             "id": raw.get("id") or "",
             "slug": raw.get("slug") or "",
             "name": name,
+            "display_name": name,
             "side": side,
             "logo": raw.get("logo") or raw.get("image"),
             "source_name": raw.get("name") or raw.get("fullName") or name,
             "country_id": country if isinstance(country, str) and len(country) <= 3 else None,
         }
-    name = clean_participant_name(str(raw or ""))
-    return {"id": "", "slug": "", "name": name, "side": side, "source_name": str(raw or "")}
+    name = clean_participant_name(str(raw or ""), sport=sport_id)
+    return {
+        "id": "",
+        "slug": "",
+        "name": name,
+        "display_name": name,
+        "side": side,
+        "source_name": str(raw or ""),
+    }

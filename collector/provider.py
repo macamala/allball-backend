@@ -21,6 +21,7 @@ from collector.models import (
 from collector.live_state import parse_ts, public_live_visible, reconcile_live_status
 from collector.display import sanitize_side
 from collector.enrichment import DETAIL_ONLY_KEYS, is_display_eligible, quality_flags_for_event
+from collector.competition_presentation import attach_competition_metadata
 from collector.matrix_guard import frozen_competition_ids
 from collector.util import isoformat, load_json
 from sports_provider import (
@@ -67,9 +68,10 @@ HEADER_KEYS = (
     "attendance",
     "referee",
     "live_class",
-    "source_family",
-    "provenance",
-    "last_contact_at",
+    "geography_label",
+    "scope_type",
+    "competition_name",
+    "country_based",
 )
 
 
@@ -92,6 +94,10 @@ INTERNAL_EVENT_KEYS = {
     "contributing_sources",
     "primary_source_id",
     "source_url",
+    "provenance",
+    "attribution",
+    "collector",
+    "provider_conflicts",
 }
 
 NESTED_SOURCE_ID_KEYS = {
@@ -123,19 +129,8 @@ def public_event(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def public_event_detail(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """List sanitizer plus canonical observation family, without internal source IDs."""
-    out = public_event(payload)
-    family = str(payload.get("source_family") or "").strip() or None
-    contact = payload.get("last_contact_at") or payload.get("source_fetch_time")
-    if family:
-        out["source_family"] = family
-        provenance = {"source_family": family}
-        if contact:
-            provenance["last_contact_at"] = contact
-        out["provenance"] = provenance
-    if contact:
-        out["last_contact_at"] = contact
-    return out
+    """Same public sanitizer as the list. Provenance stays internal."""
+    return public_event(payload)
 
 
 def is_frozen_public_competition(event: Dict[str, Any]) -> bool:
@@ -165,6 +160,11 @@ LIVE_PUBLIC_KEYS = (
     "source_fetch_time",
     "canonical_updated_at",
     "current_set",
+    "competition_key",
+    "geography_label",
+    "scope_type",
+    "country_id",
+    "competition",
 )
 
 
@@ -324,7 +324,7 @@ class NinkoCollectedSportsDataProvider:
     ) -> List[NormalizedEvent]:
         db = _session(self._session_factory)
         try:
-            cache_key = f"events:p0v4:{sport}:{competition}:{status}:{date_from}:{date_to}:{int(allow_unfiltered)}"
+            cache_key = f"events:p0v5:{sport}:{competition}:{status}:{date_from}:{date_to}:{int(allow_unfiltered)}"
             cached = cache_get(db, cache_key)
             if cached is not None:
                 return cached
@@ -509,10 +509,10 @@ class NinkoCollectedSportsDataProvider:
             "competition_key": row.competition_id,
             "season": row.season,
             "event_family": row.event_family,
-            "home": sanitize_side(raw_sides["home"]),
-            "away": sanitize_side(raw_sides["away"]),
-            "participant_a": sanitize_side(raw_sides["participant_a"]),
-            "participant_b": sanitize_side(raw_sides["participant_b"]),
+            "home": sanitize_side(raw_sides["home"], sport=row.sport_id),
+            "away": sanitize_side(raw_sides["away"], sport=row.sport_id),
+            "participant_a": sanitize_side(raw_sides["participant_a"], sport=row.sport_id),
+            "participant_b": sanitize_side(raw_sides["participant_b"], sport=row.sport_id),
             "start_time": isoformat(row.start_time),
             "status": row.status,
             "score": score,
@@ -567,6 +567,7 @@ class NinkoCollectedSportsDataProvider:
         payload["incidents"] = extra.get("incidents") or payload.get("incidents")
         payload["periods"] = extra.get("periods") or payload.get("periods")
         payload = reconcile_live_status(payload)
+        payload = attach_competition_metadata(payload)
         if extra.get("provider_conflicts"):
             payload["conflicts"] = extra.get("provider_conflicts")
         if not include_detail:
