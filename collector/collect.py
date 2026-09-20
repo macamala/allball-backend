@@ -518,7 +518,8 @@ def _consume_result(
             )
         )
         written += 1
-    stamp_live_contact(db, competition_id=competition.competition_id)
+    if capability == "live_scores":
+        stamp_live_contact(db, competition_id=competition.competition_id)
     return {"written": written, "merged": merged, "rejected": rejected, "normalized": len(events)}
 
 

@@ -596,7 +596,7 @@ def run_incremental_tick(db: Session, *, sleeper=None, now: Optional[datetime] =
     """Execute due incremental jobs. Kill switch: scheduler off returns immediately."""
     import time
 
-    from collector.collect import collect_competition, stamp_live_contact
+    from collector.collect import collect_competition
     from collector.flags import collection_enabled, scheduler_enabled
     from collector.http import STATS
     from collector.models import SportsCompetition
@@ -699,8 +699,6 @@ def run_incremental_tick(db: Session, *, sleeper=None, now: Optional[datetime] =
                     include_fallback=include_fallback,
                     source_family=None if include_fallback else job.get("family"),
                 )
-                if lane == 0 and scope == "family":
-                    stamp_live_contact(db, family=job.get("family") or family)
             except Exception:
                 incr("a_failures")
                 stats = {"classification": "FAILED", "written": 0}
