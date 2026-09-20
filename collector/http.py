@@ -55,17 +55,26 @@ _HOST_MIN_INTERVAL = {
     "super.rugby": 0.4,
     "www.eliteprospects.com": 0.45,
     "eliteprospects.com": 0.45,
-    "en.volleyballworld.com": 0.35,
+    "www.fotmob.com": 0.35,
+    "fotmob.com": 0.35,
     "www-old.cev.eu": 0.4,
     "espn.com": 1.0,
     "site.api.espn.com": 1.0,
     "api.wtatennis.com": 0.5,
+    "api.wr-rims-prod.pulselive.com": 2.0,
+    "api.motogp.pulselive.com": 2.0,
+    "api.formula-e.pulselive.com": 2.0,
     "liquipedia.net": 0.4,
     "raw.githubusercontent.com": 0.3,
     "api.github.com": 0.4,
 }
 
 _HOST_LOCKS: Dict[str, threading.Lock] = {}
+_FAMILY_LAST_REQUEST: Dict[str, float] = {}
+_FAMILY_MIN_INTERVAL = {
+    "pulselive": 2.0,
+}
+_FAMILY_STATS: Dict[str, Dict[str, Any]] = {}
 _ROLLING: deque = deque()
 _PHYSICAL_ROLLING: deque = deque()
 
@@ -265,6 +274,25 @@ def _pace_host(url: str) -> None:
         _HOST_LAST_REQUEST[host] = time.monotonic()
 
 
+def _pace_family(url: str) -> None:
+    fam = family_from_host(_host(url))
+    interval = _FAMILY_MIN_INTERVAL.get(fam or "")
+    if not interval:
+        return
+    last = _FAMILY_LAST_REQUEST.get(fam, 0.0)
+    wait = interval - (time.monotonic() - last)
+    if wait > 0:
+        STATS["paced"] = STATS.get("paced", 0) + 1
+        time.sleep(wait)
+    _FAMILY_LAST_REQUEST[fam] = time.monotonic()
+    row = _FAMILY_STATS.setdefault(fam, {"requests": 0, "http_429": 0, "http_403": 0})
+    row["requests"] = int(row.get("requests") or 0) + 1
+
+
+def family_request_stats(family: str = "pulselive") -> Dict[str, Any]:
+    return dict(_FAMILY_STATS.get(family) or {})
+
+
 def _transport_error(url: str, exc: BaseException) -> FetchResult:
     err = str(exc)
     lowered = err.lower()
@@ -295,6 +323,7 @@ def fetch_url(
         STATS["budget_skips"] += 1
         return FetchResult(ok=False, http_status=0, error="request budget exceeded")
     _pace_host(url)
+    _pace_family(url)
     timeout = DEFAULT_TIMEOUT if timeout is None else timeout
     request_headers = {
         "User-Agent": USER_AGENT,
@@ -386,6 +415,7 @@ def fetch_bytes(
         STATS["budget_skips"] += 1
         return FetchResult(ok=False, http_status=0, error="request budget exceeded")
     _pace_host(url)
+    _pace_family(url)
     timeout = DEFAULT_TIMEOUT if timeout is None else timeout
     request_headers = {
         "User-Agent": USER_AGENT,

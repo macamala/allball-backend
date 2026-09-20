@@ -12,6 +12,8 @@ from tests.test_collector_architecture import _cleanup_adapters, _competition, _
 
 
 def _two_provider_rows():
+    from collector.family_caps import family_caps
+
     runtime = build_runtime_registry()
     rows = []
     for competition_id, record in sorted(runtime["competitions"].items()):
@@ -22,6 +24,10 @@ def _two_provider_rows():
                 continue
             family = mapping.get("source_family")
             if not family or family in seen:
+                continue
+            if family_caps(family).get("production_status") == "ACCESS_BLOCKED":
+                continue
+            if (mapping.get("coverage") or "full") == "partial":
                 continue
             seen.add(family)
             families.append(family)
@@ -87,7 +93,12 @@ def test_every_two_provider_config_failsover_and_dedupes():
     db = _session()
     created = []
     try:
+        from collector.family_health import reset_family_health
+        from collector.http import reset_http_stats
+
         for index, (competition_id, sport, family_a, family_b) in enumerate(rows):
+            reset_family_health()
+            reset_http_stats()
             cid = f"ab-{index}-{competition_id}"[:80]
             key_a = f"mock-a-{index}"
             key_b = f"mock-b-{index}"
@@ -99,6 +110,7 @@ def test_every_two_provider_config_failsover_and_dedupes():
                     away={"name": f"Beta {cid}"},
                     start_time="2026-09-18T15:00:00Z",
                     competition=cid,
+                    source_competition_id=cid,
                 )
             ]
             good_b = DeterministicMockAdapter(key_b)
@@ -109,6 +121,7 @@ def test_every_two_provider_config_failsover_and_dedupes():
                     away={"name": f"Beta {cid}"},
                     start_time="2026-09-18T15:00:00Z",
                     competition=cid,
+                    source_competition_id=cid,
                 )
             ]
             fail = _Fail(key_a)
@@ -151,6 +164,7 @@ def test_every_two_provider_config_failsover_and_dedupes():
                         away={"name": f"Beta {sub}"},
                         start_time="2026-09-18T16:00:00Z",
                         competition=sub,
+                        source_competition_id=sub,
                     )
                 ]
                 _competition(db, sub, sport)

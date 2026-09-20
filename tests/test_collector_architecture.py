@@ -365,6 +365,10 @@ def test_live_status_does_not_regress_from_lower_priority():
         mock_event(
             id="st1",
             status="live",
+            source_status="live",
+            status_inferred=False,
+            source_family="live-src",
+            extra={"source_family": "live-src", "source_status": "live", "status_inferred": False},
             score={"home": 1, "away": 0},
             start_time=(datetime.now(timezone.utc) - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ"),
         )

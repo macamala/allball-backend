@@ -62,7 +62,12 @@ def _maybe_restore_null_scores(payload: Dict[str, Any], previous_status: str) ->
     return out
 
 
-def recompute_display_eligible_live(db: Session) -> Dict[str, Any]:
+def recompute_display_eligible_live(
+    db: Session,
+    *,
+    commit: bool = True,
+    only_blocked_families: bool = False,
+) -> Dict[str, Any]:
     """Rewrite persisted LIVE using Phase-0 evidence rules. Does not fabricate FT."""
     rows: List[SportsEvent] = (
         db.query(SportsEvent)
@@ -83,11 +88,19 @@ def recompute_display_eligible_live(db: Session) -> Dict[str, Any]:
     for row in rows:
         if row.display_eligible is False:
             continue
-        summary["scanned"] += 1
-        detail = db.query(SportsEventDetail).filter_by(event_id=row.event_id).first()
         previous_status = row.status
         previous_score = load_json(row.score_json, {}) or {}
         extra = load_json(row.extra_json, {}) or {}
+        if only_blocked_families:
+            from collector.family_health import family_blocks_live_path
+
+            family = str(extra.get("source_family") or row.primary_source_id or "")
+            if not family_blocks_live_path(family):
+                continue
+            detail = None
+        else:
+            detail = db.query(SportsEventDetail).filter_by(event_id=row.event_id).first()
+        summary["scanned"] += 1
         payload = _payload_from_row(row, detail)
         if previous_status == "stale":
             payload["status"] = extra.get("source_status") or "live"
@@ -116,7 +129,8 @@ def recompute_display_eligible_live(db: Session) -> Dict[str, Any]:
         else:
             summary["unchanged"] += 1
     cache_clear(db, prefix="events:")
-    db.commit()
+    if commit:
+        db.commit()
     return summary
 
 

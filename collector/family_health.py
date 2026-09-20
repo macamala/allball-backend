@@ -15,6 +15,14 @@ HOST_FAMILY = {
     "espn.com": "espn-html",
     "site.api.espn.com": "espn-html",
     "api.wtatennis.com": "wta-json",
+    "api.wr-rims-prod.pulselive.com": "pulselive",
+    "api.motogp.pulselive.com": "pulselive",
+    "api.formula-e.pulselive.com": "pulselive",
+    "www.fotmob.com": "fotmob",
+    "www.sofascore.com": "sofascore-web",
+    "orchestrator.pgatour.com": "pga-graphql",
+    "mc.championdata.com": "championdata-netball",
+    "api.gbgb.org.uk": "gbgb-meeting-json",
 }
 
 
@@ -105,6 +113,43 @@ def family_access_blocked(family: str) -> bool:
     if row.get("status") != "ACCESS_BLOCKED":
         return False
     return time.monotonic() < float(row.get("blocked_until_mono") or 0)
+
+
+def family_in_active_backoff(family: str) -> bool:
+    """True while the family cooldown window is still running."""
+    return family_rate_limited(family)
+
+
+def family_blocks_live_path(family: str) -> bool:
+    """True when this family must not occupy reserved LIVE execution slots.
+
+    Covers an active ACCESS_BLOCKED/backoff window, a still-blocked ACCESS_BLOCKED
+    status after the window, and a family whose production status is ACCESS_BLOCKED
+    until a successful recovery. Recovery probes are scheduled off the LIVE path.
+    """
+    if not family:
+        return False
+    if family_in_active_backoff(family) or family_access_blocked(family):
+        return True
+    row = _STATE.get(family)
+    if row and row.get("status") == "ACCESS_BLOCKED":
+        return True
+    from collector.family_caps import family_caps
+
+    if family_caps(family).get("production_status") == "ACCESS_BLOCKED" and (
+        not row or row.get("status") not in {"healthy", "empty"}
+    ):
+        return True
+    return False
+
+
+def family_retry_eligible(family: str) -> bool:
+    """Backoff elapsed; a single off-LIVE probe may run so the family can recover."""
+    if not family:
+        return False
+    if family_in_active_backoff(family):
+        return False
+    return family_blocks_live_path(family)
 
 
 def family_stale_or_empty(family: str) -> bool:

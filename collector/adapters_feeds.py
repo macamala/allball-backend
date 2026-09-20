@@ -374,6 +374,15 @@ class KhlAdapter:
         }
 
 
+PULSELIVE_COMP_TOKENS: Dict[str, List[str]] = {
+    "super-rugby": ["super rugby"],
+    "premiership-rugby": ["premiership"],
+    "france-top-14": ["top 14"],
+    "france-pro-d2": ["pro d2", "prod2"],
+    "nz-npc": ["npc", "bunnings"],
+}
+
+
 class WorldRugbyAdapter:
     adapter_key = "world-rugby-rims"
     source_id = "world-rugby"
@@ -383,9 +392,15 @@ class WorldRugbyAdapter:
         self._get = getter
 
     def fetch(self, request: FetchRequest) -> FetchResult:
-        if request.capability not in {"fixtures", "results", "live_scores", "snapshot"}:
+        if request.capability not in {"fixtures", "results", "live_scores", "snapshot", "live"}:
             return FetchResult(ok=True, http_status=200, events=[])
-        result = self._get("https://api.wr-rims-prod.pulselive.com/rugby/v3/match?pageSize=30&sport=mru")
+        today = datetime.now(timezone.utc).date()
+        start = (today - timedelta(days=21)).isoformat()
+        end = (today + timedelta(days=28)).isoformat()
+        result = self._get(
+            "https://api.wr-rims-prod.pulselive.com/rugby/v3/match"
+            f"?pageSize=100&sport=mru&startDate={start}&endDate={end}"
+        )
         if not result.ok:
             return result
         events = []
@@ -393,11 +408,12 @@ class WorldRugbyAdapter:
             event = self._event(row)
             if event:
                 events.append(event)
-        if request.competition_id == "super-rugby":
+        tokens = PULSELIVE_COMP_TOKENS.get(request.competition_id or "")
+        if tokens:
             events = [
                 event
                 for event in events
-                if "super rugby" in str(event.get("competition") or "").lower()
+                if any(tok in str(event.get("competition") or "").lower() for tok in tokens)
             ]
         return FetchResult(ok=True, http_status=result.http_status, events=_filter(events, request.capability))
 
@@ -420,14 +436,14 @@ class WorldRugbyAdapter:
         if start and "T" not in str(start):
             start = f"{start}T00:00:00Z"
         score: Dict[str, Any] = {
-            "home": scores[0] if len(scores) > 0 else None,
-            "away": scores[1] if len(scores) > 1 else None,
+            "home": scores[0] if len(scores) > 0 and status != "scheduled" else None,
+            "away": scores[1] if len(scores) > 1 and status != "scheduled" else None,
         }
         clock = row.get("clock") or (row.get("time") or {}).get("millis")
         period = row.get("period") or row.get("minute")
-        if clock not in (None, ""):
+        if clock not in (None, "") and status == "live":
             score["clock"] = clock
-        if period not in (None, ""):
+        if period not in (None, "") and status == "live":
             score["period"] = period
         return {
             "id": f"worldrugby:{row.get('matchId')}",
@@ -441,6 +457,12 @@ class WorldRugbyAdapter:
             "competition": name,
             "competition_key": f"rugby-{slugify(name)}",
             "event_family": "team_match",
+            "source_family": "pulselive",
+            "extra": {
+                "source_family": "pulselive",
+                "source_status": status,
+                "status_inferred": False,
+            },
         }
 
 

@@ -136,6 +136,7 @@ def test_rank_families_puts_working_ahead_of_empty():
     assert result.events[0]["home"]["name"] == "Birmingham Legion"
     assert result.events[0]["extra"]["attribution"]["text"] == ATTRIBUTION["text"]
     assert result.events[0]["extra"]["attribution"]["url"] == "https://sportscore.com/"
+    assert result.events[0]["extra"]["upstream_family"] == "thesports"
 
 
 def test_wta_json_parses_2026_match():

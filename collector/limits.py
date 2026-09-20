@@ -56,10 +56,9 @@ def record_hit(source_id: str, now: Optional[datetime] = None) -> None:
 
 
 def mark_rate_limited(db: Session, source_id: str, seconds: int = 60) -> None:
-    health = db.query(SportsSourceHealth).filter_by(source_id=source_id).first()
-    if health is None:
-        health = SportsSourceHealth(source_id=source_id)
-        db.add(health)
+    from collector.health import _health
+
+    health = _health(db, source_id)
     health.rate_limited_until = datetime.utcnow() + timedelta(seconds=seconds)
     health.status = "degraded"
     health.updated_at = datetime.utcnow()

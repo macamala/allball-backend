@@ -185,6 +185,12 @@ SPORTSCORE_COMPETITIONS: Dict[str, Dict[str, Any]] = {
         "tokens_any": ["acb", "liga endesa"],
         "slugs": ["acb", "liga-endesa"],
     },
+    "nba": {
+        "sport": "basketball",
+        "tokens_any": ["national basketball association", "nba"],
+        "deny": ["wnba", "g league", "nbl"],
+        "slugs": ["nba"],
+    },
     "mexico-lnbp": {
         "sport": "basketball",
         "tokens_any": ["lnbp", "liga nacional de baloncesto profesional"],

@@ -30,6 +30,21 @@ COMPETITION_SPECS: Dict[str, Dict[str, Any]] = {
         "tokens": ("pro d2", "prod2"),
         "slug": "pro-d2",
     },
+    "premiership-rugby": {
+        "path": "",
+        "tokens": ("premiership",),
+        "slug": "premiership",
+    },
+    "super-rugby": {
+        "path": "",
+        "tokens": ("super rugby",),
+        "slug": "super-rugby",
+    },
+    "nz-npc": {
+        "path": "",
+        "tokens": ("npc", "bunnings"),
+        "slug": "npc",
+    },
 }
 
 MONTHS = {

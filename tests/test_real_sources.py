@@ -350,6 +350,43 @@ def test_nhl_mlb_public_json_shapes():
     )
     done = mlb.fetch(FetchRequest(capability="results"))
     assert done.events[0]["home"]["name"] == "Cleveland Guardians"
+    live_mlb = MlbAdapter(
+        getter=_getter(
+            {
+                "schedule?sportId=1": {
+                    "dates": [
+                        {
+                            "games": [
+                                {
+                                    "gamePk": 2,
+                                    "gameDate": "2026-09-20T17:10:00Z",
+                                    "status": {
+                                        "abstractGameState": "Live",
+                                        "detailedState": "In Progress",
+                                    },
+                                    "teams": {
+                                        "home": {"team": {"id": 1, "name": "Cleveland Guardians"}, "score": 3},
+                                        "away": {"team": {"id": 2, "name": "Detroit Tigers"}, "score": 2},
+                                    },
+                                    "venue": {"name": "Progressive Field"},
+                                    "linescore": {
+                                        "currentInning": 5,
+                                        "inningState": "Top",
+                                        "outs": 1,
+                                        "innings": [{"num": 1, "home": {"runs": 1}, "away": {"runs": 0}}],
+                                    },
+                                }
+                            ]
+                        }
+                    ]
+                }
+            }
+        )
+    )
+    live = live_mlb.fetch(FetchRequest(capability="live_scores"))
+    assert live.events[0]["status"] == "live"
+    assert live.events[0]["score"]["inning"] == 5
+    assert live.events[0]["score"]["inning_half"] == "top"
 
 
 def test_opendota_pro_match():

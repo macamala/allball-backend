@@ -9,7 +9,14 @@ from sqlalchemy.orm import Session
 
 from collector.cadence import interval_for
 from collector.family_caps import family_caps, is_static_family, min_safe_interval, supports_live
-from collector.family_health import family_access_blocked, family_needs_failover, family_rate_limited, family_state
+from collector.family_health import (
+    family_access_blocked,
+    family_blocks_live_path,
+    family_in_active_backoff,
+    family_needs_failover,
+    family_retry_eligible,
+    family_state,
+)
 from collector.http import STATS
 from collector.metrics import incr, set_metric, snapshot
 from collector.models import (
@@ -77,6 +84,8 @@ def live_idle_seconds(default: int = 20) -> int:
     for row in _live_registry.values():
         if int(row.get("live_event_count") or 0) <= 0:
             continue
+        if family_blocks_live_path(str(row.get("family") or "")):
+            continue
         nxt = row.get("next_eligible_at")
         if isinstance(nxt, datetime):
             waits.append(max(0, int((nxt - now).total_seconds())))
@@ -138,6 +147,8 @@ def _slot(db: Session, job_key: str) -> SportsSchedulerSlot:
 
 
 def _due(slot: Optional[SportsSchedulerSlot], interval: int, now: datetime, family: str = "") -> bool:
+    if family and family_in_active_backoff(family):
+        return False
     if slot is not None and slot.last_status in FAIL_STATUSES and slot.last_run_at is not None:
         fails = int(family_state(family).get("consecutive_failures") or 1)
         backoff = min(900, 30 * (2 ** min(max(fails, 1) - 1, 4)))
@@ -243,8 +254,17 @@ def build_due_jobs(db: Session, *, now: Optional[datetime] = None, limit: Option
                     family_urgency = "TODAY"
             if family_urgency in {"LIVE", "LIVE_CANDIDATE"} and family_needs_failover(family):
                 fb_map, fb_src = _fallback_family(db, row.competition_id, family)
-                if fb_map and fb_src and supports_live(_mapping_family(fb_map, fb_src)) and not is_static_family(_mapping_family(fb_map, fb_src)):
-                    mapping, source, family = fb_map, fb_src, _mapping_family(fb_map, fb_src)
+                fb_family = _mapping_family(fb_map, fb_src) if fb_map and fb_src else ""
+                if (
+                    fb_map
+                    and fb_src
+                    and supports_live(fb_family)
+                    and not is_static_family(fb_family)
+                    and not family_blocks_live_path(fb_family)
+                ):
+                    mapping, source, family = fb_map, fb_src, fb_family
+                elif family_blocks_live_path(family) or family_in_active_backoff(family):
+                    pass
                 else:
                     continue
             interval = interval_for(family, family_urgency)
@@ -355,7 +375,10 @@ def coalesce_jobs(jobs: List[Dict[str, Any]]) -> List[List[Dict[str, Any]]]:
 
 def job_lane(job: Dict[str, Any]) -> int:
     urgency = job.get("urgency") or ""
+    family = str(job.get("family") or "")
     if urgency == "LIVE":
+        if family_blocks_live_path(family):
+            return 3
         return 0
     if urgency in {"LIVE_CANDIDATE", "IMMINENT"}:
         return 1
@@ -468,7 +491,7 @@ def select_fair_groups(
     p2 = [group for group in groups if _lane(group) == 2]
     other_groups = [group for group in groups if _lane(group) == 3]
     live_family_count = len({_family(group) for group in p0})
-    background_due_families = len({_family(group) for group in other_groups})
+    background_due_families = len({_family(group) for group in other_groups if not family_blocks_live_path(_family(group))})
     live_cap = min(max_physical, max(MAX_LIVE_PHYSICAL, live_family_count))
     background_cap = min(MAX_BACKGROUND_PHYSICAL, max(0, max_physical - live_cap))
 
@@ -507,9 +530,15 @@ def select_fair_groups(
         _family_rr += 1
         coverage = coverage[index:] + coverage[:index]
     background_taken = 0
+    blocked_retries = 0
     for family in coverage + remainder:
         if background_taken >= background_cap:
             break
+        if family_in_active_backoff(family):
+            continue
+        if family_blocks_live_path(family):
+            if live_family_count > 0 or not family_retry_eligible(family) or blocked_retries >= 1:
+                continue
         group = best_for_family[family]
         if (
             family_count.get(family, 0) >= MAX_FAMILY_NONLIVE
@@ -518,6 +547,8 @@ def select_fair_groups(
             continue
         _take(group)
         background_taken += 1
+        if family_blocks_live_path(family):
+            blocked_retries += 1
 
     never_run = sum(1 for job in jobs if job_never_run(job))
     real_waits = [job_wait_seconds(job, now) for job in jobs if job.get("last_run_at") or job.get("next_due_at")]
@@ -605,6 +636,9 @@ def run_incremental_tick(db: Session, *, sleeper=None, now: Optional[datetime] =
         return {"stopped": True, "reason": "kill_switch", "flags": {"scheduler": False}}
     now = now or _now()
     started = time.perf_counter()
+    from collector.recompute_status import recompute_display_eligible_live
+
+    recompute_display_eligible_live(db, commit=False, only_blocked_families=True)
     due = build_due_jobs(db, now=now)
     groups, schedule = select_fair_groups(due, now)
     groups = sorted(
@@ -647,6 +681,7 @@ def run_incremental_tick(db: Session, *, sleeper=None, now: Optional[datetime] =
     coalesced = 0
     changed = 0
     fail_classes = FAIL_STATUSES
+    live_groups_this_tick = sum(1 for group in groups if group and job_lane(group[0]) == 0)
     for group in groups:
         elapsed = time.perf_counter() - started
         lane = job_lane(group[0]) if group else 3
@@ -658,32 +693,40 @@ def run_incremental_tick(db: Session, *, sleeper=None, now: Optional[datetime] =
         last_classif = "ok"
         family = str(group[0].get("family") or "") if group else ""
         fetch_started = _now()
+        blocked_live = bool(family and family_blocks_live_path(family))
         if family and lane == 0:
             note_live_family(family, last_fetch_started_at=fetch_started.isoformat() + "Z")
-        run_jobs = group[:1] if lane == 0 else group
+        run_jobs = group[:1] if lane == 0 or blocked_live else group
         for job in run_jobs:
             job = dict(job)
             family = job["family"]
-            if family_needs_failover(family) or family_caps(family).get("production_status") == "ACCESS_BLOCKED":
+            retry_ok = (
+                family_retry_eligible(family)
+                and not family_in_active_backoff(family)
+                and live_groups_this_tick == 0
+                and lane > 0
+            )
+            if family_in_active_backoff(family) or (family_blocks_live_path(family) and not retry_ok):
                 fb_map, fb_src = _fallback_family(db, job["competition_id"], family)
+                fb_family = _mapping_family(fb_map, fb_src) if fb_map and fb_src else ""
                 if not (
                     fb_map
                     and fb_src
-                    and supports_live(_mapping_family(fb_map, fb_src))
-                    and not is_static_family(_mapping_family(fb_map, fb_src))
-                    and family_caps(_mapping_family(fb_map, fb_src)).get("production_status") != "ACCESS_BLOCKED"
+                    and supports_live(fb_family)
+                    and not is_static_family(fb_family)
+                    and not family_blocks_live_path(fb_family)
                 ):
-                    blocked = (
-                        "ACCESS_BLOCKED"
-                        if family_access_blocked(family)
-                        or family_caps(family).get("production_status") == "ACCESS_BLOCKED"
-                        else "RATE_LIMITED"
-                    )
-                    mark_slot(db, job, status=blocked, now=now)
-                    last_classif = blocked
+                    if live_groups_this_tick == 0:
+                        blocked = (
+                            "ACCESS_BLOCKED"
+                            if family_access_blocked(family) or family_blocks_live_path(family)
+                            else "RATE_LIMITED"
+                        )
+                        mark_slot(db, job, status=blocked, now=now)
+                        last_classif = blocked
                     continue
                 incr("b_activations")
-                job["family"] = _mapping_family(fb_map, fb_src)
+                job["family"] = fb_family
                 job["use_fallback"] = True
             competition = db.get(SportsCompetition, job["competition_id"])
             if competition is None:

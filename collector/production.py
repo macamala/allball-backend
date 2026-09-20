@@ -86,7 +86,21 @@ from collector.adapters_generic import GenericHttpAdapter, PulseLiveFamilyAdapte
 from collector.adapters_opendota import OpenDotaAdapter
 from collector.adapters_openfootball import OpenFootballAdapter
 from collector.adapters_sportscore import SportScoreAdapter
-from collector.adapters_wta import WtaJsonAdapter
+from collector.adapters_fotmob import FotMobAdapter
+from collector.adapters_sofascore import SofaScoreWebAdapter
+from collector.adapters_ro56 import (
+    CflScoreboardAdapter,
+    F1LiveTimingIndexAdapter,
+    LolEsportsAdapter,
+    WorldAquaticsApiAdapter,
+)
+from collector.adapters_final18 import (
+    AltiusRtHtmlAdapter,
+    ChampionDataNetballAdapter,
+    ClickTtRemixAdapter,
+    GbgbMeetingJsonAdapter,
+    PgaGraphqlAdapter,
+)
 from collector.adapters_sporting_events import SportingEventsAdapter
 from collector.adapters_worldcup26 import Worldcup26ApiAdapter
 from collector.adapters_sportsrc import SportSrcAdapter
@@ -97,6 +111,7 @@ from collector.adapters_super_rugby_html import SuperRugbyHtmlAdapter
 from collector.adapters_eliteprospects import EliteProspectsAdapter
 from collector.adapters_volleyballworld import VolleyballWorldAdapter
 from collector.adapters_cev_competition_area import CevCompetitionAreaAdapter
+from collector.adapters_dataproject import DataProjectWebAdapter
 from collector.adapters_official import (
     AcbHtmlAdapter,
     EttuAdapter,
@@ -119,6 +134,7 @@ from collector.adapters_closure import (
     TotalWaterpoloAdapter,
     HblScheduleAdapter,
 )
+from collector.adapters_wta import WtaJsonAdapter
 from collector.adapters_openligadb import OpenLigaDbAdapter
 from collector.adapters_squiggle import SquiggleAflAdapter
 from collector.adapters_thesportsdb import TheSportsDbAdapter
@@ -151,6 +167,17 @@ def register_production_adapters() -> None:
     register_adapter("sackmann-csv", SackmannTennisAdapter)
     register_adapter("omega-timing", OmegaTimingAdapter)
     register_adapter("sportscore", SportScoreAdapter)
+    register_adapter("fotmob", FotMobAdapter)
+    register_adapter("sofascore-web", SofaScoreWebAdapter)
+    register_adapter("cfl-scoreboard-json", CflScoreboardAdapter)
+    register_adapter("lolesports-json", LolEsportsAdapter)
+    register_adapter("f1-livetiming-index", F1LiveTimingIndexAdapter)
+    register_adapter("world-aquatics-api", WorldAquaticsApiAdapter)
+    register_adapter("pga-graphql", PgaGraphqlAdapter)
+    register_adapter("click-tt-remix", ClickTtRemixAdapter)
+    register_adapter("altiusrt-html", AltiusRtHtmlAdapter)
+    register_adapter("championdata-netball", ChampionDataNetballAdapter)
+    register_adapter("gbgb-meeting-json", GbgbMeetingJsonAdapter)
     register_adapter("wta-json", WtaJsonAdapter)
     register_adapter("sporting-events", SportingEventsAdapter)
     register_adapter("worldcup26-api", Worldcup26ApiAdapter)
@@ -162,6 +189,7 @@ def register_production_adapters() -> None:
     register_adapter("eliteprospects", EliteProspectsAdapter)
     register_adapter("volleyballworld", VolleyballWorldAdapter)
     register_adapter("cev-competition-area", CevCompetitionAreaAdapter)
+    register_adapter("dataproject-web", DataProjectWebAdapter)
     register_adapter("prod2-web", Prod2Adapter)
     register_adapter("acb-html", AcbHtmlAdapter)
     register_adapter("formula-e-web", FormulaEAdapter)

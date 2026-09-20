@@ -72,7 +72,7 @@ EVENT_TYPE_BY_COMPETITION = {
     "germany-click-tt": TEAM_MATCH,
     "uci-calendar": RACE,
     "tour-de-france": RACE,
-    "biathlon": RACE,
+    "biathlon": MEET,
     "formula-2": RACE,
     "formula-3": RACE,
     "bha-meetings": MEET,

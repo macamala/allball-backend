@@ -429,7 +429,7 @@ def _consume_result(
     for raw in events:
         skipped = False
         accepted, resolved = event_accepted_for_mapping(
-            {**raw, "source_family": raw.get("source_family") or mapping.upstream_family or source.upstream_family},
+            {**raw, "source_family": raw.get("source_family") or mapping.upstream_family or source.upstream_family or source.source_id},
             competition.competition_id,
         )
         if not accepted:
@@ -438,11 +438,18 @@ def _consume_result(
             continue
         try:
             with db.begin_nested():
+                raw = {
+                    **raw,
+                    "source_family": raw.get("source_family")
+                    or mapping.upstream_family
+                    or source.upstream_family
+                    or source.source_id,
+                }
                 incoming = normalize_event(
                     raw, sport_id=competition.sport_id, competition_id=competition.competition_id
                 )
                 incoming.update(resolved)
-                incoming["source_family"] = mapping.upstream_family or source.upstream_family
+                incoming["source_family"] = raw["source_family"]
                 incoming["source_url"] = config.get("url")
                 incoming = reconcile_live_status(incoming)
                 existing = match_event(db, incoming, source_id=source.source_id)

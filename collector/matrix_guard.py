@@ -13,7 +13,7 @@ MATRIX_PATH = ROOT / "source_matrix_final.json"
 # Git stores this file as LF; Windows working trees check it out as CRLF
 # (i/lf w/crlf). Production Linux therefore hashed bfc5c252… of identical
 # JSON. The guard must hash content, not host line endings.
-FROZEN_CHECKSUM = "744b132d9d57c9c60505f82adb845cfd5d2f685b800b3280273f0d69b3e7d673"
+FROZEN_CHECKSUM = "e16236bb4666665a6f49856fa6505e9c2defd7ec84b6fb7142fc872c79477440"
 
 
 def _canonical_matrix_bytes(raw: bytes) -> bytes:

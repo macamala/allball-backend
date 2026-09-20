@@ -5,12 +5,17 @@ from collector.cadence import interval_for
 from collector.collect import collect_competition, run_cycle
 from collector.dirty import event_unchanged, observation_signature
 from collector.family_caps import is_static_family, supports_live
-from collector.family_health import note_family_failure, reset_family_health
+from collector.family_health import (
+    family_state,
+    note_family_failure,
+    reset_family_health,
+)
 from collector.flags import scheduler_enabled
 from collector.incremental import (
     MAX_BACKGROUND_PHYSICAL,
     build_due_jobs,
     coalesce_jobs,
+    job_lane,
     request_identity,
     run_incremental_tick,
     select_fair_groups,
@@ -20,7 +25,7 @@ from collector.metrics import reset_metrics
 from collector.models import SportsEvent, SportsSource, SportsSourceCompetition
 from collector.test_support import mock_event
 from collector.urgency import classify_event
-from collector.util import dump_json
+from collector.util import dump_json, load_json
 from tests.test_collector_architecture import _cleanup_adapters, _competition, _map, _session, _source
 
 
@@ -729,3 +734,162 @@ def test_wta_json_live_jobs_coalesce_to_one_family_group():
     assert len(wta_groups) == 1
     assert len(wta_groups[0]) == 2
     assert stats["live_families_starved"] == 0
+
+
+def test_blocked_family_does_not_occupy_live_slots():
+    reset_family_health()
+    note_family_failure("blocked-html", http_status=403, error_type="ACCESS_BLOCKED", retry_after_s=900)
+    now = datetime(2026, 9, 19, 12, 0, 0)
+    jobs = [
+        {
+            "job_key": "refresh:blocked:blocked-html:live_scores",
+            "family": "blocked-html",
+            "urgency": "LIVE",
+            "competition_id": "blocked-league",
+            "priority": 1,
+            "request_key": "blocked-html|http://blocked",
+            "last_run_at": now - timedelta(seconds=600),
+            "next_due_at": now - timedelta(seconds=500),
+        },
+        {
+            "job_key": "refresh:mlb:mlb-statsapi:live_scores",
+            "family": "mlb-statsapi",
+            "urgency": "LIVE",
+            "competition_id": "mlb",
+            "priority": 1,
+            "request_key": "mlb-statsapi|http://statsapi",
+            "last_run_at": now - timedelta(seconds=90),
+            "next_due_at": now - timedelta(seconds=10),
+        },
+    ]
+    groups, stats = select_fair_groups(jobs, now)
+    selected = {group[0]["family"] for group in groups}
+    assert "mlb-statsapi" in selected
+    assert "blocked-html" not in selected
+    assert job_lane(jobs[0]) == 3
+    assert job_lane(jobs[1]) == 0
+    assert stats["live_families_waiting"] == 1
+    assert stats["live_families_starved"] == 0
+    assert stats["oldest_live_fetch_age_seconds"] < 500
+    reset_family_health()
+
+
+def test_blocked_family_retries_off_live_path_after_backoff():
+    reset_family_health()
+    note_family_failure("blocked-html", http_status=403, error_type="ACCESS_BLOCKED", retry_after_s=900)
+    family_state("blocked-html")["blocked_until_mono"] = 0.0
+    now = datetime(2026, 9, 19, 12, 0, 0)
+    jobs = [
+        {
+            "job_key": "refresh:blocked:blocked-html:live_scores",
+            "family": "blocked-html",
+            "urgency": "LIVE",
+            "competition_id": "blocked-league",
+            "priority": 1,
+            "request_key": "blocked-html|http://blocked",
+            "last_run_at": now - timedelta(seconds=600),
+            "next_due_at": now - timedelta(seconds=500),
+        }
+    ]
+    groups, stats = select_fair_groups(jobs, now)
+    assert stats["live_families_waiting"] == 0
+    assert stats["live_families_starved"] == 0
+    assert [group[0]["family"] for group in groups] == ["blocked-html"]
+    assert job_lane(jobs[0]) == 3
+    reset_family_health()
+
+
+def test_blocked_family_tick_demotes_stale_live_without_fetch(monkeypatch):
+    monkeypatch.setenv("RESULTS_COLLECTION_ENABLED", "true")
+    monkeypatch.setenv("RESULTS_SCHEDULER_ENABLED", "true")
+    monkeypatch.setenv("RESULTS_WRITE_ENABLED", "true")
+    reset_family_health()
+    reset_metrics()
+    note_family_failure("blocked-html", http_status=403, error_type="ACCESS_BLOCKED", retry_after_s=900)
+    fetched = []
+
+    def fake_collect(db, competition, *args, **kwargs):
+        fetched.append((competition.competition_id, kwargs.get("source_family")))
+        return {"classification": "ok", "written": 0}
+
+    monkeypatch.setattr("collector.collect.collect_competition", fake_collect)
+    now = datetime.utcnow()
+    stale_start = now - timedelta(hours=12)
+    fresh_start = now - timedelta(minutes=20)
+    db = _session()
+    try:
+        blocked_src = _source(db, "blocked-src", "blocked-src")
+        blocked_src.upstream_family = "blocked-html"
+        healthy_src = _source(db, "healthy-src", "healthy-src")
+        healthy_src.upstream_family = "mlb-statsapi"
+        _competition(db, "blocked-league", "football")
+        _competition(db, "healthy-league", "baseball")
+        _map(db, "blocked-league", "blocked-src", 10, upstream_family="blocked-html")
+        _map(db, "healthy-league", "healthy-src", 10, upstream_family="mlb-statsapi")
+        db.add(
+            SportsEvent(
+                event_id="ninko-evt-blocked-stale",
+                sport_id="football",
+                competition_id="blocked-league",
+                event_family="team_match",
+                status="live",
+                live=True,
+                start_time=stale_start,
+                fingerprint="fp-blocked-stale",
+                retrieved_at=stale_start,
+                extra_json=dump_json(
+                    {
+                        "live_class": "CONFIRMED_LIVE",
+                        "source_family": "blocked-html",
+                        "source_status": "live",
+                        "status_inferred": False,
+                        "source_fetch_time": stale_start.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                        "source_event_updated_at": stale_start.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    }
+                ),
+                score_json=dump_json({"home": 1, "away": 0}),
+            )
+        )
+        db.add(
+            SportsEvent(
+                event_id="ninko-evt-healthy-live",
+                sport_id="baseball",
+                competition_id="healthy-league",
+                event_family="team_match",
+                status="live",
+                live=True,
+                start_time=fresh_start,
+                fingerprint="fp-healthy-live",
+                retrieved_at=now,
+                extra_json=dump_json(
+                    {
+                        "live_class": "CONFIRMED_LIVE",
+                        "source_family": "mlb-statsapi",
+                        "source_status": "live",
+                        "status_inferred": False,
+                        "source_fetch_time": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                        "source_event_updated_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    }
+                ),
+                score_json=dump_json({"home": 2, "away": 2}),
+            )
+        )
+        db.commit()
+        tick = run_incremental_tick(db, now=now)
+        db.commit()
+        blocked_row = db.query(SportsEvent).filter_by(event_id="ninko-evt-blocked-stale").one()
+        healthy_row = db.query(SportsEvent).filter_by(event_id="ninko-evt-healthy-live").one()
+        extra = load_json(blocked_row.extra_json, {}) or {}
+        assert blocked_row.status == "stale"
+        assert blocked_row.live is False
+        assert extra.get("live_class") == "STALE_LIVE"
+        assert blocked_row.status != "finished"
+        assert healthy_row.status == "live"
+        assert "blocked-html" not in (tick.get("families_selected") or [])
+        assert tick["live_families_starved"] == 0
+        assert all(item[0] != "blocked-league" for item in fetched)
+        assert any(item[0] == "healthy-league" for item in fetched)
+    finally:
+        db.close()
+        reset_family_health()
+

@@ -138,6 +138,20 @@ PREFERRED_FALLBACK_PRIORITY = {
     "cue-tracker": 2,
     "sporting-life": 2,
     "opendota": 2,
+    "fotmob": 2,
+    "sofascore-web": 2,
+    "pga-graphql": 2,
+    "click-tt-remix": 2,
+    "altiusrt-html": 2,
+    "championdata-netball": 2,
+    "gbgb-meeting-json": 2,
+    "cfl-scoreboard-json": 2,
+    "lolesports-json": 2,
+    "f1-livetiming-index": 2,
+    "world-aquatics-api": 2,
+    "pulselive": 2,
+    "dataproject-web": 2,
+    "dataproject-wcm": 2,
     "lolesports-web": 2,
     "cdl-web": 2,
     "overwatch-esports-web": 2,
@@ -257,6 +271,8 @@ def build_runtime_registry() -> Dict[str, Any]:
         priority = int(row.get("priority_candidate") or 100)
         if family in DEPRIORITIZE_FAMILIES:
             priority = 90
+        if family == "sportscore":
+            priority = max(priority, 2)
         if family in PREFERRED_FALLBACK_PRIORITY:
             priority = min(priority, PREFERRED_FALLBACK_PRIORITY[family])
         mapping = {

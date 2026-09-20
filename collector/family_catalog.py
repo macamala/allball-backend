@@ -30,6 +30,18 @@ JSON_ADAPTERS = {
     "sackmann-tennis": "sackmann-csv",
     "omega-timing": "omega-timing",
     "sportscore": "sportscore",
+    "fotmob": "fotmob",
+    "sofascore-web": "sofascore-web",
+    "pga-graphql": "pga-graphql",
+    "click-tt": "click-tt-remix",
+    "click-tt-remix": "click-tt-remix",
+    "altiusrt-html": "altiusrt-html",
+    "championdata-netball": "championdata-netball",
+    "gbgb-meeting-json": "gbgb-meeting-json",
+    "cfl-scoreboard-json": "cfl-scoreboard-json",
+    "lolesports-json": "lolesports-json",
+    "f1-livetiming-index": "f1-livetiming-index",
+    "world-aquatics-api": "world-aquatics-api",
     "wta-json": "wta-json",
     "sporting-events": "sporting-events",
     "worldcup26-api": "worldcup26-api",
@@ -41,6 +53,8 @@ JSON_ADAPTERS = {
     "eliteprospects": "eliteprospects",
     "volleyballworld": "volleyballworld",
     "cev-competition-area": "cev-competition-area",
+    "dataproject-web": "dataproject-web",
+    "dataproject-wcm": "dataproject-web",
     "prod2-web": "prod2-web",
     "acb-web": "acb-html",
     "formula-e-web": "formula-e-web",
@@ -146,6 +160,17 @@ FAMILY_URLS = {
     "footywire": "https://www.footywire.com",
     "omega-timing": "https://www.omegatiming.com",
     "sportscore": "https://sportscore.com/api/widget/matches/?sport=football&limit=20&src=ninkosports",
+    "fotmob": "https://www.fotmob.com/api/data/matches?date=20260920",
+    "sofascore-web": "https://www.sofascore.com/api/v1/sport/football/events/live",
+    "pga-graphql": "https://orchestrator.pgatour.com/graphql",
+    "click-tt-remix": "https://www.mytischtennis.de",
+    "altiusrt-html": "https://fih.altiusrt.com",
+    "championdata-netball": "https://mc.championdata.com/data/competitions.json",
+    "gbgb-meeting-json": "https://api.gbgb.org.uk/api/results",
+    "cfl-scoreboard-json": "https://www.cfl.ca",
+    "lolesports-json": "https://esports-api.lolesports.com",
+    "f1-livetiming-index": "https://livetiming.formula1.com/static/Index.json",
+    "world-aquatics-api": "https://api.worldaquatics.com",
     "wta-json": "https://api.wtatennis.com/tennis/tournaments/901/2026/matches",
     "sporting-events": "https://sporting-events.org/data/",
     "worldcup26-api": "https://worldcup26.ir/get/soccer/leagues",
@@ -391,6 +416,9 @@ CANONICAL_HOST_FIX = {
 
 COMPETITION_PAGE_URLS = {
     ("dataproject-wcm", "italy-superlega"): "https://www.legavolley.it/calendario",
+    ("dataproject-web", "italy-superlega"): "https://www.legavolley.it/calendario",
+    ("dataproject-web", "plusliga"): "https://plusliga.pl/games",
+    ("dataproject-web", "cev-eurovolley-men"): "https://www-old.cev.eu/Competition-Area/CompetitionView.aspx?ID=1572",
     ("futbalnet", "slovakia-super-liga"): "https://sportnet.sme.sk/futbalnet/z/ulk/s/nike-liga/vysledky/",
     ("aiff-web", "india-super-league"): "https://www.the-aiff.com/competitions/isl",
     ("hbl-web", "germany-handball-bundesliga"): "https://www.liquimoly-hbl.de/de/hbl-gmbh/content/hbl-gmbh-ver%C3%B6ffentlicht-vorl%C3%A4ufige-spielpl%C3%A4ne-der-saison-202627-von-opel-handball-bundesliga-und-2-hbl",
@@ -513,6 +541,8 @@ def adapter_key_for(family: str, sport_id: str = "") -> str:
         return "generic-http"
     if family == "bbc-sport":
         return "bbc-sport"
+    if family in {"click-tt", "click-tt-remix"}:
+        return "click-tt-remix"
     if family == "espn-html":
         return "espn-scoreboard"
     if family == "soccerway":
@@ -525,6 +555,8 @@ def adapter_key_for(family: str, sport_id: str = "") -> str:
         "eliteprospects",
         "volleyballworld",
         "cev-competition-area",
+        "dataproject-web",
+        "dataproject-wcm",
         "prod2-web",
         "formula-e-web",
         "netballpass",
@@ -814,6 +846,26 @@ def extra_config(family: str, competition_id: str) -> Dict:
         cfg["url"] = page
     if family == "omega-timing":
         cfg["source_type"] = "XML/HTML"
+    if family == "fotmob":
+        from collector.adapters_fotmob import FOTMOB_LEAGUES
+
+        spec = FOTMOB_LEAGUES.get(competition_id) or {}
+        if spec.get("id") is not None:
+            cfg["fotmob_league_id"] = spec["id"]
+            cfg["fotmob_league_name"] = spec.get("name")
+        cfg["url"] = FAMILY_URLS["fotmob"]
+    if family == "sofascore-web":
+        from collector.adapters_sofascore import SOFA_COMPETITIONS
+
+        spec = SOFA_COMPETITIONS.get(competition_id) or {}
+        cfg["sofascore_sport"] = spec.get("sport")
+        if spec.get("unique_id") is not None:
+            cfg["sofascore_unique_id"] = spec["unique_id"]
+        cfg["url"] = FAMILY_URLS["sofascore-web"]
+    if family == "pga-graphql":
+        cfg["tour_code"] = "S" if competition_id == "korn-ferry-tour" else "R"
+        cfg["url"] = FAMILY_URLS["pga-graphql"]
+        cfg["http_method"] = "POST"
     if family == "sportscore":
         from collector.adapters_sportscore import ATTRIBUTION, SPORTSCORE_COMPETITIONS
 

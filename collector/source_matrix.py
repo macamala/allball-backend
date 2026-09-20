@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from collector.capability_ledger import proven_status
 from collector.discovery_inventory import COVERAGE
+from collector.coverage_capability import FAMILY_EVIDENCE, annotate_record
 from collector.event_quality import (
     BRACKET,
     HEAD_TO_HEAD,
@@ -27,6 +28,18 @@ from collector.event_quality import (
 from collector.registry import build_runtime_registry
 
 ROOT = Path(__file__).resolve().parent.parent
+
+
+def _canonical_competition_ids() -> set:
+    import subprocess
+
+    try:
+        raw = subprocess.check_output(["git", "show", "HEAD:source_matrix_final.json"], cwd=str(ROOT))
+        payload = json.loads(raw)
+        return {row["competition"] for row in payload.get("competitions") or []}
+    except Exception:
+        current = json.loads((ROOT / "source_matrix_final.json").read_text(encoding="utf-8")) if (ROOT / "source_matrix_final.json").exists() else {}
+        return {row["competition"] for row in current.get("competitions") or []}
 
 # Already identified during discovery / earlier live passes.
 KNOWN_RESTRICTED = {
@@ -45,6 +58,7 @@ KNOWN_RESTRICTED = {
     "blizzard-owcs-recaps": "TECHNICALLY_WORKING esports.overwatch.com recap HTML; TERMS_RESTRICTED Blizzard consumer/esports properties; bot/script ingestion not enabled",
     "overwatch-esports-web": "TECHNICALLY_WORKING public HTML; TERMS_RESTRICTED Blizzard Overwatch esports properties; bot/script ingestion not enabled",
     "owgr-web": "OWGR terms: website material may not be reproduced/adapted/transmitted without prior written permission except private viewing or Sharing Widget",
+    "europeantour-web": "europeantour.com returned 403 ACCESS_DENIED from Railway; live coverage not claimed",
 }
 
 KNOWN_PARTIAL = {
@@ -219,6 +233,9 @@ def _status_for(competition_id: str, family: str, mapping: Dict[str, Any], evide
     if mapping.get("coverage") == "partial" or family in KNOWN_PARTIAL:
         notes = KNOWN_PARTIAL.get(family) or mapping.get("coverage_notes") or "partial coverage"
         return "PARTIAL_WORKING", notes
+    rail = FAMILY_EVIDENCE.get(family) or {}
+    if rail.get("railway_access") and family not in KNOWN_RESTRICTED:
+        return "WORKING", rail.get("transport") or "Railway-proven public transport"
     if family in KNOWN_RESTRICTED:
         return "RESTRICTED", KNOWN_RESTRICTED[family]
     row = evidence.get((competition_id, family)) or {}
@@ -321,6 +338,7 @@ def _bucket(a_status: str, b_status: Optional[str], two: bool) -> str:
 
 def build_matrix() -> Dict[str, Any]:
     by_comp = _enabled_mappings()
+    allowed = _canonical_competition_ids()
     evidence = _family_evidence()
     proof = _load_proof()
     discovery_known = {}
@@ -330,6 +348,8 @@ def build_matrix() -> Dict[str, Any]:
     buckets = Counter()
     exceptions = []
     for competition_id, mappings in sorted(by_comp.items()):
+        if allowed and competition_id not in allowed:
+            continue
         families = []
         seen = set()
         for mapping in mappings:
@@ -391,6 +411,7 @@ def build_matrix() -> Dict[str, Any]:
             "free_source_status": "free-$0",
             "bucket": bucket,
         }
+        annotate_record(record, families)
         competitions.append(record)
         if bucket != "A+B WORKING":
             known = False
@@ -420,9 +441,16 @@ def build_matrix() -> Dict[str, Any]:
                     "bucket": bucket,
                 }
             )
+    cap_counts = Counter(row.get("capability") or "UNKNOWN" for row in competitions)
+    live_capable = sum(1 for row in competitions if row.get("capability") in {"LIVE", "STRUCTURALLY_LIVE"})
+    redundant = sum(1 for row in competitions if row.get("redundant_live_paths"))
     return {
         "total_competitions": len(competitions),
         "buckets": dict(buckets),
+        "capability_totals": dict(cap_counts),
+        "live_capable_count": live_capable,
+        "redundant_live_count": redundant,
+        "rapid_result_count": int(cap_counts.get("RAPID_RESULT") or 0),
         "exceptions": exceptions,
         "competitions": competitions,
     }

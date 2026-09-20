@@ -64,8 +64,8 @@ def parse_ibu_events_json(payload: Any) -> List[Dict[str, Any]]:
             start=start,
             status="scheduled",
             extra={
-                "event_type": RACE,
-                "event_family": "racing",
+                "event_type": MEET,
+                "event_family": "meet",
                 "classification": classification,
                 "venue": venue,
             },
@@ -104,8 +104,8 @@ def parse_ibu_events_xml(blob: str) -> List[Dict[str, Any]]:
             start=start,
             status="scheduled",
             extra={
-                "event_type": RACE,
-                "event_family": "racing",
+                "event_type": MEET,
+                "event_family": "meet",
                 "classification": classification,
                 "venue": venue,
             },

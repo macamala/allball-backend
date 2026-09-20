@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Iterable, List, Sequence, Tuple
 
 ARCHIVE_PREFIXES = ("wikipedia", "wiki-")
-SHARED_API = {"thesportsdb"}
+SHARED_API = {"thesportsdb", "pulselive", "sportscore", "fotmob", "sofascore-web"}
 HISTORICAL_FAMILIES = {"cricsheet", "sackmann-tennis"}
 
 

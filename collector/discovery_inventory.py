@@ -785,6 +785,110 @@ COVERAGE: List[CoverageRow] = [
 ]
 
 
+def _extend_live_families() -> None:
+    from collector.adapters_fotmob import FOTMOB_LEAGUES
+    from collector.adapters_sofascore import SOFA_COMPETITIONS
+
+    sofa_skip = {
+        "european-challenge-tour",
+        "ssn-australia",
+        "pga-tour",
+        "korn-ferry-tour",
+        "formula-1",
+        "formula-2",
+        "formula-3",
+        "formula-e",
+    }
+    for cid, spec in FOTMOB_LEAGUES.items():
+        COVERAGE.append(
+            _c(
+                "football",
+                str(spec.get("ccode") or "world"),
+                cid,
+                f"FotMob allLeagues id {spec['id']} {spec.get('name')}",
+                "fotmob",
+                "public JSON",
+                "Y",
+                "Y",
+                "Y",
+                "N",
+                "N",
+                "N",
+                "N",
+                True,
+                "unclear",
+                3,
+                probe=f"Railway 200 www.fotmob.com/api/data/matches league {spec['id']}; NZ not 8870",
+            )
+        )
+    sport_map = {
+        "nrl": "rugby-league",
+        "npb": "baseball",
+        "kbo": "baseball",
+        "cpbl": "baseball",
+        "sweden-shl": "ice-hockey",
+        "germany-handball-bundesliga": "handball",
+        "denmark-handball-league": "handball",
+        "france-lnh": "handball",
+        "spain-asobal": "handball",
+        "ehf-champions-league": "handball",
+        "ehf-competitions": "handball",
+        "france-top-14": "rugby",
+        "france-pro-d2": "rugby",
+        "premiership-rugby": "rugby",
+        "super-rugby": "rugby",
+        "nz-npc": "rugby",
+        "cfl": "american-football",
+        "nz-national-league": "football",
+        "nordic-water-polo-league": "water-polo",
+    }
+    for cid, spec in SOFA_COMPETITIONS.items():
+        if cid in sofa_skip or cid not in sport_map:
+            continue
+        uid = spec.get("unique_id")
+        COVERAGE.append(
+            _c(
+                sport_map[cid],
+                "world",
+                cid,
+                f"SofaScore www live/date board unique {uid or spec.get('tokens_any')}",
+                "sofascore-web",
+                "public JSON",
+                "Y",
+                "Y",
+                "Y",
+                "N",
+                "N",
+                "N",
+                "N",
+                True,
+                "unclear",
+                3,
+                probe="Railway 200 www.sofascore.com/api/v1/sport/*/events/live; unique-tournament not used",
+            )
+        )
+    extras = [
+        _c("golf", "us", "pga-tour", "PGA Tour public GraphQL POST", "pga-graphql", "public JSON", "Y", "Y", "Y", "N", "N", "N", "N", True, "unclear", 2, probe="Railway POST orchestrator.pgatour.com/graphql 200 Biltmore IN_PROGRESS R2026557"),
+        _c("golf", "us", "korn-ferry-tour", "PGA GraphQL tourCode S", "pga-graphql", "public JSON", "Y", "Y", "Y", "N", "N", "N", "N", True, "unclear", 2, probe="same PGA GraphQL family tourCode S"),
+        _c("table-tennis", "de", "germany-click-tt", "click-TT Remix tabelle + meeting live JSON", "click-tt-remix", "public JSON", "Y", "Y", "Y", "N", "N", "N", "N", True, "unclear", 2, probe="mytischtennis.de Remix 200 group 493079"),
+        _c("field-hockey", "world", "fih-eurohockey", "AltiusRT public HTML matches", "altiusrt-html", "public HTML", "Y", "Y", "Y", "N", "N", "N", "N", True, "unclear", 2, probe="fih.altiusrt.com HTML 200 REST 401"),
+        _c("netball", "au", "ssn-australia", "Champion Data Super Netball 12949", "championdata-netball", "public JSON", "Y", "Y", "Y", "N", "N", "N", "N", True, "unclear", 2, probe="mc.championdata.com/data/12949/fixture.json 200"),
+        _c("greyhound-racing", "gb", "gbgb-meetings", "GBGB meeting results JSON", "gbgb-meeting-json", "public JSON", "meeting", "Y", "Y", "N", "N", "N", "N", True, "unclear", 2, probe="api.gbgb.org.uk/api/results/meeting/{id} 200 RAPID_RESULT"),
+        _c("american-football", "ca", "cfl", "CFL scoreboard JSON", "cfl-scoreboard-json", "public JSON", "Y", "Y", "Y", "N", "N", "N", "N", True, "unclear", 2, probe="CFL public scoreboard JSON family"),
+        _c("league-of-legends", "world", "lol-world-championship", "LoL esports schedule JSON", "lolesports-json", "public JSON", "Y", "Y", "Y", "N", "N", "N", "N", True, "unclear", 2, probe="esports-api.lolesports.com schedule JSON"),
+        _c("motorsport", "world", "formula-1", "F1 livetiming Index.json", "f1-livetiming-index", "public JSON", "session", "Y", "Y", "N", "N", "N", "N", True, "unclear", 2, probe="livetiming.formula1.com/static/Index.json"),
+        _c("water-polo", "world", "world-aquatics-events", "World Aquatics public API", "world-aquatics-api", "public JSON", "Y", "Y", "Y", "N", "N", "N", "N", True, "unclear", 2, probe="api.worldaquatics.com family"),
+        _c("rugby", "fr", "france-top-14", "PulseLive WR RIMS date-window JSON", "pulselive", "public JSON", "Y", "Y", "Y", "N", "N", "N", "N", True, "unclear", 3, probe="api.wr-rims-prod.pulselive.com/rugby/v3/match date window Top 14"),
+        _c("rugby", "fr", "france-pro-d2", "PulseLive WR RIMS date-window JSON", "pulselive", "public JSON", "Y", "Y", "Y", "N", "N", "N", "N", True, "unclear", 3, probe="PulseLive Pro D2 tokens"),
+        _c("rugby", "england", "premiership-rugby", "PulseLive WR RIMS date-window JSON", "pulselive", "public JSON", "Y", "Y", "Y", "N", "N", "N", "N", True, "unclear", 3, probe="PulseLive Premiership tokens"),
+        _c("rugby", "nz", "nz-npc", "PulseLive WR RIMS date-window JSON", "pulselive", "public JSON", "Y", "Y", "Y", "N", "N", "N", "N", True, "unclear", 3, probe="PulseLive NPC tokens"),
+    ]
+    COVERAGE.extend(extras)
+
+
+_extend_live_families()
+
+
 def competition_operational_family_scopes() -> Dict[str, Dict[str, Set[str]]]:
     grouped: Dict[str, Dict[str, Set[str]]] = defaultdict(lambda: defaultdict(set))
     for row in COVERAGE:
