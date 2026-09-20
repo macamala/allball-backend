@@ -9,6 +9,7 @@ from collections import Counter
 
 from collector.competition_presentation import SPORT_GEOGRAPHY_BLOCKLIST, metadata_for
 from collector.matrix_guard import frozen_competition_ids
+from collector.duplicate_audit import audit_duplicates
 from collector.participant_text import clean_participant_name
 
 SPORT_PREFIX_RE = __import__("re").compile(r"^(US|GB|FR|DE|IT|ES|BR|AR|NL|PT|BE)\s+")
@@ -47,16 +48,22 @@ def inspect_events(events):
                 name = str(side or "")
             if not name:
                 counts["missing_participant_names"] += 1
-            cleaned = clean_participant_name(name, sport=sport)
-            if SPORT_PREFIX_RE.match(name or "") and cleaned != name and sport in {
-                "baseball",
-                "basketball",
-                "american-football",
-                "ice-hockey",
-            }:
-                counts["provider_prefix_leakage"] += 1
-            elif name.startswith("US ") and sport in {"baseball", "basketball", "american-football", "ice-hockey"}:
-                counts["provider_prefix_leakage"] += 1
+            cleaned = clean_participant_name(
+                name,
+                sport=sport,
+                competition_country=event.get("country_id") or meta.get("country_code"),
+            )
+            if SPORT_PREFIX_RE.match(str(name or "").strip()):
+                if cleaned != name:
+                    counts["provider_prefix_leakage"] += 1
+                    remaining.append(("prefix", name, event.get("id")))
+                elif name.startswith("US ") and sport in {
+                    "baseball",
+                    "basketball",
+                    "american-football",
+                    "ice-hockey",
+                }:
+                    counts["provider_prefix_leakage"] += 1
         seen = event.get("id")
         if not seen:
             counts["missing_ids"] += 1
@@ -73,4 +80,10 @@ if __name__ == "__main__":
     payload = fetch_production(f"{base}/sports-data/events")
     events = payload.get("events") or payload.get("matches") or []
     counts, samples = inspect_events(events)
-    print(json.dumps({"counts": counts, "samples": samples, "connected": payload.get("connected")}, indent=2))
+    duplicates = audit_duplicates(events)
+    print(
+        json.dumps(
+            {"counts": counts, "samples": samples, "duplicates": duplicates, "connected": payload.get("connected")},
+            indent=2,
+        )
+    )

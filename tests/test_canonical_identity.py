@@ -209,3 +209,26 @@ def test_null_scores_are_not_converted_to_zero():
         assert public[0]["score"]["home"] != 0
     finally:
         db.close()
+
+
+def test_roma_inter_and_fiorentina_napoli_collapse_without_hardcoded_fixtures():
+    db = SessionLocal()
+    try:
+        kickoff = datetime(2026, 9, 20, 18, 45, 0)
+        later = datetime(2026, 9, 20, 19, 0, 0)
+        db.add(_event(event_id="ninko-id-ri-a", home="Roma", away="Inter", competition_id="italy-sa-depth", score={"home": 2, "away": 2}, status="finished", start_time=kickoff))
+        db.add(_event(event_id="ninko-id-ri-b", home="AS Roma", away="FC Internazionale Milano", competition_id="italy-sa-depth", family="sportscore", start_time=later))
+        db.add(_event(event_id="ninko-id-fn-a", home="Fiorentina", away="Napoli", competition_id="italy-sa-depth", score={"home": 0, "away": 1}, status="halftime", start_time=kickoff))
+        db.add(_event(event_id="ninko-id-fn-b", home="ACF Fiorentina", away="SSC Napoli", competition_id="italy-sa-depth", family="thesportsdb", start_time=later))
+        db.add(_event(event_id="ninko-id-ri-cup", home="Roma", away="Inter", competition_id="coppa-italia-depth", start_time=kickoff))
+        db.add(_event(event_id="ninko-id-ri-next", home="Roma", away="Inter", competition_id="italy-sa-depth", start_time=datetime(2026, 9, 21, 18, 45, 0)))
+        db.commit()
+        collapse_canonical_events(db)
+        serie = _public(db, "italy-sa-depth")
+        same_day = [row for row in serie if row["id"] != "ninko-id-ri-next"]
+        assert len(same_day) == 2
+        assert any(row["status"] == "finished" and (row.get("score") or {}).get("home") == 2 for row in same_day)
+        assert any((row.get("score") or {}).get("away") == 1 for row in same_day)
+        assert len(_public(db, "coppa-italia-depth")) == 1
+    finally:
+        db.close()

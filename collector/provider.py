@@ -73,6 +73,7 @@ HEADER_KEYS = (
     "scope_type",
     "competition_name",
     "country_based",
+    "standings_available",
 )
 
 
@@ -331,7 +332,7 @@ class NinkoCollectedSportsDataProvider:
     ) -> List[NormalizedEvent]:
         db = _session(self._session_factory)
         try:
-            cache_key = f"events:p0v6:{sport}:{competition}:{status}:{date_from}:{date_to}:{int(allow_unfiltered)}"
+            cache_key = f"events:p0v7:{sport}:{competition}:{status}:{date_from}:{date_to}:{int(allow_unfiltered)}"
             cached = cache_get(db, cache_key)
             if cached is not None:
                 return cached
@@ -370,7 +371,12 @@ class NinkoCollectedSportsDataProvider:
             if unbounded and not allow_unfiltered:
                 query = query.limit(int(os.getenv("NINKO_EVENTS_UNFILTERED_LIMIT", "400")))
             rows = query.all()
-            events = [self._to_normalized(row) for row in rows]
+            standing_ids = {
+                item[0]
+                for item in db.query(SportsStandingSnapshot.competition_id).distinct().all()
+                if item[0]
+            }
+            events = [self._to_normalized(row, standing_ids=standing_ids) for row in rows]
             events = [row for row in events if row and is_display_eligible(row)]
             if date_from:
                 events = [row for row in events if (row.get("start_time") or "") >= date_from]
@@ -441,6 +447,12 @@ class NinkoCollectedSportsDataProvider:
             if payload is None:
                 return None
             extra = load_json(row.extra_json, {}) or {}
+            standing = (
+                db.query(SportsStandingSnapshot.competition_id)
+                .filter_by(competition_id=payload.get("competition_key"))
+                .first()
+            )
+            payload["standings_available"] = bool(standing)
             for key in DETAIL_ONLY_KEYS:
                 if extra.get(key) is not None and payload.get(key) is None:
                     payload[key] = extra[key]
@@ -466,6 +478,9 @@ class NinkoCollectedSportsDataProvider:
                 if incidents:
                     payload["incidents"] = incidents
                 payload["availability"] = load_json(detail.availability_json, []) or []
+            from collector.canonical_detail import attach_canonical_detail
+
+            payload = attach_canonical_detail(payload)
             return public_event_detail(payload)
         finally:
             db.close()
@@ -501,7 +516,12 @@ class NinkoCollectedSportsDataProvider:
     def event_header(self, event: NormalizedEvent) -> Dict[str, Any]:
         return {key: event.get(key) for key in HEADER_KEYS if event.get(key) is not None}
 
-    def _to_normalized(self, row: SportsEvent, include_detail: bool = False) -> NormalizedEvent:
+    def _to_normalized(
+        self,
+        row: SportsEvent,
+        include_detail: bool = False,
+        standing_ids: Optional[set] = None,
+    ) -> NormalizedEvent:
         participants = load_json(row.participants_json, {}) or {}
         score = load_json(row.score_json, {}) or {}
         extra = load_json(row.extra_json, {}) or {}
@@ -518,10 +538,10 @@ class NinkoCollectedSportsDataProvider:
             "competition_key": row.competition_id,
             "season": row.season,
             "event_family": row.event_family,
-            "home": sanitize_side(raw_sides["home"], sport=row.sport_id),
-            "away": sanitize_side(raw_sides["away"], sport=row.sport_id),
-            "participant_a": sanitize_side(raw_sides["participant_a"], sport=row.sport_id),
-            "participant_b": sanitize_side(raw_sides["participant_b"], sport=row.sport_id),
+            "home": raw_sides["home"],
+            "away": raw_sides["away"],
+            "participant_a": raw_sides["participant_a"],
+            "participant_b": raw_sides["participant_b"],
             "start_time": isoformat(row.start_time),
             "status": row.status,
             "score": score,
@@ -586,6 +606,17 @@ class NinkoCollectedSportsDataProvider:
         payload["competition_key"] = corrected
         payload["competition"] = corrected
         payload = attach_competition_metadata(payload)
+        country = payload.get("country_id")
+        payload["home"] = sanitize_side(raw_sides["home"], sport=row.sport_id, competition_country=country)
+        payload["away"] = sanitize_side(raw_sides["away"], sport=row.sport_id, competition_country=country)
+        payload["participant_a"] = sanitize_side(
+            raw_sides["participant_a"], sport=row.sport_id, competition_country=country
+        )
+        payload["participant_b"] = sanitize_side(
+            raw_sides["participant_b"], sport=row.sport_id, competition_country=country
+        )
+        if standing_ids is not None:
+            payload["standings_available"] = payload.get("competition_key") in standing_ids
         if extra.get("provider_conflicts"):
             payload["conflicts"] = extra.get("provider_conflicts")
         if not include_detail:

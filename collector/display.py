@@ -28,7 +28,12 @@ def _winner_loser(kind: str, round_token: str, index: str) -> str:
     return f"{role} of {slot}" if slot else TBD
 
 
-def sanitize_participant_name(name: Optional[str], sport: Optional[str] = None) -> str:
+def sanitize_participant_name(
+    name: Optional[str],
+    sport: Optional[str] = None,
+    competition_country: Optional[str] = None,
+    participant_country: Optional[str] = None,
+) -> str:
     raw = str(name or "").strip()
     if not raw:
         return ""
@@ -54,19 +59,37 @@ def sanitize_participant_name(name: Optional[str], sport: Optional[str] = None) 
         return ""
     if re.search(r"<[^>]+>", raw):
         return ""
+    from collector.participant_alias import canonical_display_name
     from collector.participant_text import clean_participant_name
 
-    return clean_participant_name(raw, sport=sport)
+    cleaned = clean_participant_name(
+        raw,
+        sport=sport,
+        competition_country=competition_country,
+        participant_country=participant_country,
+    )
+    return canonical_display_name(cleaned, sport=sport)
 
 
-def sanitize_side(side: Any, sport: Optional[str] = None) -> Any:
+def sanitize_side(
+    side: Any,
+    sport: Optional[str] = None,
+    competition_country: Optional[str] = None,
+) -> Any:
     if not isinstance(side, dict):
         if isinstance(side, str):
-            return sanitize_participant_name(side, sport=sport)
+            return sanitize_participant_name(side, sport=sport, competition_country=competition_country)
         return side
     out = dict(side)
-    shown = sanitize_participant_name(str(out.get("display_name") or out.get("name") or ""), sport=sport)
+    shown = sanitize_participant_name(
+        str(out.get("display_name") or out.get("name") or ""),
+        sport=sport,
+        competition_country=competition_country,
+        participant_country=out.get("country_id") or out.get("country") or out.get("nationality"),
+    )
     if shown:
+        if not out.get("source_name"):
+            out["source_name"] = out.get("name") or shown
         out["display_name"] = shown
         out["name"] = shown
     return out

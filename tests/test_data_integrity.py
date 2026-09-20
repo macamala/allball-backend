@@ -105,8 +105,27 @@ def test_country_code_not_part_of_display_name():
     assert clean_participant_name("US Sassuolo") == "US Sassuolo"
     assert clean_participant_name("US Chicago White Sox", sport="baseball") == "Chicago White Sox"
     assert clean_participant_name("US Sassuolo", sport="football") == "US Sassuolo"
+    assert clean_participant_name("US Colorado Springs", competition_country="US") == "Colorado Springs"
+    assert clean_participant_name("US Sassuolo", competition_country="IT") == "US Sassuolo"
+    assert clean_participant_name("IT Roma") == "Roma"
+    assert clean_participant_name("BE Oud-Heverlee Leuven") == "Oud-Heverlee Leuven"
     assert clean_participant_name("SK Rapid") == "SK Rapid"
     assert sanitize_participant_name("1. FC Kaiserslautern") == "1. FC Kaiserslautern"
+    from collector.participant_alias import canonical_display_name, names_equivalent, prefer_display
+
+    assert canonical_display_name("IT AS Roma") == "AS Roma"
+    assert canonical_display_name("FC Internazionale Milano") == "Inter"
+    assert canonical_display_name("ACF Fiorentina") == "Fiorentina"
+    assert canonical_display_name("SSC Napoli") == "Napoli"
+    assert canonical_display_name("FC Barcelona") == "FC Barcelona"
+    assert canonical_display_name("AC Milan") == "AC Milan"
+    assert names_equivalent("Roma", "AS Roma")
+    assert names_equivalent("Inter", "FC Internazionale Milano")
+    assert names_equivalent("Fiorentina", "ACF Fiorentina")
+    assert names_equivalent("Napoli", "SSC Napoli")
+    assert not names_equivalent("Inter", "Inter Miami")
+    assert prefer_display("Roma", "AS Roma") == "AS Roma"
+    assert prefer_display("Inter", "FC Internazionale Milano") == "Inter"
 
 
 def test_mojibake_repaired_but_unicode_kept():

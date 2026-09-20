@@ -82,15 +82,17 @@ def identity_confidence(canonical: Dict[str, Any], candidate: Dict[str, Any]) ->
     same_comp = (canonical.get("competition_key") or canonical.get("competition")) == (
         candidate.get("competition_key") or candidate.get("competition")
     )
+    sport = str(canonical.get("sport") or "")
+    max_delta = 4 * 3600 if sport in {"baseball", "basketball"} else 12 * 3600
     if t0 and t1:
         delta = abs((t0 - t1).total_seconds())
-        if delta > 12 * 3600:
+        if delta > max_delta:
             return 0
         if same_comp and delta <= 15 * 60:
             return 95
-        if same_comp and delta <= 3 * 3600:
+        if same_comp:
             return 90
-        if not same_comp and delta <= 3 * 3600:
+        if delta <= 3 * 3600:
             return 88
         return 0
     same_date = str(canonical.get("start_time") or "")[:10] == str(candidate.get("start_time") or "")[:10]

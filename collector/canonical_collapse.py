@@ -26,6 +26,7 @@ from collector.identity_events import identity_confidence
 from collector.merge import _filled
 from collector.models import SportsEvent, SportsEventDetail, SportsEventObservation
 from collector.participant_alias import (
+    canonical_display_name,
     contextual_pair_match,
     discover_aliases_from_pair,
     prefer_display,
@@ -140,11 +141,20 @@ def _repair_participants(row: SportsEvent) -> bool:
         if not isinstance(side, dict) or not side.get("name"):
             continue
         cleaned, country = extract_parenthetical_country(side["name"])
-        cleaned = clean_participant_name(cleaned)
-        if cleaned != side["name"]:
+        cleaned = clean_participant_name(
+            cleaned,
+            sport=row.sport_id,
+            competition_country=row.country_id,
+            participant_country=side.get("country_id"),
+        )
+        from collector.participant_alias import canonical_display_name
+
+        shown = canonical_display_name(cleaned, sport=row.sport_id)
+        if shown != side["name"]:
             if not side.get("source_name"):
                 side["source_name"] = side["name"]
-            side["name"] = cleaned
+            side["name"] = shown
+            side["display_name"] = shown
             dirty = True
         if country and not side.get("country_id"):
             side["country_id"] = country
@@ -177,20 +187,19 @@ def collapse_canonical_events(db: Session, *, competition_ids: Optional[List[str
     db.flush()
     db.expire_all()
 
-    same_day: Dict[Tuple[str, str, str], List[Dict[str, Any]]] = defaultdict(list)
+    same_comp: Dict[Tuple[str, str], List[Dict[str, Any]]] = defaultdict(list)
     for event in events:
-        start = str(event.get("start_time") or "")[:10]
-        if not start:
+        if not event.get("start_time"):
             continue
-        same_day[(event.get("sport") or "", event.get("competition_key") or "", start)].append(event)
+        same_comp[(event.get("sport") or "", event.get("competition_key") or "")].append(event)
 
     aliases_created = 0
-    for group in same_day.values():
+    for group in same_comp.values():
         if len(group) < 2:
             continue
         for i, left in enumerate(group):
             for right in group[i + 1 :]:
-                ok, reason = contextual_pair_match(left, right, db=db)
+                ok, _reason = contextual_pair_match(left, right, db=db)
                 if ok:
                     aliases_created += discover_aliases_from_pair(db, left, right)
 
@@ -208,7 +217,7 @@ def collapse_canonical_events(db: Session, *, competition_ids: Optional[List[str
         if ra != rb:
             parent[rb] = ra
 
-    for group in same_day.values():
+    for group in same_comp.values():
         public_group = [
             item
             for item in group
@@ -338,7 +347,8 @@ def _collapse_pair(db: Session, keeper_id: str, loser_id: str) -> bool:
         l_name = (l_parts.get(key) or {}).get("name") or ""
         chosen = prefer_display(k_name, l_name)
         if chosen and k_parts.get(key):
-            k_parts[key]["name"] = clean_participant_name(chosen)
+            k_parts[key]["name"] = canonical_display_name(clean_participant_name(chosen, sport=keeper.sport_id))
+            k_parts[key]["display_name"] = k_parts[key]["name"]
             k_parts[key]["source_name"] = k_parts[key].get("source_name") or k_name
         l_country = (l_parts.get(key) or {}).get("country_id")
         if l_country and k_parts.get(key) and not k_parts[key].get("country_id"):

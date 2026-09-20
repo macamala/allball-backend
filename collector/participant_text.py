@@ -142,7 +142,12 @@ def fold_for_identity(name: str) -> str:
     raw = raw.lower()
     raw = re.sub(r"\([a-z]{2,3}\)", " ", raw)
     raw = re.sub(r"^[a-z]{2}\s+", "", raw)
-    raw = re.sub(r"\b(fc|cf|sc|afc|cfc|fk|nk|bk|if|il|sk|ac|as|us|ssc|ud|cd|rcd|sv|rc|vfl|calcio|club|clube|football|soccer)\b", " ", raw)
+    raw = re.sub(r"\binternazionale(?:\s+milano)?\b", "inter", raw)
+    raw = re.sub(
+        r"\b(fc|cf|sc|afc|cfc|fk|nk|bk|if|il|sk|ac|as|us|ssc|acf|ud|cd|rcd|sv|rc|vfl|calcio|club|clube|football|soccer)\b",
+        " ",
+        raw,
+    )
     raw = re.sub(r"\b(de|da|do|del|della|di|of|the|and|la|le|el|los|las)\b", " ", raw)
     raw = re.sub(r"[^a-z0-9]+", " ", raw)
     return re.sub(r"\s+", " ", raw).strip()
@@ -164,6 +169,7 @@ LEGAL_IDENTITY_TOKENS = {
     "as",
     "us",
     "ssc",
+    "acf",
     "ud",
     "cd",
     "rcd",
@@ -236,9 +242,41 @@ _TRANSPORT_SPORTS = {
     "mlb",
     "nhl",
 }
+_ISO_ALIASES = {
+    "italy": "IT",
+    "ita": "IT",
+    "usa": "US",
+    "us": "US",
+    "united states": "US",
+    "belgium": "BE",
+    "bel": "BE",
+    "england": "GB",
+    "spain": "ES",
+    "germany": "DE",
+    "france": "FR",
+    "netherlands": "NL",
+    "portugal": "PT",
+    "brazil": "BR",
+    "argentina": "AR",
+}
 
 
-def strip_transport_country_prefix(name: str, sport: Optional[str] = None) -> str:
+def iso_country_code(value: Optional[str]) -> Optional[str]:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    if re.fullmatch(r"[A-Za-z]{2}", raw):
+        return raw.upper()
+    folded = re.sub(r"[\s_-]+", " ", raw.lower()).strip()
+    return _ISO_ALIASES.get(folded)
+
+
+def strip_transport_country_prefix(
+    name: str,
+    sport: Optional[str] = None,
+    competition_country: Optional[str] = None,
+    participant_country: Optional[str] = None,
+) -> str:
     """Drop ISO transport prefixes without touching club particles (AS Monaco, US Sassuolo)."""
     raw = str(name or "").strip()
     match = re.match(r"^([A-Z]{2})\s+(.+)$", raw)
@@ -248,14 +286,31 @@ def strip_transport_country_prefix(name: str, sport: Optional[str] = None) -> st
     if code in _CLUB_PARTICLES:
         return raw
     sport_id = str(sport or "").lower()
+    comp_iso = iso_country_code(competition_country)
+    part_iso = iso_country_code(participant_country)
+    tokens = rest.split()
     if code == "US":
-        if sport_id in _TRANSPORT_SPORTS:
+        italian_us_club = len(tokens) == 1 or (
+            len(tokens) == 2 and tokens[-1].lower() in {"calcio", "fc"}
+        )
+        metadata = (
+            sport_id in _TRANSPORT_SPORTS
+            or comp_iso == "US"
+            or part_iso == "US"
+            or (comp_iso is None and part_iso is None and len(tokens) >= 3)
+        )
+        if italian_us_club and comp_iso not in {None, "US"} and part_iso != "US":
+            return raw
+        if italian_us_club and not metadata:
+            return raw
+        if metadata or (len(tokens) >= 2 and comp_iso == "US"):
             return rest
-        tokens = rest.split()
         if len(tokens) >= 3:
             return rest
         return raw
     if code in _FLAG_CODES and code not in {"SK", "IN"}:
+        return rest
+    if comp_iso and code == comp_iso:
         return rest
     return raw
 
@@ -293,43 +348,74 @@ def extract_parenthetical_country(name: str) -> tuple[str, Optional[str]]:
     return cleaned or raw, code
 
 
-def clean_participant_name(name: str, sport: Optional[str] = None) -> str:
+def clean_participant_name(
+    name: str,
+    sport: Optional[str] = None,
+    competition_country: Optional[str] = None,
+    participant_country: Optional[str] = None,
+) -> str:
     text = repair_mojibake(str(name or "").strip())
     text = re.sub(r"\s+", " ", text)
-    text = strip_transport_country_prefix(text, sport=sport)
+    text = strip_transport_country_prefix(
+        text,
+        sport=sport,
+        competition_country=competition_country,
+        participant_country=participant_country,
+    )
     text = strip_glued_country_code(text)
     text, _country = extract_parenthetical_country(text)
     return text
 
 
-def participant_payload(raw: Any, side: str, sport: Optional[str] = None) -> Dict[str, Any]:
+def participant_payload(
+    raw: Any,
+    side: str,
+    sport: Optional[str] = None,
+    competition_country: Optional[str] = None,
+) -> Dict[str, Any]:
     sport_id = sport
     if isinstance(raw, dict):
         sport_id = sport or raw.get("sport")
-        country = raw.get("country") or raw.get("countryCode") or raw.get("nationality")
-        name = raw.get("name") or raw.get("label") or raw.get("fullName") or raw.get("displayName") or ""
-        name = clean_participant_name(str(name), sport=sport_id)
-        cleaned, extracted = extract_parenthetical_country(str(raw.get("name") or name))
+        country = raw.get("country") or raw.get("countryCode") or raw.get("nationality") or raw.get("country_id")
+        source_name = raw.get("name") or raw.get("label") or raw.get("fullName") or raw.get("displayName") or ""
+        name = clean_participant_name(
+            str(source_name),
+            sport=sport_id,
+            competition_country=competition_country,
+            participant_country=country if isinstance(country, str) else None,
+        )
+        cleaned, extracted = extract_parenthetical_country(str(source_name or name))
         if extracted and not country:
             country = extracted
         if cleaned:
-            name = clean_participant_name(cleaned, sport=sport_id)
+            name = clean_participant_name(
+                cleaned,
+                sport=sport_id,
+                competition_country=competition_country,
+                participant_country=country if isinstance(country, str) else None,
+            )
+        from collector.participant_alias import canonical_display_name
+
+        shown = canonical_display_name(name, sport=sport_id)
         return {
             "id": raw.get("id") or "",
             "slug": raw.get("slug") or "",
-            "name": name,
-            "display_name": name,
+            "name": shown,
+            "display_name": shown,
             "side": side,
             "logo": raw.get("logo") or raw.get("image"),
-            "source_name": raw.get("name") or raw.get("fullName") or name,
+            "source_name": source_name or shown,
             "country_id": country if isinstance(country, str) and len(country) <= 3 else None,
         }
-    name = clean_participant_name(str(raw or ""), sport=sport_id)
+    name = clean_participant_name(str(raw or ""), sport=sport_id, competition_country=competition_country)
+    from collector.participant_alias import canonical_display_name
+
+    shown = canonical_display_name(name, sport=sport_id)
     return {
         "id": "",
         "slug": "",
-        "name": name,
-        "display_name": name,
+        "name": shown,
+        "display_name": shown,
         "side": side,
         "source_name": str(raw or ""),
     }

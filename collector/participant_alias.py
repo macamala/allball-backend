@@ -17,6 +17,7 @@ _ABBREV = (
     (re.compile(r"\bwolves\b"), "wolverhampton"),
     (re.compile(r"\bmunchen\b"), "munich"),
     (re.compile(r"\bkoln\b"), "cologne"),
+    (re.compile(r"\binternazionale(?:\s+milano)?\b"), "inter"),
 )
 
 _LEADING_CLUB = {
@@ -35,6 +36,8 @@ _LEADING_CLUB = {
     "us",
     "rc",
     "rcd",
+    "acf",
+    "ssc",
 }
 
 
@@ -141,6 +144,44 @@ def prefix_variant(left: str, right: str) -> bool:
     return True
 
 
+_KEEP_PARTICLES = {"AS", "AC", "US", "SK", "SS", "FC", "CF"}
+_STYLE_LEAD = {"ACF", "SSC"}
+_STYLE_TAIL = {"CALCIO"}
+_NICKNAME_DISPLAY = {
+    "inter": "Inter",
+    "internazionale": "Inter",
+    "internazionale milano": "Inter",
+}
+
+
+def canonical_display_name(name: str, sport: Optional[str] = None) -> str:
+    from collector.participant_text import clean_participant_name, fold_for_identity, identity_core
+
+    cleaned = clean_participant_name(str(name or ""), sport=sport)
+    if not cleaned:
+        return ""
+    folded = fold_for_identity(cleaned)
+    core = identity_core(cleaned)
+    nick = _NICKNAME_DISPLAY.get(core) or _NICKNAME_DISPLAY.get(folded)
+    if nick:
+        return nick
+    tokens = cleaned.split()
+    if tokens and tokens[-1].isdigit() and len(tokens[-1]) == 4:
+        tokens = tokens[:-1]
+    while tokens and tokens[0].upper() in _STYLE_LEAD:
+        tokens = tokens[1:]
+    while tokens and tokens[-1].upper() in _STYLE_TAIL:
+        tokens = tokens[:-1]
+    particle = cleaned.split()[0] if cleaned.split() else ""
+    rest = " ".join(tokens).strip()
+    if particle.upper() in _KEEP_PARTICLES:
+        if rest and not rest.upper().startswith(particle.upper() + " ") and rest.upper() != particle.upper():
+            if particle.upper() not in {tok.upper() for tok in rest.split()[:1]}:
+                return f"{particle} {rest}".strip()
+        return cleaned if particle.upper() == (rest.split()[0].upper() if rest else "") else f"{particle} {rest}".strip()
+    return rest or cleaned
+
+
 def prefer_display(left: str, right: str) -> str:
     a = str(left or "").strip()
     b = str(right or "").strip()
@@ -148,12 +189,20 @@ def prefer_display(left: str, right: str) -> str:
         return b
     if not b:
         return a
+    ca = canonical_display_name(a)
+    cb = canonical_display_name(b)
     if names_equivalent(a, b) or identity_core(a) == identity_core(b):
-        if "(" in a and "(" not in b:
-            return b
-        if "(" in b and "(" not in a:
-            return a
-        return a if len(a) <= len(b) else b
+
+        def rank(raw: str, shown: str) -> tuple:
+            parts = shown.split()
+            particle = 3 if parts and parts[0].upper() in _KEEP_PARTICLES else 0
+            nick = 4 if shown in {"Inter", "Fiorentina", "Napoli"} or shown.startswith("AS ") else 0
+            generic_short = -2 if shown.lower() in _GENERIC_STEMS else 0
+            length_pen = -max(0, len(shown) - 18)
+            paren_pen = -5 if "(" in raw else 0
+            return (particle + nick + generic_short + paren_pen, length_pen, -len(shown), shown)
+
+        return ca if rank(a, ca) >= rank(b, cb) else cb
     if len(a) == len(b):
         return a if "(" not in a else b
     return a if len(a) > len(b) else b
@@ -229,6 +278,24 @@ def persist_alias(
     return True
 
 
+def _round_key(event: Dict[str, Any]) -> str:
+    extra = event.get("extra") or {}
+    raw = event.get("round") or extra.get("round") or extra.get("stage") or ""
+    return re.sub(r"[^a-z0-9]+", "", str(raw).lower())
+
+
+def _kickoff_compatible(left: Dict[str, Any], right: Dict[str, Any]) -> bool:
+    from collector.identity_events import _ts
+
+    t0 = _ts(left.get("start_time"))
+    t1 = _ts(right.get("start_time"))
+    sport = str(left.get("sport") or "")
+    max_delta = 4 * 3600 if sport in {"baseball", "basketball"} else 12 * 3600
+    if t0 and t1:
+        return abs((t0 - t1).total_seconds()) <= max_delta
+    return str(left.get("start_time") or "")[:10] == str(right.get("start_time") or "")[:10]
+
+
 def contextual_pair_match(
     left: Dict[str, Any],
     right: Dict[str, Any],
@@ -242,6 +309,10 @@ def contextual_pair_match(
         right.get("competition_key") or right.get("competition")
     ):
         return False, "competition"
+    left_round = _round_key(left)
+    right_round = _round_key(right)
+    if left_round and right_round and left_round != right_round:
+        return False, "round"
     sport = str(left.get("sport") or "")
     lh = (left.get("home") or {}).get("name") or ""
     la = (left.get("away") or {}).get("name") or ""
@@ -253,6 +324,8 @@ def contextual_pair_match(
         raw_ok = participants_equivalent(lh, la, rh, ra)
         if not raw_ok:
             return False, "participants"
+    if not _kickoff_compatible(left, right):
+        return False, "kickoff"
     return True, "ok"
 
 
