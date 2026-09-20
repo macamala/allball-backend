@@ -60,7 +60,7 @@ from collector.lock import acquire_write_lock, owner_identity, release_write_loc
 from collector.progress import persist_progress, stage
 from collector.schedule import due_capabilities, mark_job
 from collector.sources import plan_sources, source_collectable, source_config_missing
-from collector.util import dump_json, load_json, payload_hash, sha_id, slugify
+from collector.util import dump_json, isoformat, load_json, payload_hash, sha_id, slugify
 from collector.match import _register_event, match_event
 from sports_registry.sports import get_sport
 
@@ -448,6 +448,13 @@ def _consume_result(
                     incr("unchanged_skipped")
                     totals["skipped"] = int(totals.get("skipped") or 0) + 1
                     skipped = True
+                    contact = datetime.utcnow()
+                    existing.retrieved_at = contact
+                    extra = load_json(existing.extra_json, {}) or {}
+                    stamp = isoformat(contact)
+                    extra["source_fetch_time"] = stamp
+                    extra["last_contact_at"] = stamp
+                    existing.extra_json = dump_json(extra)
                 else:
                     if existing is not None:
                         merged += 1

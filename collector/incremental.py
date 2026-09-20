@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from sqlalchemy.orm import Session
 
 from collector.cadence import interval_for
-from collector.family_caps import family_caps, is_static_family, supports_live
+from collector.family_caps import family_caps, is_static_family, min_safe_interval, supports_live
 from collector.family_health import family_access_blocked, family_needs_failover, family_rate_limited, family_state
 from collector.http import STATS
 from collector.metrics import incr, set_metric, snapshot
@@ -31,11 +31,59 @@ MAX_LIVE_PHYSICAL = 8
 MAX_BACKGROUND_PHYSICAL = 4
 VERIFICATION_EVERY = 12
 STARVE_SECONDS = 600
+LIVE_STARVE_SECONDS = 90
 AGE_BAND_SECONDS = 600
 MAX_AGE_BANDS = 2
 MAX_FAMILY_NONLIVE = 1
 FINISHED_LOOKBACK_HOURS = 48
 _family_rr = 0
+_live_registry: Dict[str, Dict[str, Any]] = {}
+
+
+def live_registry_snapshot() -> Dict[str, Dict[str, Any]]:
+    return {key: dict(val) for key, val in _live_registry.items()}
+
+
+def note_live_family(family: str, **fields: Any) -> Dict[str, Any]:
+    if not family:
+        return {}
+    row = _live_registry.setdefault(
+        family,
+        {
+            "family": family,
+            "live_event_count": 0,
+            "last_fetch_started_at": None,
+            "last_fetch_completed_at": None,
+            "last_success_at": None,
+            "next_eligible_at": None,
+            "failure_count": 0,
+            "backoff_until": None,
+            "oldest_live_canonical_age": None,
+            "target_cadence_s": interval_for(family, "LIVE"),
+            "minimum_safe_s": min_safe_interval(family),
+        },
+    )
+    row.update({key: value for key, value in fields.items() if value is not None})
+    return row
+
+
+def live_idle_seconds(default: int = 20) -> int:
+    """Shorten post-tick sleep while CONFIRMED_LIVE families are active."""
+    if not _live_registry:
+        return max(15, int(default))
+    now = _now()
+    waits: List[int] = []
+    for row in _live_registry.values():
+        if int(row.get("live_event_count") or 0) <= 0:
+            continue
+        nxt = row.get("next_eligible_at")
+        if isinstance(nxt, datetime):
+            waits.append(max(0, int((nxt - now).total_seconds())))
+        else:
+            waits.append(0)
+    if not waits:
+        return max(15, int(default))
+    return max(5, min(15, min(waits) if min(waits) > 0 else 5))
 FAIL_STATUSES = {
     "NETWORK_FAILURE",
     "RATE_LIMITED",
@@ -291,12 +339,28 @@ def coalesce_jobs(jobs: List[Dict[str, Any]]) -> List[List[Dict[str, Any]]]:
     groups: Dict[str, List[Dict[str, Any]]] = {}
     order: List[str] = []
     for job in jobs:
-        key = job.get("request_key") or job["job_key"]
+        family = str(job.get("family") or "")
+        scope = str(family_caps(family).get("shared_request_scope") or "competition")
+        if job.get("urgency") == "LIVE" and scope == "family":
+            key = f"live-family|{family}"
+        else:
+            key = job.get("request_key") or job["job_key"]
         if key not in groups:
             groups[key] = []
             order.append(key)
         groups[key].append(job)
     return [groups[key] for key in order]
+
+
+def job_lane(job: Dict[str, Any]) -> int:
+    urgency = job.get("urgency") or ""
+    if urgency == "LIVE":
+        return 0
+    if urgency in {"LIVE_CANDIDATE", "IMMINENT"}:
+        return 1
+    if urgency == "RECENTLY_FINISHED":
+        return 2
+    return 3
 
 
 def job_wait_seconds(job: Dict[str, Any], now: datetime) -> float:
@@ -335,9 +399,10 @@ def select_fair_groups(
 ) -> Tuple[List[List[Dict[str, Any]]], Dict[str, Any]]:
     """Pick up to max_physical request groups from the full due set.
 
-    LIVE/IMMINENT/RECENTLY_FINISHED first within a reserved live budget.
-    Background discovery cannot consume unused live slots.
-    Live work may borrow unused background slots.
+    P0 CONFIRMED_LIVE families get reserved slots (one physical fetch per family
+    first). P1 candidates/imminent and P2 finalization may use leftover live
+    slots. Background discovery cannot consume live capacity. Unused background
+    slots may be borrowed by remaining live-lane work.
     """
     global _family_rr
     ranked = sorted(jobs, key=lambda row: job_sort_key(row, now))
@@ -349,8 +414,8 @@ def select_fair_groups(
     def _family(group: List[Dict[str, Any]]) -> str:
         return str(group[0].get("family") or "")
 
-    def _liveish(group: List[Dict[str, Any]]) -> bool:
-        return min(int(URGENCY_PRIORITY.get(job.get("urgency") or "", 50)) for job in group) <= URGENCY_PRIORITY["RECENTLY_FINISHED"]
+    def _lane(group: List[Dict[str, Any]]) -> int:
+        return min(job_lane(job) for job in group)
 
     def _wait(group: List[Dict[str, Any]]) -> float:
         return max(job_wait_seconds(job, now) for job in group)
@@ -367,21 +432,60 @@ def select_fair_groups(
         family_count[family] = family_count.get(family, 0) + 1
         selected_keys.update(job["job_key"] for job in group)
 
-    liveish_groups = [group for group in groups if _liveish(group)]
-    other_groups = [group for group in groups if not _liveish(group)]
+    def _family_first(lane_groups: List[List[Dict[str, Any]]], cap: int) -> int:
+        if cap <= 0 or not lane_groups:
+            return 0
+        by_family: Dict[str, List[List[Dict[str, Any]]]] = {}
+        order: List[str] = []
+        for group in lane_groups:
+            family = _family(group)
+            if family not in by_family:
+                by_family[family] = []
+                order.append(family)
+            by_family[family].append(group)
+        taken = 0
+        for family in order:
+            if taken >= cap:
+                break
+            pending = [group for group in by_family[family] if group not in selected]
+            if not pending:
+                continue
+            _take(pending[0])
+            taken += 1
+        leftover = [group for group in lane_groups if group not in selected]
+        for group in leftover:
+            if taken >= cap:
+                break
+            _take(group)
+            taken += 1
+        return taken
+
+    p0 = [group for group in groups if _lane(group) == 0]
+    p1 = [group for group in groups if _lane(group) == 1]
+    p2 = [group for group in groups if _lane(group) == 2]
+    other_groups = [group for group in groups if _lane(group) == 3]
+    live_family_count = len({_family(group) for group in p0})
+    background_due_families = len({_family(group) for group in other_groups})
     live_cap = min(MAX_LIVE_PHYSICAL, max_physical)
-    live_taken = 0
-    for group in liveish_groups:
-        if live_taken >= live_cap:
-            break
-        _take(group)
-        live_taken += 1
-    background_cap = min(MAX_BACKGROUND_PHYSICAL, max(0, max_physical - live_taken))
-    leftover_live = [group for group in liveish_groups if group not in selected]
-    while leftover_live and background_cap:
-        _take(leftover_live.pop(0))
-        background_cap -= 1
-        live_taken += 1
+    background_cap = min(MAX_BACKGROUND_PHYSICAL, max(0, max_physical - live_cap))
+    if live_family_count > live_cap:
+        unused_bg = max(0, background_cap - min(background_due_families, background_cap))
+        live_cap = min(max_physical, live_cap + unused_bg)
+        background_cap = min(MAX_BACKGROUND_PHYSICAL, max(0, max_physical - live_cap))
+
+    live_taken = _family_first(p0, live_cap)
+    leftover_live = max(0, live_cap - live_taken)
+    live_taken += _family_first(p1, leftover_live)
+    leftover_live = max(0, live_cap - live_taken)
+    live_taken += _family_first(p2, leftover_live)
+
+    leftover_p0 = [group for group in p0 + p1 + p2 if group not in selected]
+    if background_due_families == 0:
+        borrow = min(len(leftover_p0), background_cap)
+        for group in leftover_p0[:borrow]:
+            _take(group)
+            live_taken += 1
+            background_cap -= 1
 
     best_for_family: Dict[str, List[Dict[str, Any]]] = {}
     family_order: List[str] = []
@@ -412,16 +516,37 @@ def select_fair_groups(
     never_run = sum(1 for job in jobs if job_never_run(job))
     real_waits = [job_wait_seconds(job, now) for job in jobs if job.get("last_run_at") or job.get("next_due_at")]
     oldest = max(real_waits, default=0.0)
+    live_jobs = [job for job in jobs if job_lane(job) == 0]
+    bg_jobs = [job for job in jobs if job_lane(job) == 3]
+    live_families = {job.get("family") for job in live_jobs if job.get("family")}
+    selected_live_families = {
+        job.get("family")
+        for group in selected
+        for job in group
+        if job_lane(job) == 0 and job.get("family")
+    }
+    live_families_waiting = len(live_families)
+    live_families_starved = 0
+    for family in live_families:
+        family_jobs = [job for job in live_jobs if job.get("family") == family]
+        if any(job["job_key"] in selected_keys for job in family_jobs):
+            continue
+        if any(job_never_run(job) or job_wait_seconds(job, now) >= LIVE_STARVE_SECONDS for job in family_jobs):
+            live_families_starved += 1
+    background_jobs_waiting = len(bg_jobs)
+    background_jobs_starved = 0
     starved = 0
     for job in jobs:
-        if job_never_run(job):
-            if job["job_key"] not in selected_keys:
-                starved += 1
-            continue
-        if job_wait_seconds(job, now) < STARVE_SECONDS:
-            continue
-        if job["job_key"] not in selected_keys:
+        waiting = job_never_run(job) or (
+            (job.get("last_run_at") or job.get("next_due_at"))
+            and job_wait_seconds(job, now) >= STARVE_SECONDS
+        )
+        if job["job_key"] not in selected_keys and waiting:
             starved += 1
+            if job_lane(job) == 3:
+                background_jobs_starved += 1
+    live_waits = [job_wait_seconds(job, now) for job in live_jobs if job.get("last_run_at") or job.get("next_due_at")]
+    bg_waits = [job_wait_seconds(job, now) for job in bg_jobs if job.get("last_run_at") or job.get("next_due_at")]
     due_families = {job.get("family") for job in jobs if job.get("family")}
     stats = {
         "due_jobs": len(jobs),
@@ -430,6 +555,12 @@ def select_fair_groups(
         "oldest_due_age_s": int(oldest),
         "never_run": never_run,
         "jobs_starved": starved,
+        "background_jobs_waiting": background_jobs_waiting,
+        "background_jobs_starved": background_jobs_starved,
+        "live_families_waiting": live_families_waiting,
+        "live_families_starved": live_families_starved,
+        "oldest_live_fetch_age_seconds": int(max(live_waits, default=0.0)),
+        "oldest_background_fetch_age_seconds": int(max(bg_waits, default=0.0)),
         "due_family_count": len(due_families),
         "families_selected": sorted({job.get("family") for group in selected for job in group if job.get("family")}),
         "sports_selected": sorted({job.get("sport") for group in selected for job in group if job.get("sport")}),
@@ -470,11 +601,34 @@ def run_incremental_tick(db: Session, *, sleeper=None, now: Optional[datetime] =
     started = time.perf_counter()
     due = build_due_jobs(db, now=now)
     groups, schedule = select_fair_groups(due, now)
+    live_counts: Dict[str, int] = {}
+    for job in due:
+        if job_lane(job) != 0:
+            continue
+        family = str(job.get("family") or "")
+        live_counts[family] = live_counts.get(family, 0) + 1
+    active = set(live_counts)
+    for family, count in live_counts.items():
+        note_live_family(
+            family,
+            live_event_count=count,
+            target_cadence_s=interval_for(family, "LIVE"),
+            minimum_safe_s=min_safe_interval(family),
+        )
+    for family in list(_live_registry):
+        if family not in active:
+            _live_registry[family]["live_event_count"] = 0
     incr("cycles")
     incr("logical_jobs", schedule["selected_jobs"])
     set_metric("selected_jobs", schedule["selected_jobs"])
     set_metric("jobs_starved", schedule["jobs_starved"])
     set_metric("oldest_due_age_s", schedule["oldest_due_age_s"])
+    set_metric("background_jobs_waiting", schedule.get("background_jobs_waiting") or 0)
+    set_metric("background_jobs_starved", schedule.get("background_jobs_starved") or 0)
+    set_metric("live_families_waiting", schedule.get("live_families_waiting") or 0)
+    set_metric("live_families_starved", schedule.get("live_families_starved") or 0)
+    set_metric("oldest_live_fetch_age_seconds", schedule.get("oldest_live_fetch_age_seconds") or 0)
+    set_metric("oldest_background_fetch_age_seconds", schedule.get("oldest_background_fetch_age_seconds") or 0)
     physical = 0
     coalesced = 0
     changed = 0
@@ -484,6 +638,10 @@ def run_incremental_tick(db: Session, *, sleeper=None, now: Optional[datetime] =
         before_req = int(STATS.get("requests") or 0)
         group_written = 0
         last_classif = "ok"
+        family = str(group[0].get("family") or "") if group else ""
+        fetch_started = _now()
+        if family and job_lane(group[0]) == 0:
+            note_live_family(family, last_fetch_started_at=fetch_started.isoformat() + "Z")
         for job in group:
             job = dict(job)
             family = job["family"]
@@ -544,6 +702,16 @@ def run_incremental_tick(db: Session, *, sleeper=None, now: Optional[datetime] =
             group_written += written
             mark_slot(db, job, status=classif, http_calls=0, events_changed=written, now=now)
         used = int(STATS.get("requests") or 0) - before_req
+        completed = _now()
+        if family and job_lane(group[0]) == 0:
+            ok = last_classif not in fail_classes
+            note_live_family(
+                family,
+                last_fetch_completed_at=completed.isoformat() + "Z",
+                last_success_at=(completed.isoformat() + "Z") if ok else _live_registry.get(family, {}).get("last_success_at"),
+                next_eligible_at=completed + timedelta(seconds=interval_for(family, "LIVE")),
+                failure_count=(0 if ok else int(_live_registry.get(family, {}).get("failure_count") or 0) + 1),
+            )
         if used:
             physical += 1
             incr("physical_requests")
@@ -582,6 +750,12 @@ def run_incremental_tick(db: Session, *, sleeper=None, now: Optional[datetime] =
         "best_of_persisted": metrics.get("best_of_persisted"),
         "enrichment_promoted": metrics.get("enrichment_promoted"),
         "jobs_starved": schedule["jobs_starved"],
+        "background_jobs_waiting": schedule.get("background_jobs_waiting"),
+        "background_jobs_starved": schedule.get("background_jobs_starved"),
+        "live_families_waiting": schedule.get("live_families_waiting"),
+        "live_families_starved": schedule.get("live_families_starved"),
+        "oldest_live_fetch_age_seconds": schedule.get("oldest_live_fetch_age_seconds"),
+        "oldest_background_fetch_age_seconds": schedule.get("oldest_background_fetch_age_seconds"),
         "never_run": schedule.get("never_run"),
         "due_family_count": schedule.get("due_family_count"),
         "physical_requests": physical,

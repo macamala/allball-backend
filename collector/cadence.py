@@ -7,6 +7,7 @@ from collector.family_plan import family_refresh_class
 from collector.urgency import URGENCY_SECONDS
 
 # Seconds. Provider observed 429/cooldown always wins over these.
+# LIVE 45 + family floor: mlb/nhl 30→45; SportScore Cache-Control max-age=60.
 CADENCE_SECONDS = {
     "LIVE": 45,
     "LIVE_CANDIDATE": 90,

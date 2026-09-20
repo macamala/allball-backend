@@ -34,6 +34,9 @@ VOLATILE_SCORE_KEYS = (
     "runs",
     "wickets",
     "overs",
+    "inning",
+    "inning_half",
+    "outs",
 )
 
 

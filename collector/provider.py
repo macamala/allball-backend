@@ -18,7 +18,7 @@ from collector.models import (
     SportsSourceCompetition,
     SportsStandingSnapshot,
 )
-from collector.live_state import public_live_visible, reconcile_live_status
+from collector.live_state import parse_ts, public_live_visible, reconcile_live_status
 from collector.display import sanitize_side
 from collector.enrichment import DETAIL_ONLY_KEYS, is_display_eligible, quality_flags_for_event
 from collector.util import isoformat, load_json
@@ -75,6 +75,7 @@ INTERNAL_EVENT_KEYS = {
     "source_kickoffs",
     "source_family",
     "source_fetch_time",
+    "last_contact_at",
     "source_status",
     "source_timezone",
     "source_local_datetime",
@@ -507,7 +508,7 @@ class NinkoCollectedSportsDataProvider:
         if payload.get("live"):
             score = dict(payload.get("score") or {})
             clock = score.get("clock")
-            stamp = row.updated_at or row.retrieved_at
+            stamp = parse_ts(extra.get("last_contact_at") or extra.get("source_fetch_time")) or row.retrieved_at or row.updated_at
             if clock and stamp:
                 age = (datetime.utcnow() - stamp).total_seconds()
                 if age > 180:
@@ -522,7 +523,9 @@ class NinkoCollectedSportsDataProvider:
         else:
             payload["display_eligible"] = is_display_eligible(raw_sides)
         payload["observation_count"] = len(load_json(row.contributing_sources_json, []) or []) or 1
-        payload["source_fetch_time"] = extra.get("source_fetch_time") or isoformat(row.retrieved_at)
+        payload["source_fetch_time"] = extra.get("source_fetch_time") or extra.get("last_contact_at") or isoformat(row.retrieved_at)
+        payload["last_contact_at"] = extra.get("last_contact_at") or payload["source_fetch_time"]
+        payload["canonical_updated_at"] = extra.get("canonical_updated_at") or isoformat(row.updated_at)
         payload["source_event_updated_at"] = extra.get("source_event_updated_at")
         payload["observed_at"] = extra.get("observed_at")
         payload["canonical_last_observed_at"] = extra.get("canonical_last_observed_at")

@@ -15,7 +15,7 @@ from database import SessionLocal, engine, ensure_schema
 from models import Base
 import collector.models  # noqa: F401
 from collector.collect import run_cycle
-from collector.incremental import run_incremental_tick
+from collector.incremental import live_idle_seconds, run_incremental_tick
 from collector.family_catalog import POLL_SECONDS
 from collector.flags import (
     collection_enabled,
@@ -118,8 +118,10 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
                     "enrichment_promoted",
                     "collapse",
                     "jobs_starved",
-                    "never_run",
-                    "due_family_count",
+                    "background_jobs_starved",
+                    "live_families_waiting",
+                    "live_families_starved",
+                    "oldest_live_fetch_age_seconds",
                     "physical_requests",
                     "http",
                     "espn",
@@ -161,7 +163,10 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
             db.close()
         if once:
             return
-        time.sleep(max(15, interval))
+        if scheduler_enabled():
+            time.sleep(live_idle_seconds(interval))
+        else:
+            time.sleep(max(15, interval))
 
 
 if __name__ == "__main__":

@@ -573,3 +573,71 @@ def test_two_logical_jobs_one_request_key():
     groups = coalesce_jobs(jobs)
     assert len(groups) == 1
     assert len(groups[0]) == 2
+
+
+def test_live_family_reserved_against_many_live_urls():
+    now = datetime(2026, 9, 19, 12, 0, 0)
+    jobs = []
+    for index in range(20):
+        jobs.append(
+            {
+                "job_key": f"refresh:ss-{index}:sportscore:live_scores",
+                "family": "sportscore",
+                "urgency": "LIVE",
+                "competition_id": f"ss-{index}",
+                "priority": 1,
+                "request_key": f"sportscore|http://ss/{index}",
+                "last_run_at": now - timedelta(seconds=90),
+                "next_due_at": now - timedelta(seconds=10),
+            }
+        )
+    jobs.append(
+        {
+            "job_key": "refresh:mlb:mlb-statsapi:live_scores",
+            "family": "mlb-statsapi",
+            "urgency": "LIVE",
+            "competition_id": "mlb",
+            "priority": 1,
+            "request_key": "mlb-statsapi|http://statsapi",
+            "last_run_at": now - timedelta(seconds=90),
+            "next_due_at": now - timedelta(seconds=10),
+        }
+    )
+    groups, stats = select_fair_groups(jobs, now)
+    families = {group[0]["family"] for group in groups}
+    assert "mlb-statsapi" in families
+    assert stats["live_families_starved"] == 0
+    assert stats["live_families_waiting"] == 2
+    assert len(groups) <= 12
+
+
+def test_imminent_does_not_displace_confirmed_live():
+    now = datetime(2026, 9, 19, 12, 0, 0)
+    jobs = [
+        {
+            "job_key": "refresh:mlb:mlb-statsapi:live_scores",
+            "family": "mlb-statsapi",
+            "urgency": "LIVE",
+            "competition_id": "zzz-mlb",
+            "priority": 1,
+            "request_key": "mlb-statsapi|live",
+            "last_run_at": now - timedelta(seconds=50),
+            "next_due_at": now - timedelta(seconds=1),
+        }
+    ]
+    for index in range(20):
+        jobs.append(
+            {
+                "job_key": f"refresh:soon-{index}:wiki:fixtures",
+                "family": f"imminent-{index}",
+                "urgency": "IMMINENT",
+                "competition_id": f"aaa-{index}",
+                "priority": 3,
+                "request_key": f"imminent-{index}|url",
+                "last_run_at": now - timedelta(seconds=200),
+                "next_due_at": now - timedelta(seconds=10),
+            }
+        )
+    groups, _stats = select_fair_groups(jobs, now)
+    assert groups[0][0]["family"] == "mlb-statsapi"
+    assert any(group[0]["urgency"] == "LIVE" for group in groups)
