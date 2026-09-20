@@ -509,6 +509,8 @@ class NinkoCollectedSportsDataProvider:
             score = dict(payload.get("score") or {})
             clock = score.get("clock")
             stamp = parse_ts(extra.get("last_contact_at") or extra.get("source_fetch_time")) or row.retrieved_at or row.updated_at
+            if stamp is not None and getattr(stamp, "tzinfo", None) is not None:
+                stamp = stamp.replace(tzinfo=None)
             if clock and stamp:
                 age = (datetime.utcnow() - stamp).total_seconds()
                 if age > 180:
