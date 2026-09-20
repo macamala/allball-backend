@@ -247,11 +247,19 @@ class MlbAdapter:
         for day in (result.payload or {}).get("dates") or []:
             for row in day.get("games") or []:
                 events.append(self._event(row))
+        if request.capability == "live_scores":
+            events = [row for row in events if row.get("status") == "live"]
+        elif request.capability == "results":
+            events = [row for row in events if row.get("status") == "finished"]
+        elif request.capability == "fixtures":
+            # Official schedule includes in-progress games; dropping them here
+            # prevents live_scores jobs from ever attaching after UTC midnight.
+            events = [row for row in events if row.get("status") in {"scheduled", "live"}]
         return FetchResult(
             ok=True,
             http_status=result.http_status,
             payload=result.payload,
-            events=_filter(events, request.capability),
+            events=events,
         )
 
     def _event(self, row: Dict[str, Any]) -> Dict[str, Any]:
