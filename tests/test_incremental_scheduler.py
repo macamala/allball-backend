@@ -893,3 +893,60 @@ def test_blocked_family_tick_demotes_stale_live_without_fetch(monkeypatch):
         db.close()
         reset_family_health()
 
+
+def test_missing_competition_live_job_is_marked_so_it_leaves_due_queue(monkeypatch):
+    monkeypatch.setenv("RESULTS_COLLECTION_ENABLED", "true")
+    monkeypatch.setenv("RESULTS_SCHEDULER_ENABLED", "true")
+    monkeypatch.setenv("RESULTS_WRITE_ENABLED", "true")
+    reset_family_health()
+    reset_metrics()
+    fetched = []
+
+    def fake_collect(db, competition, *args, **kwargs):
+        fetched.append(competition.competition_id)
+        return {"classification": "ok", "written": 0}
+
+    monkeypatch.setattr("collector.collect.collect_competition", fake_collect)
+    now = datetime.utcnow()
+    db = _session()
+    try:
+        src = _source(db, "wta-src", "wta-json")
+        src.upstream_family = "wta-json"
+        _competition(db, "wta-tour", "tennis")
+        _map(db, "wta-tour", "wta-src", 10, upstream_family="wta-json")
+        _map(db, "missing-live-comp", "wta-src", 10, upstream_family="wta-json")
+        db.add(
+            SportsEvent(
+                event_id="ninko-evt-orphan-live",
+                sport_id="tennis",
+                competition_id="missing-live-comp",
+                event_family="individual_match",
+                status="live",
+                live=True,
+                start_time=now - timedelta(minutes=10),
+                fingerprint="fp-orphan-live",
+                extra_json=dump_json(
+                    {
+                        "live_class": "CONFIRMED_LIVE",
+                        "source_family": "wta-json",
+                        "source_status": "live",
+                        "status_inferred": False,
+                    }
+                ),
+            )
+        )
+        db.commit()
+        tick = run_incremental_tick(db, now=now)
+        db.commit()
+        from collector.models import SportsSchedulerSlot
+
+        slots = db.query(SportsSchedulerSlot).filter(SportsSchedulerSlot.competition_id == "missing-live-comp").all()
+        assert slots
+        assert all(row.last_status == "NO_VALID_FALLBACK" for row in slots)
+        assert all(row.next_due_at and row.next_due_at > now for row in slots)
+        assert "missing-live-comp" not in fetched
+        assert tick["live_families_starved"] == 0
+    finally:
+        db.close()
+        reset_family_health()
+

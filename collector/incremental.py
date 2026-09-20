@@ -721,20 +721,21 @@ def run_incremental_tick(db: Session, *, sleeper=None, now: Optional[datetime] =
                     and not is_static_family(fb_family)
                     and not family_blocks_live_path(fb_family)
                 ):
-                    if live_groups_this_tick == 0:
-                        blocked = (
-                            "ACCESS_BLOCKED"
-                            if family_access_blocked(family) or family_blocks_live_path(family)
-                            else "RATE_LIMITED"
-                        )
-                        mark_slot(db, job, status=blocked, now=now)
-                        last_classif = blocked
+                    blocked = (
+                        "ACCESS_BLOCKED"
+                        if family_access_blocked(family) or family_blocks_live_path(family)
+                        else "RATE_LIMITED"
+                    )
+                    mark_slot(db, job, status=blocked, now=now)
+                    last_classif = blocked
                     continue
                 incr("b_activations")
                 job["family"] = fb_family
                 job["use_fallback"] = True
             competition = db.get(SportsCompetition, job["competition_id"])
             if competition is None:
+                mark_slot(db, job, status="NO_VALID_FALLBACK", now=now)
+                last_classif = "NO_VALID_FALLBACK"
                 continue
             include_fallback = bool(job.get("use_fallback"))
             try:
