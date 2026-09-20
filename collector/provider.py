@@ -299,7 +299,7 @@ class NinkoCollectedSportsDataProvider:
     ) -> List[NormalizedEvent]:
         db = _session(self._session_factory)
         try:
-            cache_key = f"events:p0v2:{sport}:{competition}:{status}:{date_from}:{date_to}:{int(allow_unfiltered)}"
+            cache_key = f"events:p0v3:{sport}:{competition}:{status}:{date_from}:{date_to}:{int(allow_unfiltered)}"
             cached = cache_get(db, cache_key)
             if cached is not None:
                 return cached
@@ -338,7 +338,7 @@ class NinkoCollectedSportsDataProvider:
             if unbounded and not allow_unfiltered:
                 query = query.limit(int(os.getenv("NINKO_EVENTS_UNFILTERED_LIMIT", "400")))
             rows = query.all()
-            events = [public_event(self._to_normalized(row)) for row in rows]
+            events = [self._to_normalized(row) for row in rows]
             events = [row for row in events if is_display_eligible(row)]
             if date_from:
                 events = [row for row in events if (row.get("start_time") or "") >= date_from]
@@ -350,11 +350,12 @@ class NinkoCollectedSportsDataProvider:
                 ]
             if status == "live":
                 events = [
-                    row
+                    live_public_event(row)
                     for row in events
                     if public_live_visible(row) and row.get("live_class") == "CONFIRMED_LIVE"
                 ]
-                events = [live_public_event(row) for row in events]
+            else:
+                events = [public_event(row) for row in events]
             cache_set(db, cache_key, events, "upcoming_fixtures" if status != "live" else "live_events")
             db.commit()
             return events

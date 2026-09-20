@@ -141,6 +141,30 @@ def test_family_stale_uses_fetch_time_not_old_observed_at():
     assert event["live_class"] == CONFIRMED_LIVE
 
 
+def test_live_public_payload_keeps_contact_stamps():
+    from collector.provider import live_public_event, public_event
+
+    payload = {
+        "id": "ninko-evt-contact",
+        "sport": "baseball",
+        "competition": "mlb",
+        "competition_key": "mlb",
+        "status": "live",
+        "live": True,
+        "live_class": CONFIRMED_LIVE,
+        "home": {"name": "A"},
+        "away": {"name": "B"},
+        "score": {"home": 1, "away": 2},
+        "updated_at": "2026-09-20T04:00:00Z",
+        "last_contact_at": "2026-09-20T04:01:00Z",
+        "source_fetch_time": "2026-09-20T04:01:00Z",
+    }
+    assert public_event(payload).get("last_contact_at") is None
+    live = live_public_event(payload)
+    assert live["last_contact_at"] == "2026-09-20T04:01:00Z"
+    assert live["source_fetch_time"] == "2026-09-20T04:01:00Z"
+
+
 def test_registry_covers_required_sports():
     slugs = {row["slug"] for row in SPORTS}
     assert len(slugs) >= 41
