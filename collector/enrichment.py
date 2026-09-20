@@ -100,6 +100,7 @@ EXTRA_PERSIST_KEYS = (
     "source_status",
     "source_event_updated_at",
     "source_fetch_time",
+    "last_contact_at",
     "canonical_last_observed_at",
     "status_reconciliation",
     "observed_at",

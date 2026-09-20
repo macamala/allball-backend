@@ -25,6 +25,7 @@ CALENDAR_TTL_S = 12 * 3600
 LIVE_MATCH_TTL_S = 45
 PAST_MATCH_TTL_S = 12 * 3600
 MAX_MATCH_FETCHES = 6
+LIVE_SCORE_MATCH_FETCHES = 1
 WINDOW_PAST_DAYS = 14
 WINDOW_FUTURE_DAYS = 21
 
@@ -164,10 +165,20 @@ class WtaJsonAdapter:
         if not tournaments:
             configured = list(config.get("tournaments") or DEFAULT_TOURNAMENTS)
             tournaments = [(int(group_id), int(year), None) for group_id, year in configured]
+        live_scores = request.capability == "live_scores"
+        if live_scores:
+            tournaments.sort(key=lambda row: _status_rank(str((row[2] or {}).get("status") or "")))
+            live_only = [
+                row
+                for row in tournaments
+                if str((row[2] or {}).get("status") or "").lower() in {"live", "inprogress"}
+            ]
+            tournaments = live_only or tournaments[:1]
+        max_fetches = LIVE_SCORE_MATCH_FETCHES if live_scores else MAX_MATCH_FETCHES
         events: List[Dict[str, Any]] = []
         fetches = 0
         for group_id, year, meta in tournaments:
-            if fetches >= MAX_MATCH_FETCHES:
+            if fetches >= max_fetches:
                 break
             key = f"{group_id}:{year}"
             cached = _MATCH_CACHE.get(key) or {}
@@ -188,7 +199,7 @@ class WtaJsonAdapter:
                 event = match_to_event(row, request.competition_id or "wta-tour", meta)
                 if event:
                     events.append(event)
-        STATS["wta_tournaments_selected"] = min(len(tournaments), MAX_MATCH_FETCHES)
+        STATS["wta_tournaments_selected"] = min(len(tournaments), max_fetches)
         STATS["wta_match_fetches"] = fetches
         empty_reason = None if events else "SOURCE_HEALTHY_NO_EVENTS"
         return FetchResult(ok=True, http_status=200, events=events, empty_reason=empty_reason)

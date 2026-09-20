@@ -43,7 +43,7 @@ from collector.models import (
 )
 from collector.identity import ensure_entity, remember_mapping
 from collector.limits import is_rate_limited, mark_rate_limited, record_hit, retry_call
-from collector.live_state import reconcile_live_status
+from collector.live_state import is_live, reconcile_live_status
 from collector.merge import apply_row_fields, merge_event_fields
 from collector.status_transitions import apply_or_reject
 from collector.latency import record_observation_latency
@@ -205,6 +205,7 @@ def _upsert_event(
         _register_event(db, existing)
         fetch_now = datetime.utcnow().isoformat() + "Z"
         incoming["source_fetch_time"] = incoming.get("source_fetch_time") or fetch_now
+        incoming["last_contact_at"] = incoming.get("last_contact_at") or incoming["source_fetch_time"]
         incoming["retrieved_at"] = incoming.get("source_fetch_time")
         incoming["sport"] = sport_id
         incoming = reconcile_live_status(incoming)
@@ -260,6 +261,7 @@ def _upsert_event(
         )
         fetch_now = datetime.utcnow().isoformat() + "Z"
         incoming["source_fetch_time"] = incoming.get("source_fetch_time") or fetch_now
+        incoming["last_contact_at"] = incoming.get("last_contact_at") or incoming["source_fetch_time"]
         incoming["retrieved_at"] = incoming.get("source_fetch_time")
         incoming["sport"] = incoming.get("sport") or sport_id
         incoming = apply_or_reject(current, incoming)
@@ -516,7 +518,38 @@ def _consume_result(
             )
         )
         written += 1
+    stamp_live_contact(db, competition_id=competition.competition_id)
     return {"written": written, "merged": merged, "rejected": rejected, "normalized": len(events)}
+
+
+def stamp_live_contact(
+    db: Session,
+    *,
+    competition_id: Optional[str] = None,
+    family: Optional[str] = None,
+    now: Optional[datetime] = None,
+) -> int:
+    """Record feed contact on live rows even when scores did not change."""
+    now = now or datetime.utcnow()
+    stamp = isoformat(now)
+    query = db.query(SportsEvent).filter(SportsEvent.canonical_event_id.is_(None), SportsEvent.live.is_(True))
+    if competition_id:
+        query = query.filter(SportsEvent.competition_id == competition_id)
+    updated = 0
+    for row in query.all():
+        extra = load_json(row.extra_json, {}) or {}
+        if family:
+            row_family = extra.get("source_family") or row.primary_source_id or ""
+            if row_family and row_family != family:
+                continue
+        if not is_live(row.status or ""):
+            continue
+        extra["last_contact_at"] = stamp
+        extra["source_fetch_time"] = stamp
+        row.retrieved_at = now
+        row.extra_json = dump_json(extra)
+        updated += 1
+    return updated
 
 
 def collect_competition(

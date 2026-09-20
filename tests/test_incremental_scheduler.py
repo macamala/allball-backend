@@ -121,6 +121,9 @@ def test_unchanged_event_skips_second_write(monkeypatch):
         row = db.query(SportsEvent).one()
         extra = __import__("collector.util", fromlist=["load_json"]).load_json(row.extra_json, {}) or {}
         assert extra.get("obs_signature")
+        assert extra.get("last_contact_at")
+        assert extra.get("source_fetch_time")
+        assert row.retrieved_at is not None
     finally:
         db.close()
         _cleanup_adapters("inc-echo")
@@ -641,3 +644,88 @@ def test_imminent_does_not_displace_confirmed_live():
     groups, _stats = select_fair_groups(jobs, now)
     assert groups[0][0]["family"] == "mlb-statsapi"
     assert any(group[0]["urgency"] == "LIVE" for group in groups)
+
+
+def test_nine_live_families_not_starved_by_background():
+    now = datetime(2026, 9, 19, 12, 0, 0)
+    jobs = []
+    for index in range(9):
+        family = f"live-fam-{index}"
+        jobs.append(
+            {
+                "job_key": f"refresh:{family}:live_scores",
+                "family": family,
+                "urgency": "LIVE",
+                "competition_id": f"c-{family}",
+                "priority": 1,
+                "request_key": f"{family}|http://live/{index}",
+                "last_run_at": now - timedelta(seconds=120),
+                "next_due_at": now - timedelta(seconds=30),
+            }
+        )
+    for index in range(20):
+        jobs.append(
+            {
+                "job_key": f"discover:bg-{index}:wiki",
+                "family": f"wiki-{index}",
+                "urgency": "DISCOVERY_ACTIVE",
+                "competition_id": f"bg-{index}",
+                "priority": 10,
+                "request_key": f"wiki-{index}|url",
+                "last_run_at": now - timedelta(hours=2),
+                "next_due_at": now - timedelta(hours=1),
+            }
+        )
+    extra_family = "live-fam-0"
+    for index in range(12):
+        jobs.append(
+            {
+                "job_key": f"refresh:{extra_family}-extra-{index}:live_scores",
+                "family": extra_family,
+                "urgency": "LIVE",
+                "competition_id": f"extra-{index}",
+                "priority": 1,
+                "request_key": f"{extra_family}|http://extra/{index}",
+                "last_run_at": now - timedelta(seconds=120),
+                "next_due_at": now - timedelta(seconds=30),
+            }
+        )
+    groups, stats = select_fair_groups(jobs, now, max_physical=12)
+    live_selected = {group[0]["family"] for group in groups if group[0]["urgency"] == "LIVE"}
+    extra_urls = sum(1 for group in groups if group[0]["family"] == extra_family)
+    assert stats["live_families_waiting"] == 9
+    assert stats["live_families_starved"] == 0
+    assert live_selected == {f"live-fam-{index}" for index in range(9)}
+    assert extra_urls == 1
+    assert len(groups) <= 12
+
+
+def test_wta_json_live_jobs_coalesce_to_one_family_group():
+    now = datetime(2026, 9, 19, 12, 0, 0)
+    jobs = [
+        {
+            "job_key": "refresh:wta-tour:wta-json:live_scores",
+            "family": "wta-json",
+            "urgency": "LIVE",
+            "competition_id": "wta-tour",
+            "priority": 1,
+            "request_key": "wta-json|tour-a",
+            "last_run_at": now - timedelta(seconds=130),
+            "next_due_at": now - timedelta(seconds=10),
+        },
+        {
+            "job_key": "refresh:wta-tour-2:wta-json:live_scores",
+            "family": "wta-json",
+            "urgency": "LIVE",
+            "competition_id": "wta-tour-2",
+            "priority": 1,
+            "request_key": "wta-json|tour-b",
+            "last_run_at": now - timedelta(seconds=130),
+            "next_due_at": now - timedelta(seconds=10),
+        },
+    ]
+    groups, stats = select_fair_groups(jobs, now)
+    wta_groups = [group for group in groups if group[0]["family"] == "wta-json"]
+    assert len(wta_groups) == 1
+    assert len(wta_groups[0]) == 2
+    assert stats["live_families_starved"] == 0

@@ -329,6 +329,9 @@ def apply_row_fields(row, merged: Dict[str, Any], source_id: str, higher: bool) 
     merged["canonical_updated_at"] = now.isoformat() + "Z"
     extra["persisted_at"] = merged["persisted_at"]
     extra["canonical_updated_at"] = merged["canonical_updated_at"]
+    contact = merged.get("last_contact_at") or merged.get("source_fetch_time") or extra["persisted_at"]
+    extra["last_contact_at"] = contact
+    extra["source_fetch_time"] = merged.get("source_fetch_time") or extra.get("source_fetch_time") or contact
     extra["fetch_started_at"] = merged.get("fetch_started_at") or extra.get("fetch_started_at")
     extra["fetch_completed_at"] = merged.get("fetch_completed_at") or extra.get("fetch_completed_at")
     extra["parsed_at"] = merged.get("parsed_at") or extra.get("parsed_at")

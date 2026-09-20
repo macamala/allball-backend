@@ -71,7 +71,7 @@ _BY_FAMILY: Dict[str, Dict[str, Any]] = {
         "supports_live": True,
         "minimum_safe_interval": 120,
         "rate_limit_profile": "standard",
-        "shared_request_scope": "competition",
+        "shared_request_scope": "family",
     },
     "pulselive": {
         "supports_live": True,

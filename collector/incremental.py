@@ -401,9 +401,9 @@ def select_fair_groups(
     """Pick up to max_physical request groups from the full due set.
 
     P0 CONFIRMED_LIVE families get reserved slots (one physical fetch per family
-    first). P1 candidates/imminent and P2 finalization may use leftover live
-    slots. Background discovery cannot consume live capacity. Unused background
-    slots may be borrowed by remaining live-lane work.
+    first, up to MAX_PHYSICAL). Extra URLs of an already-selected live family wait
+    for a later tick. P1 candidates/imminent and P2 finalization may use leftover
+    live slots. Background discovery cannot consume live-family capacity.
     """
     global _family_rr
     ranked = sorted(jobs, key=lambda row: job_sort_key(row, now))
@@ -433,7 +433,7 @@ def select_fair_groups(
         family_count[family] = family_count.get(family, 0) + 1
         selected_keys.update(job["job_key"] for job in group)
 
-    def _family_first(lane_groups: List[List[Dict[str, Any]]], cap: int) -> int:
+    def _family_first(lane_groups: List[List[Dict[str, Any]]], cap: int, *, extra_urls: bool = True) -> int:
         if cap <= 0 or not lane_groups:
             return 0
         by_family: Dict[str, List[List[Dict[str, Any]]]] = {}
@@ -453,6 +453,8 @@ def select_fair_groups(
                 continue
             _take(pending[0])
             taken += 1
+        if not extra_urls:
+            return taken
         leftover = [group for group in lane_groups if group not in selected]
         for group in leftover:
             if taken >= cap:
@@ -467,20 +469,23 @@ def select_fair_groups(
     other_groups = [group for group in groups if _lane(group) == 3]
     live_family_count = len({_family(group) for group in p0})
     background_due_families = len({_family(group) for group in other_groups})
-    live_cap = min(MAX_LIVE_PHYSICAL, max_physical)
+    live_cap = min(max_physical, max(MAX_LIVE_PHYSICAL, live_family_count))
     background_cap = min(MAX_BACKGROUND_PHYSICAL, max(0, max_physical - live_cap))
-    if live_family_count > live_cap:
-        unused_bg = max(0, background_cap - min(background_due_families, background_cap))
-        live_cap = min(max_physical, live_cap + unused_bg)
-        background_cap = min(MAX_BACKGROUND_PHYSICAL, max(0, max_physical - live_cap))
 
-    live_taken = _family_first(p0, live_cap)
+    live_taken = _family_first(p0, live_cap, extra_urls=False)
     leftover_live = max(0, live_cap - live_taken)
     live_taken += _family_first(p1, leftover_live)
     leftover_live = max(0, live_cap - live_taken)
     live_taken += _family_first(p2, leftover_live)
 
-    leftover_p0 = [group for group in p0 + p1 + p2 if group not in selected]
+    selected_live_family = {_family(group) for group in selected if _lane(group) == 0}
+    leftover_unselected_live = [
+        group
+        for group in p0
+        if group not in selected and _family(group) not in selected_live_family
+    ]
+    leftover_p1p2 = [group for group in p1 + p2 if group not in selected]
+    leftover_p0 = leftover_unselected_live + leftover_p1p2
     if background_due_families == 0:
         borrow = min(len(leftover_p0), background_cap)
         for group in leftover_p0[:borrow]:
@@ -591,7 +596,7 @@ def run_incremental_tick(db: Session, *, sleeper=None, now: Optional[datetime] =
     """Execute due incremental jobs. Kill switch: scheduler off returns immediately."""
     import time
 
-    from collector.collect import collect_competition
+    from collector.collect import collect_competition, stamp_live_contact
     from collector.flags import collection_enabled, scheduler_enabled
     from collector.http import STATS
     from collector.models import SportsCompetition
@@ -602,6 +607,14 @@ def run_incremental_tick(db: Session, *, sleeper=None, now: Optional[datetime] =
     started = time.perf_counter()
     due = build_due_jobs(db, now=now)
     groups, schedule = select_fair_groups(due, now)
+    groups = sorted(
+        groups,
+        key=lambda group: (
+            job_lane(group[0]) if group else 3,
+            min_safe_interval(str(group[0].get("family") or "")),
+            str(group[0].get("family") or ""),
+        ),
+    )
     live_counts: Dict[str, int] = {}
     for job in due:
         if job_lane(job) != 0:
@@ -686,6 +699,8 @@ def run_incremental_tick(db: Session, *, sleeper=None, now: Optional[datetime] =
                     include_fallback=include_fallback,
                     source_family=None if include_fallback else job.get("family"),
                 )
+                if lane == 0 and scope == "family":
+                    stamp_live_contact(db, family=job.get("family") or family)
             except Exception:
                 incr("a_failures")
                 stats = {"classification": "FAILED", "written": 0}
