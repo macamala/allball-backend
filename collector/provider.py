@@ -136,6 +136,9 @@ LIVE_PUBLIC_KEYS = (
     "periods",
     "start_precision",
     "updated_at",
+    "last_contact_at",
+    "source_fetch_time",
+    "canonical_updated_at",
     "current_set",
 )
 

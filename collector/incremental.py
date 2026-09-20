@@ -36,6 +36,7 @@ AGE_BAND_SECONDS = 600
 MAX_AGE_BANDS = 2
 MAX_FAMILY_NONLIVE = 1
 FINISHED_LOOKBACK_HOURS = 48
+TICK_LIVE_BUDGET_S = 35
 _family_rr = 0
 _live_registry: Dict[str, Dict[str, Any]] = {}
 
@@ -634,15 +635,21 @@ def run_incremental_tick(db: Session, *, sleeper=None, now: Optional[datetime] =
     changed = 0
     fail_classes = FAIL_STATUSES
     for group in groups:
+        elapsed = time.perf_counter() - started
+        lane = job_lane(group[0]) if group else 3
+        if lane > 0 and elapsed >= TICK_LIVE_BUDGET_S:
+            break
         coalesced += max(0, len(group) - 1)
         before_req = int(STATS.get("requests") or 0)
         group_written = 0
         last_classif = "ok"
         family = str(group[0].get("family") or "") if group else ""
         fetch_started = _now()
-        if family and job_lane(group[0]) == 0:
+        if family and lane == 0:
             note_live_family(family, last_fetch_started_at=fetch_started.isoformat() + "Z")
-        for job in group:
+        scope = str(family_caps(family).get("shared_request_scope") or "competition")
+        run_jobs = group[:1] if lane == 0 and scope == "family" else group
+        for job in run_jobs:
             job = dict(job)
             family = job["family"]
             if family_needs_failover(family) or family_caps(family).get("production_status") == "ACCESS_BLOCKED":
@@ -701,6 +708,9 @@ def run_incremental_tick(db: Session, *, sleeper=None, now: Optional[datetime] =
             written = int(stats.get("written") or 0)
             group_written += written
             mark_slot(db, job, status=classif, http_calls=0, events_changed=written, now=now)
+        if len(run_jobs) < len(group):
+            for job in group[1:]:
+                mark_slot(db, job, status=last_classif, events_changed=0, now=now)
         used = int(STATS.get("requests") or 0) - before_req
         completed = _now()
         if family and job_lane(group[0]) == 0:
