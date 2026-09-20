@@ -1,5 +1,9 @@
 from collector.adapters_bbc import extract_bbc_events
-from collector.competition_identity import event_accepted_for_mapping, label_matches_competition
+from collector.competition_identity import (
+    correct_public_competition_id,
+    event_accepted_for_mapping,
+    label_matches_competition,
+)
 from collector.display import sanitize_participant_name
 from collector.enrichment import is_display_eligible, quality_flags_for_name
 from collector.html_parse import parse_tables
@@ -110,6 +114,45 @@ def test_mojibake_repaired_but_unicode_kept():
     assert repair_mojibake("Železničar") == "Železničar"
     assert repair_mojibake("Plzeň") == "Plzeň"
     assert "é" in repair_mojibake("AtlÃ©tico") or "Atl" in repair_mojibake("Atlético")
+
+
+def test_premier_league_label_does_not_absorb_other_countries():
+    assert label_matches_competition("Premier League", "england-premier-league")
+    assert label_matches_competition("English Premier League", "england-premier-league")
+    assert not label_matches_competition("Nigerian Premier League", "england-premier-league")
+    assert not label_matches_competition("Ukraine Premier League", "england-premier-league")
+    assert label_matches_competition("Ukraine Premier League", "ukraine-premier-league")
+    ok_ng, resolved_ng = event_accepted_for_mapping(
+        {
+            "source_competition_name": "Nigerian Premier League",
+            "source_family": "sportscore",
+            "sport": "football",
+        },
+        "england-premier-league",
+    )
+    assert ok_ng is False
+    assert resolved_ng["resolution_method"] in {
+        "rejected_label_mismatch",
+        "rejected_label_other_competition",
+    }
+    ok_epl, _ = event_accepted_for_mapping(
+        {"source_competition_name": "Premier League", "source_family": "bbc-sport", "sport": "football"},
+        "england-premier-league",
+    )
+    assert ok_epl is True
+    assert correct_public_competition_id(
+        stored_competition_id="england-premier-league",
+        source_competition_name="Nigerian Premier League",
+        sport_id="football",
+    ) is None
+    assert (
+        correct_public_competition_id(
+            stored_competition_id="england-premier-league",
+            source_competition_name="Ukraine Premier League",
+            sport_id="football",
+        )
+        == "ukraine-premier-league"
+    )
 
 
 def test_hub_event_rejected_for_wrong_mapping():

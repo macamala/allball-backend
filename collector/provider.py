@@ -21,6 +21,7 @@ from collector.models import (
 from collector.live_state import parse_ts, public_live_visible, reconcile_live_status
 from collector.display import sanitize_side
 from collector.enrichment import DETAIL_ONLY_KEYS, is_display_eligible, quality_flags_for_event
+from collector.competition_identity import correct_public_competition_id
 from collector.competition_presentation import attach_competition_metadata
 from collector.matrix_guard import frozen_competition_ids
 from collector.util import isoformat, load_json
@@ -79,6 +80,12 @@ INTERNAL_EVENT_KEYS = {
     "field_sources",
     "source_event_ids",
     "source_kickoffs",
+    "source_competition_name",
+    "source_competition_id",
+    "canonical_competition_id",
+    "resolution_method",
+    "resolution_confidence",
+    "quarantine_disposition",
     "source_family",
     "source_fetch_time",
     "last_contact_at",
@@ -324,7 +331,7 @@ class NinkoCollectedSportsDataProvider:
     ) -> List[NormalizedEvent]:
         db = _session(self._session_factory)
         try:
-            cache_key = f"events:p0v5:{sport}:{competition}:{status}:{date_from}:{date_to}:{int(allow_unfiltered)}"
+            cache_key = f"events:p0v6:{sport}:{competition}:{status}:{date_from}:{date_to}:{int(allow_unfiltered)}"
             cached = cache_get(db, cache_key)
             if cached is not None:
                 return cached
@@ -364,7 +371,7 @@ class NinkoCollectedSportsDataProvider:
                 query = query.limit(int(os.getenv("NINKO_EVENTS_UNFILTERED_LIMIT", "400")))
             rows = query.all()
             events = [self._to_normalized(row) for row in rows]
-            events = [row for row in events if is_display_eligible(row)]
+            events = [row for row in events if row and is_display_eligible(row)]
             if date_from:
                 events = [row for row in events if (row.get("start_time") or "") >= date_from]
             if date_to:
@@ -431,6 +438,8 @@ class NinkoCollectedSportsDataProvider:
                 if keeper:
                     row = keeper
             payload = self._to_normalized(row, include_detail=True)
+            if payload is None:
+                return None
             extra = load_json(row.extra_json, {}) or {}
             for key in DETAIL_ONLY_KEYS:
                 if extra.get(key) is not None and payload.get(key) is None:
@@ -567,6 +576,15 @@ class NinkoCollectedSportsDataProvider:
         payload["incidents"] = extra.get("incidents") or payload.get("incidents")
         payload["periods"] = extra.get("periods") or payload.get("periods")
         payload = reconcile_live_status(payload)
+        corrected = correct_public_competition_id(
+            stored_competition_id=row.competition_id,
+            source_competition_name=extra.get("source_competition_name") or extra.get("competition"),
+            sport_id=row.sport_id or "",
+        )
+        if corrected is None:
+            return None
+        payload["competition_key"] = corrected
+        payload["competition"] = corrected
         payload = attach_competition_metadata(payload)
         if extra.get("provider_conflicts"):
             payload["conflicts"] = extra.get("provider_conflicts")

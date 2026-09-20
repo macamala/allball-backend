@@ -6,7 +6,11 @@ competitions. A mapping bucket is not identity.
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional, Tuple
+import re
+from typing import Any, Dict, List, Optional, Tuple
+
+_WORD_RE = re.compile(r"[a-z0-9]+")
+_STOPWORDS = {"the", "and", "of", "a", "an"}
 
 # BBC/SportScore group labels that identify a mapping. `any` is OR; `all` is AND.
 # Deny tokens block false positives (women's A-League vs men, etc.).
@@ -25,10 +29,26 @@ COMPETITION_LABELS: Dict[str, Dict[str, Any]] = {
     "italy-serie-a": {"any": ["italian serie a", "serie a tim"], "all_any": [["serie a", "italy"], ["serie a", "italian"]]},
     "chile-primera": {"any": ["chilean primera", "primera división de chile", "liga de primera"]},
     "argentina-primera": {"any": ["argentine primera", "liga profesional", "primera división argentina"]},
-    "england-premier-league": {"any": ["premier league", "english premier"], "deny": ["women"]},
-    "england-championship": {"any": ["championship", "sky bet championship"], "deny": ["australian"]},
-    "england-league-one": {"any": ["league one", "sky bet league one"]},
-    "england-league-two": {"any": ["league two", "sky bet league two"]},
+    "england-premier-league": {
+        "any": ["english premier"],
+        "bounded": {"premier league": ["england", "english", "barclays"]},
+        "deny": ["women"],
+    },
+    "england-championship": {
+        "any": ["sky bet championship", "efl championship"],
+        "bounded": {"championship": ["england", "english", "sky", "bet", "efl"]},
+        "deny": ["australian", "usl", "women"],
+    },
+    "england-league-one": {
+        "any": ["sky bet league one"],
+        "bounded": {"league one": ["england", "english", "sky", "bet", "efl"]},
+        "deny": ["scottish", "scotland"],
+    },
+    "england-league-two": {
+        "any": ["sky bet league two"],
+        "bounded": {"league two": ["england", "english", "sky", "bet", "efl"]},
+        "deny": ["scottish", "scotland"],
+    },
     "scotland-premiership": {"any": ["scottish premiership", "cinch premiership"]},
     "womens-super-league": {"any": ["women's super league", "womens super league", "barclays wsl", " wsl"]},
     "uefa-europa-league": {"any": ["europa league", "uefa europa"]},
@@ -62,6 +82,11 @@ def _blob(value: Any) -> str:
     return str(value or "").strip().lower()
 
 
+def _leftover_tokens(blob: str, phrase: str) -> List[str]:
+    leftover = blob.replace(phrase, " ")
+    return [token for token in _WORD_RE.findall(leftover) if token not in _STOPWORDS]
+
+
 def label_matches_competition(label: str, competition_id: str) -> bool:
     """True only when the source competition label belongs to this canonical id."""
     blob = _blob(label)
@@ -72,6 +97,12 @@ def label_matches_competition(label: str, competition_id: str) -> bool:
         for token in spec.get("deny") or []:
             if token.lower() in blob:
                 return False
+        for phrase, allow in (spec.get("bounded") or {}).items():
+            needle = phrase.lower()
+            if needle in blob:
+                allow_set = {item.lower() for item in allow}
+                if all(token in allow_set for token in _leftover_tokens(blob, needle)):
+                    return True
         for token in spec.get("any") or []:
             if token.lower() in blob:
                 return True
@@ -232,6 +263,32 @@ def resolve_competition(
         "resolution_confidence": 55,
         "accepted": True,
     }
+
+
+def correct_public_competition_id(
+    *,
+    stored_competition_id: str,
+    source_competition_name: Optional[str] = None,
+    sport_id: str = "",
+) -> Optional[str]:
+    """Return a frozen-registry id, or None when the stored mapping is unsafe to show."""
+    from collector.matrix_guard import frozen_competition_ids
+
+    stored = str(stored_competition_id or "").strip()
+    name = str(source_competition_name or "").strip()
+    frozen = frozen_competition_ids()
+    if not name:
+        return stored if stored in frozen else None
+    if stored and label_matches_competition(name, stored):
+        return stored if stored in frozen else None
+    matches = [
+        cid
+        for cid in frozen
+        if cid != stored and label_matches_competition(name, cid)
+    ]
+    if len(matches) == 1:
+        return matches[0]
+    return None
 
 
 def event_accepted_for_mapping(raw: Dict[str, Any], mapping_competition_id: str) -> Tuple[bool, Dict[str, Any]]:

@@ -15,7 +15,7 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from collector.cache import cache_clear
-from collector.competition_identity import COMPETITION_LABELS, label_matches_competition
+from collector.competition_identity import COMPETITION_LABELS, correct_public_competition_id
 from collector.enrichment import (
     OBSERVATION_ENRICH_KEYS,
     copy_missing_enrichment,
@@ -474,9 +474,19 @@ def classify_quarantine(db: Session) -> Dict[str, Any]:
         src_name = extra.get("source_competition_name") or extra.get("competition") or ""
         cid = row.competition_id
         hub = family in HUB_FAMILIES
-        if hub and src_name and label_matches_competition(str(src_name), cid):
+        corrected = correct_public_competition_id(
+            stored_competition_id=cid,
+            source_competition_name=str(src_name or ""),
+            sport_id=row.sport_id or "",
+        )
+        if hub and src_name and corrected:
+            if corrected != cid:
+                row.competition_id = corrected
+                extra["canonical_competition_id"] = corrected
+                extra["quarantine_disposition"] = "RECOVERED_REMAPPED"
+            else:
+                extra["quarantine_disposition"] = "RECOVERED_LABEL_MATCH"
             extra["display_eligible"] = True
-            extra["quarantine_disposition"] = "RECOVERED_LABEL_MATCH"
             extra["quality_flags"] = [flag for flag in flags if flag != "duplicate_or_contaminated"]
             _sync_public_flags(row, extra, True)
             recovered += 1
