@@ -21,6 +21,7 @@ from collector.models import (
 from collector.live_state import parse_ts, public_live_visible, reconcile_live_status
 from collector.display import sanitize_side
 from collector.enrichment import DETAIL_ONLY_KEYS, is_display_eligible, quality_flags_for_event
+from collector.matrix_guard import frozen_competition_ids
 from collector.util import isoformat, load_json
 from sports_provider import (
     PROVIDER_NOT_CONNECTED,
@@ -66,6 +67,9 @@ HEADER_KEYS = (
     "attendance",
     "referee",
     "live_class",
+    "source_family",
+    "provenance",
+    "last_contact_at",
 )
 
 
@@ -116,6 +120,27 @@ def _public_value(value: Any) -> Any:
 
 def public_event(payload: Dict[str, Any]) -> Dict[str, Any]:
     return _public_value(payload)
+
+
+def public_event_detail(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """List sanitizer plus canonical observation family, without internal source IDs."""
+    out = public_event(payload)
+    family = str(payload.get("source_family") or "").strip() or None
+    contact = payload.get("last_contact_at") or payload.get("source_fetch_time")
+    if family:
+        out["source_family"] = family
+        provenance = {"source_family": family}
+        if contact:
+            provenance["last_contact_at"] = contact
+        out["provenance"] = provenance
+    if contact:
+        out["last_contact_at"] = contact
+    return out
+
+
+def is_frozen_public_competition(event: Dict[str, Any]) -> bool:
+    cid = str(event.get("competition_key") or event.get("competition") or "")
+    return bool(cid) and cid in frozen_competition_ids()
 
 
 LIVE_PUBLIC_KEYS = (
@@ -299,7 +324,7 @@ class NinkoCollectedSportsDataProvider:
     ) -> List[NormalizedEvent]:
         db = _session(self._session_factory)
         try:
-            cache_key = f"events:p0v3:{sport}:{competition}:{status}:{date_from}:{date_to}:{int(allow_unfiltered)}"
+            cache_key = f"events:p0v4:{sport}:{competition}:{status}:{date_from}:{date_to}:{int(allow_unfiltered)}"
             cached = cache_get(db, cache_key)
             if cached is not None:
                 return cached
@@ -356,6 +381,7 @@ class NinkoCollectedSportsDataProvider:
                 ]
             else:
                 events = [public_event(row) for row in events]
+            events = [row for row in events if is_frozen_public_competition(row)]
             cache_set(db, cache_key, events, "upcoming_fixtures" if status != "live" else "live_events")
             db.commit()
             return events
@@ -431,7 +457,7 @@ class NinkoCollectedSportsDataProvider:
                 if incidents:
                     payload["incidents"] = incidents
                 payload["availability"] = load_json(detail.availability_json, []) or []
-            return public_event(payload)
+            return public_event_detail(payload)
         finally:
             db.close()
 

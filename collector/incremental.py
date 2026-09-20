@@ -585,6 +585,7 @@ def select_fair_groups(
     live_waits = [job_wait_seconds(job, now) for job in live_jobs if job.get("last_run_at") or job.get("next_due_at")]
     bg_waits = [job_wait_seconds(job, now) for job in bg_jobs if job.get("last_run_at") or job.get("next_due_at")]
     due_families = {job.get("family") for job in jobs if job.get("family")}
+    live_jobs_selected = sum(1 for group in selected for job in group if job_lane(job) == 0)
     stats = {
         "due_jobs": len(jobs),
         "selected_jobs": sum(len(group) for group in selected),
@@ -592,6 +593,10 @@ def select_fair_groups(
         "oldest_due_age_s": int(oldest),
         "never_run": never_run,
         "jobs_starved": starved,
+        "live_jobs_due": len(live_jobs),
+        "live_jobs_selected": live_jobs_selected,
+        "live_families_served": len(selected_live_families),
+        "background_jobs_due": len(bg_jobs),
         "background_jobs_waiting": background_jobs_waiting,
         "background_jobs_starved": background_jobs_starved,
         "live_families_waiting": live_families_waiting,
@@ -815,6 +820,10 @@ def run_incremental_tick(db: Session, *, sleeper=None, now: Optional[datetime] =
         "best_of_persisted": metrics.get("best_of_persisted"),
         "enrichment_promoted": metrics.get("enrichment_promoted"),
         "jobs_starved": schedule["jobs_starved"],
+        "live_jobs_due": schedule.get("live_jobs_due"),
+        "live_jobs_selected": schedule.get("live_jobs_selected"),
+        "live_families_served": schedule.get("live_families_served"),
+        "background_jobs_due": schedule.get("background_jobs_due"),
         "background_jobs_waiting": schedule.get("background_jobs_waiting"),
         "background_jobs_starved": schedule.get("background_jobs_starved"),
         "live_families_waiting": schedule.get("live_families_waiting"),

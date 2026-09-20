@@ -165,6 +165,101 @@ def test_live_public_payload_keeps_contact_stamps():
     assert live["source_fetch_time"] == "2026-09-20T04:01:00Z"
 
 
+def test_event_detail_exposes_source_family_without_internal_ids():
+    from collector.provider import public_event, public_event_detail
+
+    payload = {
+        "id": "ninko-evt-detail",
+        "sport": "tennis",
+        "competition": "wta-tour",
+        "status": "live",
+        "source_family": "wta-json",
+        "last_contact_at": "2026-09-20T08:22:55Z",
+        "primary_source_id": "wta-json:internal",
+        "field_sources": {"score": "wta-json:internal"},
+        "source_event_ids": {"wta-json": "abc"},
+        "score": {"home": 0, "away": 2},
+    }
+    listed = public_event(payload)
+    assert listed.get("source_family") is None
+    assert listed.get("provenance") is None
+    assert listed.get("primary_source_id") is None
+    assert listed.get("field_sources") is None
+    detail = public_event_detail(payload)
+    assert detail["source_family"] == "wta-json"
+    assert detail["provenance"] == {
+        "source_family": "wta-json",
+        "last_contact_at": "2026-09-20T08:22:55Z",
+    }
+    assert detail.get("primary_source_id") is None
+    assert detail.get("field_sources") is None
+    assert detail.get("source_event_ids") is None
+
+
+def test_cross_game_wiki_is_not_a_frozen_public_competition():
+    from collector.matrix_guard import frozen_competition_ids
+    from collector.provider import is_frozen_public_competition
+
+    allowed = frozen_competition_ids()
+    assert "cross-game-wiki" not in allowed
+    assert "wta-tour" in allowed
+    assert is_frozen_public_competition({"competition": "wta-tour"})
+    assert not is_frozen_public_competition({"competition": "cross-game-wiki", "competition_key": "cross-game-wiki"})
+
+
+def test_upcoming_hides_cross_game_wiki():
+    from datetime import datetime, timedelta
+
+    from collector.models import SportsEvent
+    from collector.provider import NinkoCollectedSportsDataProvider
+    from collector.util import dump_json
+    from database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        start = datetime.utcnow() + timedelta(days=1)
+        db.add(
+            SportsEvent(
+                event_id="ninko-evt-wiki-leak",
+                sport_id="esports",
+                competition_id="cross-game-wiki",
+                event_family="team_match",
+                fingerprint="fp-wiki-leak",
+                status="scheduled",
+                start_time=start,
+                display_eligible=True,
+                score_json=dump_json({"home": None, "away": None}),
+                participants_json=dump_json({"home": {"name": "Alpha"}, "away": {"name": "Beta"}}),
+                extra_json=dump_json({"display_eligible": True, "source_family": "liquipedia"}),
+            )
+        )
+        db.add(
+            SportsEvent(
+                event_id="ninko-evt-lol-keep",
+                sport_id="esports",
+                competition_id="lol-world-championship",
+                event_family="team_match",
+                fingerprint="fp-lol-keep",
+                status="scheduled",
+                start_time=start,
+                display_eligible=True,
+                score_json=dump_json({"home": None, "away": None}),
+                participants_json=dump_json({"home": {"name": "T1"}, "away": {"name": "Gen.G"}}),
+                extra_json=dump_json({"display_eligible": True, "source_family": "lolesports-json"}),
+            )
+        )
+        db.commit()
+        provider = NinkoCollectedSportsDataProvider()
+        upcoming = provider.get_events(sport="esports", status="scheduled")
+        comps = {row.get("competition") for row in upcoming}
+        assert "cross-game-wiki" not in comps
+        detail = provider.get_event("ninko-evt-lol-keep")
+        assert detail["source_family"] == "lolesports-json"
+        assert detail["provenance"]["source_family"] == "lolesports-json"
+    finally:
+        db.close()
+
+
 def test_registry_covers_required_sports():
     slugs = {row["slug"] for row in SPORTS}
     assert len(slugs) >= 41
