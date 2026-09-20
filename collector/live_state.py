@@ -239,9 +239,10 @@ def beyond_live_horizon(event: Dict[str, Any], now: Optional[datetime] = None) -
     from collector.live_horizon import live_horizon
 
     current = _aware(now) or datetime.now(timezone.utc)
-    observed = observation_time(event) or source_fetch_time(event)
+    # stale_after_seconds measures last successful feed contact, not last score change.
+    family_observed = source_fetch_time(event) or observation_time(event)
     family_limit = _family_stale_threshold(event)
-    if observed is not None and family_limit is not None and (current - observed) > family_limit:
+    if family_observed is not None and family_limit is not None and (current - family_observed) > family_limit:
         if not has_fresh_live_progression(event, now=current):
             return True
     age = live_age(event, now=now)

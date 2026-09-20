@@ -143,7 +143,7 @@ def live_public_event(payload: Dict[str, Any]) -> Dict[str, Any]:
     score = payload.get("score") if isinstance(payload.get("score"), dict) else {}
     lean_score = {
         key: score.get(key)
-        for key in ("home", "away", "minute", "clock", "period", "quarter", "set", "inning", "inning_half", "overs", "wickets", "runs")
+        for key in ("home", "away", "minute", "clock", "period", "quarter", "set", "inning", "inning_half", "outs", "overs", "wickets", "runs")
         if score.get(key) is not None
     }
     row = {key: payload.get(key) for key in LIVE_PUBLIC_KEYS if payload.get(key) is not None}

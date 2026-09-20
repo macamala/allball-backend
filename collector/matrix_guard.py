@@ -9,11 +9,21 @@ from typing import Any, Dict
 
 ROOT = Path(__file__).resolve().parent.parent
 MATRIX_PATH = ROOT / "source_matrix_final.json"
+# SHA-256 of the frozen JSON after newline canonicalization to CRLF.
+# Git stores this file as LF; Windows working trees check it out as CRLF
+# (i/lf w/crlf). Production Linux therefore hashed bfc5c252… of identical
+# JSON. The guard must hash content, not host line endings.
 FROZEN_CHECKSUM = "744b132d9d57c9c60505f82adb845cfd5d2f685b800b3280273f0d69b3e7d673"
 
 
+def _canonical_matrix_bytes(raw: bytes) -> bytes:
+    if raw.startswith(b"\xef\xbb\xbf"):
+        raw = raw[3:]
+    return raw.replace(b"\r\n", b"\n").replace(b"\r", b"\n").replace(b"\n", b"\r\n")
+
+
 def matrix_checksum(path: Path | None = None) -> str:
-    return hashlib.sha256((path or MATRIX_PATH).read_bytes()).hexdigest()
+    return hashlib.sha256(_canonical_matrix_bytes((path or MATRIX_PATH).read_bytes())).hexdigest()
 
 
 def matrix_status() -> Dict[str, Any]:

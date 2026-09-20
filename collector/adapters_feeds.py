@@ -137,17 +137,28 @@ class NhlAdapter:
     def fetch(self, request: FetchRequest) -> FetchResult:
         if request.capability not in {"fixtures", "results", "live_scores", "snapshot"}:
             return FetchResult(ok=True, http_status=200, events=[])
-        result = self._get("https://api-web.nhle.com/v1/schedule/now")
-        if not result.ok:
-            return result
-        events = []
-        for day in (result.payload or {}).get("gameWeek") or []:
-            for row in day.get("games") or []:
-                events.append(self._event(row))
+        events: List[Dict[str, Any]] = []
+        last = None
+        if request.capability in {"live_scores", "snapshot"}:
+            last = self._get("https://api-web.nhle.com/v1/score/now")
+            if last.ok and isinstance(last.payload, dict):
+                for row in last.payload.get("games") or []:
+                    events.append(self._event(row))
+        if request.capability != "live_scores" or not events:
+            sched = self._get("https://api-web.nhle.com/v1/schedule/now")
+            last = sched if last is None or not events else last
+            if not sched.ok and not events:
+                return sched
+            seen = {event.get("id") for event in events}
+            for day in (sched.payload or {}).get("gameWeek") or []:
+                for row in day.get("games") or []:
+                    event = self._event(row)
+                    if event.get("id") not in seen:
+                        events.append(event)
         return FetchResult(
             ok=True,
-            http_status=result.http_status,
-            payload=result.payload,
+            http_status=(last.http_status if last else 200) or 200,
+            payload=last.payload if last else None,
             events=_filter(events, request.capability),
         )
 
@@ -164,16 +175,52 @@ class NhlAdapter:
         else:
             status = "scheduled"
         venue = row.get("venue") if isinstance(row.get("venue"), dict) else {}
-        return {
+        score: Dict[str, Any] = {
+            "home": home.get("score") if status != "scheduled" else None,
+            "away": away.get("score") if status != "scheduled" else None,
+        }
+        period = (row.get("periodDescriptor") or {}).get("number") if isinstance(row.get("periodDescriptor"), dict) else row.get("period")
+        clock = row.get("clock")
+        if isinstance(clock, dict):
+            clock = clock.get("timeRemaining") or clock.get("display")
+        if period is not None:
+            score["period"] = period
+        if clock:
+            score["clock"] = clock
+        periods = None
+        home_sog = home.get("sog")
+        if isinstance(row.get("homeTeam"), dict) and row.get("awayTeam"):
+            lines = row.get("periodScores") or row.get("linescore")
+            if isinstance(lines, list) and lines:
+                periods = []
+                for index, item in enumerate(lines):
+                    if not isinstance(item, dict):
+                        continue
+                    periods.append(
+                        {
+                            "period": item.get("period") or index + 1,
+                            "home": item.get("home") or item.get("homeScore"),
+                            "away": item.get("away") or item.get("awayScore"),
+                        }
+                    )
+        event = {
             "id": f"nhl:{row.get('id')}",
             "home": {"id": str(home.get("id") or ""), "name": home.get("abbrev") or place.get("default") or ""},
             "away": {"id": str(away.get("id") or ""), "name": away.get("abbrev") or away_place.get("default") or ""},
             "status": status,
-            "score": {"home": home.get("score"), "away": away.get("score")},
+            "source_status": state or status,
+            "score": score,
             "start_time": row.get("startTimeUTC"),
             "venue": venue.get("default"),
             "competition": "nhl",
+            "sport": "ice-hockey",
+            "source_family": "nhl-web",
         }
+        if periods:
+            event["periods"] = periods
+        if home_sog is not None:
+            event.setdefault("extra", {})["shots"] = {"home": home_sog, "away": away.get("sog")}
+        return event
 
 
 class MlbAdapter:
@@ -187,7 +234,9 @@ class MlbAdapter:
     def fetch(self, request: FetchRequest) -> FetchResult:
         if request.capability not in {"fixtures", "results", "live_scores", "snapshot"}:
             return FetchResult(ok=True, http_status=200, events=[])
-        result = self._get("https://statsapi.mlb.com/api/v1/schedule?sportId=1")
+        result = self._get(
+            "https://statsapi.mlb.com/api/v1/schedule?sportId=1&hydrate=linescore,team"
+        )
         if not result.ok:
             return result
         events = []
@@ -205,26 +254,57 @@ class MlbAdapter:
         teams = row.get("teams") or {}
         home = (teams.get("home") or {}).get("team") or {}
         away = (teams.get("away") or {}).get("team") or {}
-        abstract = ((row.get("status") or {}).get("abstractGameState") or "").lower()
-        if abstract == "final":
+        status_block = row.get("status") or {}
+        abstract = (status_block.get("abstractGameState") or "").lower()
+        detailed = (status_block.get("detailedState") or "").lower()
+        if abstract == "final" or "final" in detailed:
             status = "finished"
-        elif abstract == "live":
+        elif abstract == "live" or "in progress" in detailed or "innings" in detailed:
             status = "live"
         else:
             status = "scheduled"
-        return {
+        home_score = (teams.get("home") or {}).get("score")
+        away_score = (teams.get("away") or {}).get("score")
+        if status == "scheduled":
+            home_score = None
+            away_score = None
+        linescore = row.get("linescore") if isinstance(row.get("linescore"), dict) else {}
+        score: Dict[str, Any] = {"home": home_score, "away": away_score}
+        inning = linescore.get("currentInning")
+        half = linescore.get("inningState") or linescore.get("inningHalf")
+        if inning is not None and status != "scheduled":
+            score["inning"] = inning
+        if half and status == "live":
+            score["inning_half"] = str(half).lower()
+        if linescore.get("outs") is not None and status == "live":
+            score["outs"] = linescore.get("outs")
+        periods = []
+        for item in linescore.get("innings") or []:
+            if not isinstance(item, dict):
+                continue
+            periods.append(
+                {
+                    "period": item.get("num"),
+                    "home": (item.get("home") or {}).get("runs"),
+                    "away": (item.get("away") or {}).get("runs"),
+                }
+            )
+        event = {
             "id": f"mlb:{row.get('gamePk')}",
             "home": {"id": str(home.get("id") or ""), "name": home.get("name") or ""},
             "away": {"id": str(away.get("id") or ""), "name": away.get("name") or ""},
             "status": status,
-            "score": {
-                "home": (teams.get("home") or {}).get("score"),
-                "away": (teams.get("away") or {}).get("score"),
-            },
+            "source_status": status_block.get("detailedState") or abstract or status,
+            "score": score,
             "start_time": row.get("gameDate"),
             "venue": (row.get("venue") or {}).get("name"),
             "competition": "mlb",
+            "sport": "baseball",
+            "source_family": "mlb-statsapi",
         }
+        if periods:
+            event["periods"] = periods
+        return event
 
 
 class KhlAdapter:
@@ -260,12 +340,22 @@ class KhlAdapter:
         else:
             status = "scheduled"
         location = row.get("location") if isinstance(row.get("location"), dict) else {}
+        score: Dict[str, Any] = {
+            "home": home.get("score") if status != "scheduled" else None,
+            "away": away.get("score") if status != "scheduled" else None,
+        }
+        period = row.get("period") or row.get("current_period") or row.get("period_id")
+        clock = row.get("game_time") or row.get("time") or row.get("clock")
+        if period not in (None, ""):
+            score["period"] = period
+        if clock not in (None, ""):
+            score["clock"] = clock
         return {
             "id": f"khl:{row.get('id') or row.get('khl_id')}",
             "home": {"id": str(home.get("id") or ""), "name": home.get("name") or home.get("title") or ""},
             "away": {"id": str(away.get("id") or ""), "name": away.get("name") or away.get("title") or ""},
             "status": status,
-            "score": {"home": home.get("score"), "away": away.get("score")},
+            "score": score,
             "start_time": row.get("start_at") or row.get("start_at_iso"),
             "venue": location.get("name"),
             "competition": "khl",
@@ -317,15 +407,22 @@ class WorldRugbyAdapter:
         start = (row.get("time") or {}).get("label")
         if start and "T" not in str(start):
             start = f"{start}T00:00:00Z"
+        score: Dict[str, Any] = {
+            "home": scores[0] if len(scores) > 0 else None,
+            "away": scores[1] if len(scores) > 1 else None,
+        }
+        clock = row.get("clock") or (row.get("time") or {}).get("millis")
+        period = row.get("period") or row.get("minute")
+        if clock not in (None, ""):
+            score["clock"] = clock
+        if period not in (None, ""):
+            score["period"] = period
         return {
             "id": f"worldrugby:{row.get('matchId')}",
             "home": {"id": str(teams[0].get("id") or ""), "name": teams[0].get("name") or ""},
             "away": {"id": str(teams[1].get("id") or ""), "name": teams[1].get("name") or ""},
             "status": status,
-            "score": {
-                "home": scores[0] if len(scores) > 0 else None,
-                "away": scores[1] if len(scores) > 1 else None,
-            },
+            "score": score,
             "start_time": start,
             "venue": (row.get("venue") or {}).get("name"),
             "sport": "rugby",
@@ -395,24 +492,88 @@ class EuroleagueLiveAdapter:
             return FetchResult(ok=True, http_status=200, events=[])
         now = datetime.now(timezone.utc)
         season = f"E{now.year}" if now.month >= 9 else f"E{now.year - 1}"
-        result = self._get(f"https://live.euroleague.net/api/Header?gamecode=1&seasoncode={season}")
-        if not result.ok:
-            result = self._get("https://live.euroleague.net/api/Header?gamecode=1&seasoncode=E2025")
-        if not result.ok or not isinstance(result.payload, dict):
-            return result
-        row = result.payload
+        last = self._get(f"https://api-live.euroleague.net/v1/games?seasonCode={season}")
+        events: List[Dict[str, Any]] = []
+        for row in self._game_rows(last.payload if last.ok else None):
+            event = self._from_catalog(row, season)
+            if event:
+                events.append(event)
+        if not events:
+            last = self._get(f"https://live.euroleague.net/api/Header?gamecode=1&seasoncode={season}")
+            if not last.ok:
+                last = self._get(f"https://live.euroleague.net/api/Header?gamecode=1&seasoncode=E{now.year - 1}")
+            if last.ok and isinstance(last.payload, dict):
+                events.append(self._from_header(last.payload, season, last.payload.get("GameCode") or 1))
+        if not last.ok and not events:
+            return last
+        return FetchResult(
+            ok=True,
+            http_status=last.http_status if last else 200,
+            events=_filter(events, request.capability),
+        )
+
+    def _game_rows(self, payload: Any) -> List[Dict[str, Any]]:
+        if isinstance(payload, list):
+            return [row for row in payload if isinstance(row, dict)]
+        if isinstance(payload, dict):
+            for key in ("data", "games", "items", "value"):
+                rows = payload.get(key)
+                if isinstance(rows, list):
+                    return [row for row in rows if isinstance(row, dict)]
+        return []
+
+    def _from_catalog(self, row: Dict[str, Any], season: str) -> Optional[Dict[str, Any]]:
+        code = row.get("gamecode") or row.get("gameCode") or row.get("code") or row.get("id")
+        home = row.get("local") or row.get("home") or row.get("TeamA") or {}
+        away = row.get("road") or row.get("away") or row.get("TeamB") or {}
+        home_name = home.get("name") if isinstance(home, dict) else row.get("TeamA")
+        away_name = away.get("name") if isinstance(away, dict) else row.get("TeamB")
+        if not home_name or not away_name:
+            return None
+        live_flag = row.get("Live") or row.get("live") or str(row.get("status") or "").lower() in {"live", "inprogress"}
+        status = "live" if live_flag else "scheduled"
+        if row.get("played") or str(row.get("status") or "").lower() in {"finished", "final", "closed"}:
+            status = "finished"
+        score = {
+            "home": (home.get("score") if isinstance(home, dict) else None) or row.get("ScoreA"),
+            "away": (away.get("score") if isinstance(away, dict) else None) or row.get("ScoreB"),
+        }
+        quarter = row.get("Quarter") or row.get("quarter") or row.get("period")
+        clock = row.get("Remaining") or row.get("clock") or row.get("time")
+        if quarter not in (None, ""):
+            score["quarter"] = quarter
+            score["period"] = quarter
+        if clock not in (None, ""):
+            score["clock"] = clock
+        return {
+            "id": f"euroleague:{season}:{code}",
+            "home": {"name": home_name},
+            "away": {"name": away_name},
+            "status": status,
+            "score": score,
+            "start_time": row.get("utc") or row.get("date") or row.get("startDate"),
+            "venue": row.get("Stadium") or row.get("venue"),
+            "competition": "euroleague",
+        }
+
+    def _from_header(self, row: Dict[str, Any], season: str, gamecode: Any) -> Dict[str, Any]:
         live_flag = row.get("Live")
         status = "live" if live_flag else "scheduled"
         if row.get("ScoreA") is not None and row.get("ScoreB") is not None and not live_flag:
             status = "finished"
-        event = {
-            "id": f"euroleague:{season}:1",
+        score: Dict[str, Any] = {"home": row.get("ScoreA"), "away": row.get("ScoreB")}
+        if row.get("Quarter") is not None:
+            score["quarter"] = row.get("Quarter")
+            score["period"] = row.get("Quarter")
+        if row.get("Remaining"):
+            score["clock"] = row.get("Remaining")
+        return {
+            "id": f"euroleague:{season}:{gamecode}",
             "home": {"name": row.get("TeamA") or ""},
             "away": {"name": row.get("TeamB") or ""},
             "status": status,
-            "score": {"home": row.get("ScoreA"), "away": row.get("ScoreB")},
+            "score": score,
             "start_time": None,
             "venue": row.get("Stadium"),
             "competition": "euroleague",
         }
-        return FetchResult(ok=True, http_status=result.http_status, events=_filter([event], request.capability))

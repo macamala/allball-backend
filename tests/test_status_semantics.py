@@ -111,6 +111,36 @@ def test_openligadb_elapsed_live_without_progress_is_unproven():
     assert event["live_class"] == UNPROVEN_LIVE
 
 
+def test_normalize_keeps_baseball_inning_state():
+    raw = mock_event(
+        status="live",
+        start_time=_iso(timedelta(hours=-2)),
+        score={"home": 3, "away": 2, "inning": 7, "inning_half": "bottom", "outs": 1},
+    )
+    event = normalize_event(raw, sport_id="baseball", competition_id="mlb")
+    assert event["score"]["inning"] == 7
+    assert event["score"]["inning_half"] == "bottom"
+    assert event["score"]["outs"] == 1
+
+
+def test_family_stale_uses_fetch_time_not_old_observed_at():
+    raw = mock_event(
+        status="live",
+        start_time=_iso(timedelta(hours=-3)),
+        score={"home": 3, "away": 3, "inning": 10, "inning_half": "top", "outs": 0},
+        source_family="mlb-statsapi",
+        source_status="live",
+        source_fetch_time=_iso(timedelta(seconds=-5)),
+        observed_at=_iso(timedelta(minutes=-10)),
+    )
+    event = reconcile_live_status(
+        normalize_event(raw, sport_id="baseball", competition_id="mlb"),
+        now=NOW,
+    )
+    assert event["status"] == "live"
+    assert event["live_class"] == CONFIRMED_LIVE
+
+
 def test_registry_covers_required_sports():
     slugs = {row["slug"] for row in SPORTS}
     assert len(slugs) >= 41

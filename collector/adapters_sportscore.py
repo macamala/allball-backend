@@ -41,6 +41,12 @@ SPORTSCORE_COMPETITIONS: Dict[str, Dict[str, Any]] = {
         "tokens_any": ["women's national soccer league", "nwsl"],
         "slugs": ["united-states-womens-national-soccer-league", "nwsl"],
     },
+    "mls": {
+        "sport": "football",
+        "tokens_any": ["major league soccer", "united states major league soccer"],
+        "deny": ["usl"],
+        "slugs": ["mls", "major-league-soccer"],
+    },
     "copa-libertadores": {
         "sport": "football",
         "tokens": ["copa libertadores"],
@@ -53,7 +59,7 @@ SPORTSCORE_COMPETITIONS: Dict[str, Dict[str, Any]] = {
     },
     "argentina-primera": {
         "sport": "football",
-        "tokens_any": ["argentine primera", "liga profesional", "primera division argentina"],
+        "tokens_any": ["argentine primera", "argentine division", "liga profesional", "primera division argentina"],
         "slugs": ["argentine-primera-division", "liga-profesional"],
     },
     "afc-champions-league": {
@@ -79,8 +85,14 @@ SPORTSCORE_COMPETITIONS: Dict[str, Dict[str, Any]] = {
     },
     "mexico-liga-mx": {
         "sport": "football",
-        "tokens_any": ["liga mx", "mexican primera"],
+        "tokens_any": ["liga mx", "mexican primera", "mexico liga mx"],
         "slugs": ["liga-mx"],
+    },
+    "brazil-serie-a": {
+        "sport": "football",
+        "tokens_any": ["brazilian serie a", "brazil serie a", "brasileirao"],
+        "deny": ["serie b", "serie c"],
+        "slugs": ["brazilian-serie-a"],
     },
     "denmark-superliga": {
         "sport": "football",
@@ -127,6 +139,47 @@ SPORTSCORE_COMPETITIONS: Dict[str, Dict[str, Any]] = {
         "tokens": ["uzbekistan"],
         "slugs": ["uzbekistan-super-league"],
     },
+    "concacaf-champions-cup": {
+        "sport": "football",
+        "tokens_any": ["concacaf champions cup", "concacaf champions league"],
+        "slugs": ["concacaf-champions-cup"],
+    },
+    "iran-pro-league": {
+        "sport": "football",
+        "tokens": ["iran pro"],
+        "slugs": ["iran-pro-league"],
+    },
+    "ireland-premier-division": {
+        "sport": "football",
+        "tokens": ["ireland premier"],
+        "slugs": ["ireland-premier-division"],
+    },
+    "kazakhstan-premier-league": {
+        "sport": "football",
+        "tokens": ["kazakhstan"],
+        "slugs": ["kazakhstan-premier-league"],
+    },
+    "spain-la-liga": {
+        "sport": "football",
+        "tokens_any": ["spanish la liga", "la liga"],
+        "deny": ["liga 2", "segunda", "hypermotion"],
+        "slugs": ["spanish-la-liga"],
+    },
+    "switzerland-super-league": {
+        "sport": "football",
+        "tokens": ["switzerland super"],
+        "slugs": ["switzerland-super-league"],
+    },
+    "scotland-premiership": {
+        "sport": "football",
+        "tokens_any": ["scottish premiership", "scotland premiership"],
+        "slugs": ["scottish-premiership"],
+    },
+    "austria-bundesliga": {
+        "sport": "football",
+        "tokens_any": ["austrian bundesliga", "austria bundesliga"],
+        "slugs": ["austrian-bundesliga"],
+    },
     "spain-acb": {
         "sport": "basketball",
         "tokens_any": ["acb", "liga endesa"],
@@ -134,8 +187,25 @@ SPORTSCORE_COMPETITIONS: Dict[str, Dict[str, Any]] = {
     },
     "mexico-lnbp": {
         "sport": "basketball",
-        "tokens": ["lnbp"],
+        "tokens_any": ["lnbp", "liga nacional de baloncesto profesional"],
         "slugs": ["lnbp"],
+    },
+    "wnba": {
+        "sport": "basketball",
+        "tokens_any": ["women's national basketball association", "wnba"],
+        "slugs": ["wnba"],
+    },
+    "internationals-and-leagues": {
+        "sport": "cricket",
+        "tokens_any": ["odi series", "test series", "t20i ", "t20 international", "one-day international"],
+        "deny": ["t10", "minor league", "premier league, women"],
+        "slugs": [],
+    },
+    "t20-internationals": {
+        "sport": "cricket",
+        "tokens_any": ["t20i", "t20 international", "twenty20 international"],
+        "deny": ["asian games", "premier league", "t10"],
+        "slugs": [],
     },
     "wta-tour": {
         "sport": "tennis",
@@ -176,10 +246,10 @@ def _score(value: Any) -> Optional[int]:
 
 
 def _status(row: Dict[str, Any]) -> str:
-    raw = str(row.get("status") or row.get("status_text") or "").lower()
-    if raw in {"finished", "ended", "ft"}:
+    blob = f"{row.get('status') or ''} {row.get('status_text') or ''}".lower()
+    if any(token in blob for token in ("finished", "ended", "final", "ft", "aet")):
         return "finished"
-    if raw in {"live", "inprogress", "in progress"}:
+    if any(token in blob for token in ("live", "in progress", "inprogress", "halftime", "ht", "1st half", "2nd half")):
         return "live"
     return "scheduled"
 
@@ -189,17 +259,41 @@ def match_to_event(row: Dict[str, Any], competition_id: str) -> Optional[Dict[st
     away = (row.get("away") or "").strip()
     if not home or not away:
         return None
+    status = _status(row)
+    home_score = _score(row.get("home_score"))
+    away_score = _score(row.get("away_score"))
+    if status == "scheduled":
+        home_score = None if home_score == 0 else home_score
+        away_score = None if away_score == 0 else away_score
+    score: Dict[str, Any] = {"home": home_score, "away": away_score}
+    minute = row.get("minute") or row.get("clock")
+    period = row.get("period") or row.get("quarter") or row.get("set")
+    status_text = str(row.get("status_text") or "")
+    if period in (None, "") and status_text:
+        lowered = status_text.lower()
+        if "2nd" in lowered or "2h" in lowered:
+            period = 2
+        elif "1st" in lowered or "1h" in lowered:
+            period = 1
+        elif "ht" in lowered or "half" in lowered:
+            period = "HT"
+        minute = minute or status_text
+    if minute not in (None, ""):
+        score["minute"] = minute
+    if period not in (None, ""):
+        score["period"] = period
     event = {
         "id": row.get("url") or f"sportscore:{competition_id}:{home}:{away}:{row.get('time')}",
         "home": {"name": home, "logo": row.get("home_logo")},
         "away": {"name": away, "logo": row.get("away_logo")},
-        "status": _status(row),
-        "score": {"home": _score(row.get("home_score")), "away": _score(row.get("away_score"))},
+        "status": status,
+        "score": score,
         "start_time": row.get("time"),
         "competition": row.get("competition") or competition_id,
         "source_url": row.get("url"),
         "source_family": "sportscore",
-        "extra": {"attribution": ATTRIBUTION},
+        "source_competition_id": row.get("competition"),
+        "extra": {"attribution": ATTRIBUTION, "upstream_family": "thesports"},
     }
     return event
 
@@ -283,23 +377,24 @@ class SportScoreAdapter:
                 _STANDINGS_CACHE[standings_key] = payload
             payload = _STANDINGS_CACHE[standings_key]
             tables = payload.get("tables") or []
-            team_slug = None
+            team_slugs: List[str] = []
             for table in tables:
                 for row in table.get("rows") or []:
-                    team_slug = row.get("team_slug")
-                    if team_slug:
+                    slug_row = row.get("team_slug")
+                    if slug_row and slug_row not in team_slugs:
+                        team_slugs.append(slug_row)
+                    if len(team_slugs) >= 3:
                         break
-                if team_slug:
+                if len(team_slugs) >= 3:
                     break
-            if not team_slug:
-                continue
-            team_key = f"{sport}:{team_slug}"
-            if team_key not in _TEAM_CACHE:
-                last = self._get(TEAM_URL.format(sport=sport, slug=team_slug))
-                if not last.ok:
-                    continue
-                _TEAM_CACHE[team_key] = _payload_matches(last.payload)
-            rows.extend(_TEAM_CACHE[team_key])
+            for team_slug in team_slugs:
+                team_key = f"{sport}:{team_slug}"
+                if team_key not in _TEAM_CACHE:
+                    last = self._get(TEAM_URL.format(sport=sport, slug=team_slug))
+                    if not last.ok:
+                        continue
+                    _TEAM_CACHE[team_key] = _payload_matches(last.payload)
+                rows.extend(_TEAM_CACHE[team_key])
             if rows:
                 break
         return rows, last

@@ -13,6 +13,21 @@ def test_matrix_checksum_frozen():
     assert status["clean_full_180"] is True
 
 
+def test_matrix_checksum_ignores_host_newlines(tmp_path):
+    from collector.matrix_guard import MATRIX_PATH, matrix_checksum
+
+    raw = MATRIX_PATH.read_bytes()
+    lf = raw.replace(b"\r\n", b"\n")
+    crlf = lf.replace(b"\n", b"\r\n")
+    lf_path = tmp_path / "lf.json"
+    crlf_path = tmp_path / "crlf.json"
+    lf_path.write_bytes(lf)
+    crlf_path.write_bytes(crlf)
+    assert matrix_checksum(lf_path) == FROZEN_CHECKSUM
+    assert matrix_checksum(crlf_path) == FROZEN_CHECKSUM
+    assert lf != crlf
+
+
 def test_flags_fail_closed(monkeypatch):
     monkeypatch.delenv("RESULTS_WRITE_ENABLED", raising=False)
     monkeypatch.delenv("RESULTS_SCHEDULER_ENABLED", raising=False)
