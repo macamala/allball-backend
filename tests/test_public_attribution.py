@@ -49,6 +49,7 @@ def test_public_attribution_dedupes_and_hides_espn():
         assert "TheSportsDB" in names
         assert not any("ESPN" in name for name in names)
         assert not any("reuse:" in (row.get("description") or "") for row in items)
+        assert not any(str(row.get("name") or "").startswith("Sports data from") for row in items)
         payload = attribution_payload(db)
         assert payload["count"] == len(items)
         assert "official public sources" in payload["message"]

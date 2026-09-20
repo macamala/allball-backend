@@ -88,6 +88,8 @@ _AUDIT_MARKERS = (
 
 def _is_audit_copy(text: str) -> bool:
     blob = f" {text or ''}".lower()
+    if blob.strip().startswith("sports data from"):
+        return True
     return any(marker in blob for marker in _AUDIT_MARKERS)
 
 
@@ -126,7 +128,7 @@ def public_provider_items(db: Session) -> List[Dict[str, Any]]:
         family = _family_for(source)
         if not family or family in seen:
             continue
-        if family in _BLOCKED_PUBLIC_FAMILIES:
+        if family in _BLOCKED_PUBLIC_FAMILIES or family.startswith("wikipedia") or "wikipedia" in family:
             continue
         if family_caps(family).get("production_status") == "ACCESS_BLOCKED":
             continue
