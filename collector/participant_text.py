@@ -142,9 +142,69 @@ def fold_for_identity(name: str) -> str:
     raw = raw.lower()
     raw = re.sub(r"\([a-z]{2,3}\)", " ", raw)
     raw = re.sub(r"^[a-z]{2}\s+", "", raw)
-    raw = re.sub(r"\b(fc|cf|sc|afc|cfc|fk|nk|bk|if|il|sk|ac|ssc|ud|cd|rcd|sv)\b", " ", raw)
+    raw = re.sub(r"\b(fc|cf|sc|afc|cfc|fk|nk|bk|if|il|sk|ac|as|us|ssc|ud|cd|rcd|sv|rc|vfl|calcio|club|clube|football|soccer)\b", " ", raw)
+    raw = re.sub(r"\b(de|da|do|del|della|di|of|the|and|la|le|el|los|las)\b", " ", raw)
     raw = re.sub(r"[^a-z0-9]+", " ", raw)
     return re.sub(r"\s+", " ", raw).strip()
+
+
+LEGAL_IDENTITY_TOKENS = {
+    "fc",
+    "cf",
+    "sc",
+    "afc",
+    "cfc",
+    "fk",
+    "nk",
+    "bk",
+    "if",
+    "il",
+    "sk",
+    "ac",
+    "as",
+    "us",
+    "ssc",
+    "ud",
+    "cd",
+    "rcd",
+    "sv",
+    "rc",
+    "vfl",
+    "calcio",
+    "club",
+    "clube",
+    "football",
+    "soccer",
+    "de",
+    "da",
+    "do",
+    "del",
+    "della",
+    "di",
+    "of",
+    "the",
+    "and",
+    "la",
+    "le",
+    "el",
+    "los",
+    "las",
+    "1",
+    "i",
+}
+
+# Prefix/suffix tokens that change a club's legal name without creating a new club.
+CLUB_STYLE_EXTRAS = {
+    "racing",
+    "olympique",
+    "olympic",
+    "deportivo",
+}
+
+
+def identity_core(name: str) -> str:
+    tokens = [tok for tok in fold_for_identity(name).split() if tok not in LEGAL_IDENTITY_TOKENS]
+    return " ".join(tokens).strip()
 
 
 def repair_mojibake(value: str) -> str:

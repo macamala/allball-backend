@@ -8,7 +8,7 @@ from typing import Any, Dict, Iterable, Optional, Tuple
 from sqlalchemy.orm import Session
 
 from collector.models import SportsParticipantAlias
-from collector.participant_text import fold_for_identity
+from collector.participant_text import CLUB_STYLE_EXTRAS, fold_for_identity, identity_core
 from collector.util import dump_json, load_json
 
 _ABBREV = (
@@ -30,6 +30,11 @@ _LEADING_CLUB = {
     "1",
     "i",
     "the",
+    "as",
+    "ac",
+    "us",
+    "rc",
+    "rcd",
 }
 
 
@@ -38,7 +43,7 @@ def expand_abbreviations(folded: str) -> str:
     for pattern, replacement in _ABBREV:
         text = pattern.sub(replacement, text)
     tokens = text.split()
-    while len(tokens) > 1 and tokens[0] in _LEADING_CLUB and len(" ".join(tokens[1:])) >= 8:
+    while len(tokens) > 1 and tokens[0] in _LEADING_CLUB and len(" ".join(tokens[1:])) >= 4:
         tokens = tokens[1:]
     return re.sub(r"\s+", " ", " ".join(tokens)).strip()
 
@@ -50,7 +55,50 @@ def names_equivalent(left: str, right: str) -> bool:
         return False
     if a == b:
         return True
-    return expand_abbreviations(a) == expand_abbreviations(b)
+    if expand_abbreviations(a) == expand_abbreviations(b):
+        return True
+    return identity_cores_compatible(left, right)
+
+
+_GENERIC_STEMS = {
+    "real",
+    "sporting",
+    "athletic",
+    "united",
+    "city",
+    "inter",
+    "racing",
+}
+
+
+def identity_cores_compatible(left: str, right: str) -> bool:
+    ca = identity_core(left)
+    cb = identity_core(right)
+    if not ca or not cb:
+        return False
+    if ca == cb:
+        return True
+    ta = ca.split()
+    tb = cb.split()
+    shorter, longer = (ta, tb) if len(ca) <= len(cb) else (tb, ta)
+    short_s = " ".join(shorter)
+    long_s = " ".join(longer)
+    if not short_s or not long_s.startswith(short_s + " "):
+        if len(shorter) == 1 and longer and longer[-1] == shorter[0] and len(shorter[0]) >= 4:
+            extra = set(longer[:-1])
+            if extra and extra <= CLUB_STYLE_EXTRAS:
+                return True
+        return False
+    extra = longer[len(shorter) :]
+    if not extra:
+        return False
+    if any(token in _PREFIX_DENY or token in _GENERIC_STEMS for token in extra):
+        return False
+    if short_s in _GENERIC_STEMS or len(short_s) < 6:
+        return False
+    if len(extra) <= 3 and all(token in CLUB_STYLE_EXTRAS or len(token) >= 6 for token in extra):
+        return True
+    return False
 
 
 _PREFIX_DENY = {
@@ -76,7 +124,7 @@ def prefix_variant(left: str, right: str) -> bool:
     if not a or not b or a == b:
         return False
     shorter, longer = (a, b) if len(a) <= len(b) else (b, a)
-    if len(shorter) < 10:
+    if len(shorter) < 8:
         return False
     if not longer.startswith(shorter + " "):
         return False
@@ -94,6 +142,16 @@ def prefix_variant(left: str, right: str) -> bool:
 def prefer_display(left: str, right: str) -> str:
     a = str(left or "").strip()
     b = str(right or "").strip()
+    if not a:
+        return b
+    if not b:
+        return a
+    if names_equivalent(a, b) or identity_core(a) == identity_core(b):
+        if "(" in a and "(" not in b:
+            return b
+        if "(" in b and "(" not in a:
+            return a
+        return a if len(a) <= len(b) else b
     if len(a) == len(b):
         return a if "(" not in a else b
     return a if len(a) > len(b) else b
@@ -190,30 +248,23 @@ def contextual_pair_match(
     left_pair = {resolve_folded(db, sport, lh), resolve_folded(db, sport, la)}
     right_pair = {resolve_folded(db, sport, rh), resolve_folded(db, sport, ra)}
     if not all(left_pair) or left_pair != right_pair:
-        raw_ok = (
-            names_equivalent(lh, rh)
-            and names_equivalent(la, ra)
-            or names_equivalent(lh, ra)
-            and names_equivalent(la, rh)
-            or (prefix_variant(lh, rh) and names_equivalent(la, ra))
-            or (prefix_variant(la, ra) and names_equivalent(lh, rh))
-            or (prefix_variant(lh, ra) and names_equivalent(la, rh))
-            or (prefix_variant(la, rh) and names_equivalent(lh, ra))
-        )
+        raw_ok = participants_equivalent(lh, la, rh, ra)
         if not raw_ok:
             return False, "participants"
-    left_score = left.get("score") or {}
-    right_score = right.get("score") or {}
-    if (
-        left_score.get("home") not in (None, "")
-        and right_score.get("home") not in (None, "")
-        and (left_score.get("home"), left_score.get("away"))
-        != (right_score.get("home"), right_score.get("away"))
-        and (left_score.get("home"), left_score.get("away"))
-        != (right_score.get("away"), right_score.get("home"))
-    ):
-        return False, "score"
     return True, "ok"
+
+
+def participants_equivalent(lh: str, la: str, rh: str, ra: str) -> bool:
+    return bool(
+        (names_equivalent(lh, rh) and names_equivalent(la, ra))
+        or (names_equivalent(lh, ra) and names_equivalent(la, rh))
+        or (prefix_variant(lh, rh) and names_equivalent(la, ra))
+        or (prefix_variant(la, ra) and names_equivalent(lh, rh))
+        or (prefix_variant(lh, ra) and names_equivalent(la, rh))
+        or (prefix_variant(la, rh) and names_equivalent(lh, ra))
+        or (prefix_variant(lh, rh) and prefix_variant(la, ra))
+        or (prefix_variant(lh, ra) and prefix_variant(la, rh))
+    )
 
 
 def discover_aliases_from_pair(db: Session, left: Dict[str, Any], right: Dict[str, Any]) -> int:

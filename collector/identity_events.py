@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict, Optional
 
-from collector.participant_alias import expand_abbreviations
+from collector.participant_alias import expand_abbreviations, participants_equivalent
 from collector.participant_text import fold_for_identity
 
 IDENTITY_MERGE_THRESHOLD = 90
@@ -26,6 +26,12 @@ def _fold_side(side: Any) -> str:
     if isinstance(side, dict):
         return expand_abbreviations(fold_for_identity(str(side.get("name") or "")))
     return expand_abbreviations(fold_for_identity(str(side or "")))
+
+
+def _side_name(side: Any) -> str:
+    if isinstance(side, dict):
+        return str(side.get("name") or "")
+    return str(side or "")
 
 
 def _ts(value: Any) -> Optional[datetime]:
@@ -61,7 +67,13 @@ def identity_confidence(canonical: Dict[str, Any], candidate: Dict[str, Any]) ->
     away = _fold_side(canonical.get("away") or canonical.get("participant_b"))
     ch = _fold_side(candidate.get("home") or candidate.get("participant_a"))
     ca = _fold_side(candidate.get("away") or candidate.get("participant_b"))
-    if not home or not away or {home, away} != {ch, ca}:
+    home_name = _side_name(canonical.get("home") or canonical.get("participant_a"))
+    away_name = _side_name(canonical.get("away") or canonical.get("participant_b"))
+    ch_name = _side_name(candidate.get("home") or candidate.get("participant_a"))
+    ca_name = _side_name(candidate.get("away") or candidate.get("participant_b"))
+    if not home or not away:
+        return 0
+    if {home, away} != {ch, ca} and not participants_equivalent(home_name, away_name, ch_name, ca_name):
         return 0
     if _weak_pair(home, away):
         return 0

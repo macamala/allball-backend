@@ -29,7 +29,6 @@ from collector.participant_alias import (
     contextual_pair_match,
     discover_aliases_from_pair,
     prefer_display,
-    resolve_folded,
 )
 from collector.participant_text import clean_participant_name, extract_parenthetical_country
 from collector.timezones import DATE_ONLY, EXACT_TIME, UNKNOWN_PRECISION
@@ -44,6 +43,73 @@ BLOCKING_FLAGS = {
     "generic_heading",
     "url_in_name",
 }
+
+
+FINISHED_STATUSES = {
+    "finished",
+    "ft",
+    "final",
+    "ended",
+    "complete",
+    "completed",
+    "aet",
+    "pen",
+    "awarded",
+}
+LIVE_STATUSES = {"live", "inplay", "in_play", "halftime", "ht", "break"}
+
+
+def _score_present(score: Any) -> bool:
+    if not isinstance(score, dict):
+        return False
+    return score.get("home") not in (None, "") and score.get("away") not in (None, "")
+
+
+def _status_rank(status: Any) -> int:
+    value = str(status or "").lower()
+    if value in LIVE_STATUSES:
+        return 3
+    if value in FINISHED_STATUSES or value in {"postponed", "cancelled", "canceled", "abandoned"}:
+        return 2
+    return 1
+
+
+def _keeper_rank(item: Dict[str, Any]) -> Tuple:
+    extra = item.get("extra") or {}
+    family = extra.get("source_family") or item.get("primary_source_id") or ""
+    home = (item.get("home") or {}).get("name") or ""
+    away = (item.get("away") or {}).get("name") or ""
+    return (
+        1 if _score_present(item.get("score")) else 0,
+        _status_rank(item.get("status")),
+        1 if family in HUB_FAMILIES else 0,
+        len(extra.get("collapsed_from") or []),
+        -(len(home) + len(away)),
+        str(item.get("event_id") or ""),
+    )
+
+
+def _prefer_result(keeper: SportsEvent, loser: SportsEvent) -> None:
+    k_score = load_json(keeper.score_json, {}) or {}
+    l_score = load_json(loser.score_json, {}) or {}
+    k_filled = _score_present(k_score)
+    l_filled = _score_present(l_score)
+    if l_filled and not k_filled:
+        keeper.score_json = loser.score_json
+        if _status_rank(loser.status) >= _status_rank(keeper.status):
+            keeper.status = loser.status
+        return
+    if k_filled and l_filled:
+        if k_score.get("home") != l_score.get("home") or k_score.get("away") != l_score.get("away"):
+            if _status_rank(loser.status) > _status_rank(keeper.status) or (
+                _status_rank(loser.status) == _status_rank(keeper.status)
+                and (loser.updated_at or datetime.min) > (keeper.updated_at or datetime.min)
+            ):
+                keeper.score_json = loser.score_json
+                keeper.status = loser.status
+        return
+    if not k_filled and not l_filled and _status_rank(loser.status) > _status_rank(keeper.status):
+        keeper.status = loser.status
 
 
 def _event_dict(row: SportsEvent) -> Dict[str, Any]:
@@ -128,16 +194,41 @@ def collapse_canonical_events(db: Session, *, competition_ids: Optional[List[str
                 if ok:
                     aliases_created += discover_aliases_from_pair(db, left, right)
 
-    clusters: Dict[Tuple[str, str, str, str], List[Dict[str, Any]]] = defaultdict(list)
-    for event in events:
-        sport = event.get("sport") or ""
-        start = str(event.get("start_time") or "")[:10]
-        home = resolve_folded(db, sport, (event.get("home") or {}).get("name") or "")
-        away = resolve_folded(db, sport, (event.get("away") or {}).get("name") or "")
-        if not home or not away or not start:
-            continue
-        pair = tuple(sorted((home, away)))
-        clusters[(sport, event.get("competition_key") or "", start, pair[0], pair[1])].append(event)
+    parent: Dict[str, str] = {}
+
+    def find(eid: str) -> str:
+        parent.setdefault(eid, eid)
+        while parent[eid] != eid:
+            parent[eid] = parent[parent[eid]]
+            eid = parent[eid]
+        return eid
+
+    def union(left_id: str, right_id: str) -> None:
+        ra, rb = find(left_id), find(right_id)
+        if ra != rb:
+            parent[rb] = ra
+
+    for group in same_day.values():
+        public_group = [
+            item
+            for item in group
+            if (item.get("extra") or {}).get("display_eligible") is not False
+            and not (item.get("extra") or {}).get("canonical_event_id")
+        ]
+        for event in public_group:
+            parent.setdefault(event["event_id"], event["event_id"])
+        for i, left in enumerate(public_group):
+            for right in public_group[i + 1 :]:
+                ok, _reason = contextual_pair_match(left, right, db=db)
+                if ok:
+                    union(left["event_id"], right["event_id"])
+
+    clusters: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    by_event = {item["event_id"]: item for item in events}
+    for eid in parent:
+        event = by_event.get(eid)
+        if event:
+            clusters[find(eid)].append(event)
 
     collapsed = 0
     conflicts = 0
@@ -152,18 +243,7 @@ def collapse_canonical_events(db: Session, *, competition_ids: Optional[List[str
         ]
         if len(public) < 2:
             continue
-        keeper = sorted(
-            public,
-            key=lambda item: (
-                len((item.get("extra") or {}).get("collapsed_from") or []),
-                0 if ((item.get("extra") or {}).get("source_family") or "") == "espn-html" else 1,
-                1 if ((item.get("extra") or {}).get("source_family") or item.get("primary_source_id") or "") in HUB_FAMILIES else 0,
-                len((item.get("home") or {}).get("name") or "")
-                + len((item.get("away") or {}).get("name") or ""),
-                str(item.get("event_id") or ""),
-            ),
-            reverse=True,
-        )[0]
+        keeper = sorted(public, key=_keeper_rank, reverse=True)[0]
         for other in public:
             if other["event_id"] == keeper["event_id"]:
                 continue
@@ -172,26 +252,20 @@ def collapse_canonical_events(db: Session, *, competition_ids: Optional[List[str
             if not ok:
                 false_positive += 1
                 continue
-            if reason == "ok" and (keeper.get("score") or {}).get("home") not in (None, "") and (
-                other.get("score") or {}
-            ).get("home") not in (None, ""):
-                ks = (keeper.get("score") or {})
-                os_ = (other.get("score") or {})
-                tennis = (keeper.get("sport") or other.get("sport")) == "tennis"
-                if tennis and (ks.get("home"), ks.get("away")) != (os_.get("home"), os_.get("away")):
-                    conflicts += 1
-                    _record_conflict(db, keeper["event_id"], other["event_id"], ks, os_)
-                    continue
-                if (ks.get("home"), ks.get("away")) != (os_.get("home"), os_.get("away")) and (
-                    ks.get("home"),
-                    ks.get("away"),
-                ) != (os_.get("away"), os_.get("home")):
-                    conflicts += 1
-                    _record_conflict(db, keeper["event_id"], other["event_id"], ks, os_)
-                    continue
+            ks = keeper.get("score") or {}
+            os_ = other.get("score") or {}
+            if (
+                ks.get("home") not in (None, "")
+                and os_.get("home") not in (None, "")
+                and (ks.get("home"), ks.get("away")) != (os_.get("home"), os_.get("away"))
+                and (ks.get("home"), ks.get("away")) != (os_.get("away"), os_.get("home"))
+            ):
+                conflicts += 1
+                _record_conflict(db, keeper["event_id"], other["event_id"], ks, os_)
             if conf >= 90 or ok:
                 if _collapse_pair(db, keeper["event_id"], other["event_id"]):
                     collapsed += 1
+                    keeper = _event_dict(db.query(SportsEvent).filter_by(event_id=keeper["event_id"]).one())
             else:
                 likely += 1
     try:
@@ -256,6 +330,7 @@ def _collapse_pair(db: Session, keeper_id: str, loser_id: str) -> bool:
     if loser.primary_source_id and loser.primary_source_id not in sources:
         sources.append(loser.primary_source_id)
     keeper.contributing_sources_json = dump_json(sources)
+    _prefer_result(keeper, loser)
     k_parts = load_json(keeper.participants_json, {}) or {}
     l_parts = load_json(loser.participants_json, {}) or {}
     for key in ("home", "away"):
