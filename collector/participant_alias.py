@@ -98,6 +98,8 @@ def identity_cores_compatible(left: str, right: str) -> bool:
         return False
     if len(extra) <= 3 and all(token in CLUB_STYLE_EXTRAS or len(token) >= 6 for token in extra):
         return True
+    if len(short_s) >= 8 and extra and all(1 < len(token) <= 3 for token in extra):
+        return True
     return False
 
 
