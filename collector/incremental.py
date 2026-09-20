@@ -660,8 +660,7 @@ def run_incremental_tick(db: Session, *, sleeper=None, now: Optional[datetime] =
         fetch_started = _now()
         if family and lane == 0:
             note_live_family(family, last_fetch_started_at=fetch_started.isoformat() + "Z")
-        scope = str(family_caps(family).get("shared_request_scope") or "competition")
-        run_jobs = group[:1] if lane == 0 and scope == "family" else group
+        run_jobs = group[:1] if lane == 0 else group
         for job in run_jobs:
             job = dict(job)
             family = job["family"]
