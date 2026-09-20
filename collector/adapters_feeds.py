@@ -6,7 +6,7 @@ Does not bypass 401/403/CAPTCHA/Cloudflare.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from collector.adapters import FetchRequest, FetchResult
@@ -234,8 +234,12 @@ class MlbAdapter:
     def fetch(self, request: FetchRequest) -> FetchResult:
         if request.capability not in {"fixtures", "results", "live_scores", "snapshot"}:
             return FetchResult(ok=True, http_status=200, events=[])
+        now = datetime.now(timezone.utc)
+        start = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+        end = (now + timedelta(days=1)).strftime("%Y-%m-%d")
         result = self._get(
-            "https://statsapi.mlb.com/api/v1/schedule?sportId=1&hydrate=linescore,team"
+            "https://statsapi.mlb.com/api/v1/schedule?sportId=1"
+            f"&hydrate=linescore,team&startDate={start}&endDate={end}"
         )
         if not result.ok:
             return result
