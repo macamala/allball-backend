@@ -485,6 +485,10 @@ def _consume_result(
                         family=str(incoming.get("source_family") or mapping.upstream_family or ""),
                         source_event_id=incoming.get("source_event_id"),
                     )
+                    if incoming.get("result_type"):
+                        extra["result_type"] = incoming.get("result_type")
+                    if incoming.get("walkover"):
+                        extra["walkover"] = True
                     existing.extra_json = dump_json(extra)
                     from collector.list_extra import store_list_extra
 

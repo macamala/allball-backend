@@ -269,6 +269,7 @@ def merge_event_fields(
         "category",
         "location",
         "result_type",
+        "walkover",
     ):
         if key == "incidents" and live_wins and "incidents" in incoming:
             continue

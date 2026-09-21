@@ -22,7 +22,7 @@ from collector.util import dump_json, load_json
 
 logger = logging.getLogger(__name__)
 
-JOB_KEY = "bounded-rich-backfill-v3"
+JOB_KEY = "bounded-rich-backfill-v4"
 
 CORE_COMPETITIONS: List[str] = [
     "wta-tour",

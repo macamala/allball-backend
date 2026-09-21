@@ -32,6 +32,10 @@ def event_unchanged(existing, incoming: Dict[str, Any]) -> bool:
         return False
     if stored != observation_signature(incoming):
         return False
+    if incoming.get("result_type") and extra.get("result_type") != incoming.get("result_type"):
+        return False
+    if incoming.get("walkover") and not extra.get("walkover"):
+        return False
     from collector.source_ids import families_with_ids, merge_family_ids
 
     stored_ids = families_with_ids(extra)
