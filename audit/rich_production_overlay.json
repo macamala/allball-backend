@@ -129,5 +129,16 @@
   "pga-tour": {
     "sport_detail": "PROVEN",
     "production_verified": true
+  },
+  "formula-1": {
+    "timeline": "NOT_APPLICABLE",
+    "stats": "NOT_APPLICABLE",
+    "lineups": "NOT_APPLICABLE",
+    "periods": "NOT_APPLICABLE",
+    "standings": "PROVEN",
+    "player_stats": "PARTIAL",
+    "sport_detail": "PROVEN",
+    "production_verified": true,
+    "limitation": "Jolpica 2026 Australian GP classification: Russell P1, grid/gap/fastest lap/status; current driver standings 23 rows. Not live timing."
   }
 }
