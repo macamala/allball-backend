@@ -1,0 +1,52 @@
+{
+  "freeze": {
+    "frozen_at": "2026-09-21T02:22:58.457603+00:00",
+    "source_matrix_checksum": "e16236bb4666665a6f49856fa6505e9c2defd7ec84b6fb7142fc872c79477440",
+    "frozen_competition_count": 180,
+    "health": {
+      "status": "ok",
+      "service": "allball-backend",
+      "database": "ok",
+      "matrix": {
+        "checksum": "e16236bb4666665a6f49856fa6505e9c2defd7ec84b6fb7142fc872c79477440",
+        "frozen": "e16236bb4666665a6f49856fa6505e9c2defd7ec84b6fb7142fc872c79477440",
+        "matches_frozen": true,
+        "competition_count": 180,
+        "clean_full_180": true
+      },
+      "results_flags": {
+        "RESULTS_COLLECTION_ENABLED": true,
+        "RESULTS_WRITE_ENABLED": false,
+        "RESULTS_SCHEDULER_ENABLED": false,
+        "RESULTS_KEEPALIVE": true,
+        "fail_closed": true
+      },
+      "kill_switch": {
+        "RESULTS_SCHEDULER_ENABLED": false,
+        "stops_new_scheduled_work": true,
+        "in_flight_tick_may_finish": true
+      }
+    },
+    "public_status": {
+      "connected": true,
+      "provider": null,
+      "providers": [],
+      "public_attribution_required": false,
+      "message": "Live sports data is served from the NinkoSports collector.",
+      "collector": {
+        "enabled_sources": 608,
+        "source_mappings": 638,
+        "events": 12260
+      },
+      "attribution": []
+    },
+    "extra": {}
+  },
+  "matrix": {
+    "checksum": "e16236bb4666665a6f49856fa6505e9c2defd7ec84b6fb7142fc872c79477440",
+    "frozen": "e16236bb4666665a6f49856fa6505e9c2defd7ec84b6fb7142fc872c79477440",
+    "matches_frozen": true,
+    "competition_count": 180,
+    "clean_full_180": true
+  }
+}

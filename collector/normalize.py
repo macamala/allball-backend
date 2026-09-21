@@ -143,6 +143,15 @@ def normalize_event(raw: Dict[str, Any], *, sport_id: str, competition_id: str) 
     if sport.get("event_model") == "racing":
         event["country_id"] = event.get("country_id")
         event["country_based"] = True
+    score_row = event.get("score") or {}
+    if event.get("status") == "scheduled":
+        try:
+            if int(score_row.get("home")) == 0 and int(score_row.get("away")) == 0:
+                score_row["home"] = None
+                score_row["away"] = None
+                event["score"] = score_row
+        except (TypeError, ValueError):
+            pass
     return reconcile_live_status(event)
 
 

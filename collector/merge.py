@@ -72,6 +72,30 @@ def _prefer(current: Any, incoming: Any, incoming_wins: bool) -> Any:
     return incoming if _filled(incoming) else current
 
 
+def score_known(score: Any) -> bool:
+    if not isinstance(score, dict):
+        return False
+    return _filled(score.get("home")) and _filled(score.get("away"))
+
+
+def merge_score_fields(
+    current_score: Any,
+    incoming_score: Any,
+    *,
+    incoming_wins_volatile: bool,
+) -> Dict[str, Any]:
+    """Field-level score merge. Null/blank never erases a known value."""
+    out = dict(current_score or {}) if isinstance(current_score, dict) else {}
+    incoming = incoming_score if isinstance(incoming_score, dict) else {}
+    keys = list(dict.fromkeys([*VOLATILE_SCORE_KEYS, *incoming.keys(), *out.keys()]))
+    for key in keys:
+        inc_val = incoming.get(key)
+        cur_val = out.get(key)
+        if _filled(inc_val) and (incoming_wins_volatile or not _filled(cur_val)):
+            out[key] = inc_val
+    return out
+
+
 def contributing_sources(current_json: Optional[str], source_id: str) -> List[str]:
     values = load_json(current_json, []) or []
     if source_id not in values:
@@ -105,6 +129,16 @@ def volatile_incoming_wins(
     inc_status = canonical_status(incoming.get("status") or "")
     cur_score = current.get("score") or {}
     inc_score = incoming.get("score") or {}
+    cur_known = score_known(cur_score)
+    inc_known = score_known(inc_score)
+
+    if inc_status == "finished" and cur_status == "finished":
+        if inc_known and not cur_known:
+            return True
+        if cur_known and not inc_known:
+            return False
+        if incoming_ts < current_ts:
+            return False
 
     if inc_status in AUTHORITATIVE_END and is_live(cur_status):
         if incoming_ts < current_ts and incoming_ts != datetime.min and current_ts != datetime.min:
@@ -114,14 +148,22 @@ def volatile_incoming_wins(
         if incoming_ts > current_ts and incoming_ts != datetime.min:
             return True
         return False
-    if inc_status == "finished" and cur_status == "finished" and incoming_ts < current_ts:
-        return False
 
-    if incoming_ts > current_ts and incoming_ts != datetime.min and (
-        _filled(inc_score.get("home")) or _filled(inc_score.get("away")) or inc_status in {"live", "finished"}
-    ):
-        return True
+    if incoming_ts > current_ts and incoming_ts != datetime.min:
+        if inc_status in {"scheduled", "delayed", "unknown"} and cur_status in {"finished", "live", "break"}:
+            return False
+        if cur_known and not inc_known and inc_status in {"scheduled", "unknown", "finished"}:
+            return False
+        if (
+            inc_known
+            or inc_status in {"live", "finished", "break"}
+            or _filled(inc_score.get("home"))
+            or _filled(inc_score.get("away"))
+        ):
+            return True
     if incoming_ts < current_ts and incoming_ts != datetime.min:
+        if inc_known and inc_status == "finished" and cur_status in {"scheduled", "unknown", "status_unknown", ""}:
+            return True
         if inc_status == "finished" and cur_status in {"", "scheduled", "live"} and incoming_ts == datetime.min:
             return False
         if incoming_ts < current_ts:
@@ -164,39 +206,30 @@ def merge_event_fields(
             freshness["status"] = {"source": incoming_source_id, "at": stamp}
     cur_score = current.get("score") or {}
     inc_score = incoming.get("score") or {}
-    if live_wins:
-        out["score"] = dict(cur_score)
-        for key in VOLATILE_SCORE_KEYS:
-            if key in inc_score:
-                out["score"][key] = inc_score.get(key)
+    out["score"] = merge_score_fields(cur_score, inc_score, incoming_wins_volatile=live_wins)
+    if incoming_source_id and (
+        (live_wins and score_known(inc_score))
+        or (not score_known(cur_score) and score_known(out.get("score") or {}))
+    ):
+        provenance["score"] = incoming_source_id
+        freshness["score"] = {"source": incoming_source_id, "at": stamp}
+        if _filled(inc_score.get("clock")) or _filled(inc_score.get("minute")):
+            freshness["clock"] = {"source": incoming_source_id, "at": stamp}
+    if live_wins and _filled(incoming.get("periods")):
+        out["periods"] = incoming.get("periods")
         if incoming_source_id:
-            provenance["score"] = incoming_source_id
-            freshness["score"] = {"source": incoming_source_id, "at": stamp}
-            if inc_score.get("clock") is not None or inc_score.get("minute") is not None:
-                freshness["clock"] = {"source": incoming_source_id, "at": stamp}
-        if "periods" in incoming:
-            out["periods"] = incoming.get("periods")
-            if incoming_source_id:
-                provenance["periods"] = incoming_source_id
-                freshness["periods"] = {"source": incoming_source_id, "at": stamp}
-        if "incidents" in incoming:
-            out["incidents"] = incoming.get("incidents")
-            if incoming_source_id:
-                provenance["incidents"] = incoming_source_id
-                freshness["incidents"] = {"source": incoming_source_id, "at": stamp}
-    else:
-        score_from_incoming = False
-        if not _filled(cur_score.get("home")) and _filled(inc_score.get("home")):
-            score_from_incoming = True
-        out["score"] = {key: _prefer(cur_score.get(key), inc_score.get(key), score_from_incoming) for key in VOLATILE_SCORE_KEYS}
-        if score_from_incoming and incoming_source_id:
-            provenance["score"] = incoming_source_id
-            freshness["score"] = {"source": incoming_source_id, "at": stamp}
-        if not _filled(current.get("periods")) and _filled(incoming.get("periods")):
-            out["periods"] = incoming.get("periods")
-            if incoming_source_id:
-                provenance["periods"] = incoming_source_id
-                freshness["periods"] = {"source": incoming_source_id, "at": stamp}
+            provenance["periods"] = incoming_source_id
+            freshness["periods"] = {"source": incoming_source_id, "at": stamp}
+    elif not _filled(current.get("periods")) and _filled(incoming.get("periods")):
+        out["periods"] = incoming.get("periods")
+        if incoming_source_id:
+            provenance["periods"] = incoming_source_id
+            freshness["periods"] = {"source": incoming_source_id, "at": stamp}
+    if live_wins and _filled(incoming.get("incidents")):
+        out["incidents"] = incoming.get("incidents")
+        if incoming_source_id:
+            provenance["incidents"] = incoming_source_id
+            freshness["incidents"] = {"source": incoming_source_id, "at": stamp}
     for key in (
         "venue",
         "season",

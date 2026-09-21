@@ -85,8 +85,24 @@ def same_canonical_event(left: Dict[str, Any], right: Dict[str, Any]) -> bool:
         return False
     lh, la = _participants(left)
     rh, ra = _participants(right)
-    if not lh or {lh, la} != {rh, ra}:
+    if not lh:
         return False
+    if {lh, la} != {rh, ra}:
+        from collector.participant_alias import participants_equivalent
+
+        def _raw(event: Dict[str, Any], side: str) -> str:
+            value = event.get(side) or event.get("participant_a" if side == "home" else "participant_b") or {}
+            if isinstance(value, dict):
+                return str(value.get("name") or "")
+            return str(value or "")
+
+        if not participants_equivalent(
+            _raw(left, "home"),
+            _raw(left, "away"),
+            _raw(right, "home"),
+            _raw(right, "away"),
+        ):
+            return False
     left_round = left.get("round") or left.get("stage")
     right_round = right.get("round") or right.get("stage")
     if rounds_conflict(left_round, right_round):

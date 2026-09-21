@@ -51,6 +51,29 @@ def expand_abbreviations(folded: str) -> str:
     return re.sub(r"\s+", " ", " ".join(tokens)).strip()
 
 
+def token_abbreviation_equivalent(left_folded: str, right_folded: str) -> bool:
+    """Lok. Tashkent / Lokomotiv Tashkent: aligned tokens, one is a real prefix.
+
+    Requires two or more tokens so single-stem clubs (Inter / Internacional)
+    are not merged by prefix alone.
+    """
+    ta = [tok for tok in expand_abbreviations(left_folded).split() if tok]
+    tb = [tok for tok in expand_abbreviations(right_folded).split() if tok]
+    if len(ta) < 2 or len(ta) != len(tb):
+        return False
+    matched_abbrev = False
+    for a, b in zip(ta, tb):
+        if a == b:
+            continue
+        shorter, longer = (a, b) if len(a) <= len(b) else (b, a)
+        if shorter in _GENERIC_STEMS or shorter in _PREFIX_DENY or longer in _PREFIX_DENY:
+            return False
+        if len(shorter) < 3 or not longer.startswith(shorter) or len(longer) - len(shorter) < 3:
+            return False
+        matched_abbrev = True
+    return matched_abbrev
+
+
 def names_equivalent(left: str, right: str) -> bool:
     a = fold_for_identity(left)
     b = fold_for_identity(right)
@@ -59,6 +82,8 @@ def names_equivalent(left: str, right: str) -> bool:
     if a == b:
         return True
     if expand_abbreviations(a) == expand_abbreviations(b):
+        return True
+    if token_abbreviation_equivalent(a, b):
         return True
     return identity_cores_compatible(left, right)
 

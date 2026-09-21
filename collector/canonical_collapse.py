@@ -23,7 +23,7 @@ from collector.enrichment import (
     quality_flags_for_event,
 )
 from collector.identity_events import identity_confidence
-from collector.merge import _filled
+from collector.merge import _filled, merge_event_fields
 from collector.models import SportsEvent, SportsEventDetail, SportsEventObservation
 from collector.participant_alias import (
     canonical_display_name,
@@ -91,26 +91,17 @@ def _keeper_rank(item: Dict[str, Any]) -> Tuple:
 
 
 def _prefer_result(keeper: SportsEvent, loser: SportsEvent) -> None:
-    k_score = load_json(keeper.score_json, {}) or {}
-    l_score = load_json(loser.score_json, {}) or {}
-    k_filled = _score_present(k_score)
-    l_filled = _score_present(l_score)
-    if l_filled and not k_filled:
-        keeper.score_json = loser.score_json
-        if _status_rank(loser.status) >= _status_rank(keeper.status):
-            keeper.status = loser.status
-        return
-    if k_filled and l_filled:
-        if k_score.get("home") != l_score.get("home") or k_score.get("away") != l_score.get("away"):
-            if _status_rank(loser.status) > _status_rank(keeper.status) or (
-                _status_rank(loser.status) == _status_rank(keeper.status)
-                and (loser.updated_at or datetime.min) > (keeper.updated_at or datetime.min)
-            ):
-                keeper.score_json = loser.score_json
-                keeper.status = loser.status
-        return
-    if not k_filled and not l_filled and _status_rank(loser.status) > _status_rank(keeper.status):
-        keeper.status = loser.status
+    k_dict = _event_dict(keeper)
+    l_dict = _event_dict(loser)
+    merged = merge_event_fields(
+        k_dict,
+        l_dict,
+        incoming_is_higher_priority=False,
+        incoming_source_id=str(loser.primary_source_id or ""),
+    )
+    keeper.score_json = dump_json(merged.get("score") or {})
+    if merged.get("status"):
+        keeper.status = merged.get("status")
 
 
 def _event_dict(row: SportsEvent) -> Dict[str, Any]:
@@ -130,6 +121,12 @@ def _event_dict(row: SportsEvent) -> Dict[str, Any]:
         "source_event_ids": extra.get("source_event_ids") or {},
         "event_family": row.event_family,
         "status": row.status,
+        "observed_at": extra.get("observed_at") or extra.get("canonical_last_observed_at"),
+        "retrieved_at": extra.get("source_fetch_time")
+        or (row.retrieved_at.isoformat() + "Z" if row.retrieved_at else None),
+        "source_fetch_time": extra.get("source_fetch_time"),
+        "field_sources": extra.get("field_sources") or {},
+        "periods": extra.get("periods"),
     }
 
 

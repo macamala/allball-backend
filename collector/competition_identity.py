@@ -277,7 +277,8 @@ def correct_public_competition_id(
     stored = str(stored_competition_id or "").strip()
     name = str(source_competition_name or "").strip()
     frozen = frozen_competition_ids()
-    if not name:
+    slugish = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+    if not name or slugish == stored:
         return stored if stored in frozen else None
     if stored and label_matches_competition(name, stored):
         return stored if stored in frozen else None

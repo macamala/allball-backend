@@ -63,7 +63,11 @@ def test_name_normalization_equivalents():
     assert names_equivalent("São Paulo", "Sao Paulo - SP")
     assert names_equivalent("Internacional", "Internacional -")
     assert names_equivalent("FR Monaco", "Monaco")
+    assert names_equivalent("Lokomotiv Tashkent", "Lok. Tashkent")
+    assert names_equivalent("Bologna", "Bologna FC")
+    assert names_equivalent("Torino", "Torino FC")
     assert not names_equivalent("Inter", "Inter Miami")
+    assert not names_equivalent("Inter", "Internacional")
     assert not names_equivalent("Real Madrid", "Real Sociedad")
     assert not names_equivalent("Manchester United", "Manchester City")
 
@@ -230,5 +234,42 @@ def test_roma_inter_and_fiorentina_napoli_collapse_without_hardcoded_fixtures():
         assert any(row["status"] == "finished" and (row.get("score") or {}).get("home") == 2 for row in same_day)
         assert any((row.get("score") or {}).get("away") == 1 for row in same_day)
         assert len(_public(db, "coppa-italia-depth")) == 1
+    finally:
+        db.close()
+
+
+def test_lokomotiv_and_club_particle_aliases_collapse():
+    db = SessionLocal()
+    try:
+        kickoff = datetime(2026, 9, 20, 15, 0, 0)
+        db.add(_event(event_id="ninko-id-lok-a", home="Lokomotiv Tashkent", away="Neftchi Fergana", competition_id="uzbekistan-super-league", score={"home": 0, "away": 1}, status="finished", start_time=kickoff))
+        db.add(_event(event_id="ninko-id-lok-b", home="Lok. Tashkent", away="Neftchi Fergana", competition_id="uzbekistan-super-league", family="sportscore", start_time=kickoff))
+        db.add(_event(event_id="ninko-id-bo-a", home="Bologna", away="Torino", competition_id="italy-sa-particles", score={"home": 1, "away": 0}, status="finished", start_time=kickoff))
+        db.add(_event(event_id="ninko-id-bo-b", home="Bologna FC", away="Torino FC", competition_id="italy-sa-particles", family="thesportsdb", start_time=kickoff))
+        db.commit()
+        collapse_canonical_events(db)
+        assert len(_public(db, "uzbekistan-super-league")) == 1
+        uz = _public(db, "uzbekistan-super-league")[0]
+        assert uz["score"]["home"] == 0
+        assert uz["score"]["away"] == 1
+        assert len(_public(db, "italy-sa-particles")) == 1
+    finally:
+        db.close()
+
+
+def test_false_merge_protection_youth_women_cup_doubleheader():
+    db = SessionLocal()
+    try:
+        kickoff = datetime(2026, 9, 20, 18, 0, 0)
+        db.add(_event(event_id="ninko-id-yh-a", home="Arsenal", away="Chelsea", competition_id="england-pl-false"))
+        db.add(_event(event_id="ninko-id-yh-b", home="Arsenal U21", away="Chelsea U21", competition_id="england-pl-false"))
+        db.add(_event(event_id="ninko-id-wm-a", home="Arsenal", away="Chelsea", competition_id="england-wsl-false"))
+        db.add(_event(event_id="ninko-id-bb-a", home="Yankees", away="Red Sox", competition_id="mlb-false", sport_id="baseball", start_time=kickoff))
+        db.add(_event(event_id="ninko-id-bb-b", home="Yankees", away="Red Sox", competition_id="mlb-false", sport_id="baseball", start_time=datetime(2026, 9, 20, 23, 0, 0)))
+        db.commit()
+        collapse_canonical_events(db)
+        assert len(_public(db, "england-pl-false")) == 2
+        assert len(_public(db, "england-wsl-false")) == 1
+        assert len(_public(db, "mlb-false")) == 2
     finally:
         db.close()
