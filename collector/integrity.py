@@ -27,6 +27,7 @@ from collector.identity_events import identity_confidence
 from collector.models import SportsEvent, SportsEventObservation
 from collector.normalize import fingerprint
 from collector.participant_text import clean_participant_name, fold_for_identity, repair_mojibake
+from collector.source_ids import as_family_map
 from collector.util import dump_json, load_json
 
 HUB_FAMILIES = {"bbc-sport", "sportscore", "espn-html"}
@@ -367,7 +368,9 @@ def apply_competition_attribution(
         eligible = row.display_eligible is not False and extra.get("display_eligible") is not False
         recover = extra.get("competition_attribution") == "quarantined_unproven"
         family = str(extra.get("source_family") or "")
-        owned_hidden = family in MAPPING_OWNED_FAMILIES and (
+        id_families = set(as_family_map(extra.get("source_event_ids")).keys())
+        owned = family in MAPPING_OWNED_FAMILIES or bool(id_families & MAPPING_OWNED_FAMILIES)
+        owned_hidden = owned and (
             row.display_eligible is False or extra.get("display_eligible") is False
         )
         if eligible or recover or owned_hidden:
@@ -383,6 +386,11 @@ def apply_competition_attribution(
         source_id = extra.get("source_competition_id")
         source_name = extra.get("source_competition_name") or extra.get("competition") or ""
         family = str(extra.get("source_family") or "")
+        id_families = set(as_family_map(extra.get("source_event_ids")).keys())
+        for candidate in id_families:
+            if candidate in MAPPING_OWNED_FAMILIES:
+                family = candidate
+                break
         for match_id in obs_by_event.get(row.event_id) or []:
             live = live_index.get(str(match_id))
             if live:

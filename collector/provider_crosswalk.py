@@ -23,7 +23,7 @@ from collector.util import dump_json, load_json
 
 logger = logging.getLogger(__name__)
 
-ATTACH_JOB = "provider-id-attach-v6"
+ATTACH_JOB = "provider-id-attach-v7"
 MAX_INGEST_PER_FAMILY = 40
 FAMILY_SPORT = {
     "pulselive": "rugby",
@@ -210,13 +210,6 @@ def _ingest(db: Session, incoming: Dict[str, Any], source_id: str) -> bool:
     from collector.source_ids import source_id_aliases
 
     candidates = source_id_aliases(source_id) or [source_id]
-    source = (
-        db.query(SportsSource)
-        .filter(SportsSource.source_id.in_(candidates))
-        .first()
-    )
-    if source is None:
-        return False
     competition_id = incoming.get("competition_key") or ""
     mapping = (
         db.query(SportsSourceCompetition)
@@ -227,16 +220,36 @@ def _ingest(db: Session, incoming: Dict[str, Any], source_id: str) -> bool:
         .first()
     )
     if mapping is None:
+        mapping = (
+            db.query(SportsSourceCompetition)
+            .filter_by(competition_id=competition_id, enabled=True)
+            .first()
+        )
+    if mapping is None:
         return False
-    mapped_source = db.query(SportsSource).filter_by(source_id=mapping.source_id).first()
-    if mapped_source is not None:
-        source = mapped_source
+    source = db.query(SportsSource).filter_by(source_id=mapping.source_id).first()
+    if source is None:
+        source = (
+            db.query(SportsSource)
+            .filter(SportsSource.source_id.in_(candidates))
+            .first()
+        )
+    if source is None:
+        return False
     sport_id = incoming.get("sport") or ""
-    event = normalize_event(incoming, sport_id=sport_id, competition_id=competition_id)
-    event["competition_key"] = competition_id
-    existing = match_event(db, event, source_id=source.source_id)
-    _upsert_event(db, incoming=event, source=source, mapping=mapping, existing=existing)
-    return True
+    try:
+        event = normalize_event(incoming, sport_id=sport_id, competition_id=competition_id)
+        event["competition_key"] = competition_id
+        existing = match_event(db, event, source_id=source.source_id)
+        _upsert_event(db, incoming=event, source=source, mapping=mapping, existing=existing)
+        return True
+    except Exception:
+        logger.exception(
+            "provider_crosswalk ingest failed source=%s competition=%s",
+            source.source_id,
+            competition_id,
+        )
+        return False
 
 
 def crosswalk_family(
@@ -499,6 +512,9 @@ def run_provider_id_attach(
             totals["families"][family].get("ambiguous"),
             totals["families"][family].get("ingested"),
         )
+    from collector.cache import cache_clear
+
+    cache_clear(db)
     return totals
 
 

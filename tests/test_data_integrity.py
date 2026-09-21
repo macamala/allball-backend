@@ -629,7 +629,8 @@ def test_owned_family_hidden_cricket_is_recovered():
             extra_json=dump_json(
                 {
                     "display_eligible": False,
-                    "source_family": "cricsheet",
+                    "source_family": "thesportsdb",
+                    "source_event_ids": {"cricsheet": "1482210"},
                     "source_competition_name": "ICC Men's T20 World Cup",
                     "innings": [{"label": "India", "runs": 120, "wickets": 4, "overs": 20}],
                 }

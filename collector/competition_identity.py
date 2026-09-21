@@ -229,6 +229,8 @@ def resolve_competition(
             "resolution_confidence": 100,
             "accepted": True,
         }
+    hub = source_family in {"bbc-sport", "sportscore", "espn-html"}
+    owned = source_family in MAPPING_OWNED_FAMILIES
     if independent_name and label_matches_competition(name, mapping_competition_id):
         return {
             **base,
@@ -238,7 +240,7 @@ def resolve_competition(
             "accepted": True,
         }
     other = unique_label_competition(name, sport_id=sport_id, exclude=mapping_competition_id) if independent_name else None
-    if other:
+    if other and not owned:
         return {
             **base,
             "canonical_competition_id": mapping_competition_id,
@@ -247,8 +249,6 @@ def resolve_competition(
             "resolution_confidence": 0,
             "accepted": False,
         }
-    hub = source_family in {"bbc-sport", "sportscore", "espn-html"}
-    owned = source_family in MAPPING_OWNED_FAMILIES
     if not independent_name and not source_competition_id:
         return {
             **base,
@@ -309,6 +309,8 @@ def correct_public_competition_id(
         return stored if stored in frozen else None
     if stored and label_matches_competition(name, stored):
         return stored if stored in frozen else None
+    if family in MAPPING_OWNED_FAMILIES:
+        return stored if stored in frozen else None
     matches = [
         cid
         for cid in frozen
@@ -316,8 +318,6 @@ def correct_public_competition_id(
     ]
     if len(matches) == 1:
         return matches[0]
-    if family in MAPPING_OWNED_FAMILIES:
-        return stored if stored in frozen else None
     return None
 
 

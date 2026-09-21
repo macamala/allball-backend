@@ -308,6 +308,13 @@ def test_opendota_owned_mapping_stays_public():
         )
         == "professional"
     )
+    world_cup = resolve_competition(
+        mapping_competition_id="t20-internationals",
+        source_competition_name="ICC Men's T20 World Cup",
+        source_family="cricsheet",
+        sport_id="cricket",
+    )
+    assert world_cup["accepted"] is True
 
 
 def test_cricsheet_historical_direct_event_keeps_frozen_id():
