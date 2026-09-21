@@ -359,6 +359,8 @@ def apply_row_fields(row, merged: Dict[str, Any], source_id: str, higher: bool) 
     extra = load_json(row.extra_json, {}) or {}
     nested = merged.get("extra") if isinstance(merged.get("extra"), dict) else {}
     for key in EXTRA_PERSIST_KEYS:
+        if key in {"source_event_ids", "source_event_id"}:
+            continue
         if merged.get(key) is not None:
             extra[key] = merged.get(key)
         elif nested.get(key) is not None and extra.get(key) is None:
@@ -370,11 +372,17 @@ def apply_row_fields(row, merged: Dict[str, Any], source_id: str, higher: bool) 
     extra["display_eligible"] = is_display_eligible(merged)
     if hasattr(row, "display_eligible"):
         row.display_eligible = extra["display_eligible"]
-    ids = extra.get("source_event_ids") or []
-    incoming_id = merged.get("source_event_id")
-    if incoming_id and incoming_id not in ids:
-        ids.append(incoming_id)
-        extra["source_event_ids"] = ids
+    from collector.source_ids import merge_family_ids
+
+    extra["source_event_ids"] = merge_family_ids(
+        extra.get("source_event_ids"),
+        merged.get("source_event_ids"),
+        nested.get("source_event_ids"),
+        family=merged.get("source_family") or extra.get("source_family") or "",
+        source_event_id=merged.get("source_event_id") or nested.get("source_event_id"),
+    )
+    if extra.get("source_event_ids") and not extra.get("source_event_id"):
+        extra["source_event_id"] = next(iter(extra["source_event_ids"].values()), None)
     extra["field_sources"] = merged.get("field_sources") or extra.get("field_sources") or {}
     extra["field_freshness"] = merged.get("field_freshness") or extra.get("field_freshness") or {}
     now = datetime.utcnow()

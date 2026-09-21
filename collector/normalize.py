@@ -103,6 +103,8 @@ def normalize_event(raw: Dict[str, Any], *, sport_id: str, competition_id: str) 
         "timezone": raw.get("timezone"),
         "source_url": raw.get("source_url") or raw.get("url"),
         "source_family": raw.get("source_family"),
+        "source_event_ids": (raw.get("source_event_ids") if isinstance(raw.get("source_event_ids"), dict) else None)
+        or ((raw.get("extra") or {}).get("source_event_ids") if isinstance(raw.get("extra"), dict) else None),
         "athletes": raw.get("athletes") or raw.get("drivers") or raw.get("runners"),
         "periods": raw.get("periods") or raw.get("sets") or raw.get("quarters"),
         "maps": raw.get("maps"),
@@ -158,6 +160,16 @@ def normalize_event(raw: Dict[str, Any], *, sport_id: str, competition_id: str) 
                 event["score"] = score_row
         except (TypeError, ValueError):
             pass
+    from collector.source_ids import merge_family_ids
+
+    extra_raw = raw.get("extra") if isinstance(raw.get("extra"), dict) else {}
+    event["source_event_ids"] = merge_family_ids(
+        event.get("source_event_ids"),
+        raw.get("source_event_ids"),
+        extra_raw.get("source_event_ids"),
+        family=str(raw.get("source_family") or extra_raw.get("source_family") or ""),
+        source_event_id=raw.get("source_event_id") or extra_raw.get("source_event_id") or event.get("source_event_id"),
+    )
     if sport_id == "tennis":
         event = apply_tennis_match_score(event)
     return reconcile_live_status(event)

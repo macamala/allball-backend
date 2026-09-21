@@ -327,7 +327,7 @@ def sofa_event(row: Dict[str, Any], competition_id: str, sport_id: str) -> Optio
         "source_competition_id": unique.get("id") or tour.get("id"),
         "extra": {
             "source_family": "sofascore-web",
-            "source_event_ids": [str(row.get("id") or "")],
+            "source_event_ids": {"sofascore-web": str(row.get("id") or "")},
             "source_event_id": str(row.get("id") or ""),
         },
     }

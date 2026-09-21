@@ -162,8 +162,11 @@ def match_event(
                 db.info.setdefault("events_by_comp", {})[competition_id] = list(cross)
             for row in cross:
                 extra = load_json(row.extra_json, {}) or {}
-                ids = extra.get("source_event_ids") or []
-                if source_event_id in ids or key in ids:
+                from collector.source_ids import as_family_map
+
+                ids = as_family_map(extra.get("source_event_ids"))
+                values = set(ids.values())
+                if str(source_event_id) in values or key in values or extra.get("source_event_id") == source_event_id:
                     if _stored_pair(row) == _incoming_pair(event):
                         _register_event(db, row)
                         return row

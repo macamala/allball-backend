@@ -160,6 +160,8 @@ class SportsEvent(Base):
         Index("ix_sports_event_canonical", "canonical_event_id"),
         Index("ix_sports_event_status_start", "status", "start_time"),
         Index("ix_sports_event_updated", "updated_at"),
+        Index("ix_sports_event_start_canonical", "start_time", "canonical_event_id"),
+        Index("ix_sports_event_comp_status_start", "competition_id", "status", "start_time"),
     )
 
     event_id = Column(String(160), primary_key=True)

@@ -318,14 +318,14 @@ def _collapse_pair(db: Session, keeper_id: str, loser_id: str) -> bool:
         return False
     k_extra = load_json(keeper.extra_json, {}) or {}
     l_extra = load_json(loser.extra_json, {}) or {}
-    k_ids = k_extra.get("source_event_ids") or []
-    l_ids = l_extra.get("source_event_ids") or []
-    if isinstance(k_ids, dict):
-        k_ids = list(k_ids.values())
-    if isinstance(l_ids, dict):
-        l_ids = list(l_ids.values())
-    merged_ids = list(dict.fromkeys([*k_ids, *l_ids, loser.event_id]))
-    k_extra["source_event_ids"] = merged_ids
+    from collector.source_ids import merge_family_ids
+
+    k_extra["source_event_ids"] = merge_family_ids(
+        k_extra.get("source_event_ids"),
+        l_extra.get("source_event_ids"),
+        family=str(l_extra.get("source_family") or k_extra.get("source_family") or ""),
+        source_event_id=l_extra.get("source_event_id") or k_extra.get("source_event_id"),
+    )
     k_extra["collapsed_from"] = list(dict.fromkeys((k_extra.get("collapsed_from") or []) + [loser_id]))
     if l_extra.get("provider_conflicts"):
         k_extra["provider_conflicts"] = (k_extra.get("provider_conflicts") or []) + l_extra.get("provider_conflicts")

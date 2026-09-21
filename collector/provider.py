@@ -32,6 +32,24 @@ from sports_provider import (
 )
 
 LIVE_QUERY_STATUSES = ("live", "halftime", "break")
+LIST_EXTRA_KEYS = (
+    "periods",
+    "winner",
+    "runners",
+    "round",
+    "live_class",
+    "start_precision",
+    "start_date",
+    "best_of",
+    "maps",
+    "race_number",
+    "tournament",
+    "tournament_name",
+    "current_set",
+    "result_type",
+    "walkover",
+    "stage",
+)
 HEADER_KEYS = (
     "id",
     "sport",
@@ -116,6 +134,11 @@ INTERNAL_EVENT_KEYS = {
     "source_event_updated_at",
     "status_inferred",
     "quality_flags",
+    "detail_fetched_at",
+    "detail_empty",
+    "detail_negative",
+    "detail_families_tried",
+    "source_event_id",
 }
 
 NESTED_SOURCE_ID_KEYS = {
@@ -342,15 +365,18 @@ class NinkoCollectedSportsDataProvider:
     ) -> List[NormalizedEvent]:
         db = _session(self._session_factory)
         try:
-            cache_key = f"events:p0v8:{sport}:{competition}:{status}:{date_from}:{date_to}:{int(allow_unfiltered)}"
+            cache_key = f"events:p0v11:{sport}:{competition}:{status}:{date_from}:{date_to}:{int(allow_unfiltered)}"
             cached = cache_get(db, cache_key)
             if cached is not None:
                 return cached
+            frozen = frozen_competition_ids()
             query = db.query(SportsEvent)
             if sport:
                 query = query.filter_by(sport_id=sport)
             if competition:
                 query = query.filter_by(competition_id=competition)
+            else:
+                query = query.filter(SportsEvent.competition_id.in_(frozen))
             if status == "live":
                 query = query.filter(SportsEvent.status.in_(LIVE_QUERY_STATUSES))
             elif status:
@@ -362,8 +388,6 @@ class NinkoCollectedSportsDataProvider:
             if start_to is not None:
                 query = query.filter(SportsEvent.start_time <= start_to)
             query = query.filter(SportsEvent.canonical_event_id.is_(None))
-            # Prefer the display_eligible column so dated queries can use
-            # ix_sports_event_public_start. Only scan extra_json when the column is NULL.
             query = query.filter(
                 or_(
                     SportsEvent.display_eligible.is_(True),
@@ -376,11 +400,14 @@ class NinkoCollectedSportsDataProvider:
                     ),
                 )
             )
-            query = query.order_by(SportsEvent.start_time.asc())
             unbounded = not date_from and not date_to
             if unbounded and not allow_unfiltered:
+                query = query.order_by(SportsEvent.start_time.desc())
                 query = query.limit(int(os.getenv("NINKO_EVENTS_UNFILTERED_LIMIT", "400")))
-            rows = query.all()
+                rows = list(reversed(query.all()))
+            else:
+                query = query.order_by(SportsEvent.start_time.asc())
+                rows = query.all()
             standing_ids = {
                 item[0]
                 for item in db.query(SportsStandingSnapshot.competition_id).distinct().all()
@@ -542,6 +569,7 @@ class NinkoCollectedSportsDataProvider:
         participants = load_json(row.participants_json, {}) or {}
         score = load_json(row.score_json, {}) or {}
         extra = load_json(row.extra_json, {}) or {}
+        extra_for_payload = extra if include_detail else {k: extra[k] for k in LIST_EXTRA_KEYS if extra.get(k) is not None}
         raw_sides = {
             "home": participants.get("home") or {},
             "away": participants.get("away") or {},
@@ -575,7 +603,7 @@ class NinkoCollectedSportsDataProvider:
             "live": bool(row.live),
             **{
                 k: v
-                for k, v in extra.items()
+                for k, v in extra_for_payload.items()
                 if k not in INTERNAL_EVENT_KEYS
                 and k not in CORE_ROW_KEYS
                 and (include_detail or k not in DETAIL_ONLY_KEYS)
@@ -593,9 +621,9 @@ class NinkoCollectedSportsDataProvider:
                     score["clock"] = None
                     score["clock_stale"] = True
                     payload["score"] = score
-        payload["quality_flags"] = extra.get("quality_flags") or quality_flags_for_event(
-            {**raw_sides, "sport": row.sport_id, "score": score}
-        )
+        payload["quality_flags"] = extra.get("quality_flags") if include_detail else None
+        if include_detail and payload["quality_flags"] is None:
+            payload["quality_flags"] = quality_flags_for_event({**raw_sides, "sport": row.sport_id, "score": score})
         if extra.get("display_eligible") is not None:
             payload["display_eligible"] = extra.get("display_eligible")
         else:

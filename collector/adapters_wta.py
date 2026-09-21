@@ -24,7 +24,7 @@ DEFAULT_TOURNAMENTS = [(901, 2026)]
 CALENDAR_TTL_S = 12 * 3600
 LIVE_MATCH_TTL_S = 45
 PAST_MATCH_TTL_S = 12 * 3600
-MAX_MATCH_FETCHES = 18
+MAX_MATCH_FETCHES = 36
 LIVE_SCORE_MATCH_FETCHES = 1
 WINDOW_PAST_DAYS = 14
 WINDOW_FUTURE_DAYS = 21
@@ -61,10 +61,19 @@ def match_to_event(row: Dict[str, Any], competition_id: str, tournament: Optiona
         }.items()
         if v not in (None, "")
     }
+    home_side = {"name": home, "side": "home"}
+    away_side = {"name": away, "side": "away"}
+    for side, prefix in ((home_side, "A"), (away_side, "B")):
+        seed = row.get(f"Seed{prefix}") or row.get(f"PlayerSeed{prefix}") or row.get(f"SeedPlayer{prefix}")
+        rank = row.get(f"Rank{prefix}") or row.get(f"PlayerRank{prefix}") or row.get(f"Ranking{prefix}")
+        if seed not in (None, ""):
+            side["seed"] = seed
+        if rank not in (None, ""):
+            side["rank"] = rank
     payload = {
         "id": oriented["source_event_id"] or f"wta:{row.get('EventID')}:{home}:{away}",
-        "home": {"name": home, "side": "home"},
-        "away": {"name": away, "side": "away"},
+        "home": home_side,
+        "away": away_side,
         "participant_a": {"name": home, "side": "a"},
         "participant_b": {"name": away, "side": "b"},
         "status": oriented["status"],
@@ -76,13 +85,45 @@ def match_to_event(row: Dict[str, Any], competition_id: str, tournament: Optiona
         "periods": oriented["periods"],
         "source_family": "wta-json",
         "source_event_id": oriented["source_event_id"],
+        "source_event_ids": {"wta-json": oriented["source_event_id"]},
         "walkover": True if oriented["result_type"] == "walkover" else None,
         "result_type": oriented["result_type"],
         **extra_meta,
     }
+    stats = wta_match_statistics(row)
+    if stats:
+        payload["statistics"] = stats
     if oriented["orientation_conflict"]:
         payload["orientation_conflict"] = True
     return payload
+
+
+_WTA_STAT_PAIRS = (
+    ("AcesA", "AcesB", "Aces"),
+    ("DoubleFaultsA", "DoubleFaultsB", "Double faults"),
+    ("FirstServePercentageA", "FirstServePercentageB", "First serve %"),
+    ("FirstServeA", "FirstServeB", "First serve %"),
+    ("FirstServePointsWonA", "FirstServePointsWonB", "First serve points won"),
+    ("BreakPointsConvertedA", "BreakPointsConvertedB", "Break points converted"),
+    ("BreakPointsWonA", "BreakPointsWonB", "Break points won"),
+    ("WinnersA", "WinnersB", "Winners"),
+    ("UnforcedErrorsA", "UnforcedErrorsB", "Unforced errors"),
+)
+
+
+def wta_match_statistics(row: Dict[str, Any]) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    seen = set()
+    for key_a, key_b, label in _WTA_STAT_PAIRS:
+        if label in seen:
+            continue
+        home = row.get(key_a)
+        away = row.get(key_b)
+        if home in (None, "") and away in (None, ""):
+            continue
+        seen.add(label)
+        out.append({"label": label, "home": home, "away": away})
+    return out
 
 
 def _parse_day(value: Any) -> Optional[date]:

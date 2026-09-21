@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict
 
@@ -26,11 +27,14 @@ def matrix_checksum(path: Path | None = None) -> str:
     return hashlib.sha256(_canonical_matrix_bytes((path or MATRIX_PATH).read_bytes())).hexdigest()
 
 
-def frozen_competition_ids() -> set[str]:
+@lru_cache(maxsize=1)
+def frozen_competition_ids() -> frozenset[str]:
     rows = json.loads(MATRIX_PATH.read_text(encoding="utf-8"))
     if isinstance(rows, list):
-        return {str(row.get("competition") or "") for row in rows if row.get("competition")}
-    return {str(row.get("competition") or "") for row in rows.get("competitions") or [] if row.get("competition")}
+        return frozenset(str(row.get("competition") or "") for row in rows if row.get("competition"))
+    return frozenset(
+        str(row.get("competition") or "") for row in rows.get("competitions") or [] if row.get("competition")
+    )
 
 
 def matrix_status() -> Dict[str, Any]:

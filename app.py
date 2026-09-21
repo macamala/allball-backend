@@ -140,6 +140,12 @@ def _startup_integrity():
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
     ensure_schema(engine)
+    try:
+        from collector.schema_tune import ensure_event_list_indexes
+
+        ensure_event_list_indexes(engine)
+    except Exception:
+        pass
     if os.getenv("NINKO_SKIP_STARTUP_INDEX") != "1":
         threading.Thread(target=_startup_index, daemon=True).start()
     if os.getenv("NINKO_SKIP_INTEGRITY_BACKFILL") != "1":

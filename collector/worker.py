@@ -62,6 +62,9 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
     register_production_adapters()
     Base.metadata.create_all(bind=engine)
     ensure_schema(engine)
+    from collector.schema_tune import ensure_event_list_indexes
+
+    ensure_event_list_indexes(engine)
     interval = interval_seconds
     if interval is None:
         if scheduler_enabled():
@@ -97,6 +100,14 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
 
             rebuild_watch_set(db)
             db.commit()
+            try:
+                from collector.backfill import run_if_due
+
+                backfill = run_if_due(db)
+                if backfill:
+                    logger.info("Bounded backfill %s", backfill.get("enrich"))
+            except Exception:
+                logger.exception("Bounded backfill failed")
             if not collection_enabled():
                 logger.info("Collection disabled; holding lock idle")
             elif enabled_source_count(db) == 0:

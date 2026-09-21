@@ -161,7 +161,7 @@ def match_to_event(match: Dict[str, Any], competition_id: str) -> Optional[Dict[
             "source_family": "fotmob",
             "source_status": status_obj.get("reason", {}).get("short") if isinstance(status_obj.get("reason"), dict) else status,
             "status_inferred": False,
-            "source_event_ids": [str(match.get("id") or "")],
+            "source_event_ids": {"fotmob": str(match.get("id") or "")},
             "source_event_id": str(match.get("id") or ""),
             "source_competition_id": str(league.get("id") or ""),
         },

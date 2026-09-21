@@ -218,7 +218,7 @@ class NhlAdapter:
             "source_event_id": str(row.get("id") or ""),
             "extra": {
                 "source_family": "nhl-web",
-                "source_event_ids": [str(row.get("id") or "")],
+                "source_event_ids": {"nhl-web": str(row.get("id") or "")},
                 "source_event_id": str(row.get("id") or ""),
             },
         }
@@ -322,7 +322,7 @@ class MlbAdapter:
             "source_event_id": str(row.get("gamePk") or ""),
             "extra": {
                 "source_family": "mlb-statsapi",
-                "source_event_ids": [str(row.get("gamePk") or "")],
+                "source_event_ids": {"mlb-statsapi": str(row.get("gamePk") or "")},
                 "source_event_id": str(row.get("gamePk") or ""),
             },
         }
