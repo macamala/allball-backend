@@ -19,7 +19,7 @@ FOTMOB_LEAGUE = "https://www.fotmob.com/api/data/leagues?id={league_id}"
 OPENLIGA_TABLE = "https://api.openligadb.de/getbltable/{shortcut}/{year}"
 NHL_STANDINGS = "https://api-web.nhle.com/v1/standings/now"
 MLB_STANDINGS = "https://statsapi.mlb.com/api/v1/standings?leagueId=103,104&season={season}&standingsTypes=regularSeason"
-SQUIGGLE_STANDINGS = "https://api.squiggle.com.au/?q=standings"
+SQUIGGLE_STANDINGS = "https://api.squiggle.com.au/?q=standings;year={year}"
 JOLPICA_DRIVERS = "https://api.jolpi.ca/ergast/f1/current/driverStandings.json"
 
 def standings_supported(competition_id: Optional[str]) -> bool:
@@ -196,11 +196,26 @@ def fetch_competition_standings(competition_id: str, getter=None) -> Dict[str, A
             if rows:
                 return wrap_standings(rows, competition=competition_id, sport="baseball", source="mlb-statsapi")
     if competition_id == "australia-afl":
-        result = getter(SQUIGGLE_STANDINGS)
-        if result.ok:
-            rows = parse_squiggle_standings(result.payload)
+        year = datetime.utcnow().year
+        for season in (year, year - 1):
+            result = getter(SQUIGGLE_STANDINGS.format(year=season))
+            payload = result.payload if result.ok else None
+            if not isinstance(payload, dict) and result.ok and isinstance(getattr(result, "payload", None), str):
+                try:
+                    import json
+
+                    payload = json.loads(result.payload)
+                except (TypeError, ValueError):
+                    payload = None
+            rows = parse_squiggle_standings(payload)
             if rows:
-                return wrap_standings(rows, competition=competition_id, sport="australian-rules", source="squiggle-afl")
+                return wrap_standings(
+                    rows,
+                    competition=competition_id,
+                    season=str(season),
+                    sport="australian-rules",
+                    source="squiggle-afl",
+                )
     if competition_id == "formula-1":
         result = getter(JOLPICA_DRIVERS)
         if result.ok:

@@ -25,7 +25,14 @@ from collector.util import dump_json, load_json
 from database import SessionLocal
 
 
-def test_family_keyed_source_ids_merge_is_idempotent():
+def test_merge_keeps_first_when_same_family_disagrees():
+    out = merge_family_ids({"pulselive": "aaa-bbb"}, family="pulselive", source_event_id="ccc")
+    assert out["pulselive"] == "aaa-bbb"
+    unioned = merge_family_ids({"fotmob": "1"}, {"squiggle-afl": "99"}, family="pulselive", source_event_id="guid-1")
+    assert unioned["fotmob"] == "1"
+    assert unioned["squiggle-afl"] == "99"
+    assert unioned["pulselive"] == "guid-1"
+
     first = merge_family_ids({"fotmob": "111"}, family="sofascore-web", source_event_id="222")
     second = merge_family_ids(first, family="sofascore-web", source_event_id="222")
     assert first == second
@@ -339,6 +346,9 @@ def test_compound_source_ids_are_kept():
 
     assert normalize_source_id("2026:5") == "2026:5"
     assert normalize_source_id("jolpica:2026:5") == "2026:5"
+    assert normalize_source_id("E2025_47") == "E2025_47"
+    assert normalize_source_id("pga:R2026014") == "R2026014"
+    assert normalize_source_id("opendota:123/456") == "123/456"
     mapped = as_family_map({"jolpica-f1": "2026:5", "euroleague-live": "E2025:1"})
     assert mapped["jolpica-f1"] == "2026:5"
     assert mapped["euroleague-live"] == "E2025:1"

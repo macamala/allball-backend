@@ -143,6 +143,17 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
                     )
             except Exception:
                 logger.exception("FotMob date-board backfill failed")
+            try:
+                from collector.provider_crosswalk import run_provider_id_attach_if_due
+
+                attached = run_provider_id_attach_if_due(db, owner=owner)
+                if attached:
+                    logger.info(
+                        "Provider ID attach %s",
+                        {key: val for key, val in (attached.get("families") or {}).items()},
+                    )
+            except Exception:
+                logger.exception("Provider ID attach failed")
             if not collection_enabled():
                 logger.info("Collection disabled; holding lock idle")
             elif enabled_source_count(db) == 0:

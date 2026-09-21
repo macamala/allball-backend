@@ -8,8 +8,11 @@ from typing import Any, Dict, List
 from collector.adapters import FetchRequest, FetchResult
 from collector.http import fetch_url
 
-GAMES_URL = f"https://api.squiggle.com.au/?q=games;year={datetime.now(timezone.utc).year}"
 COMPETITION_ID = "australia-afl"
+
+
+def _games_url(year: int) -> str:
+    return f"https://api.squiggle.com.au/?q=games;year={year}"
 
 
 def _status(row: Dict[str, Any]) -> str:
@@ -81,11 +84,21 @@ class SquiggleAflAdapter:
     def fetch(self, request: FetchRequest) -> FetchResult:
         if request.capability not in {"fixtures", "results", "live_scores", "snapshot"}:
             return FetchResult(ok=True, http_status=200, events=[])
-        result = self._get(GAMES_URL)
-        if not result.ok:
-            return result
-        payload = result.payload if isinstance(result.payload, dict) else {}
-        games: List[Dict[str, Any]] = payload.get("games") or []
+        year = datetime.now(timezone.utc).year
+        payload: Dict[str, Any] = {}
+        games: List[Dict[str, Any]] = []
+        last = None
+        for season in (year, year - 1):
+            last = self._get(_games_url(season))
+            if not last.ok:
+                continue
+            payload = last.payload if isinstance(last.payload, dict) else {}
+            batch = payload.get("games") or []
+            games.extend(batch)
+            if batch:
+                break
+        if last is not None and not last.ok and not games:
+            return last
         events = [_to_event(row) for row in games if row.get("hteam") and row.get("ateam")]
         if request.capability == "live_scores":
             events = [row for row in events if row["status"] == "live"]
@@ -93,4 +106,4 @@ class SquiggleAflAdapter:
             events = [row for row in events if row["status"] == "finished"]
         elif request.capability == "fixtures":
             events = [row for row in events if row["status"] == "scheduled"]
-        return FetchResult(ok=True, http_status=result.http_status, payload=payload, events=events)
+        return FetchResult(ok=True, http_status=(last.http_status if last else 200), payload=payload, events=events)

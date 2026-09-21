@@ -60,9 +60,16 @@ def as_family_map(raw: Any) -> Dict[str, str]:
 def merge_family_ids(*parts: Any, family: str = "", source_event_id: Any = None) -> Dict[str, str]:
     out: Dict[str, str] = {}
     for part in parts:
-        out.update(as_family_map(part))
+        for key, value in as_family_map(part).items():
+            if not value:
+                continue
+            if key in out and out[key] != value:
+                continue
+            out[key] = value
     if family and source_event_id not in (None, ""):
-        out[str(family)] = normalize_source_id(source_event_id)
+        incoming = normalize_source_id(source_event_id)
+        if incoming and (family not in out or out[family] == incoming):
+            out[str(family)] = incoming
     return {key: value for key, value in out.items() if value}
 
 

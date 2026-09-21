@@ -56,22 +56,32 @@ def parse_ibu_events_json(payload: Any) -> List[Dict[str, Any]]:
         venue = str(row.get("Organizer") or row.get("ShortDescription") or row.get("NatLong") or "").strip()
         start = str(row.get("StartDate") or row.get("FirstCompetitionDate") or "").strip()
         classification = str(row.get("EventClassificationId") or "").strip()
+        eid = str(row.get("EventId") or row.get("eventId") or "").strip()
         if not desc or not start:
             continue
+        extra = {
+            "event_type": MEET,
+            "event_family": "meet",
+            "classification": classification,
+            "venue": venue,
+        }
+        if eid:
+            extra["source_family"] = "ibu-web"
+            extra["source_event_id"] = eid
+            extra["source_event_ids"] = {"ibu-web": eid}
         event = _event(
             home=desc,
             away=venue or classification or "IBU",
             start=start,
             status="scheduled",
-            extra={
-                "event_type": MEET,
-                "event_family": "meet",
-                "classification": classification,
-                "venue": venue,
-            },
+            extra=extra,
         )
         ev = _ok(event, "winter-sports", "biathlon")
         if ev:
+            if eid:
+                ev["source_family"] = "ibu-web"
+                ev["source_event_id"] = eid
+                ev["source_event_ids"] = {"ibu-web": eid}
             events.append(ev)
     return _dedupe(events)
 
@@ -96,22 +106,32 @@ def parse_ibu_events_xml(blob: str) -> List[Dict[str, Any]]:
         venue = (node.findtext("Organizer") or node.findtext("ShortDescription") or "").strip()
         start = (node.findtext("StartDate") or node.findtext("FirstCompetitionDate") or "").strip()
         classification = (node.findtext("EventClassificationId") or "").strip()
+        eid = (node.findtext("EventId") or "").strip()
         if not desc or not start:
             continue
+        extra = {
+            "event_type": MEET,
+            "event_family": "meet",
+            "classification": classification,
+            "venue": venue,
+        }
+        if eid:
+            extra["source_family"] = "ibu-web"
+            extra["source_event_id"] = eid
+            extra["source_event_ids"] = {"ibu-web": eid}
         event = _event(
             home=desc,
             away=venue or classification or "IBU",
             start=start,
             status="scheduled",
-            extra={
-                "event_type": MEET,
-                "event_family": "meet",
-                "classification": classification,
-                "venue": venue,
-            },
+            extra=extra,
         )
         ev = _ok(event, "winter-sports", "biathlon")
         if ev:
+            if eid:
+                ev["source_family"] = "ibu-web"
+                ev["source_event_id"] = eid
+                ev["source_event_ids"] = {"ibu-web": eid}
             events.append(ev)
     return _dedupe(events)
 

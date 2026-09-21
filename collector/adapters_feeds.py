@@ -445,6 +445,12 @@ class WorldRugbyAdapter:
         name = competition.get("name") if isinstance(competition, dict) else loc(competition)
         name = name or "Rugby"
         start = (row.get("time") or {}).get("label")
+        millis = (row.get("time") or {}).get("millis")
+        if millis not in (None, ""):
+            try:
+                start = datetime.fromtimestamp(int(millis) / 1000, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            except (TypeError, ValueError, OSError):
+                pass
         if start and "T" not in str(start):
             start = f"{start}T00:00:00Z"
         score: Dict[str, Any] = {
@@ -568,23 +574,33 @@ class EuroleagueLiveAdapter:
         if request.capability not in {"fixtures", "results", "live_scores", "snapshot"}:
             return FetchResult(ok=True, http_status=200, events=[])
         now = datetime.now(timezone.utc)
-        season = f"E{now.year}" if now.month >= 9 else f"E{now.year - 1}"
-        last = self._get(f"https://api-live.euroleague.net/v1/games?seasonCode={season}")
+        primary = f"E{now.year}" if now.month >= 9 else f"E{now.year - 1}"
+        seasons = [primary]
+        prior = f"E{int(primary[1:]) - 1}"
+        if prior not in seasons:
+            seasons.append(prior)
+        last = None
         events: List[Dict[str, Any]] = []
-        for row in self._game_rows(last.payload if last.ok else None):
-            event = self._from_catalog(row, season)
-            if event:
-                events.append(event)
-        if not events:
+        for season in seasons:
+            last = self._get(f"https://api-live.euroleague.net/v1/games?seasonCode={season}")
+            for row in self._game_rows(last.payload if last.ok else None):
+                event = self._from_catalog(row, season)
+                if event:
+                    events.append(event)
+            if events:
+                break
             xml = fetch_text(f"https://api-live.euroleague.net/v1/results?seasonCode={season}")
             if xml.ok and isinstance(xml.payload, str):
                 events.extend(self._from_results_xml(xml.payload, season))
+                last = xml
+            if events:
+                break
         if not events:
-            last = self._get(f"https://live.euroleague.net/api/Header?gamecode=1&seasoncode={season}")
+            last = self._get(f"https://live.euroleague.net/api/Header?gamecode=1&seasoncode={primary}")
             if not last.ok:
-                last = self._get(f"https://live.euroleague.net/api/Header?gamecode=1&seasoncode=E{now.year - 1}")
+                last = self._get(f"https://live.euroleague.net/api/Header?gamecode=1&seasoncode={prior}")
             if last.ok and isinstance(last.payload, dict):
-                events.append(self._from_header(last.payload, season, last.payload.get("GameCode") or 1))
+                events.append(self._from_header(last.payload, primary, last.payload.get("GameCode") or 1))
         if not last.ok and not events:
             return last
         return FetchResult(
@@ -608,46 +624,55 @@ class EuroleagueLiveAdapter:
 
         events: List[Dict[str, Any]] = []
         blocks = re.findall(r"<game\b[^>]*>.*?</game>", text or "", flags=re.I | re.S)
-        if not blocks:
-            blocks = re.findall(r"<item\b[^>]*>.*?</item>", text or "", flags=re.I | re.S)
-        for block in blocks[:120]:
-            def attr(name: str) -> str:
-                found = re.search(rf'{name}="([^"]*)"', block, re.I)
-                if found:
-                    return found.group(1)
-                found = re.search(rf"<{name}[^>]*>([^<]+)</{name}>", block, re.I)
-                return found.group(1) if found else ""
+        for block in blocks[:250]:
+            def tag(name: str) -> str:
+                found = re.search(rf"<{name}[^>]*>([^<]*)</{name}>", block, re.I)
+                return (found.group(1) or "").strip() if found else ""
 
-            code = attr("gamecode") or attr("gameCode") or attr("code")
-            home = attr("localteam") or attr("TeamA") or attr("hometeam")
-            away = attr("roadteam") or attr("TeamB") or attr("awayteam")
-            if not code or not home or not away:
+            number = tag("gamenumber") or tag("gamecode")
+            if "_" in number:
+                number = number.split("_")[-1]
+            home = tag("hometeam") or tag("localteam")
+            away = tag("awayteam") or tag("roadteam")
+            if not number or not home or not away:
                 continue
-            score_a = attr("ScoreA") or attr("localscore") or attr("homescore")
-            score_b = attr("ScoreB") or attr("roadscore") or attr("awayscore")
-            played = (attr("played") or "").lower() in {"true", "1", "yes"}
+            score_a = tag("homescore") or tag("localscore")
+            score_b = tag("awayscore") or tag("roadscore")
+            played = tag("played").lower() in {"true", "1", "yes"}
             status = "finished" if played or (score_a and score_b) else "scheduled"
+            date = tag("date")
+            clock = tag("time")
+            start = None
+            if date:
+                try:
+                    stamp = f"{date} {clock}".strip()
+                    parsed = datetime.strptime(stamp, "%b %d, %Y %H:%M") if clock else datetime.strptime(date, "%b %d, %Y")
+                    start = parsed.strftime("%Y-%m-%dT%H:%M:%SZ")
+                except ValueError:
+                    start = date
             events.append(
                 {
-                    "id": f"euroleague:{season}:{code}",
-                    "home": {"name": home},
-                    "away": {"name": away},
+                    "id": f"euroleague:{season}:{number}",
+                    "home": {"name": home, "id": tag("homecode")},
+                    "away": {"name": away, "id": tag("awaycode")},
                     "status": status,
                     "score": {
                         "home": int(score_a) if str(score_a).isdigit() else (score_a or None),
                         "away": int(score_b) if str(score_b).isdigit() else (score_b or None),
                     },
+                    "start_time": start,
+                    "round": tag("round") or tag("group"),
                     "sport": "basketball",
                     "competition": "euroleague",
                     "competition_key": "euroleague",
                     "event_family": "team_match",
                     "source_family": "euroleague-live",
-                    "source_event_id": f"{season}:{code}",
-                    "source_event_ids": {"euroleague-live": f"{season}:{code}"},
+                    "source_event_id": f"{season}:{number}",
+                    "source_event_ids": {"euroleague-live": f"{season}:{number}"},
                     "extra": {
                         "source_family": "euroleague-live",
-                        "source_event_id": f"{season}:{code}",
-                        "source_event_ids": {"euroleague-live": f"{season}:{code}"},
+                        "source_event_id": f"{season}:{number}",
+                        "source_event_ids": {"euroleague-live": f"{season}:{number}"},
                     },
                 }
             )

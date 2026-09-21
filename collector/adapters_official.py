@@ -721,7 +721,7 @@ FIS_ROW = re.compile(
 )
 
 
-def parse_fis(html: str) -> List[Dict[str, Any]]:
+def parse_fis(html: str, race_id: str = "") -> List[Dict[str, Any]]:
     events: List[Dict[str, Any]] = []
     text = html or ""
     names = [_text(n) for n in re.findall(r'class="result-card__name">\s*([^<]+)', text, re.I)]
@@ -748,12 +748,17 @@ def parse_fis(html: str) -> List[Dict[str, Any]]:
         dm = re.search(r"(20\d{2})[-.](\d{2})[-.](\d{2})", text)
         if dm:
             date = f"{dm.group(1)}-{dm.group(2)}-{dm.group(3)}T00:00:00Z"
+        extra = {"event_family": "individual", "rank": "1"}
+        if race_id:
+            extra["source_family"] = "fis-web"
+            extra["source_event_id"] = str(race_id)
+            extra["source_event_ids"] = {"fis-web": str(race_id)}
         event = _event(
             home=winner,
             away="FIS race",
             start=date,
             status="finished",
-            extra={"event_family": "individual", "rank": "1"},
+            extra=extra,
         )
         ev = _valid(event, "winter-sports", "fis-disciplines")
         if ev:
@@ -781,8 +786,18 @@ class FisResultsAdapter:
             if not url:
                 continue
             last = _get(self._get_text, url, timeout=25)
+            race_id = ""
+            found = re.search(r"raceid=(\d+)", url, re.I)
+            if found:
+                race_id = found.group(1)
             if last.ok and isinstance(last.payload, str):
-                events.extend(parse_fis(last.payload))
+                parsed = parse_fis(last.payload, race_id=race_id)
+                for event in parsed:
+                    if race_id:
+                        event["source_family"] = "fis-web"
+                        event["source_event_id"] = race_id
+                        event["source_event_ids"] = {"fis-web": race_id}
+                events.extend(parsed)
             if events:
                 break
         return FetchResult(
