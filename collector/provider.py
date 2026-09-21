@@ -366,7 +366,7 @@ class NinkoCollectedSportsDataProvider:
     ) -> List[NormalizedEvent]:
         db = _session(self._session_factory)
         try:
-            cache_key = f"events:p0v13:{sport}:{competition}:{status}:{date_from}:{date_to}:{int(allow_unfiltered)}"
+            cache_key = f"events:p0v14:{sport}:{competition}:{status}:{date_from}:{date_to}:{int(allow_unfiltered)}"
             cached = cache_get(db, cache_key)
             if cached is not None:
                 return cached
@@ -393,13 +393,7 @@ class NinkoCollectedSportsDataProvider:
             query = query.filter(
                 or_(
                     SportsEvent.display_eligible.is_(True),
-                    and_(
-                        SportsEvent.display_eligible.is_(None),
-                        or_(
-                            SportsEvent.extra_json.is_(None),
-                            ~SportsEvent.extra_json.like('%"display_eligible": false%'),
-                        ),
-                    ),
+                    SportsEvent.display_eligible.is_(None),
                 )
             )
             unbounded = not date_from and not date_to
