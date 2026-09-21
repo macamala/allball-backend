@@ -606,12 +606,14 @@ class NinkoCollectedSportsDataProvider:
             if payload is None:
                 return None
             extra = load_json(row.extra_json, {}) or {}
+            from collector.standings_enrich import standings_supported
+
             standing = (
                 db.query(SportsStandingSnapshot.competition_id)
                 .filter_by(competition_id=payload.get("competition_key"))
                 .first()
             )
-            payload["standings_available"] = bool(standing)
+            payload["standings_available"] = bool(standing) or standings_supported(payload.get("competition_key"))
             for key in DETAIL_ONLY_KEYS:
                 if extra.get(key) is not None and payload.get(key) is None:
                     payload[key] = extra[key]
@@ -650,13 +652,9 @@ class NinkoCollectedSportsDataProvider:
     def get_standings(self, competition_key: Optional[str] = None) -> List[TeamStandingRow]:
         db = _session(self._session_factory)
         try:
-            query = db.query(SportsStandingSnapshot)
-            if competition_key:
-                query = query.filter_by(competition_id=competition_key)
-            row = query.order_by(SportsStandingSnapshot.captured_at.desc()).first()
-            if row is None:
-                return []
-            return load_json(row.rows_json, []) or []
+            from collector.standings_enrich import load_standings
+
+            return load_standings(db, competition_key)
         finally:
             db.close()
 
@@ -788,7 +786,11 @@ class NinkoCollectedSportsDataProvider:
             raw_sides["participant_b"], sport=row.sport_id, competition_country=country
         )
         if standing_ids is not None:
-            payload["standings_available"] = payload.get("competition_key") in standing_ids
+            from collector.standings_enrich import standings_supported
+
+            payload["standings_available"] = payload.get("competition_key") in standing_ids or standings_supported(
+                payload.get("competition_key")
+            )
         if extra.get("provider_conflicts"):
             payload["conflicts"] = extra.get("provider_conflicts")
         if not include_detail:

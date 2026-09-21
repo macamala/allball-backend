@@ -28,6 +28,36 @@ def _runs(innings: List[Dict[str, Any]], team: str) -> Optional[int]:
     return total if found else None
 
 
+def _innings_cards(doc: Dict[str, Any], teams: List[str]) -> List[Dict[str, Any]]:
+    cards = []
+    for inn in doc.get("innings") or []:
+        if not isinstance(inn, dict):
+            continue
+        team = inn.get("team")
+        runs = wickets = 0
+        overs = inn.get("overs") or []
+        over_count = 0
+        for over in overs:
+            over_count += 1
+            for ball in over.get("deliveries") or []:
+                runs += int(((ball.get("runs") or {}).get("total") or 0))
+                if ball.get("wickets"):
+                    wickets += len(ball.get("wickets") or [])
+        target = (inn.get("target") or {}).get("runs") if isinstance(inn.get("target"), dict) else None
+        cards.append(
+            {
+                "label": team,
+                "home": runs if teams and team == teams[0] else None,
+                "away": runs if teams and len(teams) > 1 and team == teams[1] else None,
+                "runs": runs,
+                "wickets": wickets,
+                "overs": over_count,
+                "target": target,
+            }
+        )
+    return cards
+
+
 def _event(doc: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     info = doc.get("info") or {}
     teams = info.get("teams") or []
@@ -41,6 +71,23 @@ def _event(doc: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     innings = doc.get("innings") or []
     dates = info.get("dates") or []
     start = f"{dates[0]}T00:00:00Z" if dates else None
+    cards = _innings_cards(doc, teams)
+    winner = outcome.get("winner")
+    result = outcome.get("result") or (f"{winner} won" if winner else None)
+    if result == "draw":
+        result = "draw"
+    by_blob = outcome.get("by") if isinstance(outcome.get("by"), dict) else {}
+    sport_detail = {
+        "match_type": info.get("match_type"),
+        "gender": info.get("gender"),
+        "series": (event.get("name") if isinstance(event, dict) else None),
+        "result": result,
+        "winner": winner,
+        "win_by": by_blob or None,
+        "historical": True,
+        "live": False,
+    }
+    sid = str(info.get("cricsheet_id") or info.get("match_id") or f"{dates[0] if dates else ''}:{home}:{away}")
     return {
         "id": f"cricsheet:{info.get('match_type')}:{dates[0] if dates else ''}:{home}:{away}",
         "home": {"name": home},
@@ -55,6 +102,18 @@ def _event(doc: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         "event_family": "team_match",
         "gender": info.get("gender"),
         "match_type": info.get("match_type"),
+        "periods": cards or None,
+        "innings": cards or None,
+        "source_family": "cricsheet",
+        "source_event_id": sid,
+        "source_event_ids": {"cricsheet": sid},
+        "sport_detail": {k: v for k, v in sport_detail.items() if v not in (None, "", {})},
+        "extra": {
+            "source_family": "cricsheet",
+            "source_event_id": sid,
+            "source_event_ids": {"cricsheet": sid},
+            "historical": True,
+        },
     }
 
 

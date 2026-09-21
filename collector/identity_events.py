@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Any, Dict, Optional
 
 from collector.participant_alias import expand_abbreviations, participants_equivalent
-from collector.participant_text import fold_for_identity
+from collector.participant_text import fold_for_identity, identity_core
 
 IDENTITY_MERGE_THRESHOLD = 90
 _WEAK = {"united", "city", "racing", "sporting", "athletic", "rovers", "town", "county", "stars"}
@@ -56,6 +56,24 @@ def _weak_pair(a: str, b: str) -> bool:
     return False
 
 
+def _core_contains(left: str, right: str) -> bool:
+    if not left or not right:
+        return False
+    if left == right:
+        return True
+    shorter, longer = (left, right) if len(left) <= len(right) else (right, left)
+    if len(shorter) < 5:
+        return False
+    if not longer.startswith(shorter + " "):
+        return False
+    extra = longer[len(shorter) :].strip()
+    return extra not in _WEAK and extra not in {"fc", "cf"}
+
+
+def _core_pair(h0: str, a0: str, h1: str, a1: str) -> bool:
+    return (_core_contains(h0, h1) and _core_contains(a0, a1)) or (_core_contains(h0, a1) and _core_contains(a0, h1))
+
+
 def identity_confidence(canonical: Dict[str, Any], candidate: Dict[str, Any]) -> int:
     if not canonical or not candidate:
         return 0
@@ -73,7 +91,18 @@ def identity_confidence(canonical: Dict[str, Any], candidate: Dict[str, Any]) ->
     ca_name = _side_name(candidate.get("away") or candidate.get("participant_b"))
     if not home or not away:
         return 0
-    if {home, away} != {ch, ca} and not participants_equivalent(home_name, away_name, ch_name, ca_name):
+    core_home = identity_core(home_name) or home
+    core_away = identity_core(away_name) or away
+    core_ch = identity_core(ch_name) or ch
+    core_ca = identity_core(ca_name) or ca
+    cores_match = bool(core_home and core_away) and {core_home, core_away} == {core_ch, core_ca}
+    cores_contain = _core_pair(core_home, core_away, core_ch, core_ca)
+    if (
+        {home, away} != {ch, ca}
+        and not participants_equivalent(home_name, away_name, ch_name, ca_name)
+        and not cores_match
+        and not cores_contain
+    ):
         return 0
     if _weak_pair(home, away):
         return 0

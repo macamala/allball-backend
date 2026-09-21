@@ -98,13 +98,10 @@ def _match_keepers(
     incoming: Dict[str, Any],
     rows: List[SportsEvent],
 ) -> Tuple[Optional[SportsEvent], int, int]:
-    incoming_day = str(incoming.get("start_time") or "")[:10]
     scored: List[Tuple[int, SportsEvent]] = []
     protected = 0
     for row in rows:
         view = _event_view(row)
-        if incoming_day and str(view.get("start_time") or "")[:10] != incoming_day:
-            continue
         if _protected_conflict(view, incoming):
             protected += 1
             continue
@@ -123,7 +120,7 @@ def _match_keepers(
 def crosswalk_fotmob_ids(
     db: Session,
     *,
-    hours: int = 192,
+    hours: int = 504,
     getter=None,
     dates: Optional[List[str]] = None,
     past_days: Optional[int] = None,
@@ -206,7 +203,7 @@ def crosswalk_fotmob_ids(
 def eligible_coverage(
     db: Session,
     *,
-    hours: int = 192,
+    hours: int = 504,
     getter=None,
     dates: Optional[List[str]] = None,
     past_days: int = 7,
