@@ -137,15 +137,22 @@ def _startup_integrity():
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
-    Base.metadata.create_all(bind=engine)
-    ensure_schema(engine)
+def _startup_list_indexes():
     try:
         from collector.schema_tune import ensure_event_list_indexes
 
         ensure_event_list_indexes(engine)
     except Exception:
         pass
+
+
+async def lifespan(app: FastAPI):
+    Base.metadata.create_all(bind=engine)
+    try:
+        ensure_schema(engine)
+    except Exception:
+        pass
+    threading.Thread(target=_startup_list_indexes, daemon=True).start()
     if os.getenv("NINKO_SKIP_STARTUP_INDEX") != "1":
         threading.Thread(target=_startup_index, daemon=True).start()
     if os.getenv("NINKO_SKIP_INTEGRITY_BACKFILL") != "1":

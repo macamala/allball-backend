@@ -190,6 +190,11 @@ def _ensure_collector_columns(bind):
         ],
     }
     with bind.begin() as conn:
+        try:
+            conn.execute(text("SET LOCAL lock_timeout = '3s'"))
+            conn.execute(text("SET LOCAL statement_timeout = '8s'"))
+        except Exception:
+            pass
         for table, columns in patches.items():
             if table not in tables:
                 continue
@@ -258,6 +263,11 @@ def _ensure_collector_indexes(conn, tables):
         statements.append(
             "CREATE INDEX IF NOT EXISTS ix_scheduler_lease_expires ON sports_scheduler_lease (expires_at)"
         )
+    try:
+        conn.execute(text("SET LOCAL lock_timeout = '3s'"))
+        conn.execute(text("SET LOCAL statement_timeout = '8s'"))
+    except Exception:
+        pass
     for stmt in statements:
         try:
             conn.execute(text(stmt))

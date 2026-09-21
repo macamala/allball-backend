@@ -13,6 +13,11 @@ def ensure_event_list_indexes(engine) -> None:
         "CREATE INDEX IF NOT EXISTS ix_sports_event_public_window ON sports_events (start_time) WHERE canonical_event_id IS NULL",
     )
     with engine.begin() as conn:
+        try:
+            conn.execute(text("SET LOCAL lock_timeout = '3s'"))
+            conn.execute(text("SET LOCAL statement_timeout = '8s'"))
+        except Exception:
+            pass
         for sql in statements:
             try:
                 conn.execute(text(sql))
