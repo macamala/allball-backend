@@ -6,7 +6,7 @@ from typing import Any, Dict, List
 
 from sqlalchemy.orm import Session
 
-from collector.cache import cache_clear
+from collector.cache import note_list_invalidation
 from collector.live_state import (
     UNPROVEN_LIVE,
     has_progress_evidence,
@@ -128,7 +128,14 @@ def recompute_display_eligible_live(
             summary["unknown"] += 1
         else:
             summary["unchanged"] += 1
-    cache_clear(db, prefix="events:")
+        if previous_status != row.status or previous_score != (load_json(row.score_json, {}) or {}):
+            note_list_invalidation(
+                db,
+                sport=row.sport_id,
+                competition=row.competition_id,
+                start_time=row.start_time,
+                scoreboard_visible=True,
+            )
     if commit:
         db.commit()
     return summary

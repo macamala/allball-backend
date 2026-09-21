@@ -2,19 +2,21 @@
 
 Safe to rerun: force=True collection is idempotent via fingerprints/merge.
 Does not mutate source_matrix_final. Does not invent scores.
+Completion is durable on SportsCollectorJob so a restart resumes pending work.
 """
 
 from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
-from collector.adapters_sofascore import SOFA_COMPETITIONS
+from collector.adapters_fotmob import FOTMOB_LEAGUES
 from collector.collect import run_cycle
 from collector.detail_enrich import enrich_event_row
+from collector.lock import lock_status
 from collector.models import SportsCollectorJob, SportsEvent
 from collector.production import register_production_adapters
 from collector.source_ids import families_with_ids
@@ -22,7 +24,7 @@ from collector.util import dump_json, load_json
 
 logger = logging.getLogger(__name__)
 
-JOB_KEY = "bounded-rich-backfill-v4"
+JOB_KEY = "bounded-rich-backfill-v5"
 
 CORE_COMPETITIONS: List[str] = [
     "wta-tour",
@@ -31,20 +33,8 @@ CORE_COMPETITIONS: List[str] = [
     "nsw-hrnsw-meetings",
     "mlb",
     "nhl",
-    "italy-serie-a",
-    "france-ligue-1",
-    "netherlands-eredivisie",
-    "portugal-primeira-liga",
-    "croatia-hnl",
-    "norway-eliteserien",
-    "poland-ekstraklasa",
-    "romania-superliga",
-    "korea-k-league-1",
-    "china-super-league",
-    "czech-first-league",
-    "hungary-nb-i",
 ]
-CORE_COMPETITIONS.extend(sorted(SOFA_COMPETITIONS)[:8])
+CORE_COMPETITIONS.extend(sorted(FOTMOB_LEAGUES))
 
 ENRICH_FAMILIES = {"fotmob", "sofascore-web", "mlb-statsapi", "nhl-web", "wta-json"}
 
@@ -58,18 +48,55 @@ def _job(db: Session) -> SportsCollectorJob:
     return row
 
 
-def run_bounded_backfill(db: Session, *, competitions: Optional[List[str]] = None) -> Dict[str, Any]:
+def _checkpoint(job: SportsCollectorJob, **fields: Any) -> None:
+    payload = load_json(job.last_error, {}) or {}
+    if not isinstance(payload, dict):
+        payload = {}
+    payload.update(fields)
+    job.last_error = dump_json(payload)[:4000]
+    job.last_status = str(payload.get("state") or job.last_status or "")
+
+
+def run_bounded_backfill(
+    db: Session,
+    *,
+    competitions: Optional[List[str]] = None,
+    heartbeat: Optional[Callable[[], None]] = None,
+) -> Dict[str, Any]:
     register_production_adapters()
+    from collector.fotmob_crosswalk import crosswalk_fotmob_ids, eligible_coverage
     from collector.id_backfill import attach_observation_ids, copy_complementary_ids, coverage_counts
     from collector.list_extra import store_list_extra
+    from collector.wta_rewrite import rewrite_wta_result_types
 
+    job = _job(db)
+    payload = load_json(job.last_error, {}) or {}
+    if not isinstance(payload, dict):
+        payload = {}
+    comps = list(dict.fromkeys(competitions or payload.get("comp_list") or CORE_COMPETITIONS))
+    next_index = 0 if competitions is not None else int(payload.get("next_index") or 0)
     before = coverage_counts(db)
+    eligible_before = eligible_coverage(db)
     attach_observation_ids(db)
     copy_complementary_ids(db)
+    cross_before = crosswalk_fotmob_ids(db)
     db.commit()
-    comps = list(dict.fromkeys(competitions or CORE_COMPETITIONS))
-    summaries: Dict[str, Any] = {}
-    for competition_id in comps:
+    _checkpoint(
+        job,
+        state="running",
+        next_index=next_index,
+        comp_list=comps,
+        coverage_before=before,
+        fotmob_eligible_before=eligible_before,
+        fotmob_crosswalk=cross_before,
+    )
+    db.commit()
+    summaries: Dict[str, Any] = dict(payload.get("competitions") or {})
+    for index, competition_id in enumerate(comps):
+        if index < next_index:
+            continue
+        if heartbeat:
+            heartbeat()
         try:
             summaries[competition_id] = run_cycle(
                 db,
@@ -83,11 +110,22 @@ def run_bounded_backfill(db: Session, *, competitions: Optional[List[str]] = Non
             logger.exception("backfill failed competition=%s", competition_id)
             summaries[competition_id] = {"error": str(exc)[:240]}
             db.rollback()
+        if competition_id == "wta-tour":
+            try:
+                summaries["wta_rewrite"] = rewrite_wta_result_types(db)
+                db.commit()
+            except Exception:
+                logger.exception("WTA result rewrite failed")
+                db.rollback()
+        _checkpoint(job, state="running", next_index=index + 1, competitions=summaries)
+        db.commit()
     attach_observation_ids(db)
     copy_complementary_ids(db)
+    cross_after = crosswalk_fotmob_ids(db)
     db.commit()
     enrich = enrich_recent_detail(db)
     after = coverage_counts(db)
+    eligible_after = eligible_coverage(db)
     bound = datetime.utcnow() - timedelta(hours=192)
     racing = {"greyhound-racing", "horse-racing", "harness-racing"}
     for row in (
@@ -102,8 +140,36 @@ def run_bounded_backfill(db: Session, *, competitions: Optional[List[str]] = Non
                 row.status = "scheduled"
                 row.live = False
         store_list_extra(row, extra)
+    _checkpoint(
+        job,
+        state="done",
+        next_index=len(comps),
+        competitions=summaries,
+        enrich=enrich,
+        coverage_after=after,
+        fotmob_eligible_after=eligible_after,
+        fotmob_crosswalk_after=cross_after,
+    )
+    job.last_run_at = datetime.utcnow()
+    job.last_status = "ok"
+    job.items_written = int((enrich or {}).get("filled") or 0)
     db.commit()
-    return {"competitions": summaries, "enrich": enrich, "count": len(comps), "coverage_before": before, "coverage_after": after}
+    logger.info(
+        "bounded_backfill_complete coverage_before=%s coverage_after=%s eligible_before=%s eligible_after=%s",
+        before,
+        after,
+        eligible_before,
+        eligible_after,
+    )
+    return {
+        "competitions": summaries,
+        "enrich": enrich,
+        "count": len(comps),
+        "coverage_before": before,
+        "coverage_after": after,
+        "fotmob_eligible_before": eligible_before,
+        "fotmob_eligible_after": eligible_after,
+    }
 
 
 def enrich_recent_detail(db: Session, *, hours: int = 96, limit: int = 80) -> Dict[str, int]:
@@ -135,17 +201,28 @@ def enrich_recent_detail(db: Session, *, hours: int = 96, limit: int = 80) -> Di
     return {"attempted": attempted, "filled": filled}
 
 
-def run_if_due(db: Session, *, min_interval_hours: int = 6) -> Optional[Dict[str, Any]]:
-    job = _job(db)
-    if job.last_run_at and datetime.utcnow() - job.last_run_at < timedelta(hours=min_interval_hours):
+def run_if_due(
+    db: Session,
+    *,
+    min_interval_hours: int = 6,
+    owner: Optional[str] = None,
+    heartbeat: Optional[Callable[[], None]] = None,
+) -> Optional[Dict[str, Any]]:
+    status = lock_status(db)
+    if not status.get("held"):
+        logger.info("skip backfill; scheduler lease is not held")
         return None
-    result = run_bounded_backfill(db)
-    job.last_run_at = datetime.utcnow()
-    job.last_status = "ok"
-    job.items_written = int((result.get("enrich") or {}).get("filled") or 0)
-    job.last_error = dump_json({"competitions": len(result.get("competitions") or {}), "enrich": result.get("enrich")})[:2000]
-    db.commit()
-    return result
+    if owner and status.get("owner_id") != owner:
+        logger.info("skip backfill; process is not the scheduler owner")
+        return None
+    job = _job(db)
+    payload = load_json(job.last_error, {}) or {}
+    if not isinstance(payload, dict):
+        payload = {}
+    state = payload.get("state")
+    if state == "done" and job.last_run_at and datetime.utcnow() - job.last_run_at < timedelta(hours=min_interval_hours):
+        return None
+    return run_bounded_backfill(db, heartbeat=heartbeat)
 
 
 if __name__ == "__main__":

@@ -633,12 +633,19 @@ def run_incremental_tick(db: Session, *, sleeper=None, now: Optional[datetime] =
     import time
 
     from collector.collect import collect_competition
-    from collector.flags import collection_enabled, scheduler_enabled
+    from collector.flags import collection_enabled, scheduler_enabled, writes_enabled
     from collector.http import STATS
+    from collector.lock import acquire_write_lock, owner_identity, release_write_lock
     from collector.models import SportsCompetition
 
     if not collection_enabled() or not scheduler_enabled():
         return {"stopped": True, "reason": "kill_switch", "flags": {"scheduler": False}}
+    write_owner = owner_identity()
+    held_write = False
+    if writes_enabled():
+        held_write = acquire_write_lock(db, owner=write_owner)
+        if not held_write:
+            return {"stopped": True, "reason": "write_lock_held", "write_lock": 0}
     now = now or _now()
     started = time.perf_counter()
     from collector.recompute_status import recompute_display_eligible_live
@@ -802,6 +809,9 @@ def run_incremental_tick(db: Session, *, sleeper=None, now: Optional[datetime] =
 
     collapse = collapse_canonical_events(db)
     enrichment = promote_observation_enrichment(db)
+    from collector.cache import flush_list_invalidations
+
+    flush_list_invalidations(db)
     set_metric("enrichment_promoted", int((enrichment or {}).get("copied") or 0))
     duration = round(time.perf_counter() - started, 3)
     set_metric("last_cycle_s", duration)
@@ -859,6 +869,11 @@ def run_incremental_tick(db: Session, *, sleeper=None, now: Optional[datetime] =
         "groups": len(groups),
         "coalesced": coalesced,
     }
+    if held_write:
+        try:
+            release_write_lock(db, owner=write_owner)
+        except Exception:
+            pass
     return tick
 
 

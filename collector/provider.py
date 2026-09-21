@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session, defer
 
-from collector.cache import cache_get, cache_set
+from collector.cache import cache_get, cache_set, list_cache_key
 from collector.models import (
     SportsCompetition,
     SportsEvent,
@@ -366,7 +366,7 @@ class NinkoCollectedSportsDataProvider:
     ) -> List[NormalizedEvent]:
         db = _session(self._session_factory)
         try:
-            cache_key = f"events:p0v14:{sport}:{competition}:{status}:{date_from}:{date_to}:{int(allow_unfiltered)}"
+            cache_key = list_cache_key(sport, competition, status, date_from, date_to, allow_unfiltered)
             cached = cache_get(db, cache_key)
             if cached is not None:
                 return cached

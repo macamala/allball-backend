@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
-from collector.cache import cache_clear
+from collector.cache import flush_list_invalidations, note_list_invalidation
 from collector.competition_identity import COMPETITION_LABELS, correct_public_competition_id
 from collector.enrichment import (
     OBSERVATION_ENRICH_KEYS,
@@ -271,6 +271,13 @@ def collapse_canonical_events(db: Session, *, competition_ids: Optional[List[str
             if conf >= 90 or ok:
                 if _collapse_pair(db, keeper["event_id"], other["event_id"]):
                     collapsed += 1
+                    note_list_invalidation(
+                        db,
+                        sport=keeper.get("sport"),
+                        competition=keeper.get("competition") or keeper.get("competition_id"),
+                        start_time=keeper.get("start_time"),
+                        scoreboard_visible=True,
+                    )
                     keeper = _event_dict(db.query(SportsEvent).filter_by(event_id=keeper["event_id"]).one())
             else:
                 likely += 1
@@ -280,7 +287,7 @@ def collapse_canonical_events(db: Session, *, competition_ids: Optional[List[str
         db.rollback()
         time.sleep(0.4)
         db.commit()
-    cache_clear(db)
+    flush_list_invalidations(db)
     try:
         db.commit()
     except OperationalError:
@@ -519,7 +526,7 @@ def classify_quarantine(db: Session) -> Dict[str, Any]:
         else:
             row.display_eligible = True if extra.get("display_eligible") is not False else False
     db.commit()
-    cache_clear(db)
+    flush_list_invalidations(db)
     db.commit()
     return {
         "recovered": recovered,
@@ -575,7 +582,7 @@ def promote_observation_enrichment(db: Session) -> Dict[str, Any]:
         _merge_event_details(db, keeper.event_id, loser.event_id)
     if copied:
         db.commit()
-        cache_clear(db)
+        flush_list_invalidations(db)
         db.commit()
     return {"copied": copied, "skipped_quarantine": skipped_quarantine}
 

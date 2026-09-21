@@ -18,7 +18,7 @@ from collector.adapters import (
     FetchResult,
     make_adapter,
 )
-from collector.cache import cache_clear
+from collector.cache import flush_list_invalidations, note_list_invalidation
 from collector.competition_identity import event_accepted_for_mapping
 from collector.coverage import constraints_for, filter_partial_events
 from collector.health import (
@@ -56,7 +56,13 @@ from collector.metrics import incr
 from collector.http import begin_budget, end_budget, family_host_blocked
 from collector.cadence import cadence_seconds_for
 from collector.ids import bound_source_key
-from collector.lock import acquire_write_lock, owner_identity, release_write_lock
+from collector.lock import (
+    acquire_write_lock,
+    heartbeat_scheduler_lock,
+    heartbeat_write_lock,
+    owner_identity,
+    release_write_lock,
+)
 from collector.progress import persist_progress, stage
 from collector.schedule import due_capabilities, mark_job
 from collector.sources import plan_sources, source_collectable, source_config_missing
@@ -1014,6 +1020,8 @@ def run_cycle(
                 batch += 1
                 if writes_enabled() and batch % BATCH_COMMIT == 0:
                     stage("PERSIST progress", batch=batch, written=written)
+                    heartbeat_write_lock(db, owner=write_owner)
+                    heartbeat_scheduler_lock(db, owner=write_owner)
                     db.commit()
                     run = db.get(SportsIngestionRun, run_id)
             mark_job(db, capability, "ok" if errors == 0 else "degraded", written, None if errors == 0 else f"{errors} competition errors")
@@ -1044,8 +1052,10 @@ def run_cycle(
             }
         )
         stage("COMMIT")
-        if any(summary.values()) and writes_enabled():
-            cache_clear(db)
+        if writes_enabled():
+            flushed = flush_list_invalidations(db)
+            if flushed:
+                stage("CACHE FLUSH", keys=flushed)
         stage("POST-WRITE VALIDATION")
         stage("SUMMARY", written=run.events_written, errors=run.errors, rejected=run.rejected)
         stage("PROCESS END")

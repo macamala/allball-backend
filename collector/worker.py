@@ -33,6 +33,9 @@ from collector.lock import (
     postgres_try_advisory,
     release_scheduler_lock,
 )
+
+STANDBY_SLEEP_SECONDS = 45
+_standby_logged = False
 from collector.matrix_guard import assert_frozen_matrix
 from collector.models import SportsSource
 from collector.production import bootstrap_registry, register_production_adapters
@@ -83,15 +86,28 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
         held = False
         advisory = None
         try:
+            global _standby_logged
             held = acquire_scheduler_lock(db, owner=owner)
             if not held:
-                logger.info("Results worker is standby; another process owns the scheduler lock")
+                if not _standby_logged:
+                    logger.info("Results worker is standby; backing off until the scheduler lease is free")
+                    _standby_logged = True
                 db.commit()
                 if once:
                     return
-                time.sleep(max(15, interval))
+                time.sleep(STANDBY_SLEEP_SECONDS)
                 continue
+            _standby_logged = False
             advisory = postgres_try_advisory(db)
+            if advisory is False:
+                logger.info("Results worker is standby; postgres advisory lock is held by another owner")
+                release_scheduler_lock(db, owner=owner)
+                db.commit()
+                held = False
+                if once:
+                    return
+                time.sleep(STANDBY_SLEEP_SECONDS)
+                continue
             if not db.info.get("registry_bootstrapped"):
                 bootstrap_registry(db)
                 db.commit()
@@ -103,7 +119,11 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
             try:
                 from collector.backfill import run_if_due
 
-                backfill = run_if_due(db)
+                def _pulse() -> None:
+                    heartbeat_scheduler_lock(db, owner=owner)
+                    db.commit()
+
+                backfill = run_if_due(db, owner=owner, heartbeat=_pulse)
                 if backfill:
                     logger.info("Bounded backfill %s", backfill.get("enrich"))
             except Exception:

@@ -275,6 +275,9 @@ def test_backfill_is_bounded_and_rerunnable(monkeypatch):
     monkeypatch.setattr("collector.backfill.run_cycle", fake_cycle)
     monkeypatch.setattr("collector.backfill.enrich_recent_detail", lambda db, **kwargs: {"attempted": 0, "filled": 0})
     monkeypatch.setattr("collector.backfill.register_production_adapters", lambda: None)
+    monkeypatch.setattr("collector.fotmob_crosswalk.crosswalk_fotmob_ids", lambda db, **kwargs: {"upstream_eligible": 0, "attached": 0})
+    monkeypatch.setattr("collector.fotmob_crosswalk.eligible_coverage", lambda db, **kwargs: {"upstream_eligible": 0, "canonical_with_fotmob_id": 0, "coverage_pct": 0})
+    monkeypatch.setattr("collector.wta_rewrite.rewrite_wta_result_types", lambda db: {"applied": 0})
     db = SessionLocal()
     try:
         first = run_bounded_backfill(db, competitions=["wta-tour", "mlb"])

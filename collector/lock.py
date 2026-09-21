@@ -130,13 +130,31 @@ def postgres_advisory_unlock(db: Session) -> None:
 
 WRITE_LOCK_NAME = "results-write"
 WRITE_ADVISORY = 88442202
+WRITE_TTL_SECONDS = 180
+
+
+def heartbeat_write_lock(
+    db: Session,
+    *,
+    owner: Optional[str] = None,
+    ttl_seconds: int = WRITE_TTL_SECONDS,
+) -> bool:
+    owner = owner or owner_identity()
+    row = db.query(SportsSchedulerLease).filter_by(lock_name=WRITE_LOCK_NAME).first()
+    if row is None or row.owner_id != owner:
+        return False
+    now = _now()
+    row.heartbeat_at = now
+    row.expires_at = now + timedelta(seconds=max(60, ttl_seconds))
+    db.flush()
+    return True
 
 
 def acquire_write_lock(
     db: Session,
     *,
     owner: Optional[str] = None,
-    ttl_seconds: int = 3600,
+    ttl_seconds: int = WRITE_TTL_SECONDS,
 ) -> bool:
     """Exclusive results persist lock. Second writer is refused, not overlapped."""
     owner = owner or owner_identity()

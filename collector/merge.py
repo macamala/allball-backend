@@ -345,6 +345,10 @@ def merge_event_fields(
 
 
 def apply_row_fields(row, merged: Dict[str, Any], source_id: str, higher: bool) -> None:
+    before_status = row.status
+    before_score = row.score_json
+    before_start = row.start_time
+    prev_extra = load_json(row.extra_json, {}) or {}
     row.status = merged.get("status") or row.status
     row.live = bool(merged.get("live"))
     row.venue = merged.get("venue") or row.venue
@@ -457,3 +461,24 @@ def apply_row_fields(row, merged: Dict[str, Any], source_id: str, higher: bool) 
     from collector.list_extra import store_list_extra
 
     store_list_extra(row, extra)
+    try:
+        from sqlalchemy.orm import object_session
+        from collector.cache import note_list_invalidation
+
+        session = object_session(row)
+        if session is not None:
+            scoreboard = (
+                before_status != row.status
+                or before_score != row.score_json
+                or before_start != row.start_time
+                or prev_extra.get("result_type") != extra.get("result_type")
+            )
+            note_list_invalidation(
+                session,
+                sport=row.sport_id,
+                competition=row.competition_id,
+                start_time=row.start_time,
+                scoreboard_visible=bool(scoreboard),
+            )
+    except Exception:
+        pass

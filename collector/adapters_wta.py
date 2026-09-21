@@ -215,7 +215,16 @@ class WtaJsonAdapter:
                 if str((row[2] or {}).get("status") or "").lower() in {"live", "inprogress"}
             ]
             tournaments = live_only or tournaments[:1]
-        max_fetches = LIVE_SCORE_MATCH_FETCHES if live_scores else MAX_MATCH_FETCHES
+        if request.capability in {"results", "fixtures"} and not live_scores:
+            tournaments.sort(
+                key=lambda row: (
+                    0 if str((row[2] or {}).get("status") or "").lower() == "past" else 1,
+                    _status_rank(str((row[2] or {}).get("status") or "")),
+                )
+            )
+        max_fetches = LIVE_SCORE_MATCH_FETCHES if live_scores else int(
+            (config or {}).get("max_match_fetches") or MAX_MATCH_FETCHES
+        )
         events: List[Dict[str, Any]] = []
         fetches = 0
         for group_id, year, meta in tournaments:

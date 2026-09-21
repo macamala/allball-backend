@@ -219,6 +219,9 @@ def stamp_provenance(section: Any, *, source_family: str, source_event_id: Optio
 def copy_missing_enrichment(destination: Dict[str, Any], source: Dict[str, Any]) -> Dict[str, Any]:
     """Fill empty enrichment sections only. Never overwrite real zeros or existing lists."""
     out = dict(destination)
+    from collector.source_ids import merge_family_ids
+
+    out["source_event_ids"] = merge_family_ids(out.get("source_event_ids"), source.get("source_event_ids"))
     for key in OBSERVATION_ENRICH_KEYS:
         if not _section_filled(out.get(key)) and _section_filled(source.get(key)):
             out[key] = source.get(key)

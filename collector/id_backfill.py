@@ -56,6 +56,15 @@ def attach_observation_ids(db: Session, *, hours: int = 120) -> Dict[str, int]:
             row = db.get(SportsEvent, obs.event_id)
             if row:
                 cache[obs.event_id] = row
+        if row is None:
+            continue
+        if row.canonical_event_id:
+            keeper_id = row.canonical_event_id
+            row = cache.get(keeper_id)
+            if row is None:
+                row = db.get(SportsEvent, keeper_id)
+                if row:
+                    cache[keeper_id] = row
         if row is None or row.canonical_event_id:
             continue
         extra = load_json(row.extra_json, {}) or {}
