@@ -477,7 +477,32 @@ def _consume_result(
                     stamp = isoformat(contact)
                     extra["source_fetch_time"] = stamp
                     extra["last_contact_at"] = stamp
+                    from collector.source_ids import merge_family_ids
+
+                    extra["source_event_ids"] = merge_family_ids(
+                        extra.get("source_event_ids"),
+                        incoming.get("source_event_ids"),
+                        family=str(incoming.get("source_family") or mapping.upstream_family or ""),
+                        source_event_id=incoming.get("source_event_id"),
+                    )
                     existing.extra_json = dump_json(extra)
+                    from collector.list_extra import store_list_extra
+
+                    store_list_extra(existing, extra)
+                    original_sid = str(incoming.get("source_event_id") or "")
+                    if original_sid:
+                        db.add(
+                            SportsEventObservation(
+                                event_id=existing.event_id,
+                                source_id=source.source_id,
+                                source_family=mapping.upstream_family or source.upstream_family,
+                                source_event_id=original_sid,
+                                source_event_key=bound_source_key(source.source_id, original_sid),
+                                source_url=config.get("url"),
+                                payload_json=dump_json({"payload_hash": payload_hash(raw)}),
+                                retrieved_at=datetime.utcnow(),
+                            )
+                        )
                 else:
                     if existing is not None:
                         merged += 1

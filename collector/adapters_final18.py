@@ -35,7 +35,7 @@ ALTIUSRT_MATCHES = [
 CD_COMPS = "https://mc.championdata.com/data/competitions.json"
 CD_FIXTURE = "https://mc.championdata.com/data/{comp_id}/fixture.json"
 
-GBGB_RESULTS = "https://api.gbgb.org.uk/api/results?page=1&itemsPerPage=50&date={date}"
+GBGB_RESULTS = "https://api.gbgb.org.uk/api/results?page={page}&itemsPerPage=50&date={date}"
 GBGB_MEETING = "https://api.gbgb.org.uk/api/results/meeting/{meeting_id}?meeting={meeting_id}"
 
 SCORELINE = re.compile(r"(\d+)\s*[-–]\s*(\d+)")
@@ -528,15 +528,23 @@ class GbgbMeetingJsonAdapter:
         events: List[Dict[str, Any]] = []
         seen_meetings = []
         for day in dates:
-            last = self._get(GBGB_RESULTS.format(date=day))
-            if last.ok and isinstance(last.payload, dict):
+            items = []
+            for page in (1, 2, 3, 4):
+                last = self._get(GBGB_RESULTS.format(page=page, date=day))
+                if not last.ok or not isinstance(last.payload, dict):
+                    break
+                chunk = last.payload.get("items") or []
+                if not chunk:
+                    break
                 events.extend(parse_gbgb(last.payload))
-            if not last.ok or not isinstance(last.payload, dict):
+                items.extend(row for row in chunk if isinstance(row, dict))
+                if len(chunk) < 50:
+                    break
+            if not items:
                 continue
-            items = last.payload.get("items") or []
             meeting_ids = []
             for row in items:
-                if isinstance(row, dict) and row.get("meetingId") and row["meetingId"] not in meeting_ids:
+                if row.get("meetingId") and row["meetingId"] not in meeting_ids:
                     meeting_ids.append(row["meetingId"])
             for meeting_id in meeting_ids:
                 if meeting_id in seen_meetings:

@@ -182,6 +182,7 @@ class SportsEvent(Base):
     country_id = Column(String(40), nullable=True)
     meeting_id = Column(String(120), nullable=True)
     extra_json = Column(Text, nullable=True)
+    list_extra_json = Column(Text, nullable=True)
     fingerprint = Column(String(80), nullable=True)
     primary_source_id = Column(String(80), nullable=True)
     contributing_sources_json = Column(Text, nullable=True)

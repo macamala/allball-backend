@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from collector.adapters import FetchResult
 from collector.http import fetch_url
 from collector.models import SportsEvent, SportsEventDetail
-from collector.source_ids import families_with_ids, id_for_family
+from collector.source_ids import families_with_ids, id_for_family, merge_family_ids
 from collector.util import dump_json, load_json
 
 FOTMOB_DETAILS = "https://www.fotmob.com/api/data/matchDetails?matchId={match_id}"
@@ -474,18 +474,32 @@ def fetch_family_detail(family: str, source_event_id: str, getter=None) -> Dict[
             out.update(parse_fotmob_details(payload))
         return out
     if family == "sofascore-web":
-        inc = _get(getter, SOFA_INCIDENTS.format(event_id=source_event_id))
-        if inc.ok and isinstance(inc.payload, dict):
+        from concurrent.futures import ThreadPoolExecutor
+
+        urls = {
+            "incidents": SOFA_INCIDENTS.format(event_id=source_event_id),
+            "statistics": SOFA_STATS.format(event_id=source_event_id),
+            "lineups": SOFA_LINEUPS.format(event_id=source_event_id),
+        }
+
+        def _fetch(item):
+            kind, url = item
+            return kind, _get(getter, url)
+
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            results = dict(pool.map(_fetch, urls.items()))
+        inc = results.get("incidents")
+        if inc and inc.ok and isinstance(inc.payload, dict):
             rows = parse_sofa_incidents(inc.payload)
             if rows:
                 out["incidents"] = rows
-        stats = _get(getter, SOFA_STATS.format(event_id=source_event_id))
-        if stats.ok and isinstance(stats.payload, dict):
+        stats = results.get("statistics")
+        if stats and stats.ok and isinstance(stats.payload, dict):
             rows = parse_sofa_statistics(stats.payload)
             if rows:
                 out["statistics"] = rows
-        line = _get(getter, SOFA_LINEUPS.format(event_id=source_event_id))
-        if line.ok and isinstance(line.payload, dict):
+        line = results.get("lineups")
+        if line and line.ok and isinstance(line.payload, dict):
             packed = parse_sofa_lineups(line.payload)
             if packed:
                 out["lineups"] = packed
@@ -509,23 +523,51 @@ def fetch_family_detail(family: str, source_event_id: str, getter=None) -> Dict[
 
 def enrich_event_row(db: Session, row: SportsEvent, getter=None) -> None:
     extra = load_json(row.extra_json, {}) or {}
+    try:
+        from collector.models import SportsEventObservation
+
+        for obs in (
+            db.query(SportsEventObservation)
+            .filter_by(event_id=row.event_id)
+            .all()
+        ):
+            if obs.source_family and obs.source_event_id:
+                extra["source_event_ids"] = merge_family_ids(
+                    extra.get("source_event_ids"),
+                    family=str(obs.source_family),
+                    source_event_id=obs.source_event_id,
+                )
+    except Exception:
+        pass
     ids = families_with_ids(extra)
     tried = set(extra.get("detail_families_tried") or [])
     pending = [fam for fam in DETAIL_FAMILIES if ids.get(fam) and fam not in tried]
     if _fresh(extra, row.status or "") and not pending:
+        row.extra_json = dump_json(extra)
         return
-    if not ids:
+    if not any(fam in DETAIL_FAMILIES for fam in ids):
+        row.extra_json = dump_json(extra)
         return
+    jobs = [(family, source_id) for family, source_id in ids.items() if family in DETAIL_FAMILIES]
     detail: Dict[str, Any] = {}
     used = list(tried)
-    for family, source_id in ids.items():
-        if family not in DETAIL_FAMILIES:
-            continue
-        if family in tried and _fresh(extra, row.status or "") and extra.get("detail_empty") is False:
-            continue
-        part = fetch_family_detail(family, source_id, getter=getter)
-        used.append(family)
-        _merge_detail(detail, part)
+    getter = getter or (lambda url: fetch_url(url, timeout=8))
+    from concurrent.futures import ThreadPoolExecutor
+
+    def _one(item):
+        family, source_id = item
+        return family, fetch_family_detail(family, source_id, getter=getter)
+
+    if len(jobs) == 1:
+        family, source_id = jobs[0]
+        if not (family in tried and _fresh(extra, row.status or "") and extra.get("detail_empty") is False):
+            _merge_detail(detail, fetch_family_detail(family, source_id, getter=getter))
+            used.append(family)
+    else:
+        with ThreadPoolExecutor(max_workers=min(3, len(jobs))) as pool:
+            for family, part in pool.map(_one, jobs):
+                used.append(family)
+                _merge_detail(detail, part)
     extra["detail_families_tried"] = list(dict.fromkeys(used))
     extra["detail_fetched_at"] = datetime.utcnow().isoformat()
     if not detail:
@@ -539,19 +581,23 @@ def enrich_event_row(db: Session, row: SportsEvent, getter=None) -> None:
         db.add(record)
     if detail.get("incidents") and not load_json(record.incidents_json):
         record.incidents_json = dump_json(detail["incidents"])
-        extra["incidents"] = extra.get("incidents") or detail["incidents"]
     if detail.get("statistics") and not load_json(record.statistics_json):
         record.statistics_json = dump_json(detail["statistics"])
-        extra["statistics"] = extra.get("statistics") or detail["statistics"]
     if detail.get("lineups") and not load_json(record.lineups_json):
         record.lineups_json = dump_json(detail["lineups"])
-        extra["lineups"] = extra.get("lineups") or detail["lineups"]
     if detail.get("periods") and not extra.get("periods"):
         extra["periods"] = detail["periods"]
-    for key in ("player_statistics", "venue", "referee", "attendance", "sport_detail", "match_facts"):
+    for key in ("venue", "referee", "attendance"):
         if detail.get(key) and not extra.get(key):
             extra[key] = detail[key]
+    if detail.get("player_statistics"):
+        extra["player_statistics"] = extra.get("player_statistics") or detail["player_statistics"]
+    if detail.get("sport_detail"):
+        extra["sport_detail"] = extra.get("sport_detail") or detail["sport_detail"]
     extra["detail_empty"] = False
     extra["detail_negative"] = False
     row.extra_json = dump_json(extra)
+    from collector.list_extra import store_list_extra
+
+    store_list_extra(row, extra)
     record.updated_at = datetime.utcnow()

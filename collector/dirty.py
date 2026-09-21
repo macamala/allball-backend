@@ -32,6 +32,16 @@ def event_unchanged(existing, incoming: Dict[str, Any]) -> bool:
         return False
     if stored != observation_signature(incoming):
         return False
+    from collector.source_ids import families_with_ids, merge_family_ids
+
+    stored_ids = families_with_ids(extra)
+    incoming_ids = merge_family_ids(
+        incoming.get("source_event_ids"),
+        family=str(incoming.get("source_family") or ""),
+        source_event_id=incoming.get("source_event_id"),
+    )
+    if any(incoming_ids.get(key) and stored_ids.get(key) != incoming_ids.get(key) for key in incoming_ids):
+        return False
     for key in OBSERVATION_ENRICH_KEYS:
         if _section_filled(incoming.get(key)) and not _section_filled(extra.get(key)):
             return False

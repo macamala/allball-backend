@@ -15,12 +15,12 @@ from collector.detail_enrich import (
     parse_sofa_statistics,
 )
 from collector.merge import apply_row_fields
-from collector.models import SportsEvent
+from collector.models import SportsEvent, SportsEventObservation
 from collector.normalize import normalize_event
 from collector.provider import NinkoCollectedSportsDataProvider
 from collector.source_ids import merge_family_ids
 from collector.test_support import mock_event
-from collector.util import dump_json
+from collector.util import dump_json, load_json
 from database import SessionLocal
 
 
@@ -276,6 +276,7 @@ def test_event_list_query_stays_light_with_fat_extra():
                     start_time=start,
                     display_eligible=True,
                     extra_json=blob,
+                    list_extra_json=dump_json({"live_class": "UPCOMING"}),
                     participants_json=dump_json({"home": {"name": f"H{index}"}, "away": {"name": f"A{index}"}}),
                     score_json=dump_json({}),
                 )
@@ -310,3 +311,243 @@ def test_normalize_keeps_family_source_ids():
         competition_id="italy-serie-a",
     )
     assert event["source_event_ids"]["fotmob"] == "55"
+
+
+def test_merge_keeps_fotmob_and_sofa_ids():
+    current = mock_event(status="finished", score={"home": 1, "away": 0})
+    current["source_family"] = "fotmob"
+    current["source_event_id"] = "111"
+    current["source_event_ids"] = {"fotmob": "111"}
+    incoming = mock_event(status="finished", score={"home": 1, "away": 0})
+    incoming["source_family"] = "sofascore-web"
+    incoming["source_event_id"] = "222"
+    incoming["source_event_ids"] = {"sofascore-web": "222"}
+    from collector.merge import merge_event_fields
+
+    merged = merge_event_fields(current, incoming, incoming_is_higher_priority=True, incoming_source_id="sofascore-web")
+    assert merged["source_event_ids"]["fotmob"] == "111"
+    assert merged["source_event_ids"]["sofascore-web"] == "222"
+
+
+def test_fotmob_and_sofa_detail_merge_into_event_detail():
+    db = SessionLocal()
+    try:
+        row = SportsEvent(
+            event_id="ninko-evt-fotmob-rich",
+            sport_id="football",
+            competition_id="italy-serie-a",
+            event_family="team_match",
+            status="finished",
+            extra_json=dump_json({"source_family": "fotmob", "source_event_ids": {"fotmob": "4810", "sofascore-web": "99"}}),
+        )
+        db.add(row)
+        db.commit()
+
+        class Result:
+            def __init__(self, payload):
+                self.ok = True
+                self.payload = payload
+
+        def getter(url):
+            if "matchDetails" in url:
+                return Result(
+                    {
+                        "content": {
+                            "stats": {"Periods": {"All": {"stats": [{"stats": [{"title": "Possession", "stats": [60, 40]}]}]}}},
+                            "lineup": {"lineup": [{"formation": "4-3-3", "coach": {"name": "X"}, "players": [[{"name": {"fullName": "A"}, "shirtNumber": 1}]]}, {"players": []}]},
+                            "matchFacts": {"events": [{"type": "Goal", "time": 10, "name": "A", "isHome": True}]},
+                        }
+                    }
+                )
+            if "incidents" in url:
+                return Result({"incidents": [{"incidentType": "goal", "time": 12, "player": {"name": "B"}, "isHome": True}]})
+            if "statistics" in url:
+                return Result({"statistics": []})
+            if "lineups" in url:
+                return Result({})
+            return Result({})
+
+        from collector.detail_enrich import enrich_event_row
+        from collector.models import SportsEventDetail
+
+        enrich_event_row(db, row, getter=getter)
+        db.commit()
+        detail = db.get(SportsEventDetail, row.event_id)
+        assert load_json(detail.incidents_json)
+        assert load_json(detail.statistics_json)
+        assert load_json(detail.lineups_json)
+    finally:
+        db.close()
+
+
+def test_walkover_stays_public_without_invented_score():
+    event = normalize_event(
+        {
+            "home": {"name": "A"},
+            "away": {"name": "B"},
+            "status": "finished",
+            "result_type": "walkover",
+            "walkover": True,
+            "score": {"home": None, "away": None},
+            "start_time": "2026-09-18T15:48:00Z",
+        },
+        sport_id="tennis",
+        competition_id="wta-tour",
+    )
+    assert event["result_type"] == "walkover"
+    assert event["score"]["home"] is None
+
+
+def test_racing_finished_without_result_becomes_scheduled():
+    db = SessionLocal()
+    try:
+        row = SportsEvent(
+            event_id="ninko-evt-race-blank",
+            sport_id="horse-racing",
+            competition_id="bha-meetings",
+            event_family="racing",
+            status="scheduled",
+            extra_json=dump_json({}),
+        )
+        db.add(row)
+        db.commit()
+        incoming = mock_event(status="finished", score={"home": None, "away": None})
+        incoming["event_family"] = "racing"
+        apply_row_fields(row, incoming, "bha", True)
+        assert row.status == "scheduled"
+    finally:
+        db.close()
+
+
+def test_list_payload_omits_rich_match_centre_sections():
+    db = SessionLocal()
+    try:
+        row = SportsEvent(
+            event_id="ninko-evt-list-slim",
+            sport_id="football",
+            competition_id="italy-serie-a",
+            event_family="team_match",
+            status="finished",
+            start_time=datetime(2026, 9, 21, 12, 0, 0),
+            display_eligible=True,
+            extra_json=dump_json({"incidents": [{"type": "goal"}] * 50, "statistics": [{"label": "x"}], "lineups": {"home": {}}, "winner": None, "live_class": "FT"}),
+            list_extra_json=dump_json({"live_class": "FT", "result_type": None}),
+            participants_json=dump_json({"home": {"name": "A"}, "away": {"name": "B"}}),
+            score_json=dump_json({"home": 1, "away": 0}),
+        )
+        db.add(row)
+        db.commit()
+        public = NinkoCollectedSportsDataProvider().get_events(
+            sport="football",
+            date_from="2026-09-21T00:00:00Z",
+            date_to="2026-09-21T23:59:59Z",
+        )
+        assert len(public) == 1
+        assert public[0].get("incidents") in (None, [])
+        assert public[0].get("statistics") in (None, [])
+        assert public[0].get("lineups") in (None, [], {})
+        assert public[0]["score"]["home"] == 1
+    finally:
+        db.close()
+
+
+def test_gbgb_without_placing_is_scheduled():
+    from collector.adapters_official import parse_gbgb
+
+    events = parse_gbgb(
+        {
+            "items": [
+                {
+                    "trackName": "Oxford",
+                    "raceNumber": 3,
+                    "raceDate": "21/09/2026",
+                    "raceTime": "14:00",
+                    "greyhoundName": "",
+                    "resultPosition": None,
+                }
+            ]
+        }
+    )
+    assert not events or events[0]["status"] == "scheduled"
+
+
+def test_fotmob_id_backfill_from_observations():
+    from collector.id_backfill import attach_observation_ids, copy_complementary_ids
+
+    db = SessionLocal()
+    try:
+        start = datetime.utcnow()
+        keeper = SportsEvent(
+            event_id="ninko-evt-id-keeper",
+            sport_id="football",
+            competition_id="italy-serie-a",
+            event_family="team_match",
+            status="finished",
+            start_time=start,
+            extra_json=dump_json({"source_family": "openligadb"}),
+            participants_json=dump_json({"home": {"name": "Inter"}, "away": {"name": "Milan"}}),
+        )
+        sibling = SportsEvent(
+            event_id="ninko-evt-id-fotmob",
+            sport_id="football",
+            competition_id="italy-serie-a",
+            event_family="team_match",
+            status="finished",
+            start_time=start,
+            extra_json=dump_json({"source_family": "fotmob", "source_event_ids": {"fotmob": "481099"}}),
+            participants_json=dump_json({"home": {"name": "Inter"}, "away": {"name": "Milan"}}),
+        )
+        db.add_all([keeper, sibling])
+        db.add(
+            SportsEventObservation(
+                event_id="ninko-evt-id-keeper",
+                source_id="fotmob-board",
+                source_family="fotmob",
+                source_event_id="481099",
+                retrieved_at=datetime.utcnow(),
+            )
+        )
+        db.commit()
+        updated = attach_observation_ids(db, hours=24)
+        assert updated["rows_updated"] >= 1
+        copied = copy_complementary_ids(db, hours=24)
+        extra = load_json(db.get(SportsEvent, "ninko-evt-id-keeper").extra_json, {})
+        assert extra["source_event_ids"]["fotmob"] == "481099"
+        extra2 = load_json(db.get(SportsEvent, "ninko-evt-id-fotmob").extra_json, {})
+        assert extra2["source_event_ids"]["fotmob"] == "481099"
+        assert copied >= 0
+    finally:
+        db.close()
+
+
+def test_seven_day_list_returns_all_valid_rows():
+    db = SessionLocal()
+    try:
+        start = datetime(2026, 9, 18, 12, 0, 0)
+        for index in range(12):
+            db.add(
+                SportsEvent(
+                    event_id=f"ninko-evt-week-{index}",
+                    sport_id="football",
+                    competition_id="italy-serie-a",
+                    event_family="team_match",
+                    status="finished",
+                    start_time=start + timedelta(hours=index),
+                    display_eligible=True,
+                    extra_json=dump_json({}),
+                    list_extra_json=dump_json({"live_class": "FT"}),
+                    participants_json=dump_json({"home": {"name": f"H{index}"}, "away": {"name": f"A{index}"}}),
+                    score_json=dump_json({"home": 1, "away": 0}),
+                )
+            )
+        db.commit()
+        rows = NinkoCollectedSportsDataProvider().get_events(
+            sport="football",
+            date_from="2026-09-18T00:00:00Z",
+            date_to="2026-09-25T00:00:00Z",
+        )
+        assert len(rows) == 12
+        assert all(row.get("incidents") in (None, []) for row in rows)
+    finally:
+        db.close()
+

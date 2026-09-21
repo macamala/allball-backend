@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import os
-from datetime import datetime, timedelta, timedelta
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import and_, or_
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, defer
 
 from collector.cache import cache_get, cache_set
 from collector.models import (
@@ -23,6 +23,7 @@ from collector.display import sanitize_side
 from collector.enrichment import DETAIL_ONLY_KEYS, is_display_eligible, quality_flags_for_event
 from collector.competition_identity import correct_public_competition_id
 from collector.competition_presentation import attach_competition_metadata
+from collector.list_extra import extra_for_list
 from collector.matrix_guard import frozen_competition_ids
 from collector.util import isoformat, load_json
 from sports_provider import (
@@ -365,7 +366,7 @@ class NinkoCollectedSportsDataProvider:
     ) -> List[NormalizedEvent]:
         db = _session(self._session_factory)
         try:
-            cache_key = f"events:p0v11:{sport}:{competition}:{status}:{date_from}:{date_to}:{int(allow_unfiltered)}"
+            cache_key = f"events:p0v13:{sport}:{competition}:{status}:{date_from}:{date_to}:{int(allow_unfiltered)}"
             cached = cache_get(db, cache_key)
             if cached is not None:
                 return cached
@@ -388,6 +389,7 @@ class NinkoCollectedSportsDataProvider:
             if start_to is not None:
                 query = query.filter(SportsEvent.start_time <= start_to)
             query = query.filter(SportsEvent.canonical_event_id.is_(None))
+            query = query.options(defer(SportsEvent.extra_json))
             query = query.filter(
                 or_(
                     SportsEvent.display_eligible.is_(True),
@@ -480,17 +482,18 @@ class NinkoCollectedSportsDataProvider:
                 keeper = db.query(SportsEvent).filter_by(event_id=row.canonical_event_id).first()
                 if keeper:
                     row = keeper
-            payload = self._to_normalized(row, include_detail=True)
-            if payload is None:
-                return None
-            extra = load_json(row.extra_json, {}) or {}
             try:
                 from collector.detail_enrich import enrich_event_row
 
                 enrich_event_row(db, row)
-                extra = load_json(row.extra_json, {}) or {}
+                db.commit()
+                db.refresh(row)
             except Exception:
-                extra = load_json(row.extra_json, {}) or {}
+                db.rollback()
+            payload = self._to_normalized(row, include_detail=True)
+            if payload is None:
+                return None
+            extra = load_json(row.extra_json, {}) or {}
             standing = (
                 db.query(SportsStandingSnapshot.competition_id)
                 .filter_by(competition_id=payload.get("competition_key"))
@@ -499,6 +502,9 @@ class NinkoCollectedSportsDataProvider:
             payload["standings_available"] = bool(standing)
             for key in DETAIL_ONLY_KEYS:
                 if extra.get(key) is not None and payload.get(key) is None:
+                    payload[key] = extra[key]
+            for key in ("venue", "referee", "attendance"):
+                if extra.get(key) and not payload.get(key):
                     payload[key] = extra[key]
             detail = db.query(SportsEventDetail).filter_by(event_id=row.event_id).first()
             if detail is None or not (
@@ -568,8 +574,8 @@ class NinkoCollectedSportsDataProvider:
     ) -> NormalizedEvent:
         participants = load_json(row.participants_json, {}) or {}
         score = load_json(row.score_json, {}) or {}
-        extra = load_json(row.extra_json, {}) or {}
-        extra_for_payload = extra if include_detail else {k: extra[k] for k in LIST_EXTRA_KEYS if extra.get(k) is not None}
+        extra = extra_for_list(row) if not include_detail else (load_json(row.extra_json, {}) or {})
+        extra_for_payload = extra if include_detail else extra
         raw_sides = {
             "home": participants.get("home") or {},
             "away": participants.get("away") or {},

@@ -162,6 +162,7 @@ def _ensure_collector_columns(bind):
             ("source_url", "VARCHAR(500)"),
             ("display_eligible", "BOOLEAN DEFAULT TRUE"),
             ("canonical_event_id", "VARCHAR(160)"),
+            ("list_extra_json", "TEXT"),
         ],
         "sports_id_map": [
             ("source_entity_id_original", "TEXT"),

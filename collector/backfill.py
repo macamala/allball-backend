@@ -22,7 +22,7 @@ from collector.util import dump_json, load_json
 
 logger = logging.getLogger(__name__)
 
-JOB_KEY = "bounded-rich-backfill-v2"
+JOB_KEY = "bounded-rich-backfill-v3"
 
 CORE_COMPETITIONS: List[str] = [
     "wta-tour",
@@ -39,6 +39,10 @@ CORE_COMPETITIONS: List[str] = [
     "norway-eliteserien",
     "poland-ekstraklasa",
     "romania-superliga",
+    "korea-k-league-1",
+    "china-super-league",
+    "czech-first-league",
+    "hungary-nb-i",
 ]
 CORE_COMPETITIONS.extend(sorted(SOFA_COMPETITIONS)[:8])
 
@@ -56,6 +60,13 @@ def _job(db: Session) -> SportsCollectorJob:
 
 def run_bounded_backfill(db: Session, *, competitions: Optional[List[str]] = None) -> Dict[str, Any]:
     register_production_adapters()
+    from collector.id_backfill import attach_observation_ids, copy_complementary_ids, coverage_counts
+    from collector.list_extra import store_list_extra
+
+    before = coverage_counts(db)
+    attach_observation_ids(db)
+    copy_complementary_ids(db)
+    db.commit()
     comps = list(dict.fromkeys(competitions or CORE_COMPETITIONS))
     summaries: Dict[str, Any] = {}
     for competition_id in comps:
@@ -72,9 +83,27 @@ def run_bounded_backfill(db: Session, *, competitions: Optional[List[str]] = Non
             logger.exception("backfill failed competition=%s", competition_id)
             summaries[competition_id] = {"error": str(exc)[:240]}
             db.rollback()
-    enrich = enrich_recent_detail(db)
+    attach_observation_ids(db)
+    copy_complementary_ids(db)
     db.commit()
-    return {"competitions": summaries, "enrich": enrich, "count": len(comps)}
+    enrich = enrich_recent_detail(db)
+    after = coverage_counts(db)
+    bound = datetime.utcnow() - timedelta(hours=192)
+    racing = {"greyhound-racing", "horse-racing", "harness-racing"}
+    for row in (
+        db.query(SportsEvent)
+        .filter(SportsEvent.start_time >= bound)
+        .filter(SportsEvent.canonical_event_id.is_(None))
+        .all()
+    ):
+        extra = load_json(row.extra_json, {}) or {}
+        if row.sport_id in racing and (row.status or "").lower() == "finished":
+            if not extra.get("winner") and not extra.get("runners"):
+                row.status = "scheduled"
+                row.live = False
+        store_list_extra(row, extra)
+    db.commit()
+    return {"competitions": summaries, "enrich": enrich, "count": len(comps), "coverage_before": before, "coverage_after": after}
 
 
 def enrich_recent_detail(db: Session, *, hours: int = 96, limit: int = 80) -> Dict[str, int]:

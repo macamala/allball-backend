@@ -55,7 +55,7 @@ _BOARD: Dict[str, List[Dict[str, Any]]] = {}
 
 def _dates() -> List[str]:
     now = datetime.now(timezone.utc)
-    return [(now + timedelta(days=delta)).strftime("%Y%m%d") for delta in (-1, 0, 1)]
+    return [(now + timedelta(days=delta)).strftime("%Y%m%d") for delta in (-3, -2, -1, 0, 1)]
 
 
 def _extract_matches(payload: Any) -> List[Dict[str, Any]]:

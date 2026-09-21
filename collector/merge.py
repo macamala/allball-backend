@@ -311,6 +311,15 @@ def merge_event_fields(
     if not b_name:
         out["participant_b"] = {**(out.get("away") or {}), "side": "b"}
     out["field_sources"] = provenance
+    from collector.source_ids import merge_family_ids
+
+    out["source_event_ids"] = merge_family_ids(
+        current.get("source_event_ids"),
+        incoming.get("source_event_ids"),
+        family=str(incoming.get("source_family") or ""),
+        source_event_id=incoming.get("source_event_id"),
+    )
+    out["source_family"] = incoming.get("source_family") or current.get("source_family")
     out["field_freshness"] = freshness
     out["source_status"] = current.get("source_status") or incoming.get("source_status") or current.get("status")
     if incoming.get("source_status") and live_wins:
@@ -436,3 +445,14 @@ def apply_row_fields(row, merged: Dict[str, Any], source_id: str, higher: bool) 
     if higher or not row.primary_source_id:
         row.primary_source_id = source_id
     row.updated_at = datetime.utcnow()
+    extra = load_json(row.extra_json, {}) or {}
+    racing = row.sport_id in {"greyhound-racing", "horse-racing", "harness-racing"} or row.event_family == "racing"
+    if racing and (row.status or "").lower() == "finished":
+        if not extra.get("winner") and not extra.get("runners"):
+            row.status = "scheduled"
+            row.live = False
+            extra["status_inferred"] = False
+            row.extra_json = dump_json(extra)
+    from collector.list_extra import store_list_extra
+
+    store_list_extra(row, extra)
