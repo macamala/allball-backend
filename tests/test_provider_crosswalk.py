@@ -324,6 +324,47 @@ def test_cricsheet_historical_direct_event_keeps_frozen_id():
     )
 
 
+def test_cricsheet_attach_copies_innings_onto_keeper():
+    start = datetime(2026, 9, 14, 0, 0, 0)
+    row = _row(
+        event_id="ninko-xw-cricket",
+        fingerprint="xw-cricket",
+        start_time=start,
+        sport_id="cricket",
+        competition_id="t20-internationals",
+        home="India",
+        away="Australia",
+    )
+    innings = [
+        {"label": "India", "runs": 178, "wickets": 6, "overs": 20},
+        {"label": "Australia", "runs": 164, "wickets": 8, "overs": 20},
+    ]
+    incoming = {
+        "sport": "cricket",
+        "competition_key": "t20-internationals",
+        "home": {"name": "India"},
+        "away": {"name": "Australia"},
+        "start_time": "2026-09-14T00:00:00Z",
+        "source_event_ids": {"cricsheet": "1482210"},
+        "innings": innings,
+        "sport_detail": {"result": "India won", "historical": True, "live": False},
+    }
+    best, n_ok, _protected = match_keepers(incoming, [row])
+    assert n_ok == 1
+    assert attach_family_id(best, "cricsheet", "1482210", incoming=incoming)
+    extra = load_json(best.extra_json, {}) or {}
+    assert extra["innings"][0]["runs"] == 178
+    assert extra["sport_detail"]["result"] == "India won"
+
+
+def test_click_tt_source_aliases_cover_registry_id():
+    from collector.source_ids import source_id_aliases
+
+    aliases = source_id_aliases("click-tt-remix")
+    assert "click-tt" in aliases
+    assert "click-tt-remix" in aliases
+
+
 def test_dataproject_volleyball_identity_attach():
     start = datetime(2026, 1, 10, 18, 0, 0)
     row = _row(

@@ -6,7 +6,7 @@ Compound IDs (season:round, season:gamecode) must be kept intact.
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 _FAMILY_PREFIXES = (
     "jolpica:",
@@ -123,6 +123,19 @@ _CANONICAL_FAMILY = {
     "dataproject-wcm": "dataproject-web",
     "cricsheet-json": "cricsheet",
 }
+
+
+def source_id_aliases(source_id: str) -> List[str]:
+    """Registry/source rows may use family aliases (click-tt vs click-tt-remix)."""
+    raw = str(source_id or "").strip()
+    if not raw:
+        return []
+    canonical = _CANONICAL_FAMILY.get(raw, raw)
+    seen: List[str] = []
+    for item in (raw, canonical, * [alias for alias, canon in _CANONICAL_FAMILY.items() if canon == canonical]):
+        if item and item not in seen:
+            seen.append(item)
+    return seen
 
 
 def families_with_ids(extra: Dict[str, Any]) -> Dict[str, str]:

@@ -40,6 +40,11 @@ def _event(row: Dict[str, Any], competition_id: str = "professional") -> Dict[st
         "winner": row.get("radiant_name")
         if row.get("radiant_win")
         else (row.get("dire_name") if row.get("radiant_win") is False else None),
+        "sport_detail": {
+            "duration": row.get("duration"),
+            "radiant_win": row.get("radiant_win"),
+            "historical": False,
+        },
         "source_family": "opendota",
         "source_event_id": str(row.get("match_id") or ""),
         "source_event_ids": {"opendota": str(row.get("match_id") or "")},
@@ -49,6 +54,10 @@ def _event(row: Dict[str, Any], competition_id: str = "professional") -> Dict[st
             "source_event_ids": {"opendota": str(row.get("match_id") or "")},
             "league_name": league,
             "source_competition_name": "Dota 2 Professional",
+            "sport_detail": {
+                "duration": row.get("duration"),
+                "radiant_win": row.get("radiant_win"),
+            },
         },
     }
 

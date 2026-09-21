@@ -603,3 +603,49 @@ def test_attribution_corrects_or_quarantines_from_source_evidence():
         assert extra.get("competition_attribution") == "quarantined_unproven"
     finally:
         db.close()
+
+
+def test_owned_family_hidden_cricket_is_recovered():
+    from datetime import datetime
+
+    from collector.integrity import apply_competition_attribution
+    from collector.models import SportsEvent
+    from collector.util import dump_json, load_json
+    from database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        db.query(SportsEvent).filter_by(event_id="ninko-evt-cricsheet-hidden").delete()
+        db.commit()
+        row = SportsEvent(
+            event_id="ninko-evt-cricsheet-hidden",
+            sport_id="cricket",
+            competition_id="t20-internationals",
+            event_family="team_match",
+            fingerprint="fp-cricsheet-hidden",
+            start_time=datetime(2026, 9, 16, 0, 0, 0),
+            display_eligible=False,
+            participants_json=dump_json({"home": {"name": "India"}, "away": {"name": "Pakistan"}}),
+            extra_json=dump_json(
+                {
+                    "display_eligible": False,
+                    "source_family": "cricsheet",
+                    "source_competition_name": "ICC Men's T20 World Cup",
+                    "innings": [{"label": "India", "runs": 120, "wickets": 4, "overs": 20}],
+                }
+            ),
+        )
+        db.add(row)
+        db.commit()
+        result = apply_competition_attribution(db, live_index={}, fetch_live=False)
+        recovered = db.query(SportsEvent).filter_by(event_id="ninko-evt-cricsheet-hidden").one()
+        extra = load_json(recovered.extra_json, {}) or {}
+        assert result["recovered"] >= 1
+        assert recovered.display_eligible is True
+        assert extra.get("display_eligible") is True
+        assert extra.get("competition_attribution") == "recovered_mapping_owned"
+        assert extra["innings"][0]["runs"] == 120
+    finally:
+        db.query(SportsEvent).filter_by(event_id="ninko-evt-cricsheet-hidden").delete()
+        db.commit()
+        db.close()

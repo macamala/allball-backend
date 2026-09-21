@@ -16,7 +16,12 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from collector.cache import cache_clear
-from collector.competition_identity import COMPETITION_LABELS, label_matches_competition, resolve_competition
+from collector.competition_identity import (
+    COMPETITION_LABELS,
+    MAPPING_OWNED_FAMILIES,
+    label_matches_competition,
+    resolve_competition,
+)
 from collector.enrichment import is_display_eligible, quality_flags_for_event
 from collector.identity_events import identity_confidence
 from collector.models import SportsEvent, SportsEventObservation
@@ -361,7 +366,11 @@ def apply_competition_attribution(
         extra = load_json(row.extra_json, {}) or {}
         eligible = row.display_eligible is not False and extra.get("display_eligible") is not False
         recover = extra.get("competition_attribution") == "quarantined_unproven"
-        if eligible or recover:
+        family = str(extra.get("source_family") or "")
+        owned_hidden = family in MAPPING_OWNED_FAMILIES and (
+            row.display_eligible is False or extra.get("display_eligible") is False
+        )
+        if eligible or recover or owned_hidden:
             kept.append(row)
     public = kept
     scanned = len(public)

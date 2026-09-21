@@ -23,7 +23,7 @@ from collector.util import dump_json, load_json
 
 logger = logging.getLogger(__name__)
 
-ATTACH_JOB = "provider-id-attach-v5"
+ATTACH_JOB = "provider-id-attach-v6"
 MAX_INGEST_PER_FAMILY = 40
 FAMILY_SPORT = {
     "pulselive": "rugby",
@@ -114,6 +114,12 @@ def attach_family_id(row: SportsEvent, family: str, source_event_id: str, incomi
         if incoming.get("periods") and not extra.get("periods"):
             extra["periods"] = incoming.get("periods")
             changed = True
+        innings = incoming.get("innings")
+        if not innings and isinstance(incoming.get("extra"), dict):
+            innings = incoming["extra"].get("innings")
+        if innings and not extra.get("innings"):
+            extra["innings"] = innings
+            changed = True
         detail = incoming.get("sport_detail") or ((incoming.get("extra") or {}).get("sport_detail") if isinstance(incoming.get("extra"), dict) else None)
         if isinstance(detail, dict) and detail:
             extra["sport_detail"] = {**(extra.get("sport_detail") or {}), **detail}
@@ -201,17 +207,30 @@ def _ingest(db: Session, incoming: Dict[str, Any], source_id: str) -> bool:
     from collector.match import match_event
     from collector.normalize import normalize_event
 
-    source = db.query(SportsSource).filter_by(source_id=source_id).first()
+    from collector.source_ids import source_id_aliases
+
+    candidates = source_id_aliases(source_id) or [source_id]
+    source = (
+        db.query(SportsSource)
+        .filter(SportsSource.source_id.in_(candidates))
+        .first()
+    )
     if source is None:
         return False
     competition_id = incoming.get("competition_key") or ""
     mapping = (
         db.query(SportsSourceCompetition)
-        .filter_by(source_id=source.source_id, competition_id=competition_id)
+        .filter(
+            SportsSourceCompetition.competition_id == competition_id,
+            SportsSourceCompetition.source_id.in_(candidates),
+        )
         .first()
     )
     if mapping is None:
         return False
+    mapped_source = db.query(SportsSource).filter_by(source_id=mapping.source_id).first()
+    if mapped_source is not None:
+        source = mapped_source
     sport_id = incoming.get("sport") or ""
     event = normalize_event(incoming, sport_id=sport_id, competition_id=competition_id)
     event["competition_key"] = competition_id
