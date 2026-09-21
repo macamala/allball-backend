@@ -91,6 +91,32 @@ def test_fotmob_sanitized_payload_maps_timeline_stats_lineups():
     assert out["referee"] == "M. Oliver"
 
 
+def test_fotmob_hometeam_lineup_shape_parses_starters():
+    out = parse_fotmob_details(
+        {
+            "content": {
+                "lineup": {
+                    "homeTeam": {
+                        "formation": "4-3-3",
+                        "coach": {"name": "Paolo Vanoli"},
+                        "starters": [{"name": "David de Gea", "shirtNumber": "43"}],
+                        "subs": [{"name": "Pietro Comuzzo", "shirtNumber": "15"}],
+                    },
+                    "awayTeam": {
+                        "formation": "4-3-3",
+                        "coach": {"name": "Antonio Conte"},
+                        "starters": [{"name": "Vanja Milinkovic-Savic", "shirtNumber": "32"}],
+                        "subs": [],
+                    },
+                }
+            }
+        }
+    )
+    assert out["lineups"]["home"]["formation"] == "4-3-3"
+    assert out["lineups"]["home"]["coach"] == "Paolo Vanoli"
+    assert out["lineups"]["home"]["start"][0]["name"] == "David de Gea"
+
+
 def test_sofascore_sanitized_payloads_map_incidents_stats_lineups():
     incidents = parse_sofa_incidents(
         {"incidents": [{"incidentType": "goal", "time": 9, "player": {"name": "Haaland"}, "isHome": True, "homeScore": 1, "awayScore": 0}]}

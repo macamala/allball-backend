@@ -148,7 +148,35 @@ def parse_fotmob_details(payload: Any) -> Dict[str, Any]:
             out["statistics"] = rows
     lineup = content.get("lineup") or content.get("lineups") or {}
     sides = lineup.get("lineup") if isinstance(lineup, dict) else None
-    if isinstance(sides, list) and len(sides) >= 2:
+    if isinstance(lineup, dict) and lineup.get("homeTeam") and lineup.get("awayTeam"):
+        def pack_team(side: Dict[str, Any]) -> Dict[str, Any]:
+            players = []
+            for player in side.get("starters") or side.get("startXI") or []:
+                if not isinstance(player, dict):
+                    continue
+                players.append({"name": player.get("name"), "number": player.get("shirtNumber") or player.get("number")})
+            bench = []
+            for player in side.get("subs") or side.get("substitutes") or []:
+                if not isinstance(player, dict):
+                    continue
+                bench.append({"name": player.get("name"), "number": player.get("shirtNumber") or player.get("number")})
+            coach = side.get("coach") or {}
+            if isinstance(coach, list) and coach:
+                coach = coach[0]
+            return {
+                "formation": side.get("formation"),
+                "coach": (coach.get("name") if isinstance(coach, dict) else None) or side.get("coachName"),
+                "start": players,
+                "bench": bench,
+            }
+
+        packed = {
+            "home": pack_team(lineup.get("homeTeam") if isinstance(lineup.get("homeTeam"), dict) else {}),
+            "away": pack_team(lineup.get("awayTeam") if isinstance(lineup.get("awayTeam"), dict) else {}),
+        }
+        if packed["home"]["start"] or packed["away"]["start"]:
+            out["lineups"] = packed
+    elif isinstance(sides, list) and len(sides) >= 2:
         def pack(side: Dict[str, Any]) -> Dict[str, Any]:
             players = []
             bench = []
@@ -542,7 +570,13 @@ def enrich_event_row(db: Session, row: SportsEvent, getter=None) -> None:
     ids = families_with_ids(extra)
     tried = set(extra.get("detail_families_tried") or [])
     pending = [fam for fam in DETAIL_FAMILIES if ids.get(fam) and fam not in tried]
-    if _fresh(extra, row.status or "") and not pending:
+    record = db.get(SportsEventDetail, row.event_id)
+    missing_lineups = not (record and load_json(record.lineups_json)) and not extra.get("lineups_absent")
+    if missing_lineups:
+        tried.discard("fotmob")
+        tried.discard("sofascore-web")
+        pending = [fam for fam in DETAIL_FAMILIES if ids.get(fam)]
+    if _fresh(extra, row.status or "") and not pending and not missing_lineups:
         row.extra_json = dump_json(extra)
         return
     if not any(fam in DETAIL_FAMILIES for fam in ids):
@@ -573,6 +607,7 @@ def enrich_event_row(db: Session, row: SportsEvent, getter=None) -> None:
     if not detail:
         extra["detail_empty"] = True
         extra["detail_negative"] = True
+        extra["lineups_absent"] = True
         row.extra_json = dump_json(extra)
         return
     record = db.get(SportsEventDetail, row.event_id)
@@ -596,6 +631,7 @@ def enrich_event_row(db: Session, row: SportsEvent, getter=None) -> None:
         extra["sport_detail"] = extra.get("sport_detail") or detail["sport_detail"]
     extra["detail_empty"] = False
     extra["detail_negative"] = False
+    extra["lineups_absent"] = not bool(detail.get("lineups") or load_json(record.lineups_json))
     row.extra_json = dump_json(extra)
     from collector.list_extra import store_list_extra
 
