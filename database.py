@@ -199,7 +199,10 @@ def _ensure_collector_columns(bind):
                     continue
                 conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {coltype}"))
         if dialect == "postgresql" and "sports_event_observations" in tables:
-            conn.execute(text("ALTER TABLE sports_event_observations ALTER COLUMN source_event_id TYPE TEXT"))
+            obs_cols = {col["name"]: col for col in insp.get_columns("sports_event_observations")}
+            source_type = str((obs_cols.get("source_event_id") or {}).get("type") or "").lower()
+            if source_type and "text" not in source_type:
+                conn.execute(text("ALTER TABLE sports_event_observations ALTER COLUMN source_event_id TYPE TEXT"))
         _ = bool_default
         _ensure_collector_indexes(conn, tables)
 
