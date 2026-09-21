@@ -18,6 +18,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
 
+from collector.tennis_score import apply_tennis_match_score, completed_set_wins, set_is_complete
+
 A_SIDE = "home"
 B_SIDE = "away"
 
@@ -58,9 +60,10 @@ def periods_from_score_sets(row: Dict[str, Any]) -> List[Dict[str, Any]]:
         if home is None or away is None:
             continue
         winner = None
-        if home > away:
+        complete = set_is_complete(home, away)
+        if complete and home > away:
             winner = A_SIDE
-        elif away > home:
+        elif complete and away > home:
             winner = B_SIDE
         out.append(
             {
@@ -71,6 +74,7 @@ def periods_from_score_sets(row: Dict[str, Any]) -> List[Dict[str, Any]]:
                 "home": home,
                 "away": away,
                 "winner": winner,
+                "complete": complete,
                 "tiebreak_home": None,
                 "tiebreak_away": None,
             }
@@ -79,24 +83,7 @@ def periods_from_score_sets(row: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 
 def sets_won_from_periods(periods: List[Dict[str, Any]]) -> Tuple[Optional[int], Optional[int]]:
-    if not periods:
-        return None, None
-    home = away = 0
-    scored = False
-    for row in periods:
-        try:
-            a = int(row.get("home"))
-            b = int(row.get("away"))
-        except (TypeError, ValueError):
-            continue
-        scored = True
-        if a > b:
-            home += 1
-        elif b > a:
-            away += 1
-    if not scored:
-        return None, None
-    return home, away
+    return completed_set_wins(periods)
 
 
 def winner_side_from_source(row: Dict[str, Any], home_name: str, away_name: str) -> Optional[str]:
@@ -147,8 +134,17 @@ def orient_wta_match(row: Dict[str, Any], tournament: Optional[Dict[str, Any]] =
     home = wta_player_name(row, "A")
     away = wta_player_name(row, "B")
     periods = periods_from_score_sets(row)
-    home_sets, away_sets = sets_won_from_periods(periods)
     status, result_type = match_status(row)
+    payload = apply_tennis_match_score(
+        {
+            "periods": periods,
+            "status": status,
+            "result_type": result_type,
+            "score": {"home": None, "away": None},
+        }
+    )
+    home_sets = (payload.get("score") or {}).get("home")
+    away_sets = (payload.get("score") or {}).get("away")
     winner_side = winner_side_from_source(row, home, away)
     conflict = False
     if winner_side == A_SIDE and home_sets is not None and away_sets is not None and home_sets < away_sets:

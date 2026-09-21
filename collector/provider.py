@@ -106,6 +106,16 @@ INTERNAL_EVENT_KEYS = {
     "attribution",
     "collector",
     "provider_conflicts",
+    "field_freshness",
+    "source_family",
+    "source_status",
+    "source_fetch_time",
+    "last_contact_at",
+    "canonical_last_observed_at",
+    "observed_at",
+    "source_event_updated_at",
+    "status_inferred",
+    "quality_flags",
 }
 
 NESTED_SOURCE_ID_KEYS = {
@@ -447,6 +457,13 @@ class NinkoCollectedSportsDataProvider:
             if payload is None:
                 return None
             extra = load_json(row.extra_json, {}) or {}
+            try:
+                from collector.detail_enrich import enrich_event_row
+
+                enrich_event_row(db, row)
+                extra = load_json(row.extra_json, {}) or {}
+            except Exception:
+                extra = load_json(row.extra_json, {}) or {}
             standing = (
                 db.query(SportsStandingSnapshot.competition_id)
                 .filter_by(competition_id=payload.get("competition_key"))

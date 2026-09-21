@@ -215,6 +215,12 @@ class NhlAdapter:
             "competition": "nhl",
             "sport": "ice-hockey",
             "source_family": "nhl-web",
+            "source_event_id": str(row.get("id") or ""),
+            "extra": {
+                "source_family": "nhl-web",
+                "source_event_ids": [str(row.get("id") or "")],
+                "source_event_id": str(row.get("id") or ""),
+            },
         }
         if periods:
             event["periods"] = periods
@@ -313,6 +319,12 @@ class MlbAdapter:
             "competition": "mlb",
             "sport": "baseball",
             "source_family": "mlb-statsapi",
+            "source_event_id": str(row.get("gamePk") or ""),
+            "extra": {
+                "source_family": "mlb-statsapi",
+                "source_event_ids": [str(row.get("gamePk") or "")],
+                "source_event_id": str(row.get("gamePk") or ""),
+            },
         }
         if periods:
             event["periods"] = periods

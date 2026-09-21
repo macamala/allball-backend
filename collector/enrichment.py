@@ -122,6 +122,8 @@ EXTRA_PERSIST_KEYS = (
     "persisted_at",
     "canonical_updated_at",
     "field_freshness",
+    "source_event_id",
+    "source_event_ids",
 )
 
 _DATE = re.compile(

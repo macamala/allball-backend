@@ -1,6 +1,6 @@
 """Production adapters use recorded real payloads, not invented matches."""
 
-from collector.adapters import FetchRequest, FetchResult, unregister_adapter
+from collector.adapters import ADAPTERS, FetchRequest, FetchResult, unregister_adapter
 from collector.adapters_cricsheet import CricsheetAdapter
 from collector.adapters_feeds import FifaFootballAdapter, MlbAdapter, NhlAdapter
 from collector.adapters_opendota import OpenDotaAdapter
@@ -399,68 +399,62 @@ def test_opendota_pro_match():
 def test_bootstrap_and_collect_with_injected_adapters():
     register_production_adapters()
     db = SessionLocal()
+    original = None
     try:
         bootstrap_registry(db)
         db.commit()
         assert db.query(SportsSourceCompetition).count() >= 20
-        from collector.adapters import ADAPTERS
-
-        ADAPTERS["openfootball-json"] = lambda source_id="openfootball": OpenFootballAdapter(
-            getter=_getter({"2026-27/en.1.json": OPENFOOTBALL_EN})
-        )
-        ADAPTERS["openligadb"] = lambda source_id="openligadb": OpenLigaDbAdapter(
-            getter=_getter(
-                {
-                    "getmatchdata/bl1": OPENLIGA_BL1,
-                    "getmatchdata/bl2": [],
-                    "getmatchdata/bl3": [],
-                    "getmatchdata/dfb": [],
-                    "getmatchdata/del": [],
-                    "getmatchdata/ucl": [],
-                    "getmatchdata/fbl1": [],
-                    "getmatchdata/fbl2": [],
-                    "getmatchdata/del2": [],
-                    "getmatchdata/CHL": [],
-                    "getmatchdata/PDCWM": [],
-                    "getbltable": [],
-                }
-            )
-        )
-        ADAPTERS["thesportsdb"] = lambda source_id="thesportsdb": TheSportsDbAdapter(
-            getter=_getter(
-                {
-                    "eventsnextleague.php": TSDB_NEXT,
-                    "eventspastleague.php": TSDB_PAST,
-                    "lookuptable.php": {"table": []},
-                }
-            )
-        )
-        ADAPTERS["opendota"] = lambda source_id="opendota": OpenDotaAdapter(getter=_getter({"proMatches": OPENDOTA}))
-        ADAPTERS["squiggle-afl"] = lambda source_id="squiggle": SquiggleAflAdapter(
-            getter=_getter({"q=games": SQUIGGLE_GAMES})
-        )
-        ADAPTERS["cricsheet-json"] = lambda source_id="cricsheet": CricsheetAdapter(
-            getter=_getter({"recently_added_7_json.zip": [CRICSHEET_DOC]})
-        )
+        original = dict(ADAPTERS)
 
         class _Empty:
             def fetch(self, request):
                 return FetchResult(ok=True, http_status=200, events=[])
 
-        for key in (
-            "fifa-json",
-            "nhl-web",
-            "mlb-statsapi",
-            "khl-mobile",
-            "world-rugby-rims",
-            "jolpica-f1",
-            "euroleague-live",
-            "generic-http",
-            "pulselive-family",
-        ):
-            ADAPTERS[key] = lambda source_id="x", _empty=_Empty: _empty()
+        injected = {
+            "openfootball-json": lambda source_id="openfootball": OpenFootballAdapter(
+                getter=_getter({"2026-27/en.1.json": OPENFOOTBALL_EN})
+            ),
+            "openligadb": lambda source_id="openligadb": OpenLigaDbAdapter(
+                getter=_getter(
+                    {
+                        "getmatchdata/bl1": OPENLIGA_BL1,
+                        "getmatchdata/bl2": [],
+                        "getmatchdata/bl3": [],
+                        "getmatchdata/dfb": [],
+                        "getmatchdata/del": [],
+                        "getmatchdata/ucl": [],
+                        "getmatchdata/fbl1": [],
+                        "getmatchdata/fbl2": [],
+                        "getmatchdata/del2": [],
+                        "getmatchdata/CHL": [],
+                        "getmatchdata/PDCWM": [],
+                        "getbltable": [],
+                    }
+                )
+            ),
+            "thesportsdb": lambda source_id="thesportsdb": TheSportsDbAdapter(
+                getter=_getter(
+                    {
+                        "eventsnextleague.php": TSDB_NEXT,
+                        "eventspastleague.php": TSDB_PAST,
+                        "lookuptable.php": {"table": []},
+                    }
+                )
+            ),
+            "opendota": lambda source_id="opendota": OpenDotaAdapter(getter=_getter({"proMatches": OPENDOTA})),
+            "squiggle-afl": lambda source_id="squiggle": SquiggleAflAdapter(
+                getter=_getter({"q=games": SQUIGGLE_GAMES})
+            ),
+            "cricsheet-json": lambda source_id="cricsheet": CricsheetAdapter(
+                getter=_getter({"recently_added_7_json.zip": [CRICSHEET_DOC]})
+            ),
+        }
+        empty = lambda source_id="x", _empty=_Empty: _empty()
+        for key in list(ADAPTERS):
+            ADAPTERS[key] = empty
+        ADAPTERS.update(injected)
 
-        summary = run_cycle(db, capabilities=["fixtures", "results"], sleeper=lambda _d: None)
+        summary = run_cycle(db, capabilities=["fixtures", "results"], sleeper=lambda _d: None, force=True)
         db.commit()
         assert sum(summary.values()) > 0
         assert db.query(SportsEvent).count() > 0
@@ -471,21 +465,6 @@ def test_bootstrap_and_collect_with_injected_adapters():
         assert "cricket" in names
     finally:
         db.close()
-        for key in (
-            "openfootball-json",
-            "openligadb",
-            "thesportsdb",
-            "opendota",
-            "squiggle-afl",
-            "cricsheet-json",
-            "fifa-json",
-            "nhl-web",
-            "mlb-statsapi",
-            "khl-mobile",
-            "world-rugby-rims",
-            "jolpica-f1",
-            "euroleague-live",
-            "generic-http",
-            "pulselive-family",
-        ):
-            unregister_adapter(key)
+        if original is not None:
+            ADAPTERS.clear()
+            ADAPTERS.update(original)

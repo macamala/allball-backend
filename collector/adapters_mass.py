@@ -136,21 +136,48 @@ def parse_aso_rankings(html: str) -> List[Dict[str, Any]]:
 
 def parse_hrnsw_meetings(html: str) -> List[Dict[str, Any]]:
     events: List[Dict[str, Any]] = []
-    for m in HRNSW_ROW.finditer(_text(html or "")):
+    blob = _text(html or "")
+    for m in HRNSW_ROW.finditer(blob):
         track = m.group(1).title().replace("Tabcorp Pk ", "Tabcorp Park ")
         if "Menangle" in track or "MENANGLE" in m.group(1).upper():
             track = "Menangle"
         day, month, year = int(m.group(3)), int(m.group(4)), int(m.group(5))
-        event = _event(
-            home=track,
-            away="Race 1",
-            start=_iso(day, month, year),
-            status="finished",
-            extra={"event_type": MEET, "event_family": "racing", "session": m.group(2), "track": track},
-        )
-        ev = _ok(event, "harness-racing", "nsw-hrnsw-meetings")
-        if ev:
-            events.append(ev)
+        start = _iso(day, month, year)
+        chunk = blob[m.end() : m.end() + 2500]
+        for race in re.finditer(r"Race\s+(\d{1,2})", chunk, re.I):
+            race_no = race.group(1)
+            window = chunk[race.end() : race.end() + 500]
+            win = re.search(r"(?:1st|1\s*st)\s+(?:[\d.]+\s+)?([A-Z][A-Za-z'\- ]{2,40})", window)
+            winner = win.group(1).strip() if win else None
+            event = _event(
+                home=track,
+                away=f"Race {race_no}",
+                start=start,
+                status="finished" if winner else "scheduled",
+                extra={
+                    "event_type": MEET,
+                    "event_family": "racing",
+                    "session": m.group(2),
+                    "track": track,
+                    "race_number": race_no,
+                    "winner": winner,
+                    "runners": [{"name": winner, "position": 1}] if winner else None,
+                },
+            )
+            ev = _ok(event, "harness-racing", "nsw-hrnsw-meetings")
+            if ev:
+                events.append(ev)
+        if not any(row.get("race_number") for row in events if (row.get("extra") or {}).get("track") == track):
+            event = _event(
+                home=track,
+                away="Race 1",
+                start=start,
+                status="scheduled",
+                extra={"event_type": MEET, "event_family": "racing", "session": m.group(2), "track": track},
+            )
+            ev = _ok(event, "harness-racing", "nsw-hrnsw-meetings")
+            if ev:
+                events.append(ev)
     return _dedupe(events)
 
 

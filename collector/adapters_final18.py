@@ -12,6 +12,7 @@ from urllib.parse import quote
 
 from collector.adapters import FetchRequest, FetchResult
 from collector.http import USER_AGENT, fetch_url
+from collector.adapters_official import parse_gbgb
 
 PGA_GQL = "https://orchestrator.pgatour.com/graphql"
 PGA_WEB_KEY = "da2-gsrx5bibzbb4njvhl7t37wqyl4"
@@ -522,11 +523,14 @@ class GbgbMeetingJsonAdapter:
         if request.capability not in {"fixtures", "results", "live_scores", "snapshot", "live"}:
             return FetchResult(ok=True, http_status=200, events=[])
         today = datetime.now(timezone.utc).date()
-        dates = [(today - timedelta(days=delta)).isoformat() for delta in (0, 1)]
+        dates = [(today - timedelta(days=delta)).isoformat() for delta in (0, 1, 2, 3)]
         last = None
         events: List[Dict[str, Any]] = []
+        seen_meetings = []
         for day in dates:
             last = self._get(GBGB_RESULTS.format(date=day))
+            if last.ok and isinstance(last.payload, dict):
+                events.extend(parse_gbgb(last.payload))
             if not last.ok or not isinstance(last.payload, dict):
                 continue
             items = last.payload.get("items") or []
@@ -534,16 +538,25 @@ class GbgbMeetingJsonAdapter:
             for row in items:
                 if isinstance(row, dict) and row.get("meetingId") and row["meetingId"] not in meeting_ids:
                     meeting_ids.append(row["meetingId"])
-            for meeting_id in meeting_ids[:8]:
+            for meeting_id in meeting_ids:
+                if meeting_id in seen_meetings:
+                    continue
+                seen_meetings.append(meeting_id)
                 meet = self._get(GBGB_MEETING.format(meeting_id=meeting_id))
                 payload = meet.payload
+                if isinstance(payload, dict) and payload.get("items"):
+                    events.extend(parse_gbgb(payload))
+                    continue
+                if isinstance(payload, list) and payload and isinstance(payload[0], dict) and (
+                    payload[0].get("resultPosition") is not None or payload[0].get("raceId")
+                ):
+                    events.extend(parse_gbgb({"items": payload}))
+                    continue
                 rows = payload if isinstance(payload, list) else [payload] if isinstance(payload, dict) else []
                 for block in rows:
                     if not isinstance(block, dict):
                         continue
                     events.extend(self._races(block, day))
-            if events:
-                break
         return FetchResult(ok=True, http_status=(last.http_status if last else 200) or 200, events=events)
 
     def _races(self, block: Dict[str, Any], day: str) -> List[Dict[str, Any]]:
@@ -561,7 +574,13 @@ class GbgbMeetingJsonAdapter:
             for trap in traps:
                 if not isinstance(trap, dict):
                     continue
-                name = trap.get("dogName") or trap.get("greyhoundName") or trap.get("name")
+                name = (
+                    trap.get("dogName")
+                    or trap.get("greyhoundName")
+                    or trap.get("name")
+                    or trap.get("winnerName")
+                    or trap.get("officialName")
+                )
                 pos = trap.get("resultPosition") or trap.get("position")
                 try:
                     pos_i = int(pos) if pos not in (None, "") else None

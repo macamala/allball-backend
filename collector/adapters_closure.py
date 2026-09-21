@@ -204,7 +204,7 @@ def parse_sportinglife_greyhounds(html: str, url: str = "") -> List[Dict[str, An
             home=f"{track} meeting",
             away=track,
             start=date,
-            status="finished",
+            status="scheduled",
             extra={"event_family": "racing"},
         )
         ev = _valid(event, "greyhound-racing", "gbgb-meetings")

@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Dict, Optional
 
 from collector.live_state import canonical_status, guard_future_status, is_live, reconcile_live_status
+from collector.tennis_score import apply_tennis_match_score
 from collector.participant_text import clean_participant_name, fold_for_identity, participant_payload
 from collector.timezones import DATE_ONLY, iso_utc, resolve_event_time
 from collector.util import slugify
@@ -143,6 +144,11 @@ def normalize_event(raw: Dict[str, Any], *, sport_id: str, competition_id: str) 
     if sport.get("event_model") == "racing":
         event["country_id"] = event.get("country_id")
         event["country_based"] = True
+        runners = event.get("runners") or (event.get("score") or {}).get("winner")
+        winner = event.get("winner") or (event.get("score") or {}).get("winner")
+        if event.get("status") == "finished" and not winner and not runners:
+            event["status"] = "scheduled"
+            event["live"] = False
     score_row = event.get("score") or {}
     if event.get("status") == "scheduled":
         try:
@@ -152,6 +158,8 @@ def normalize_event(raw: Dict[str, Any], *, sport_id: str, competition_id: str) 
                 event["score"] = score_row
         except (TypeError, ValueError):
             pass
+    if sport_id == "tennis":
+        event = apply_tennis_match_score(event)
     return reconcile_live_status(event)
 
 

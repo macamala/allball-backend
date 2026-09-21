@@ -307,10 +307,16 @@ def _racing_meeting_events(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
             winner = _team_name(race.get("winner") or race.get("horse") or race.get("first") or "")
             start = race.get("offTime") or race.get("start_time") or race.get("time") or meeting.get("date")
             home = f"R{number}" if number else (winner or course or "Race")
-            away = winner or course or "meeting"
+            away = course or "meeting"
             if home == away:
                 away = course or "meeting"
-            event = _event(home=home, away=away, start=start, extra={"event_family": "racing", "venue": course})
+            event = _event(
+                home=home,
+                away=away,
+                start=start,
+                status="finished" if winner else "scheduled",
+                extra={"event_family": "racing", "venue": course, "winner": winner or None, "race_number": number},
+            )
             if event:
                 events.append(event)
     return events

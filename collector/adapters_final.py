@@ -641,8 +641,8 @@ def parse_meet_index(html: str, tracks: tuple[str, ...], sport_id: str, competit
             home=track,
             away=f"Race {race_no}",
             start=start,
-            status="finished",
-            extra={"event_type": MEET, "event_family": "racing", "track": track, "race_number": race_no},
+            status="scheduled",
+            extra={"event_family": "racing", "track": track, "race_number": race_no},
         )
         ev = _ok(event, sport_id, competition_id)
         if ev:
@@ -720,6 +720,13 @@ class HrnswMeetAdapter:
             if last.ok and isinstance(last.payload, str):
                 events.extend(parse_hrnsw_meetings(last.payload))
                 events.extend(parse_meet_index(last.payload, tracks, "harness-racing", "nsw-hrnsw-meetings"))
+                for href in HREF_RE.findall(last.payload)[:12]:
+                    if "result" not in href.lower():
+                        continue
+                    abs_url = href if href.startswith("http") else urljoin("https://www.hrnsw.com.au", href)
+                    page = _get(self._get_text, abs_url, timeout=20)
+                    if page.ok and isinstance(page.payload, str):
+                        events.extend(parse_hrnsw_meetings(page.payload))
             if events:
                 break
         return FetchResult(

@@ -619,6 +619,10 @@ def parse_gbgb(payload: Any) -> List[Dict[str, Any]]:
                 or row.get("name")
                 or row.get("winner")
                 or row.get("greyhound")
+                or row.get("winnerName")
+                or row.get("officialName")
+                or row.get("DogName")
+                or row.get("Greyhound")
                 or ""
             )
             if isinstance(dog, dict):
@@ -644,7 +648,8 @@ def parse_gbgb(payload: Any) -> List[Dict[str, Any]]:
             )
         runners = [row for row in runners if row.get("name")]
         runners.sort(key=lambda item: (item.get("position") is None, item.get("position") or 99))
-        winner = next((row["name"] for row in runners if row.get("position") == 1), runners[0]["name"] if runners else None)
+        winners = [row for row in runners if row.get("position") == 1]
+        winner = winners[0]["name"] if winners else None
         event = _event(
             home=f"Race {race_no}",
             away=track,

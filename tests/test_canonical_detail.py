@@ -1,11 +1,18 @@
 from collector.canonical_detail import attach_canonical_detail, canonicalize_statistics, canonicalize_timeline
+from collector.detail_capabilities import capability_inventory
+from collector.rich_capability import build_rows
 
 
 def test_capability_inventory_is_static():
-    from collector.detail_capabilities import capability_inventory
-
     rows = capability_inventory()
     assert any(row["provider_family"] == "openligadb" and row["timeline"] for row in rows)
+
+
+def test_rich_capability_covers_frozen_180():
+    rows = build_rows()
+    assert len(rows) == 180
+    assert len({row["competition"] for row in rows}) == 180
+
 
 
 def test_timeline_and_stats_omit_unknown_zeros():

@@ -19,6 +19,7 @@ from collector.live_state import (
     reconcile_live_status,
 )
 from collector.enrichment import EXTRA_PERSIST_KEYS
+from collector.tennis_score import apply_tennis_match_score
 from collector.util import dump_json, load_json, parse_datetime
 
 VOLATILE_SCORE_KEYS = (
@@ -230,6 +231,19 @@ def merge_event_fields(
         if incoming_source_id:
             provenance["incidents"] = incoming_source_id
             freshness["incidents"] = {"source": incoming_source_id, "at": stamp}
+    elif not _filled(current.get("incidents")) and _filled(incoming.get("incidents")):
+        out["incidents"] = incoming.get("incidents")
+        if incoming_source_id:
+            provenance["incidents"] = incoming_source_id
+            freshness["incidents"] = {"source": incoming_source_id, "at": stamp}
+    if not _filled(out.get("statistics")) and _filled(incoming.get("statistics")):
+        out["statistics"] = incoming.get("statistics")
+        if incoming_source_id:
+            provenance["statistics"] = incoming_source_id
+    if not _filled(out.get("lineups")) and _filled(incoming.get("lineups")):
+        out["lineups"] = incoming.get("lineups")
+        if incoming_source_id:
+            provenance["lineups"] = incoming_source_id
     for key in (
         "venue",
         "season",
@@ -314,6 +328,9 @@ def merge_event_fields(
             out["canonical_last_observed_at"] = incoming.get("canonical_last_observed_at") or out.get("observed_at")
     else:
         out["retrieved_at"] = current.get("retrieved_at") or incoming.get("retrieved_at")
+    sport = current.get("sport") or incoming.get("sport")
+    if sport == "tennis":
+        out = apply_tennis_match_score(out)
     return out
 
 
@@ -340,9 +357,12 @@ def apply_row_fields(row, merged: Dict[str, Any], source_id: str, higher: bool) 
         }
     )
     extra = load_json(row.extra_json, {}) or {}
+    nested = merged.get("extra") if isinstance(merged.get("extra"), dict) else {}
     for key in EXTRA_PERSIST_KEYS:
         if merged.get(key) is not None:
             extra[key] = merged.get(key)
+        elif nested.get(key) is not None and extra.get(key) is None:
+            extra[key] = nested.get(key)
     from collector.enrichment import is_display_eligible, quality_flags_for_event
 
     flags = quality_flags_for_event(merged)

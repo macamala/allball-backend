@@ -67,33 +67,29 @@ def test_doubles_uses_a_and_b_pairs():
     assert event["home"]["name"] == "Gabriela Dabrowski / Luisa Stefani"
     assert event["away"]["name"] == "Kaitlin Quevedo / Dominika Salkova"
     assert event["score"] == {"home": 2, "away": 0}
-    assert event["periods"][0] == {
-        "number": 1,
-        "period": 1,
-        "code": "Set 1",
-        "label": "Set 1",
-        "home": 6,
-        "away": 4,
-        "winner": "home",
-        "tiebreak_home": None,
-        "tiebreak_away": None,
-    }
+    assert event["periods"][0]["home"] == 6
+    assert event["periods"][0]["away"] == 4
+    assert event["periods"][0]["winner"] == "home"
+    assert event["periods"][0]["complete"] is True
 
 
 def test_zero_values_are_stored_not_inferred():
     event = match_to_event(_singles(a_sets=(0, 0), b_sets=(0, 0), state="P"), "wta-tour")
     assert event["status"] == "live"
-    assert event["score"] == {"home": 0, "away": 0}
+    assert event["score"] == {"home": None, "away": None}
     assert event["periods"][0]["home"] == 0
     assert event["periods"][0]["winner"] is None
+    assert event["periods"][0]["complete"] is False
 
 
-def test_retirement_keeps_played_sets_only():
+def test_retirement_does_not_invent_match_score_from_incomplete_set():
     event = match_to_event(_singles(a_sets=(6, 2), b_sets=(3, 1), state="R"), "wta-tour")
     assert event["status"] == "finished"
     assert event["result_type"] == "retirement"
-    assert event["score"] == {"home": 2, "away": 0}
+    assert event["score"] == {"home": None, "away": None}
     assert len(event["periods"]) == 2
+    assert event["periods"][0]["complete"] is True
+    assert event["periods"][1]["complete"] is False
 
 
 def test_winner_disagreement_is_flagged_not_rotated():

@@ -296,13 +296,22 @@ def sofa_event(row: Dict[str, Any], competition_id: str, sport_id: str) -> Optio
         score["clock"] = clock
     if period not in (None, "") and status == "live":
         score["period"] = period
+    periods = []
+    hs = row.get("homeScore") if isinstance(row.get("homeScore"), dict) else {}
+    aws = row.get("awayScore") if isinstance(row.get("awayScore"), dict) else {}
+    for index in range(1, 8):
+        home_p = hs.get(f"period{index}")
+        away_p = aws.get(f"period{index}")
+        if home_p is None and away_p is None:
+            continue
+        periods.append({"label": str(index), "home": home_p, "away": away_p})
     start = row.get("startTimestamp")
     start_time = None
     if isinstance(start, (int, float)):
         start_time = datetime.fromtimestamp(int(start), tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     tour = row.get("tournament") or {}
     unique = tour.get("uniqueTournament") or {}
-    return {
+    payload = {
         "id": f"sofascore:{row.get('id')}",
         "home": {"id": str(home.get("id") or ""), "name": home_name},
         "away": {"id": str(away.get("id") or ""), "name": away_name},
@@ -314,8 +323,17 @@ def sofa_event(row: Dict[str, Any], competition_id: str, sport_id: str) -> Optio
         "competition_key": competition_id,
         "event_family": "team_match",
         "source_family": "sofascore-web",
+        "source_event_id": str(row.get("id") or ""),
         "source_competition_id": unique.get("id") or tour.get("id"),
+        "extra": {
+            "source_family": "sofascore-web",
+            "source_event_ids": [str(row.get("id") or "")],
+            "source_event_id": str(row.get("id") or ""),
+        },
     }
+    if periods:
+        payload["periods"] = periods
+    return payload
 
 
 class SofaScoreWebAdapter:

@@ -340,17 +340,17 @@ def _upsert_details(db: Session, event_id: str, incoming: Dict[str, Any], incomi
         detail = SportsEventDetail(event_id=event_id)
         db.add(detail)
     cache[event_id] = detail
-    if incoming_is_higher or not detail.lineups_json:
-        if incoming.get("lineups") is not None:
+    if incoming.get("lineups"):
+        if incoming_is_higher or not load_json(detail.lineups_json):
             detail.lineups_json = dump_json(incoming.get("lineups"))
-    if incoming_is_higher or not detail.statistics_json:
-        if incoming.get("statistics") is not None:
+    if incoming.get("statistics"):
+        if incoming_is_higher or not load_json(detail.statistics_json):
             detail.statistics_json = dump_json(incoming.get("statistics"))
-    if incoming_is_higher or not detail.incidents_json:
-        if incoming.get("incidents") is not None:
+    if incoming.get("incidents"):
+        if incoming_is_higher or not load_json(detail.incidents_json):
             detail.incidents_json = dump_json(incoming.get("incidents"))
-    if incoming_is_higher or not detail.availability_json:
-        if incoming.get("availability"):
+    if incoming.get("availability"):
+        if incoming_is_higher or not load_json(detail.availability_json):
             detail.availability_json = dump_json(incoming.get("availability"))
     detail.updated_at = datetime.utcnow()
 
