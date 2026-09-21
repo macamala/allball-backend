@@ -16,13 +16,19 @@
     "lineups": "PROVEN",
     "player_stats": "PARTIAL",
     "venue": "PARTIAL",
-    "production_verified": true
+    "production_verified": true,
+    "limitation": "FotMob matchDetails present; playerStats not on every event"
   },
   "portugal-primeira-liga": {
     "timeline": "PROVEN",
     "stats": "PROVEN",
     "lineups": "PROVEN",
-    "production_verified": true
+    "player_stats": "PROVEN",
+    "venue": "PROVEN",
+    "officials": "PROVEN",
+    "sport_detail": "PROVEN",
+    "production_verified": true,
+    "limitation": "Rio Ave vs Estrela production matchDetails includes player ratings"
   },
   "croatia-hnl": {
     "timeline": "PROVEN",
@@ -35,6 +41,21 @@
     "stats": "PROVEN",
     "lineups": "PROVEN",
     "production_verified": true
+  },
+  "hungary-nb-i": {
+    "timeline": "PROVEN",
+    "stats": "PROVEN",
+    "lineups": "PROVEN",
+    "production_verified": true,
+    "limitation": "Puskas vs Honved production matchDetails timeline/stats/lineups"
+  },
+  "germany-bundesliga": {
+    "timeline": "PROVEN",
+    "periods": "PROVEN",
+    "sport_detail": "PARTIAL",
+    "venue": "PARTIAL",
+    "production_verified": true,
+    "limitation": "OpenLiga goals + HT/FT periods; no cards/lineups"
   },
   "mlb": {
     "timeline": "PROVEN",
@@ -49,10 +70,10 @@
     "timeline": "PROVEN",
     "stats": "PROVEN",
     "lineups": "PROVEN",
-    "periods": "PROVEN",
     "player_stats": "PROVEN",
     "sport_detail": "PROVEN",
-    "production_verified": true
+    "production_verified": true,
+    "limitation": "Goals/penalties/rosters/SOG proven; scoreByPeriod absent on sampled preseason games so period table not marked PROVEN"
   },
   "wta-tour": {
     "periods": "PROVEN",
