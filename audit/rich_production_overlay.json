@@ -7,8 +7,9 @@
     "venue": "PROVEN",
     "officials": "PROVEN",
     "sport_detail": "PROVEN",
+    "standings": "PROVEN",
     "production_verified": true,
-    "limitation": "Production matchDetails: timeline/stats/lineups/xG/player ratings/referee/stadium"
+    "limitation": "Production matchDetails: timeline/stats/lineups/xG/player ratings/referee/stadium; FotMob table 20 rows"
   },
   "france-ligue-1": {
     "timeline": "PROVEN",
@@ -51,11 +52,54 @@
   },
   "germany-bundesliga": {
     "timeline": "PROVEN",
+    "stats": "PROVEN",
+    "lineups": "PROVEN",
     "periods": "PROVEN",
-    "sport_detail": "PARTIAL",
-    "venue": "PARTIAL",
+    "player_stats": "PROVEN",
+    "sport_detail": "PROVEN",
+    "venue": "PROVEN",
+    "officials": "PROVEN",
+    "standings": "PROVEN",
     "production_verified": true,
-    "limitation": "OpenLiga goals + HT/FT periods; no cards/lineups"
+    "limitation": "FotMob matchDetails plus OpenLiga HT/FT; FotMob table 18 rows"
+  },
+  "england-premier-league": {
+    "timeline": "PROVEN",
+    "stats": "PROVEN",
+    "lineups": "PROVEN",
+    "player_stats": "PROVEN",
+    "venue": "PROVEN",
+    "officials": "PROVEN",
+    "sport_detail": "PROVEN",
+    "standings": "PROVEN",
+    "production_verified": true,
+    "limitation": "Leeds vs Newcastle matchDetails; Table tab shows FotMob Premier League 20-team table"
+  },
+  "spain-la-liga": {
+    "timeline": "PROVEN",
+    "stats": "PROVEN",
+    "lineups": "PROVEN",
+    "player_stats": "PROVEN",
+    "venue": "PROVEN",
+    "officials": "PROVEN",
+    "sport_detail": "PROVEN",
+    "production_verified": true,
+    "limitation": "Villarreal vs Betis production matchDetails"
+  },
+  "serbia-superliga": {
+    "timeline": "PROVEN",
+    "stats": "PROVEN",
+    "lineups": "PROVEN",
+    "player_stats": "PROVEN",
+    "venue": "PROVEN",
+    "officials": "PROVEN",
+    "sport_detail": "PROVEN",
+    "production_verified": true,
+    "limitation": "Zemun vs Radnik production matchDetails timeline/stats/lineups/player ratings"
+  },
+  "netherlands-eredivisie": {
+    "standings": "PROVEN",
+    "limitation": "FotMob table 18 rows (AZ Alkmaar 19 pts); Ajax/Willem II date-board did not attach a FotMob match id this window"
   },
   "mlb": {
     "timeline": "PROVEN",
@@ -64,6 +108,7 @@
     "periods": "PROVEN",
     "player_stats": "PROVEN",
     "sport_detail": "PROVEN",
+    "standings": "PROVEN",
     "production_verified": true
   },
   "nhl": {
@@ -72,8 +117,9 @@
     "lineups": "PROVEN",
     "player_stats": "PROVEN",
     "sport_detail": "PROVEN",
+    "standings": "PROVEN",
     "production_verified": true,
-    "limitation": "Goals/penalties/rosters/SOG proven; scoreByPeriod absent on sampled preseason games so period table not marked PROVEN"
+    "limitation": "Goals/penalties/rosters/SOG proven; NHL standings/now 32 rows with OT losses"
   },
   "wta-tour": {
     "periods": "PROVEN",
