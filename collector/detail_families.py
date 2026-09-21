@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from collector.adapters import FetchResult
-from collector.http import fetch_url
+from collector.http import fetch_text, fetch_url
 
 RUGBY_STATS = "https://api.wr-rims-prod.pulselive.com/rugby/v3/match/{match_id}/stats"
 RUGBY_MATCH = "https://api.wr-rims-prod.pulselive.com/rugby/v3/match/{match_id}"
@@ -100,7 +100,17 @@ def parse_rugby_detail(match: Dict[str, Any], stats: Dict[str, Any], summary: Di
             out["sport_detail"] = {
                 "tries": {"home": (home_s or {}).get("Tries"), "away": (away_s or {}).get("Tries")},
                 "conversions": {"home": (home_s or {}).get("Conversions"), "away": (away_s or {}).get("Conversions")},
+                "penalties": {"home": (home_s or {}).get("PenaltyGoals") or (home_s or {}).get("Penalties"), "away": (away_s or {}).get("PenaltyGoals") or (away_s or {}).get("Penalties")},
             }
+    scores = match.get("scores")
+    if isinstance(scores, list) and scores and isinstance(scores[0], (list, tuple)):
+        periods = []
+        for index, pair in enumerate(scores, start=1):
+            if not isinstance(pair, (list, tuple)) or len(pair) < 2:
+                continue
+            periods.append({"label": index, "home": pair[0], "away": pair[1]})
+        if periods:
+            out["periods"] = periods
     return out
 
 
@@ -186,10 +196,34 @@ def parse_euroleague_box(payload: Any) -> Dict[str, Any]:
     if not isinstance(payload, dict):
         return {}
     out: Dict[str, Any] = {}
+    by_q = payload.get("ByQuarter") or []
+    if isinstance(by_q, list) and len(by_q) >= 2:
+        periods = []
+        home_q, away_q = by_q[0], by_q[1]
+        for index, key in enumerate(("Quarter1", "Quarter2", "Quarter3", "Quarter4", "ExtraTime"), start=1):
+            hv = home_q.get(key) if isinstance(home_q, dict) else None
+            av = away_q.get(key) if isinstance(away_q, dict) else None
+            if hv is None and av is None:
+                continue
+            periods.append({"label": "OT" if key == "ExtraTime" else index, "home": hv, "away": av})
+        if periods:
+            out["periods"] = periods
+    stats_rows = payload.get("Stats") or []
+    home = stats_rows[0] if isinstance(stats_rows, list) and stats_rows and isinstance(stats_rows[0], dict) else payload.get("HomeTeam") or {}
+    away = stats_rows[1] if isinstance(stats_rows, list) and len(stats_rows) > 1 and isinstance(stats_rows[1], dict) else payload.get("AwayTeam") or {}
     stats = []
-    home = payload.get("HomeTeam") or payload.get("home") or {}
-    away = payload.get("AwayTeam") or payload.get("away") or {}
-    for key, label in (("Score", "Points"), ("FieldGoalsMade", "FG made"), ("ThreePointersMade", "3PT"), ("FreeThrowsMade", "FT"), ("TotalRebounds", "Rebounds"), ("Assistances", "Assists"), ("Turnovers", "Turnovers"), ("Steals", "Steals"), ("Blocks", "Blocks"), ("FoulsCommited", "Fouls")):
+    for key, label in (
+        ("Score", "Points"),
+        ("FieldGoalsMade", "FG made"),
+        ("ThreePointersMade", "3PT"),
+        ("FreeThrowsMade", "FT"),
+        ("TotalRebounds", "Rebounds"),
+        ("Assistances", "Assists"),
+        ("Turnovers", "Turnovers"),
+        ("Steals", "Steals"),
+        ("BlocksFavour", "Blocks"),
+        ("FoulsCommited", "Fouls"),
+    ):
         hv = home.get(key) if isinstance(home, dict) else None
         av = away.get(key) if isinstance(away, dict) else None
         if hv is not None or av is not None:
@@ -198,19 +232,34 @@ def parse_euroleague_box(payload: Any) -> Dict[str, Any]:
         out["statistics"] = stats
     players = []
     for side_name, blob in (("home", home), ("away", away)):
-        for item in (blob.get("Players") if isinstance(blob, dict) else []) or []:
+        roster = []
+        if isinstance(blob, dict):
+            roster = blob.get("PlayersStats") or blob.get("Players") or []
+        for item in roster or []:
             if not isinstance(item, dict):
                 continue
-            name = item.get("Player") or item.get("name")
+            name = item.get("Player") or item.get("PlayerName") or item.get("name")
             if not name:
                 continue
-            players.append({"name": name, "side": side_name, "points": item.get("Points") or item.get("points"), "rebounds": item.get("TotalRebounds"), "assists": item.get("Assistances")})
+            players.append(
+                {
+                    "name": str(name).strip(),
+                    "side": side_name,
+                    "points": item.get("Points") or item.get("points"),
+                    "rebounds": item.get("TotalRebounds"),
+                    "assists": item.get("Assistances"),
+                }
+            )
     if players:
         out["player_statistics"] = players
         out["lineups"] = {
             "home": {"start": [p for p in players if p["side"] == "home"], "bench": [], "formation": None, "coach": None},
             "away": {"start": [p for p in players if p["side"] == "away"], "bench": [], "formation": None, "coach": None},
         }
+    if payload.get("Referees"):
+        out["referee"] = payload.get("Referees")
+    if payload.get("Attendance"):
+        out["attendance"] = payload.get("Attendance")
     return out
 
 
@@ -243,27 +292,21 @@ def parse_lol_event(payload: Any) -> Dict[str, Any]:
 
 def parse_cfl_game(game: Dict[str, Any]) -> Dict[str, Any]:
     out: Dict[str, Any] = {}
-    periods = []
-    for key in ("quarters", "periods", "scoresByQuarter"):
-        raw = game.get(key)
-        if isinstance(raw, list):
-            for index, item in enumerate(raw):
-                if isinstance(item, dict):
-                    periods.append({"label": item.get("number") or index + 1, "home": item.get("home") or item.get("homeScore"), "away": item.get("away") or item.get("awayScore")})
-                elif isinstance(item, (int, float)):
-                    periods.append({"label": index + 1, "home": item, "away": None})
-    if periods:
-        out["periods"] = periods
     home = game.get("homeSquad") or game.get("home") or {}
     away = game.get("awaySquad") or game.get("away") or {}
-    stats = []
-    for label, hk, ak in (("Yards", "yards", "yards"), ("Pass yards", "passYards", "passYards"), ("Rush yards", "rushYards", "rushYards")):
-        hv = home.get(hk) if isinstance(home, dict) else None
-        av = away.get(ak) if isinstance(away, dict) else None
-        if hv is not None or av is not None:
-            stats.append({"label": label, "home": hv, "away": av})
-    if stats:
-        out["statistics"] = stats
+    if not isinstance(home, dict):
+        home = {}
+    if not isinstance(away, dict):
+        away = {}
+    if home.get("score") is not None or away.get("score") is not None:
+        out["sport_detail"] = {
+            "home_score": home.get("score"),
+            "away_score": away.get("score"),
+            "winner_id": game.get("winner"),
+        }
+    timeouts = game.get("timeouts") if isinstance(game.get("timeouts"), dict) else {}
+    if timeouts:
+        out["statistics"] = [{"label": "Timeouts", "home": timeouts.get("home"), "away": timeouts.get("away")}]
     return out
 
 
@@ -366,12 +409,14 @@ def fetch_extra_family_detail(family: str, source_event_id: str, getter=None) ->
         rows = payload.get("rounds") if isinstance(payload, dict) else payload
         if isinstance(rows, list):
             for round_row in rows:
-                games = (round_row or {}).get("tournaments") or (round_row or {}).get("games") or []
+                if not isinstance(round_row, dict):
+                    continue
+                games = round_row.get("tournaments") or round_row.get("games") or []
                 for game in games:
                     if not isinstance(game, dict):
                         continue
-                    gid = str(game.get("id") or game.get("gameId") or "")
-                    if gid == sid:
+                    gid = str(game.get("id") or game.get("gameId") or game.get("cflId") or "")
+                    if gid == sid or str(game.get("cflId") or "") == sid:
                         return parse_cfl_game(game)
         return {}
     if family in {"lolesports-json", "lolesports"}:
@@ -403,8 +448,20 @@ def fetch_extra_family_detail(family: str, source_event_id: str, getter=None) ->
         season = parts[0] if len(parts) > 1 else "E2025"
         code = parts[-1]
         box = _get(getter, EUROLEAGUE_BOX.format(code=code, season=season))
-        if box.ok and isinstance(box.payload, dict):
-            return parse_euroleague_box(box.payload)
+        payload = box.payload if box.ok else None
+        if not isinstance(payload, dict):
+            text = fetch_text(EUROLEAGUE_BOX.format(code=code, season=season))
+            if text.ok and isinstance(text.payload, str) and text.payload.strip().startswith("{"):
+                import json
+
+                try:
+                    payload = json.loads(text.payload)
+                except json.JSONDecodeError:
+                    payload = None
+        if isinstance(payload, dict):
+            parsed = parse_euroleague_box(payload)
+            if parsed:
+                return parsed
         header = _get(getter, EUROLEAGUE_HEADER.format(code=code, season=season))
         if header.ok and isinstance(header.payload, dict):
             return parse_euroleague_box(header.payload)
@@ -431,5 +488,29 @@ def fetch_extra_family_detail(family: str, source_event_id: str, getter=None) ->
         result = _get(getter, CLICK_TT_LIVE.format(meeting_id=sid.split(":")[-1]))
         if result.ok and isinstance(result.payload, dict):
             return parse_clicktt_live(result.payload)
+        return {}
+    if family in {"pga-graphql", "pga"}:
+        from collector.adapters_final18 import PgaGraphqlAdapter
+
+        adapter = PgaGraphqlAdapter()
+        board = adapter._leaderboard(sid, "pga-tour")
+        rows = []
+        for item in board:
+            extra = item.get("extra") if isinstance(item, dict) else {}
+            name = ((item.get("home") or {}).get("name") if isinstance(item, dict) else None)
+            if not name:
+                continue
+            rows.append(
+                {
+                    "position": extra.get("position") or (item.get("score") or {}).get("position"),
+                    "name": name,
+                    "total": (item.get("score") or {}).get("home"),
+                    "today": extra.get("today"),
+                    "thru": extra.get("thru"),
+                    "cut": extra.get("cut"),
+                }
+            )
+        if rows:
+            return {"classification": rows, "leaderboard": rows, "sport_detail": {"field": len(rows)}}
         return {}
     return {}

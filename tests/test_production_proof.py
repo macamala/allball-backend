@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 from collector.adapters_wta import match_to_event, wta_match_statistics
 from collector.backfill import CORE_COMPETITIONS, run_bounded_backfill
 from collector.detail_enrich import (
+    PARSER_REV,
     TTL_FINISHED,
     TTL_NEGATIVE,
     _fresh,
@@ -50,14 +51,22 @@ def test_negative_detail_ttl_is_shorter_than_finished_success():
         "detail_fetched_at": (datetime.utcnow() - timedelta(hours=2)).isoformat(),
         "detail_empty": True,
         "detail_negative": True,
+        "parser_rev": PARSER_REV,
     }
     assert not _fresh(empty, "finished")
     success = {
         "detail_fetched_at": (datetime.utcnow() - timedelta(hours=2)).isoformat(),
         "detail_empty": False,
         "detail_negative": False,
+        "parser_rev": PARSER_REV,
     }
     assert _fresh(success, "finished")
+    stale_parser = {
+        "detail_fetched_at": (datetime.utcnow() - timedelta(hours=2)).isoformat(),
+        "detail_empty": False,
+        "parser_rev": PARSER_REV - 1,
+    }
+    assert not _fresh(stale_parser, "finished")
     assert TTL_NEGATIVE < TTL_FINISHED
 
 
@@ -325,7 +334,17 @@ def test_event_list_query_stays_light_with_fat_extra():
         db.close()
 
 
-def test_normalize_keeps_family_source_ids():
+def test_compound_source_ids_are_kept():
+    from collector.source_ids import as_family_map, families_with_ids, normalize_source_id
+
+    assert normalize_source_id("2026:5") == "2026:5"
+    assert normalize_source_id("jolpica:2026:5") == "2026:5"
+    mapped = as_family_map({"jolpica-f1": "2026:5", "euroleague-live": "E2025:1"})
+    assert mapped["jolpica-f1"] == "2026:5"
+    assert mapped["euroleague-live"] == "E2025:1"
+    ids = families_with_ids({"source_event_ids": {"jolpica": "2026:5", "euroleague": "E2025:12"}})
+    assert ids["jolpica-f1"] == "2026:5"
+    assert ids["euroleague-live"] == "E2025:12"
     event = normalize_event(
         {
             "home": {"name": "A"},

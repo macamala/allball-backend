@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional
 
 from collector.adapters import FetchRequest, FetchResult
 from collector.event_quality import event_is_valid
-from collector.http import fetch_url
+from collector.http import fetch_text, fetch_url
 from collector.util import slugify
 
 
@@ -417,7 +417,7 @@ class WorldRugbyAdapter:
             return result
         events = []
         for row in (result.payload or {}).get("content") or []:
-            event = self._event(row)
+            event = self._event(row, request.competition_id)
             if event:
                 events.append(event)
         tokens = PULSELIVE_COMP_TOKENS.get(request.competition_id or "")
@@ -429,7 +429,7 @@ class WorldRugbyAdapter:
             ]
         return FetchResult(ok=True, http_status=result.http_status, events=_filter(events, request.capability))
 
-    def _event(self, row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def _event(self, row: Dict[str, Any], competition_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
         teams = row.get("teams") or []
         if len(teams) < 2:
             return None
@@ -467,7 +467,7 @@ class WorldRugbyAdapter:
             "venue": (row.get("venue") or {}).get("name"),
             "sport": "rugby",
             "competition": name,
-            "competition_key": f"rugby-{slugify(name)}",
+            "competition_key": competition_id or f"rugby-{slugify(name)}",
             "event_family": "team_match",
             "source_family": "pulselive",
             "source_event_id": str(row.get("matchId") or ""),
@@ -524,7 +524,10 @@ class JolpicaF1Adapter:
             "score": {"home": winner.get("position"), "away": None},
             "start_time": start,
             "venue": (row.get("Circuit") or {}).get("circuitName"),
+            "sport": "motorsport",
             "competition": "formula-1",
+            "competition_key": "formula-1",
+            "event_family": "motorsport_race",
             "series_id": "formula-1",
             "source_family": "jolpica-f1",
             "source_event_id": f"{row.get('season')}:{row.get('round')}",
@@ -573,6 +576,10 @@ class EuroleagueLiveAdapter:
             if event:
                 events.append(event)
         if not events:
+            xml = fetch_text(f"https://api-live.euroleague.net/v1/results?seasonCode={season}")
+            if xml.ok and isinstance(xml.payload, str):
+                events.extend(self._from_results_xml(xml.payload, season))
+        if not events:
             last = self._get(f"https://live.euroleague.net/api/Header?gamecode=1&seasoncode={season}")
             if not last.ok:
                 last = self._get(f"https://live.euroleague.net/api/Header?gamecode=1&seasoncode=E{now.year - 1}")
@@ -595,6 +602,56 @@ class EuroleagueLiveAdapter:
                 if isinstance(rows, list):
                     return [row for row in rows if isinstance(row, dict)]
         return []
+
+    def _from_results_xml(self, text: str, season: str) -> List[Dict[str, Any]]:
+        import re
+
+        events: List[Dict[str, Any]] = []
+        blocks = re.findall(r"<game\b[^>]*>.*?</game>", text or "", flags=re.I | re.S)
+        if not blocks:
+            blocks = re.findall(r"<item\b[^>]*>.*?</item>", text or "", flags=re.I | re.S)
+        for block in blocks[:120]:
+            def attr(name: str) -> str:
+                found = re.search(rf'{name}="([^"]*)"', block, re.I)
+                if found:
+                    return found.group(1)
+                found = re.search(rf"<{name}[^>]*>([^<]+)</{name}>", block, re.I)
+                return found.group(1) if found else ""
+
+            code = attr("gamecode") or attr("gameCode") or attr("code")
+            home = attr("localteam") or attr("TeamA") or attr("hometeam")
+            away = attr("roadteam") or attr("TeamB") or attr("awayteam")
+            if not code or not home or not away:
+                continue
+            score_a = attr("ScoreA") or attr("localscore") or attr("homescore")
+            score_b = attr("ScoreB") or attr("roadscore") or attr("awayscore")
+            played = (attr("played") or "").lower() in {"true", "1", "yes"}
+            status = "finished" if played or (score_a and score_b) else "scheduled"
+            events.append(
+                {
+                    "id": f"euroleague:{season}:{code}",
+                    "home": {"name": home},
+                    "away": {"name": away},
+                    "status": status,
+                    "score": {
+                        "home": int(score_a) if str(score_a).isdigit() else (score_a or None),
+                        "away": int(score_b) if str(score_b).isdigit() else (score_b or None),
+                    },
+                    "sport": "basketball",
+                    "competition": "euroleague",
+                    "competition_key": "euroleague",
+                    "event_family": "team_match",
+                    "source_family": "euroleague-live",
+                    "source_event_id": f"{season}:{code}",
+                    "source_event_ids": {"euroleague-live": f"{season}:{code}"},
+                    "extra": {
+                        "source_family": "euroleague-live",
+                        "source_event_id": f"{season}:{code}",
+                        "source_event_ids": {"euroleague-live": f"{season}:{code}"},
+                    },
+                }
+            )
+        return events
 
     def _from_catalog(self, row: Dict[str, Any], season: str) -> Optional[Dict[str, Any]]:
         code = row.get("gamecode") or row.get("gameCode") or row.get("code") or row.get("id")
@@ -658,4 +715,15 @@ class EuroleagueLiveAdapter:
             "start_time": None,
             "venue": row.get("Stadium"),
             "competition": "euroleague",
+            "competition_key": "euroleague",
+            "sport": "basketball",
+            "event_family": "team_match",
+            "source_family": "euroleague-live",
+            "source_event_id": f"{season}:{gamecode}",
+            "source_event_ids": {"euroleague-live": f"{season}:{gamecode}"},
+            "extra": {
+                "source_family": "euroleague-live",
+                "source_event_id": f"{season}:{gamecode}",
+                "source_event_ids": {"euroleague-live": f"{season}:{gamecode}"},
+            },
         }

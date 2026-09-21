@@ -19,13 +19,15 @@ FOTMOB_LEAGUE = "https://www.fotmob.com/api/data/leagues?id={league_id}"
 OPENLIGA_TABLE = "https://api.openligadb.de/getbltable/{shortcut}/{year}"
 NHL_STANDINGS = "https://api-web.nhle.com/v1/standings/now"
 MLB_STANDINGS = "https://statsapi.mlb.com/api/v1/standings?leagueId=103,104&season={season}&standingsTypes=regularSeason"
+SQUIGGLE_STANDINGS = "https://api.squiggle.com.au/?q=standings"
+JOLPICA_DRIVERS = "https://api.jolpi.ca/ergast/f1/current/driverStandings.json"
 
 def standings_supported(competition_id: Optional[str]) -> bool:
     if not competition_id:
         return False
     if competition_id in FOTMOB_LEAGUES:
         return True
-    if competition_id in {"nhl", "mlb"}:
+    if competition_id in {"nhl", "mlb", "australia-afl", "formula-1"}:
         return True
     return _openliga_shortcut(competition_id) is not None
 
@@ -95,6 +97,60 @@ def parse_mlb_standings(payload: Any) -> List[Dict[str, Any]]:
     return out
 
 
+def parse_squiggle_standings(payload: Any) -> List[Dict[str, Any]]:
+    rows = payload.get("standings") if isinstance(payload, dict) else payload
+    if not isinstance(rows, list):
+        return []
+    out = []
+    for item in rows:
+        if not isinstance(item, dict):
+            continue
+        name = item.get("name") or item.get("team")
+        if not name:
+            continue
+        out.append(
+            {
+                "position": item.get("rank") or item.get("position"),
+                "team": name,
+                "played": item.get("played") or item.get("games"),
+                "wins": item.get("wins"),
+                "losses": item.get("losses"),
+                "draws": item.get("draws"),
+                "points": item.get("pts") or item.get("points"),
+                "goals_for": item.get("for") or item.get("pf"),
+                "goals_against": item.get("against") or item.get("pa"),
+                "percentage": item.get("percentage"),
+            }
+        )
+    return out
+
+
+def parse_jolpica_standings(payload: Any) -> List[Dict[str, Any]]:
+    lists = (((payload or {}).get("MRData") or {}).get("StandingsTable") or {}).get("StandingsLists") or []
+    if not lists:
+        return []
+    drivers = (lists[0] or {}).get("DriverStandings") or []
+    out = []
+    for item in drivers:
+        if not isinstance(item, dict):
+            continue
+        driver = item.get("Driver") or {}
+        name = " ".join(part for part in (driver.get("givenName"), driver.get("familyName")) if part)
+        if not name:
+            continue
+        constructor = ((item.get("Constructors") or [{}])[0] or {}).get("name")
+        out.append(
+            {
+                "position": item.get("position"),
+                "team": name,
+                "points": item.get("points"),
+                "wins": item.get("wins"),
+                "group": constructor,
+            }
+        )
+    return out
+
+
 def _fresh(row: Optional[SportsStandingSnapshot]) -> bool:
     if row is None or not row.captured_at:
         return False
@@ -139,6 +195,18 @@ def fetch_competition_standings(competition_id: str, getter=None) -> Dict[str, A
             rows = parse_mlb_standings(result.payload)
             if rows:
                 return wrap_standings(rows, competition=competition_id, sport="baseball", source="mlb-statsapi")
+    if competition_id == "australia-afl":
+        result = getter(SQUIGGLE_STANDINGS)
+        if result.ok:
+            rows = parse_squiggle_standings(result.payload)
+            if rows:
+                return wrap_standings(rows, competition=competition_id, sport="australian-rules", source="squiggle-afl")
+    if competition_id == "formula-1":
+        result = getter(JOLPICA_DRIVERS)
+        if result.ok:
+            rows = parse_jolpica_standings(result.payload)
+            if rows:
+                return wrap_standings(rows, competition=competition_id, sport="motorsport", source="jolpica-f1")
     return {}
 
 

@@ -30,6 +30,7 @@ TTL_LIVE = 45
 TTL_SCHEDULED = 1800
 TTL_FINISHED = 7 * 24 * 3600
 TTL_NEGATIVE = 900
+PARSER_REV = 3
 
 DETAIL_FAMILIES = (
     "fotmob",
@@ -50,6 +51,8 @@ DETAIL_FAMILIES = (
     "openligadb",
     "championdata-netball",
     "click-tt-remix",
+    "dataproject-web",
+    "cricsheet",
 )
 
 
@@ -69,6 +72,8 @@ def _source_id(extra: Dict[str, Any], family: str) -> Optional[str]:
 
 
 def _fresh(extra: Dict[str, Any], status: str) -> bool:
+    if extra.get("parser_rev") != PARSER_REV:
+        return False
     stamp = extra.get("detail_fetched_at")
     if not stamp:
         return False
@@ -726,6 +731,7 @@ def enrich_event_row(db: Session, row: SportsEvent, getter=None) -> None:
                 _merge_detail(detail, part)
     extra["detail_families_tried"] = list(dict.fromkeys(used))
     extra["detail_fetched_at"] = datetime.utcnow().isoformat()
+    extra["parser_rev"] = PARSER_REV
     if not detail:
         extra["detail_empty"] = True
         extra["detail_negative"] = True

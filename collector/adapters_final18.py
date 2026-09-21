@@ -250,8 +250,12 @@ class PgaGraphqlAdapter:
             "event_family": "leaderboard",
             "source_family": "pga-graphql",
             "source_competition_id": row.get("id"),
+            "source_event_id": str(row.get("id") or ""),
+            "source_event_ids": {"pga-graphql": str(row.get("id") or "")},
             "extra": {
                 "source_family": "pga-graphql",
+                "source_event_id": str(row.get("id") or ""),
+                "source_event_ids": {"pga-graphql": str(row.get("id") or "")},
                 "source_status": status,
                 "status_inferred": False,
                 "tournament_status": raw,

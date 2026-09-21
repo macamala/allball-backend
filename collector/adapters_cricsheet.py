@@ -113,6 +113,9 @@ def _event(doc: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             "source_event_id": sid,
             "source_event_ids": {"cricsheet": sid},
             "historical": True,
+            "sport_detail": {k: v for k, v in sport_detail.items() if v not in (None, "", {})},
+            "periods": cards or None,
+            "innings": cards or None,
         },
     }
 
@@ -159,6 +162,9 @@ class CricsheetAdapter:
                     events.append(event)
         else:
             return FetchResult(ok=False, http_status=result.http_status, error="unexpected cricsheet payload")
+        if request.competition_id:
+            for event in events:
+                event["competition_key"] = request.competition_id
         if request.capability == "live_scores":
             events = []
         elif request.capability == "results":

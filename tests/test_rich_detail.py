@@ -156,6 +156,26 @@ def test_rugby_and_squiggle_and_jolpica_parsers():
     assert ol["incidents"] or ol["periods"]
 
 
+def test_euroleague_boxscore_quarters_and_players():
+    from collector.detail_families import parse_euroleague_box
+
+    out = parse_euroleague_box(
+        {
+            "ByQuarter": [
+                {"Quarter1": 22, "Quarter2": 18, "Quarter3": 20, "Quarter4": 21},
+                {"Quarter1": 19, "Quarter2": 20, "Quarter3": 15, "Quarter4": 18},
+            ],
+            "Stats": [
+                {"Score": 81, "TotalRebounds": 40, "PlayersStats": [{"Player": "Larkin", "Points": 18, "TotalRebounds": 4, "Assistances": 6}]},
+                {"Score": 72, "TotalRebounds": 33, "PlayersStats": [{"Player": "Baldwin", "Points": 14, "TotalRebounds": 3, "Assistances": 5}]},
+            ],
+        }
+    )
+    assert out["periods"][0]["home"] == 22
+    assert out["statistics"][0]["home"] == 81
+    assert out["player_statistics"][0]["name"] == "Larkin"
+
+
 def test_nhl_period_scores_from_score_by_period():
     from collector.detail_enrich import parse_nhl_landing
 

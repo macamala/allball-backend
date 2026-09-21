@@ -24,6 +24,7 @@ DETAIL_ONLY_KEYS = {
     "officials",
     "innings",
     "h2h",
+    "sport_detail",
 }
 
 # Copied onto a canonical keeper from collapsed observations. Never includes
@@ -124,6 +125,7 @@ EXTRA_PERSIST_KEYS = (
     "field_freshness",
     "source_event_id",
     "source_event_ids",
+    "sport_detail",
 )
 
 _DATE = re.compile(

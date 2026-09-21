@@ -10,12 +10,11 @@ from typing import Any, Dict, List
 
 from collector.adapters import FetchRequest, FetchResult
 from collector.http import fetch_url
-from collector.util import slugify
 
 API = "https://api.opendota.com/api/proMatches"
 
 
-def _event(row: Dict[str, Any]) -> Dict[str, Any]:
+def _event(row: Dict[str, Any], competition_id: str = "professional") -> Dict[str, Any]:
     league = row.get("league_name") or "Dota 2 professional"
     start = row.get("start_time")
     iso = None
@@ -32,7 +31,7 @@ def _event(row: Dict[str, Any]) -> Dict[str, Any]:
         "game_id": "dota-2",
         "sport": "dota-2",
         "competition": league,
-        "competition_key": f"dota-2-{slugify(league)}",
+        "competition_key": competition_id or "professional",
         "event_family": "esports_match",
         "series_id": str(row.get("series_id") or "") or None,
         "best_of": {0: 1, 1: 3, 2: 5}.get(row.get("series_type")),
@@ -65,7 +64,7 @@ class OpenDotaAdapter:
         if not result.ok:
             return result
         rows = result.payload if isinstance(result.payload, list) else []
-        events = [_event(row) for row in rows if row.get("radiant_name") or row.get("dire_name")]
+        events = [_event(row, request.competition_id or "professional") for row in rows if row.get("radiant_name") or row.get("dire_name")]
         if request.capability == "results":
             events = [row for row in events if row["status"] == "finished"]
         elif request.capability == "live_scores":

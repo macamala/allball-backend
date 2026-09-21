@@ -2,7 +2,7 @@ from collector.adapters_cricsheet import _event
 from collector.adapters_fotmob import parse_fotmob_table
 from collector.canonical_standings import canonicalize_standing_rows, unwrap_standings
 from collector.identity_events import identity_confidence
-from collector.standings_enrich import TTL_SECONDS, _fresh, parse_mlb_standings, parse_nhl_standings
+from collector.standings_enrich import TTL_SECONDS, _fresh, parse_jolpica_standings, parse_mlb_standings, parse_nhl_standings, parse_squiggle_standings
 
 
 def test_identity_matches_club_core_and_city_suffix():
@@ -90,6 +90,35 @@ def test_nhl_and_mlb_standings_parsers():
 def test_standings_ttl_skips_empty_snapshot():
     assert TTL_SECONDS >= 60
     assert _fresh(None) is False
+
+
+def test_afl_and_f1_standings_parsers():
+    afl = parse_squiggle_standings({"standings": [{"rank": 1, "name": "Fremantle", "pts": 76, "wins": 19, "played": 23}]})
+    assert afl[0]["team"] == "Fremantle"
+    assert afl[0]["points"] == 76
+    f1 = parse_jolpica_standings(
+        {
+            "MRData": {
+                "StandingsTable": {
+                    "StandingsLists": [
+                        {
+                            "DriverStandings": [
+                                {
+                                    "position": "1",
+                                    "points": "186",
+                                    "wins": "5",
+                                    "Driver": {"givenName": "Lando", "familyName": "Norris"},
+                                    "Constructors": [{"name": "McLaren"}],
+                                }
+                            ]
+                        }
+                    ]
+                }
+            }
+        }
+    )
+    assert f1[0]["team"] == "Lando Norris"
+    assert f1[0]["points"] == "186"
 
 
 def test_cricsheet_innings_are_historical_not_live():

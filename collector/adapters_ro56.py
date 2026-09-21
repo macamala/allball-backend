@@ -119,12 +119,16 @@ class CflScoreboardAdapter:
             "competition_key": "cfl",
             "event_family": "team_match",
             "source_family": "cfl-scoreboard-json",
-            "source_event_id": str(game.get("id") or game.get("gameId") or ""),
-            "source_event_ids": {"cfl-scoreboard-json": str(game.get("id") or game.get("gameId") or "")},
+            "source_event_id": str(game.get("id") or game.get("gameId") or game.get("cflId") or ""),
+            "source_event_ids": {
+                "cfl-scoreboard-json": str(game.get("id") or game.get("gameId") or game.get("cflId") or "")
+            },
             "extra": {
                 "source_family": "cfl-scoreboard-json",
-                "source_event_id": str(game.get("id") or game.get("gameId") or ""),
-                "source_event_ids": {"cfl-scoreboard-json": str(game.get("id") or game.get("gameId") or "")},
+                "source_event_id": str(game.get("id") or game.get("gameId") or game.get("cflId") or ""),
+                "source_event_ids": {
+                    "cfl-scoreboard-json": str(game.get("id") or game.get("gameId") or game.get("cflId") or "")
+                },
             },
         }
 
