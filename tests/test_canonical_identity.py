@@ -64,6 +64,7 @@ def test_name_normalization_equivalents():
     assert names_equivalent("Internacional", "Internacional -")
     assert names_equivalent("FR Monaco", "Monaco")
     assert names_equivalent("Lokomotiv Tashkent", "Lok. Tashkent")
+    assert names_equivalent("Neftchi Fergana", "Neftchi Fargona")
     assert names_equivalent("Bologna", "Bologna FC")
     assert names_equivalent("Torino", "Torino FC")
     assert not names_equivalent("Inter", "Inter Miami")

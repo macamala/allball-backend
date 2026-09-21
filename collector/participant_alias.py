@@ -38,6 +38,8 @@ _LEADING_CLUB = {
     "rcd",
     "acf",
     "ssc",
+    "ogc",
+    "osc",
 }
 
 
@@ -85,7 +87,31 @@ def names_equivalent(left: str, right: str) -> bool:
         return True
     if token_abbreviation_equivalent(a, b):
         return True
+    if place_name_transliteration_equivalent(a, b):
+        return True
     return identity_cores_compatible(left, right)
+
+
+def _consonant_skeleton(token: str) -> str:
+    return re.sub(r"[aeiouy]+", "", token)
+
+
+def place_name_transliteration_equivalent(left_folded: str, right_folded: str) -> bool:
+    """Neftchi Fergana / Neftchi Fargona: same club stem, romanized place name."""
+    ta = [tok for tok in expand_abbreviations(left_folded).split() if tok]
+    tb = [tok for tok in expand_abbreviations(right_folded).split() if tok]
+    if len(ta) < 2 or len(ta) != len(tb):
+        return False
+    if ta[:-1] != tb[:-1]:
+        return False
+    la, lb = ta[-1], tb[-1]
+    if la == lb or la in _GENERIC_STEMS or lb in _GENERIC_STEMS:
+        return False
+    if min(len(la), len(lb)) < 6 or abs(len(la) - len(lb)) > 1:
+        return False
+    if any(token in _PREFIX_DENY for token in (*ta, *tb)):
+        return False
+    return _consonant_skeleton(la) == _consonant_skeleton(lb) and len(_consonant_skeleton(la)) >= 4
 
 
 _GENERIC_STEMS = {
