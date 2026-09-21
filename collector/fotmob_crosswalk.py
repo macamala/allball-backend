@@ -28,7 +28,7 @@ from collector.util import dump_json, load_json
 
 logger = logging.getLogger(__name__)
 
-DATE_BOARD_JOB = "fotmob-date-boards-v1"
+DATE_BOARD_JOB = "fotmob-date-boards-v2"
 _YOUTH = ("u17", "u18", "u19", "u20", "u21", "u23", "youth", "junior")
 _WOMEN = ("women", "womens", "woms")
 _RESERVE = ("reserve", " ii", "2nd", "b team")
