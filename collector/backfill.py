@@ -24,7 +24,7 @@ from collector.util import dump_json, load_json
 
 logger = logging.getLogger(__name__)
 
-JOB_KEY = "bounded-rich-backfill-v5"
+JOB_KEY = "bounded-rich-backfill-v6"
 
 CORE_COMPETITIONS: List[str] = [
     "wta-tour",
@@ -98,13 +98,24 @@ def run_bounded_backfill(
         if heartbeat:
             heartbeat()
         try:
-            summaries[competition_id] = run_cycle(
+            summary = run_cycle(
                 db,
                 capabilities=["fixtures", "results", "snapshot"],
                 competition_id=competition_id,
                 sleeper=lambda _d: None,
                 force=True,
             )
+            if summary.get("write_lock") == 0:
+                logger.info("backfill pausing; write lock not owned competition=%s", competition_id)
+                _checkpoint(job, state="running", next_index=index, competitions=summaries)
+                db.commit()
+                return {
+                    "paused": True,
+                    "next_index": index,
+                    "competitions": summaries,
+                    "count": len(comps),
+                }
+            summaries[competition_id] = summary
             db.commit()
         except Exception as exc:  # noqa: BLE001
             logger.exception("backfill failed competition=%s", competition_id)
