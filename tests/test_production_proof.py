@@ -37,6 +37,14 @@ def test_list_ids_promote_to_family_map():
     assert out["fotmob"] == "999"
 
 
+def test_untyped_list_ids_bind_to_source_family():
+    from collector.source_ids import families_with_ids
+
+    ids = families_with_ids({"source_family": "fotmob", "source_event_ids": ["48101234"]})
+    assert ids["fotmob"] == "48101234"
+    assert "_untyped" not in ids
+
+
 def test_negative_detail_ttl_is_shorter_than_finished_success():
     empty = {
         "detail_fetched_at": (datetime.utcnow() - timedelta(hours=2)).isoformat(),
@@ -155,7 +163,27 @@ def test_nhl_payloads_map_goals_and_rosters():
     assert box["lineups"]["home"]["start"][0]["name"] == "McDavid"
 
 
-def test_wta_stats_and_sets_from_public_fields_only():
+def test_wta_walkover_string_does_not_invent_sets():
+    row = {
+        "PlayerNameFirstA": "Gabriela",
+        "PlayerNameLastA": "Dabrowski",
+        "PlayerNameFirstA2": "Luisa",
+        "PlayerNameLastA2": "Stefani",
+        "PlayerNameFirstB": "Kaitlin",
+        "PlayerNameLastB": "Quevedo",
+        "PlayerNameFirstB2": "Dominika",
+        "PlayerNameLastB2": "Salkova",
+        "ScoreSet1A": "",
+        "ScoreSet1B": "",
+        "MatchState": "F",
+        "ScoreString": " W/O",
+        "MatchID": "LD004",
+    }
+    event = match_to_event(row, "wta-tour")
+    assert event["result_type"] == "walkover"
+    assert event["walkover"] is True
+    assert event["score"]["home"] is None
+    assert event["periods"] in (None, [])
     row = {
         "PlayerNameFirstA": "Iga",
         "PlayerNameLastA": "Swiatek",

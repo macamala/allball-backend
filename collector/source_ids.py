@@ -62,6 +62,8 @@ def id_for_family(extra: Dict[str, Any], family: str) -> Optional[str]:
 def families_with_ids(extra: Dict[str, Any]) -> Dict[str, str]:
     ids = as_family_map(extra.get("source_event_ids"))
     family = str(extra.get("source_family") or "")
+    if family and ids.get("_untyped") and family not in ids:
+        ids[family] = ids.pop("_untyped")
     sid = extra.get("source_event_id")
     if family and sid and family not in ids:
         ids[family] = str(sid).split(":")[-1]

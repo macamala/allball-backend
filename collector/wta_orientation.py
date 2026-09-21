@@ -107,6 +107,9 @@ def winner_side_from_source(row: Dict[str, Any], home_name: str, away_name: str)
 
 
 def match_status(row: Dict[str, Any]) -> Tuple[str, Optional[str]]:
+    score_string = str(row.get("ScoreString") or "").upper()
+    if "W/O" in score_string or score_string.strip() in {"WO", "WALKOVER"}:
+        return "finished", "walkover"
     state = str(row.get("MatchState") or "").strip().upper()
     if state in _FINISHED:
         return "finished", None
