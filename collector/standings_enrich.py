@@ -14,6 +14,7 @@ from collector.models import SportsEvent, SportsStandingSnapshot
 from collector.util import dump_json, load_json
 from collector.verified_coverage import OPENLIGADB_LEAGUES
 
+TTL_SECONDS = 1800
 FOTMOB_LEAGUE = "https://www.fotmob.com/api/data/leagues?id={league_id}"
 OPENLIGA_TABLE = "https://api.openligadb.de/getbltable/{shortcut}/{year}"
 NHL_STANDINGS = "https://api-web.nhle.com/v1/standings/now"

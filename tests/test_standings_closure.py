@@ -2,7 +2,7 @@ from collector.adapters_cricsheet import _event
 from collector.adapters_fotmob import parse_fotmob_table
 from collector.canonical_standings import canonicalize_standing_rows, unwrap_standings
 from collector.identity_events import identity_confidence
-from collector.standings_enrich import parse_mlb_standings, parse_nhl_standings
+from collector.standings_enrich import TTL_SECONDS, _fresh, parse_mlb_standings, parse_nhl_standings
 
 
 def test_identity_matches_club_core_and_city_suffix():
@@ -85,6 +85,11 @@ def test_nhl_and_mlb_standings_parsers():
     )
     assert mlb[0]["team"] == "Cubs"
     assert unwrap_standings(mlb)[0]["wins"] == 90
+
+
+def test_standings_ttl_skips_empty_snapshot():
+    assert TTL_SECONDS >= 60
+    assert _fresh(None) is False
 
 
 def test_cricsheet_innings_are_historical_not_live():
