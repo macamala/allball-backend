@@ -102,6 +102,15 @@ def attach_family_id(row: SportsEvent, family: str, source_event_id: str, incomi
     extra["source_family"] = extra.get("source_family") or family
     changed = families_with_ids(extra) != before
     if incoming:
+        if incoming.get("start_time") and not row.start_time:
+            from collector.util import parse_datetime
+
+            stamp = parse_datetime(incoming.get("start_time"))
+            if stamp is not None:
+                if getattr(stamp, "tzinfo", None) is not None:
+                    stamp = stamp.replace(tzinfo=None)
+                row.start_time = stamp
+                changed = True
         if incoming.get("periods") and not extra.get("periods"):
             extra["periods"] = incoming.get("periods")
             changed = True
