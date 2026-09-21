@@ -23,7 +23,7 @@ from collector.util import dump_json, load_json
 
 logger = logging.getLogger(__name__)
 
-ATTACH_JOB = "provider-id-attach-v4"
+ATTACH_JOB = "provider-id-attach-v5"
 MAX_INGEST_PER_FAMILY = 40
 FAMILY_SPORT = {
     "pulselive": "rugby",
@@ -322,6 +322,14 @@ def _load_family_events(family: str, getter=None) -> List[Dict[str, Any]]:
 
         adapter = SquiggleAflAdapter(getter=getter) if getter else SquiggleAflAdapter()
         result = adapter.fetch(FetchRequest(capability="snapshot", competition_id="australia-afl"))
+        logger.info(
+            "squiggle_fetch status=%s ok=%s events=%s reason=%s empty=%s",
+            result.http_status,
+            result.ok,
+            len(result.events or []),
+            (result.parse_reason or "")[:400],
+            (result.empty_reason or result.error or "")[:400],
+        )
         return result.events or []
     if family == "cfl-scoreboard-json":
         from collector.adapters_ro56 import CflScoreboardAdapter

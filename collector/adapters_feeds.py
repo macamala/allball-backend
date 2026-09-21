@@ -620,7 +620,7 @@ class EuroleagueLiveAdapter:
 
         events: List[Dict[str, Any]] = []
         blocks = re.findall(r"<game\b[^>]*>.*?</game>", text or "", flags=re.I | re.S)
-        for block in blocks[:250]:
+        for block in blocks:
             def tag(name: str) -> str:
                 found = re.search(rf"<{name}[^>]*>([^<]*)</{name}>", block, re.I)
                 return (found.group(1) or "").strip() if found else ""

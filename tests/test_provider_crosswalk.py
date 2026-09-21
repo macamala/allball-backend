@@ -246,6 +246,10 @@ def test_euroleague_bc_baloncesto_identity_normalization():
     dotted = dict(canonical)
     dotted["home"] = {"name": "Olympiacos B.C."}
     assert identity_confidence(dotted, provider) >= 90
+    piraeus = dict(provider)
+    piraeus["home"] = {"name": "OLYMPIACOS PIRAEUS"}
+    piraeus["away"] = {"name": "REAL MADRID"}
+    assert identity_confidence(canonical, piraeus) >= 90
 
 
 def test_basketball_club_suffix_does_not_false_merge():

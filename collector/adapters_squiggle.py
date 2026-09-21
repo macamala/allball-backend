@@ -184,6 +184,6 @@ class SquiggleAflAdapter:
             http_status=(last.http_status if last else 200),
             payload=payload or {"games": games, "fetch_diag": diag[:4]},
             events=events,
-            empty_reason=None if events else (diag[0].get("shape") if diag else "SOURCE_HEALTHY_NO_EVENTS"),
+            empty_reason=None if events else json.dumps(diag[:4])[:800],
             parse_reason=reason,
         )

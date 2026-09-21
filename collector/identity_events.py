@@ -93,6 +93,23 @@ def _core_pair(h0: str, a0: str, h1: str, a1: str, *, sport: str = "", competiti
     )
 
 
+def _club_stems(core: str, *, sport: str = "") -> set:
+    tokens = [tok for tok in str(core or "").split() if tok]
+    if not tokens:
+        return set()
+    stems = {" ".join(tokens)}
+    if sport in {"basketball", "volleyball", "table-tennis"} and len(tokens[0]) >= 8:
+        stems.add(tokens[0])
+    return stems
+
+
+def _stems_pair(h0: str, a0: str, h1: str, a1: str, *, sport: str = "") -> bool:
+    sh0, sa0, sh1, sa1 = _club_stems(h0, sport=sport), _club_stems(a0, sport=sport), _club_stems(h1, sport=sport), _club_stems(a1, sport=sport)
+    return bool(sh0 and sa0 and sh1 and sa1) and (
+        (sh0 & sh1 and sa0 & sa1) or (sh0 & sa1 and sa0 & sh1)
+    )
+
+
 def _side_id(side: Any) -> str:
     if isinstance(side, dict):
         return str(side.get("id") or side.get("source_id") or "").strip()
@@ -136,12 +153,14 @@ def identity_confidence(canonical: Dict[str, Any], candidate: Dict[str, Any]) ->
     core_ca = identity_core(ca_name, sport=sport, competition=competition) or ca
     cores_match = bool(core_home and core_away) and {core_home, core_away} == {core_ch, core_ca}
     cores_contain = _core_pair(core_home, core_away, core_ch, core_ca, sport=sport, competition=competition)
+    stems_match = _stems_pair(core_home, core_away, core_ch, core_ca, sport=sport)
     if (
         not ids_match
         and {home, away} != {ch, ca}
         and not participants_equivalent(home_name, away_name, ch_name, ca_name)
         and not cores_match
         and not cores_contain
+        and not stems_match
     ):
         return 0
     if _weak_pair(home, away):
