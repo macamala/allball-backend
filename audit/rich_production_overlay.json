@@ -140,5 +140,39 @@
     "sport_detail": "PROVEN",
     "production_verified": true,
     "limitation": "Jolpica 2026 Australian GP classification: Russell P1, grid/gap/fastest lap/status; current driver standings 23 rows. Not live timing."
+  },
+  "france-top-14": {
+    "timeline": "PARTIAL",
+    "stats": "PROVEN",
+    "lineups": "PROVEN",
+    "player_stats": "PROVEN",
+    "sport_detail": "PROVEN",
+    "venue": "PROVEN",
+    "periods": "PARTIAL",
+    "standings": "PARTIAL",
+    "production_verified": true,
+    "limitation": "PulseLive Toulouse vs Bordeaux-Begles: tries 8-2, conversions 4-1, team stats, player tries/points, lineups at Stade Ernest-Wallon. Incident timeline and ladder not on this event."
+  },
+  "premiership-rugby": {
+    "timeline": "PARTIAL",
+    "stats": "PROVEN",
+    "lineups": "PROVEN",
+    "player_stats": "PROVEN",
+    "sport_detail": "PROVEN",
+    "venue": "PROVEN",
+    "standings": "PARTIAL",
+    "production_verified": true,
+    "limitation": "PulseLive Northampton vs Exeter production Match Centre team stats, lineups, tries/conversions sport_detail."
+  },
+  "super-rugby": {
+    "timeline": "PARTIAL",
+    "stats": "PROVEN",
+    "lineups": "PROVEN",
+    "player_stats": "PROVEN",
+    "sport_detail": "PROVEN",
+    "venue": "PROVEN",
+    "standings": "PARTIAL",
+    "production_verified": true,
+    "limitation": "PulseLive Hurricanes vs Chiefs production Match Centre team stats, lineups, tries/conversions sport_detail."
   }
 }
