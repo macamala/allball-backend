@@ -199,15 +199,81 @@ def public_event(payload: Dict[str, Any]) -> Dict[str, Any]:
     return _public_value(payload)
 
 
-def _list_public_event(payload: Dict[str, Any]) -> Dict[str, Any]:
+LIST_PUBLIC_KEYS = (
+    "id",
+    "sport",
+    "competition",
+    "competition_key",
+    "competition_name",
+    "event_family",
+    "home",
+    "away",
+    "participant_a",
+    "participant_b",
+    "start_time",
+    "status",
+    "score",
+    "live",
+    "live_class",
+    "periods",
+    "start_precision",
+    "start_date",
+    "updated_at",
+    "current_set",
+    "geography_label",
+    "scope_type",
+    "country_id",
+    "country_based",
+    "standings_available",
+    "venue",
+    "series_id",
+    "session_type",
+    "stage",
+    "walkover",
+    "result_type",
+    "maps",
+    "round",
+    "winner",
+    "runners",
+    "race_number",
+    "best_of",
+)
+
+
+def _compact_mapping(value: Any) -> Any:
+    if not isinstance(value, dict):
+        return value
     out: Dict[str, Any] = {}
-    for key, value in payload.items():
-        if key in INTERNAL_EVENT_KEYS or key in NESTED_SOURCE_ID_KEYS or key in {"provider", "provider_id"}:
+    for key, item in value.items():
+        if key in INTERNAL_EVENT_KEYS or key in NESTED_SOURCE_ID_KEYS:
             continue
-        if key in {"home", "away", "participant_a", "participant_b", "score"}:
-            out[key] = _public_value(value)
+        if item in (None, "", [], {}):
+            continue
+        out[key] = item
+    return out
+
+
+def _list_public_event(payload: Dict[str, Any]) -> Dict[str, Any]:
+    score = payload.get("score") if isinstance(payload.get("score"), dict) else {}
+    out: Dict[str, Any] = {}
+    for key in LIST_PUBLIC_KEYS:
+        if key == "score":
+            continue
+        value = payload.get(key)
+        if value in (None, "", [], {}):
+            continue
+        if key in {"home", "away", "participant_a", "participant_b"}:
+            out[key] = _compact_mapping(value)
         else:
             out[key] = value
+    lean_score = {
+        key: value
+        for key, value in score.items()
+        if value is not None and key not in INTERNAL_EVENT_KEYS and key not in NESTED_SOURCE_ID_KEYS and key not in {"home", "away"}
+    }
+    lean_score["home"] = score.get("home")
+    lean_score["away"] = score.get("away")
+    out["score"] = lean_score
     return out
 
 
