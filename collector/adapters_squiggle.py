@@ -38,8 +38,9 @@ def _start(row: Dict[str, Any]) -> str | None:
 
 
 def _to_event(row: Dict[str, Any]) -> Dict[str, Any]:
-    return {
-        "id": f"squiggle:{row.get('id')}",
+    gid = str(row.get("id") or "")
+    payload = {
+        "id": f"squiggle:{gid}",
         "home": {"id": str(row.get("hteamid") or ""), "name": row.get("hteam") or ""},
         "away": {"id": str(row.get("ateamid") or ""), "name": row.get("ateam") or ""},
         "status": _status(row),
@@ -48,7 +49,25 @@ def _to_event(row: Dict[str, Any]) -> Dict[str, Any]:
         "venue": row.get("venue"),
         "round": row.get("roundname") or row.get("round"),
         "competition": COMPETITION_ID,
+        "source_family": "squiggle-afl",
+        "source_event_id": gid,
+        "source_event_ids": {"squiggle-afl": gid},
+        "extra": {
+            "source_family": "squiggle-afl",
+            "source_event_id": gid,
+            "source_event_ids": {"squiggle-afl": gid},
+        },
     }
+    if row.get("hgoals") is not None or row.get("agoals") is not None:
+        payload["periods"] = [
+            {"label": "G", "home": row.get("hgoals"), "away": row.get("agoals")},
+            {"label": "B", "home": row.get("hbehinds"), "away": row.get("abehinds")},
+        ]
+        payload["extra"]["sport_detail"] = {
+            "goals": {"home": row.get("hgoals"), "away": row.get("agoals")},
+            "behinds": {"home": row.get("hbehinds"), "away": row.get("abehinds")},
+        }
+    return payload
 
 
 class SquiggleAflAdapter:

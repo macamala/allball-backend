@@ -9,6 +9,7 @@ from typing import Any, Dict, List
 
 ROOT = Path(__file__).resolve().parents[1]
 MATRIX = ROOT / "source_matrix_final.json"
+OVERLAY = ROOT / "audit" / "rich_production_overlay.json"
 
 # Adapter/canonical/API/Match Centre path exists for these families.
 _IMPLEMENTED = {
@@ -16,8 +17,8 @@ _IMPLEMENTED = {
         "timeline": "PARTIAL",
         "stats": "NO_ACCESSIBLE_DATA_FOUND",
         "lineups": "NO_ACCESSIBLE_DATA_FOUND",
-        "periods": "PROVEN",
-        "standings": "PROVEN",
+        "periods": "PARTIAL",
+        "standings": "PARTIAL",
         "player_stats": "NO_ACCESSIBLE_DATA_FOUND",
         "venue": "PARTIAL",
         "officials": "NO_ACCESSIBLE_DATA_FOUND",
@@ -28,19 +29,19 @@ _IMPLEMENTED = {
         "limitation": "Goals timeline only; no cards/lineups on OpenLigaDB",
     },
     "fotmob": {
-        "timeline": "PROVEN",
-        "stats": "PROVEN",
-        "lineups": "PROVEN",
+        "timeline": "PARTIAL",
+        "stats": "PARTIAL",
+        "lineups": "PARTIAL",
         "periods": "PARTIAL",
         "standings": "SOURCE_AVAILABLE_NOT_IMPLEMENTED",
-        "player_stats": "SOURCE_AVAILABLE_NOT_IMPLEMENTED",
+        "player_stats": "PARTIAL",
         "venue": "PROVEN",
         "officials": "PARTIAL",
         "sport_detail": "PARTIAL",
         "implemented": True,
         "adapter": "fotmob",
         "transport": "www.fotmob.com/api/data/matches + matchDetails on-demand",
-        "limitation": "Lineups from content.lineup.homeTeam/awayTeam; referee/attendance only when present on general; not on the list payload",
+        "limitation": "Player rating/goals/assists/xG when matchDetails.playerStats present; referee/stadium from infoBox; table not mapped from match payload",
     },
     "sofascore-web": {
         "timeline": "PARTIAL",
@@ -100,7 +101,127 @@ _IMPLEMENTED = {
         "implemented": True,
         "adapter": "nhl-web",
         "transport": "api-web.nhle.com gamecenter landing + boxscore on-demand",
-        "limitation": "Period score table incomplete on some landing payloads; goals/penalties/rosters proven",
+        "limitation": "Period scores from scoreByPeriod when present; goals/penalties/rosters/player stats proven",
+    },
+    "pulselive": {
+        "timeline": "PARTIAL",
+        "stats": "PARTIAL",
+        "lineups": "PARTIAL",
+        "periods": "PARTIAL",
+        "standings": "NO_ACCESSIBLE_DATA_FOUND",
+        "player_stats": "PARTIAL",
+        "venue": "PARTIAL",
+        "officials": "PARTIAL",
+        "sport_detail": "PARTIAL",
+        "implemented": True,
+        "adapter": "world-rugby-rims",
+        "transport": "api.wr-rims-prod.pulselive.com/rugby/v3/match/{id}/stats",
+        "limitation": "Tries/conversions/rosters when teamStats present; scoring timeline when summary.teams.scoring present",
+    },
+    "pulselive-family": {
+        "timeline": "PARTIAL",
+        "stats": "PARTIAL",
+        "lineups": "PARTIAL",
+        "periods": "PARTIAL",
+        "standings": "NO_ACCESSIBLE_DATA_FOUND",
+        "player_stats": "PARTIAL",
+        "venue": "PARTIAL",
+        "officials": "PARTIAL",
+        "sport_detail": "PARTIAL",
+        "implemented": True,
+        "adapter": "pulselive-family",
+        "transport": "api.wr-rims-prod.pulselive.com/rugby/v3/match",
+        "limitation": "Same PulseLive rugby match stats family",
+    },
+    "squiggle": {
+        "timeline": "NO_ACCESSIBLE_DATA_FOUND",
+        "stats": "PARTIAL",
+        "lineups": "NO_ACCESSIBLE_DATA_FOUND",
+        "periods": "PARTIAL",
+        "standings": "NO_ACCESSIBLE_DATA_FOUND",
+        "player_stats": "NO_ACCESSIBLE_DATA_FOUND",
+        "venue": "PARTIAL",
+        "officials": "NO_ACCESSIBLE_DATA_FOUND",
+        "sport_detail": "PARTIAL",
+        "implemented": True,
+        "adapter": "squiggle-afl",
+        "transport": "api.squiggle.com.au games",
+        "limitation": "Goals/behinds/score; no player box on Squiggle games feed",
+    },
+    "jolpica-f1": {
+        "timeline": "NOT_APPLICABLE",
+        "stats": "PARTIAL",
+        "lineups": "NOT_APPLICABLE",
+        "periods": "NOT_APPLICABLE",
+        "standings": "NO_ACCESSIBLE_DATA_FOUND",
+        "player_stats": "PARTIAL",
+        "venue": "PARTIAL",
+        "officials": "NOT_APPLICABLE",
+        "sport_detail": "PARTIAL",
+        "implemented": True,
+        "adapter": "jolpica-f1",
+        "transport": "api.jolpi.ca/ergast/f1 results",
+        "limitation": "Race classification/grid/status; live timing not used",
+    },
+    "opendota": {
+        "timeline": "NO_ACCESSIBLE_DATA_FOUND",
+        "stats": "PARTIAL",
+        "lineups": "PARTIAL",
+        "periods": "NOT_APPLICABLE",
+        "standings": "NO_ACCESSIBLE_DATA_FOUND",
+        "player_stats": "PARTIAL",
+        "venue": "NOT_APPLICABLE",
+        "officials": "NOT_APPLICABLE",
+        "sport_detail": "PARTIAL",
+        "implemented": True,
+        "adapter": "opendota",
+        "transport": "api.opendota.com/api/matches/{id}",
+        "limitation": "KDA/hero on-demand; no full PBP mapped",
+    },
+    "lolesports-json": {
+        "timeline": "NO_ACCESSIBLE_DATA_FOUND",
+        "stats": "NO_ACCESSIBLE_DATA_FOUND",
+        "lineups": "NO_ACCESSIBLE_DATA_FOUND",
+        "periods": "NOT_APPLICABLE",
+        "standings": "NO_ACCESSIBLE_DATA_FOUND",
+        "player_stats": "NO_ACCESSIBLE_DATA_FOUND",
+        "venue": "NOT_APPLICABLE",
+        "officials": "NOT_APPLICABLE",
+        "sport_detail": "PARTIAL",
+        "implemented": True,
+        "adapter": "lolesports-json",
+        "transport": "esports-api.lolesports.com getEventDetails",
+        "limitation": "Series maps/game wins when event details return games",
+    },
+    "cfl-scoreboard-json": {
+        "timeline": "NO_ACCESSIBLE_DATA_FOUND",
+        "stats": "PARTIAL",
+        "lineups": "NO_ACCESSIBLE_DATA_FOUND",
+        "periods": "PARTIAL",
+        "standings": "NO_ACCESSIBLE_DATA_FOUND",
+        "player_stats": "NO_ACCESSIBLE_DATA_FOUND",
+        "venue": "NO_ACCESSIBLE_DATA_FOUND",
+        "officials": "NO_ACCESSIBLE_DATA_FOUND",
+        "sport_detail": "PARTIAL",
+        "implemented": True,
+        "adapter": "cfl-scoreboard-json",
+        "transport": "cflscoreboard.cfl.ca rounds.json",
+        "limitation": "Quarter scores when present on scoreboard payload",
+    },
+    "euroleague-live": {
+        "timeline": "NO_ACCESSIBLE_DATA_FOUND",
+        "stats": "PARTIAL",
+        "lineups": "PARTIAL",
+        "periods": "PARTIAL",
+        "standings": "NO_ACCESSIBLE_DATA_FOUND",
+        "player_stats": "PARTIAL",
+        "venue": "PARTIAL",
+        "officials": "NO_ACCESSIBLE_DATA_FOUND",
+        "sport_detail": "PARTIAL",
+        "implemented": True,
+        "adapter": "euroleague-live",
+        "transport": "live.euroleague.net/api/Boxscore",
+        "limitation": "Boxscore when Header/Boxscore routes respond; catalog v1 games often 404",
     },
     "pga-graphql": {
         "timeline": "NOT_APPLICABLE",
@@ -111,7 +232,7 @@ _IMPLEMENTED = {
         "player_stats": "PARTIAL",
         "venue": "PARTIAL",
         "officials": "NOT_APPLICABLE",
-        "sport_detail": "PROVEN",
+        "sport_detail": "PARTIAL",
         "implemented": True,
         "adapter": "pga-graphql",
         "transport": "orchestrator.pgatour.com/graphql leaderboardV3",
@@ -176,6 +297,51 @@ _IMPLEMENTED = {
         "adapter": "thesportsdb",
         "transport": "www.thesportsdb.com/api/v1/json public events",
         "limitation": "Fixture/score/venue; events table has no incidents",
+    },
+    "championdata-netball": {
+        "timeline": "NO_ACCESSIBLE_DATA_FOUND",
+        "stats": "PARTIAL",
+        "lineups": "NO_ACCESSIBLE_DATA_FOUND",
+        "periods": "PARTIAL",
+        "standings": "NO_ACCESSIBLE_DATA_FOUND",
+        "player_stats": "PARTIAL",
+        "venue": "NO_ACCESSIBLE_DATA_FOUND",
+        "officials": "NO_ACCESSIBLE_DATA_FOUND",
+        "sport_detail": "PARTIAL",
+        "implemented": True,
+        "adapter": "championdata-netball",
+        "transport": "mc.championdata.com fixture + match JSON on-demand",
+        "limitation": "Quarter scores/player box when present on Champion Data match JSON; no invented periods",
+    },
+    "click-tt-remix": {
+        "timeline": "NO_ACCESSIBLE_DATA_FOUND",
+        "stats": "NO_ACCESSIBLE_DATA_FOUND",
+        "lineups": "NO_ACCESSIBLE_DATA_FOUND",
+        "periods": "PARTIAL",
+        "standings": "NO_ACCESSIBLE_DATA_FOUND",
+        "player_stats": "NO_ACCESSIBLE_DATA_FOUND",
+        "venue": "NO_ACCESSIBLE_DATA_FOUND",
+        "officials": "NO_ACCESSIBLE_DATA_FOUND",
+        "sport_detail": "PARTIAL",
+        "implemented": True,
+        "adapter": "click-tt-remix",
+        "transport": "mytischtennis.de click-TT remix table + /api/meeting/{id}/live",
+        "limitation": "Individual rubber set scores when live JSON returns matches",
+    },
+    "dataproject-web": {
+        "timeline": "NO_ACCESSIBLE_DATA_FOUND",
+        "stats": "NO_ACCESSIBLE_DATA_FOUND",
+        "lineups": "NO_ACCESSIBLE_DATA_FOUND",
+        "periods": "PARTIAL",
+        "standings": "NO_ACCESSIBLE_DATA_FOUND",
+        "player_stats": "NO_ACCESSIBLE_DATA_FOUND",
+        "venue": "NO_ACCESSIBLE_DATA_FOUND",
+        "officials": "NO_ACCESSIBLE_DATA_FOUND",
+        "sport_detail": "PARTIAL",
+        "implemented": True,
+        "adapter": "dataproject-web",
+        "transport": "DataProject WCM HTML/JSON family",
+        "limitation": "Set score on list; match-centre stats only when source_event_id is numeric mID",
     },
 }
 
@@ -258,7 +424,21 @@ def build_rows() -> List[Dict[str, Any]]:
                 limitation = spec.get("limitation") or limitation
         if not detail_provider:
             detail_provider = score
-        production = any(caps[k] == "PROVEN" for k in caps)
+        overlay = {}
+        if OVERLAY.exists():
+            try:
+                overlay = json.loads(OVERLAY.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                overlay = {}
+        proven = overlay.get(str(comp.get("competition") or "")) if isinstance(overlay, dict) else None
+        if isinstance(proven, dict):
+            for key in ("timeline", "stats", "lineups", "periods", "standings", "player_stats", "venue", "officials", "sport_detail"):
+                if proven.get(key):
+                    caps[key] = proven[key]
+            limitation = proven.get("limitation") or limitation
+        production = False
+        if isinstance(proven, dict) and proven.get("production_verified"):
+            production = True
         rows.append(
             {
                 "competition": comp.get("competition"),

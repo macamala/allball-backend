@@ -90,6 +90,86 @@ def test_fotmob_parser_maps_timeline_stats_lineups():
     assert out["lineups"]["home"]["start"][0]["name"] == "Raya"
 
 
+def test_fotmob_parser_maps_infobox_player_stats_and_xg():
+    from collector.detail_enrich import parse_fotmob_details
+
+    payload = {
+        "general": {"homeTeam": {"id": 1}, "awayTeam": {"id": 2}},
+        "content": {
+            "matchFacts": {
+                "events": {"events": [{"type": "Substitution", "time": 60, "name": "In", "isHome": True}]},
+                "infoBox": {
+                    "Stadium": {"name": "Artemio Franchi"},
+                    "Referee": {"text": "Daniele Doveri"},
+                    "Attendance": 38000,
+                },
+            },
+            "stats": {"Periods": {"All": {"stats": [{"stats": [{"title": "Expected goals (xG)", "stats": ["1.51", "1.47"]}]}]}}},
+            "lineup": {
+                "homeTeam": {"formation": "4-3-3", "coach": {"name": "Vanoli"}, "starters": [{"name": "De Bruyne", "shirtNumber": 11, "performance": {"rating": 8.1}}], "subs": []},
+                "awayTeam": {"formation": "4-4-2", "starters": [{"name": "Keeper", "shirtNumber": 1}], "subs": []},
+            },
+            "playerStats": {
+                "11": {
+                    "name": "De Bruyne",
+                    "teamId": 1,
+                    "shirtNumber": 11,
+                    "stats": [{"title": "Top stats", "stats": {"FotMob rating": {"stat": {"value": 8.1}}, "Goals": {"stat": {"value": 1}}}}],
+                }
+            },
+            "shotmap": {"shots": [{"isOnTarget": True}, {"isOnTarget": False}]},
+        },
+    }
+    out = parse_fotmob_details(payload)
+    assert out["venue"] == "Artemio Franchi"
+    assert out["referee"] == "Daniele Doveri"
+    assert out["attendance"] == 38000
+    assert out["statistics"][0]["label"] == "Expected goals (xG)"
+    assert out["lineups"]["home"]["formation"] == "4-3-3"
+    assert out["lineups"]["home"]["coach"] == "Vanoli"
+    assert out["player_statistics"][0]["goals"] == 1
+    assert out["sport_detail"]["shots"] == 2
+
+
+def test_rugby_and_squiggle_and_jolpica_parsers():
+    from collector.detail_families import parse_jolpica_results, parse_rugby_detail, parse_squiggle_game
+
+    rugby = parse_rugby_detail(
+        {"venue": {"name": "Murrayfield"}, "attendance": 12000},
+        {"teamStats": [{"stats": {"Tries": 2, "Conversions": 1}, "playerStats": [{"player": {"name": {"display": "A"}}, "stats": {"Tries": 1}}]}, {"stats": {"Tries": 1, "Conversions": 0}, "playerStats": []}]},
+        {"officials": [{"official": {"name": {"display": "Ref A"}}}]},
+    )
+    assert rugby["venue"] == "Murrayfield"
+    assert rugby["statistics"][0]["label"] in {"Tries", "Conversions"}
+    assert rugby["referee"] == "Ref A"
+    afl = parse_squiggle_game({"hgoals": 12, "agoals": 9, "hbehinds": 8, "abehinds": 6, "hscore": 80, "ascore": 60, "venue": "MCG"})
+    assert afl["periods"][0]["home"] == 12
+    f1 = parse_jolpica_results({"MRData": {"RaceTable": {"Races": [{"Circuit": {"circuitName": "Monza"}, "Results": [{"position": "1", "Driver": {"givenName": "Max", "familyName": "Verstappen"}, "status": "Finished"}]}]}}})
+    assert f1["classification"][0]["name"] == "Max Verstappen"
+    from collector.detail_families import parse_championdata_match, parse_clicktt_live, parse_openliga_match
+
+    cd = parse_championdata_match({"homeSquadScoreQ1": 15, "awaySquadScoreQ1": 12, "homeSquadScoreQ2": 14, "awaySquadScoreQ2": 18})
+    assert cd["periods"][0]["home"] == 15
+    tt = parse_clicktt_live({"matches": [{"sets_home": 3, "sets_guest": 1}]})
+    assert tt["periods"][0]["home"] == 3
+    ol = parse_openliga_match({"goals": [{"goalGetterName": "Müller", "matchMinute": 12, "scoreTeam1": 1, "scoreTeam2": 0}], "matchResults": [{"resultName": "Halbzeit", "pointsTeam1": 1, "pointsTeam2": 0}]})
+    assert ol["incidents"] or ol["periods"]
+
+
+def test_nhl_period_scores_from_score_by_period():
+    from collector.detail_enrich import parse_nhl_landing
+
+    out = parse_nhl_landing(
+        {
+            "homeTeam": {"score": 3, "sog": 30, "scoreByPeriod": [1, 0, 2]},
+            "awayTeam": {"score": 2, "sog": 22, "scoreByPeriod": [0, 1, 1]},
+            "summary": {"scoring": [], "penalties": []},
+        }
+    )
+    assert out["periods"][0] == {"label": 1, "home": 1, "away": 0}
+    assert out["statistics"][0]["label"] == "Shots"
+
+
 def test_sofa_and_mlb_parsers_do_not_fabricate():
     assert parse_sofa_incidents({}) == []
     assert parse_mlb_live({}) == {}

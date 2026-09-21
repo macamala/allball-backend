@@ -90,6 +90,7 @@ def _to_event(match: Dict[str, Any], spec: Dict[str, Any]) -> Dict[str, Any]:
         "periods": periods_from_openliga_results(match),
         "incidents": incidents_from_openliga_goals(match),
         "source_event_id": str(match.get("matchID") or ""),
+        "source_event_ids": {"openligadb": str(match.get("matchID") or "")},
         "source_family": "openligadb",
         "sport": spec.get("sport_id") or "football",
     }

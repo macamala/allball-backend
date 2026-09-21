@@ -470,8 +470,12 @@ class WorldRugbyAdapter:
             "competition_key": f"rugby-{slugify(name)}",
             "event_family": "team_match",
             "source_family": "pulselive",
+            "source_event_id": str(row.get("matchId") or ""),
+            "source_event_ids": {"pulselive": str(row.get("matchId") or "")},
             "extra": {
                 "source_family": "pulselive",
+                "source_event_id": str(row.get("matchId") or ""),
+                "source_event_ids": {"pulselive": str(row.get("matchId") or "")},
                 "source_status": status,
                 "status_inferred": False,
             },
@@ -522,6 +526,30 @@ class JolpicaF1Adapter:
             "venue": (row.get("Circuit") or {}).get("circuitName"),
             "competition": "formula-1",
             "series_id": "formula-1",
+            "source_family": "jolpica-f1",
+            "source_event_id": f"{row.get('season')}:{row.get('round')}",
+            "source_event_ids": {"jolpica-f1": f"{row.get('season')}:{row.get('round')}"},
+            "extra": {
+                "source_family": "jolpica-f1",
+                "source_event_id": f"{row.get('season')}:{row.get('round')}",
+                "source_event_ids": {"jolpica-f1": f"{row.get('season')}:{row.get('round')}"},
+                "classification": [
+                    {
+                        "position": item.get("position"),
+                        "name": " ".join(
+                            part
+                            for part in (
+                                (item.get("Driver") or {}).get("givenName"),
+                                (item.get("Driver") or {}).get("familyName"),
+                            )
+                            if part
+                        ),
+                        "status": item.get("status"),
+                    }
+                    for item in results
+                    if isinstance(item, dict)
+                ],
+            },
         }
 
 
@@ -600,6 +628,14 @@ class EuroleagueLiveAdapter:
             "start_time": row.get("utc") or row.get("date") or row.get("startDate"),
             "venue": row.get("Stadium") or row.get("venue"),
             "competition": "euroleague",
+            "source_family": "euroleague-live",
+            "source_event_id": f"{season}:{code}",
+            "source_event_ids": {"euroleague-live": f"{season}:{code}"},
+            "extra": {
+                "source_family": "euroleague-live",
+                "source_event_id": f"{season}:{code}",
+                "source_event_ids": {"euroleague-live": f"{season}:{code}"},
+            },
         }
 
     def _from_header(self, row: Dict[str, Any], season: str, gamecode: Any) -> Dict[str, Any]:

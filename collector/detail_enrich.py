@@ -31,7 +31,26 @@ TTL_SCHEDULED = 1800
 TTL_FINISHED = 7 * 24 * 3600
 TTL_NEGATIVE = 900
 
-DETAIL_FAMILIES = ("fotmob", "sofascore-web", "mlb-statsapi", "nhl-web")
+DETAIL_FAMILIES = (
+    "fotmob",
+    "sofascore-web",
+    "mlb-statsapi",
+    "nhl-web",
+    "pulselive",
+    "pulselive-family",
+    "world-rugby-rims",
+    "cfl-scoreboard-json",
+    "lolesports-json",
+    "jolpica-f1",
+    "squiggle-afl",
+    "squiggle",
+    "euroleague-live",
+    "opendota",
+    "pga-graphql",
+    "openligadb",
+    "championdata-netball",
+    "click-tt-remix",
+)
 
 
 def _ttl(status: str, *, empty: bool) -> int:
@@ -77,30 +96,41 @@ def parse_fotmob_details(payload: Any) -> Dict[str, Any]:
     root = payload if isinstance(payload, dict) else {}
     content = root.get("content") if isinstance(root.get("content"), dict) else root
     out: Dict[str, Any] = {}
-    general = root.get("general") if isinstance(root.get("general"), dict) else content.get("general") if isinstance(content.get("general"), dict) else {}
-    if isinstance(general, dict):
-        venue = general.get("venueName") or (general.get("venue") or {}).get("name") if isinstance(general.get("venue"), dict) else general.get("venueName")
-        if venue:
-            out["venue"] = venue
-        referee = general.get("referee") or (general.get("matchOfficials") or {}).get("referee")
-        if isinstance(referee, dict):
-            referee = referee.get("name") or referee.get("text")
-        if referee:
-            out["referee"] = referee
+    general = root.get("general") if isinstance(root.get("general"), dict) else {}
+    if not general and isinstance(content.get("general"), dict):
+        general = content.get("general") or {}
+    facts = content.get("matchFacts") if isinstance(content.get("matchFacts"), dict) else {}
+    info = facts.get("infoBox") if isinstance(facts.get("infoBox"), dict) else {}
+    stadium = info.get("Stadium") if isinstance(info.get("Stadium"), dict) else {}
+    venue = stadium.get("name") or general.get("venueName")
+    if isinstance(general.get("venue"), dict):
+        venue = venue or general["venue"].get("name")
+    if venue:
+        out["venue"] = venue
+    referee_blob = info.get("Referee")
+    referee = None
+    if isinstance(referee_blob, dict):
+        referee = referee_blob.get("text") or referee_blob.get("name")
+    elif referee_blob:
+        referee = referee_blob
+    if not referee:
+        raw_ref = general.get("referee")
+        if isinstance(raw_ref, dict):
+            referee = raw_ref.get("name") or raw_ref.get("text")
+        else:
+            referee = raw_ref
+    if referee:
+        out["referee"] = referee
+    attendance = info.get("Attendance")
+    if isinstance(attendance, dict):
+        attendance = attendance.get("value") or attendance.get("text")
+    if attendance in (None, ""):
         attendance = general.get("attendance") or general.get("spectators")
-        if attendance not in (None, ""):
-            out["attendance"] = attendance
-        facts = []
-        for item in general.get("matchFacts") or []:
-            if isinstance(item, dict) and item.get("title"):
-                facts.append({"label": item.get("title"), "value": item.get("value") or item.get("text")})
-        if facts:
-            out["match_facts"] = facts
-    events = content.get("matchFacts") or content.get("events") or {}
+    if attendance not in (None, ""):
+        out["attendance"] = attendance
+    events = facts.get("events") if isinstance(facts, dict) else {}
     if isinstance(events, dict):
         rows = events.get("events") or events.get("list") or []
-        if isinstance(events.get("events"), dict):
-            rows = events["events"].get("events") or events["events"].get("list") or []
     else:
         rows = events if isinstance(events, list) else []
     timeline = []
@@ -108,6 +138,8 @@ def parse_fotmob_details(payload: Any) -> Dict[str, Any]:
         if not isinstance(item, dict):
             continue
         kind = str(item.get("type") or item.get("eventType") or item.get("key") or "").lower()
+        if kind in {"half", "addedtime", "added time"}:
+            continue
         player = _player_name(item.get("name") or item.get("player") or item.get("playerObj"))
         minute = item.get("time") or item.get("minute")
         assist = item.get("assistStr") or item.get("assist")
@@ -116,12 +148,21 @@ def parse_fotmob_details(payload: Any) -> Dict[str, Any]:
         card = item.get("card") or item.get("cardType")
         if card:
             kind = f"{str(card).lower()} card"
+        if item.get("varReason") or "var" in kind:
+            kind = kind if "var" in kind else "var"
+        player_in = _player_name(item.get("playerIn") or item.get("inPlayer"))
+        player_out = _player_name(item.get("playerOut") or item.get("outPlayer"))
+        if kind in {"substitution", "subst", "sub"}:
+            kind = "substitution"
+            player_in = player_in or player
         timeline.append(
             {
                 "type": kind or "event",
                 "minute": minute,
                 "player": player,
                 "assist": assist,
+                "player_in": player_in,
+                "player_out": player_out,
                 "side": "home" if item.get("isHome") else "away" if item.get("isHome") is False else None,
                 "score_after": {"home": item.get("homeScore"), "away": item.get("awayScore")}
                 if item.get("homeScore") is not None or item.get("awayScore") is not None
@@ -146,28 +187,45 @@ def parse_fotmob_details(payload: Any) -> Dict[str, Any]:
                     rows.append({"label": title, "home": values[0], "away": values[1]})
         if rows:
             out["statistics"] = rows
+    period_rows = []
+    for key, label in (("FirstHalf", "1"), ("SecondHalf", "2")):
+        blob = periods.get(key) if isinstance(periods, dict) else None
+        if not isinstance(blob, dict):
+            continue
+        scoreline = blob.get("score") or blob.get("Score")
+        if isinstance(scoreline, str) and "-" in scoreline:
+            left, right = scoreline.split("-", 1)
+            period_rows.append({"label": label, "home": left.strip(), "away": right.strip()})
+    if period_rows:
+        out["periods"] = period_rows
     lineup = content.get("lineup") or content.get("lineups") or {}
     sides = lineup.get("lineup") if isinstance(lineup, dict) else None
+    home_id = str((general.get("homeTeam") or {}).get("id") or "") if isinstance(general.get("homeTeam"), dict) else ""
+
+    def _players_from_side(side: Dict[str, Any], *, substitutes: bool) -> List[Dict[str, Any]]:
+        key = "subs" if substitutes else "starters"
+        alt = "substitutes" if substitutes else "startXI"
+        players = []
+        for player in side.get(key) or side.get(alt) or []:
+            if not isinstance(player, dict):
+                continue
+            name = player.get("name") or player.get("lastName")
+            if not name:
+                continue
+            rating = (player.get("performance") or {}).get("rating") if isinstance(player.get("performance"), dict) else None
+            players.append({"name": name, "number": player.get("shirtNumber") or player.get("number"), "rating": rating})
+        return players
+
     if isinstance(lineup, dict) and lineup.get("homeTeam") and lineup.get("awayTeam"):
         def pack_team(side: Dict[str, Any]) -> Dict[str, Any]:
-            players = []
-            for player in side.get("starters") or side.get("startXI") or []:
-                if not isinstance(player, dict):
-                    continue
-                players.append({"name": player.get("name"), "number": player.get("shirtNumber") or player.get("number")})
-            bench = []
-            for player in side.get("subs") or side.get("substitutes") or []:
-                if not isinstance(player, dict):
-                    continue
-                bench.append({"name": player.get("name"), "number": player.get("shirtNumber") or player.get("number")})
             coach = side.get("coach") or {}
             if isinstance(coach, list) and coach:
                 coach = coach[0]
             return {
                 "formation": side.get("formation"),
                 "coach": (coach.get("name") if isinstance(coach, dict) else None) or side.get("coachName"),
-                "start": players,
-                "bench": bench,
+                "start": _players_from_side(side, substitutes=False),
+                "bench": _players_from_side(side, substitutes=True),
             }
 
         packed = {
@@ -208,6 +266,48 @@ def parse_fotmob_details(payload: Any) -> Dict[str, Any]:
         packed = {"home": pack(sides[0] if isinstance(sides[0], dict) else {}), "away": pack(sides[1] if isinstance(sides[1], dict) else {})}
         if packed["home"]["start"] or packed["away"]["start"]:
             out["lineups"] = packed
+    player_stats_blob = content.get("playerStats") if isinstance(content.get("playerStats"), dict) else {}
+    players_out = []
+    for item in player_stats_blob.values():
+        if not isinstance(item, dict):
+            continue
+        name = item.get("name")
+        if not name:
+            continue
+        groups = item.get("stats") if isinstance(item.get("stats"), list) else []
+        values: Dict[str, Any] = {}
+        for group in groups:
+            stats = (group or {}).get("stats") if isinstance(group, dict) else None
+            if not isinstance(stats, dict):
+                continue
+            for label, blob in stats.items():
+                stat = blob.get("stat") if isinstance(blob, dict) else None
+                if isinstance(stat, dict) and "value" in stat:
+                    values[label] = stat.get("value")
+        team_id = str(item.get("teamId") or "")
+        side = "home" if home_id and team_id == home_id else "away" if home_id else None
+        players_out.append(
+            {
+                "name": name,
+                "number": item.get("shirtNumber"),
+                "side": side,
+                "rating": values.get("FotMob rating"),
+                "minutes": values.get("Minutes played"),
+                "goals": values.get("Goals"),
+                "assists": values.get("Assists"),
+                "xg": values.get("Expected goals (xG)") or values.get("xG"),
+                "xa": values.get("Expected assists (xA)"),
+            }
+        )
+    if players_out:
+        out["player_statistics"] = players_out
+    shots = ((content.get("shotmap") or {}).get("shots") if isinstance(content.get("shotmap"), dict) else None) or []
+    if isinstance(shots, list) and shots:
+        out["sport_detail"] = {
+            **(out.get("sport_detail") or {}),
+            "shots": len(shots),
+            "shots_on_target": sum(1 for shot in shots if isinstance(shot, dict) and shot.get("isOnTarget")),
+        }
     return out
 
 
@@ -435,10 +535,27 @@ def parse_nhl_landing(payload: Any) -> Dict[str, Any]:
         team_stats.append({"label": "Shots", "home": home.get("sog"), "away": away.get("sog")})
     if home.get("score") is not None or away.get("score") is not None:
         team_stats.append({"label": "Goals", "home": home.get("score"), "away": away.get("score")})
+    for key, label in (("powerPlayConversion", "Power play"), ("pim", "PIM")):
+        if home.get(key) is not None or away.get(key) is not None:
+            team_stats.append({"label": label, "home": home.get(key), "away": away.get(key)})
     if team_stats:
         out["statistics"] = team_stats
-    if home.get("score") is not None:
-        out["periods"] = periods or [{"label": "F", "home": home.get("score"), "away": away.get("score")}]
+    home_periods = home.get("scoreByPeriod") or home.get("periodScores") or []
+    away_periods = away.get("scoreByPeriod") or away.get("periodScores") or []
+    filled = []
+    count = max(len(home_periods) if isinstance(home_periods, list) else 0, len(away_periods) if isinstance(away_periods, list) else 0)
+    for index in range(count):
+        hv = home_periods[index] if index < len(home_periods) else None
+        av = away_periods[index] if index < len(away_periods) else None
+        if isinstance(hv, dict):
+            hv = hv.get("goals") or hv.get("score")
+        if isinstance(av, dict):
+            av = av.get("goals") or av.get("score")
+        if hv is None and av is None:
+            continue
+        filled.append({"label": index + 1, "home": hv, "away": av})
+    if filled:
+        out["periods"] = filled
     return out
 
 
@@ -546,6 +663,11 @@ def fetch_family_detail(family: str, source_event_id: str, getter=None) -> Dict[
         if box.ok and isinstance(box.payload, dict):
             _merge_detail(out, parse_nhl_boxscore(box.payload))
         return out
+    from collector.detail_families import fetch_extra_family_detail
+
+    extra = fetch_extra_family_detail(family, source_event_id, getter=getter)
+    if extra:
+        out.update(extra)
     return out
 
 
@@ -629,6 +751,12 @@ def enrich_event_row(db: Session, row: SportsEvent, getter=None) -> None:
         extra["player_statistics"] = extra.get("player_statistics") or detail["player_statistics"]
     if detail.get("sport_detail"):
         extra["sport_detail"] = extra.get("sport_detail") or detail["sport_detail"]
+    if detail.get("classification"):
+        extra["classification"] = extra.get("classification") or detail["classification"]
+    if detail.get("maps"):
+        extra["maps"] = extra.get("maps") or detail["maps"]
+    if detail.get("referee"):
+        extra["referee"] = extra.get("referee") or detail["referee"]
     extra["detail_empty"] = False
     extra["detail_negative"] = False
     extra["lineups_absent"] = not bool(detail.get("lineups") or load_json(record.lineups_json))

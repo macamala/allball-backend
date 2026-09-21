@@ -40,6 +40,13 @@ def _event(row: Dict[str, Any]) -> Dict[str, Any]:
         if row.get("radiant_win")
         else (row.get("dire_name") if row.get("radiant_win") is False else None),
         "source_family": "opendota",
+        "source_event_id": str(row.get("match_id") or ""),
+        "source_event_ids": {"opendota": str(row.get("match_id") or "")},
+        "extra": {
+            "source_family": "opendota",
+            "source_event_id": str(row.get("match_id") or ""),
+            "source_event_ids": {"opendota": str(row.get("match_id") or "")},
+        },
     }
 
 

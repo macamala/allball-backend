@@ -119,6 +119,13 @@ class CflScoreboardAdapter:
             "competition_key": "cfl",
             "event_family": "team_match",
             "source_family": "cfl-scoreboard-json",
+            "source_event_id": str(game.get("id") or game.get("gameId") or ""),
+            "source_event_ids": {"cfl-scoreboard-json": str(game.get("id") or game.get("gameId") or "")},
+            "extra": {
+                "source_family": "cfl-scoreboard-json",
+                "source_event_id": str(game.get("id") or game.get("gameId") or ""),
+                "source_event_ids": {"cfl-scoreboard-json": str(game.get("id") or game.get("gameId") or "")},
+            },
         }
 
 
@@ -191,6 +198,13 @@ class LolEsportsAdapter:
             "competition_key": "lol-world-championship",
             "event_family": "team_match",
             "source_family": "lolesports-json",
+            "source_event_id": str(match.get("id") or row.get("startTime") or ""),
+            "source_event_ids": {"lolesports-json": str(match.get("id") or "")},
+            "extra": {
+                "source_family": "lolesports-json",
+                "source_event_id": str(match.get("id") or ""),
+                "source_event_ids": {"lolesports-json": str(match.get("id") or "")},
+            },
         }
 
 

@@ -226,7 +226,14 @@ def attach_canonical_detail(event: Dict[str, Any]) -> Dict[str, Any]:
         event.pop("lineups", None)
     if periods:
         event["periods"] = periods
-    sport_detail = sport_detail_from_event(event)
+    existing = event.get("sport_detail") if isinstance(event.get("sport_detail"), dict) else {}
+    sport_detail = {**existing, **sport_detail_from_event(event)}
     if sport_detail:
         event["sport_detail"] = sport_detail
+    if event.get("player_statistics") in ([], {}, None):
+        event.pop("player_statistics", None)
+    if event.get("classification") in ([], {}, None):
+        event.pop("classification", None)
+    if event.get("maps") in ([], {}, None):
+        event.pop("maps", None)
     return event

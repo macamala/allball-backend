@@ -1,0 +1,66 @@
+{
+  "italy-serie-a": {
+    "timeline": "PROVEN",
+    "stats": "PROVEN",
+    "lineups": "PROVEN",
+    "player_stats": "PROVEN",
+    "venue": "PROVEN",
+    "officials": "PROVEN",
+    "sport_detail": "PROVEN",
+    "production_verified": true,
+    "limitation": "Production matchDetails: timeline/stats/lineups/xG/player ratings/referee/stadium"
+  },
+  "france-ligue-1": {
+    "timeline": "PROVEN",
+    "stats": "PROVEN",
+    "lineups": "PROVEN",
+    "player_stats": "PARTIAL",
+    "venue": "PARTIAL",
+    "production_verified": true
+  },
+  "portugal-primeira-liga": {
+    "timeline": "PROVEN",
+    "stats": "PROVEN",
+    "lineups": "PROVEN",
+    "production_verified": true
+  },
+  "croatia-hnl": {
+    "timeline": "PROVEN",
+    "stats": "PROVEN",
+    "lineups": "PROVEN",
+    "production_verified": true
+  },
+  "norway-eliteserien": {
+    "timeline": "PROVEN",
+    "stats": "PROVEN",
+    "lineups": "PROVEN",
+    "production_verified": true
+  },
+  "mlb": {
+    "timeline": "PROVEN",
+    "stats": "PROVEN",
+    "lineups": "PROVEN",
+    "periods": "PROVEN",
+    "player_stats": "PROVEN",
+    "sport_detail": "PROVEN",
+    "production_verified": true
+  },
+  "nhl": {
+    "timeline": "PROVEN",
+    "stats": "PROVEN",
+    "lineups": "PROVEN",
+    "periods": "PROVEN",
+    "player_stats": "PROVEN",
+    "sport_detail": "PROVEN",
+    "production_verified": true
+  },
+  "wta-tour": {
+    "periods": "PROVEN",
+    "sport_detail": "PROVEN",
+    "production_verified": true
+  },
+  "pga-tour": {
+    "sport_detail": "PROVEN",
+    "production_verified": true
+  }
+}

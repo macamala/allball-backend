@@ -49,6 +49,19 @@ def id_for_family(extra: Dict[str, Any], family: str) -> Optional[str]:
         "mlb-statsapi": ("mlb-statsapi", "mlb"),
         "nhl-web": ("nhl-web", "nhl"),
         "wta-json": ("wta-json", "wta"),
+        "pulselive-family": ("pulselive-family", "pulselive", "world-rugby-rims"),
+        "pulselive": ("pulselive", "pulselive-family", "world-rugby-rims"),
+        "cfl-scoreboard-json": ("cfl-scoreboard-json", "cfl"),
+        "lolesports-json": ("lolesports-json", "lolesports"),
+        "jolpica-f1": ("jolpica-f1", "jolpica"),
+        "squiggle-afl": ("squiggle-afl", "squiggle"),
+        "opendota": ("opendota",),
+        "euroleague-live": ("euroleague-live", "euroleague"),
+        "pga-graphql": ("pga-graphql", "pga"),
+        "openligadb": ("openligadb",),
+        "championdata-netball": ("championdata-netball", "championdata"),
+        "click-tt-remix": ("click-tt-remix", "click-tt"),
+        "dataproject-web": ("dataproject-web", "dataproject"),
     }
     for key in aliases.get(family, (family,)):
         if ids.get(key):

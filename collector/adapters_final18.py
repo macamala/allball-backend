@@ -151,7 +151,8 @@ class PgaGraphqlAdapter:
             {
                 "query": (
                     "query { leaderboardV3(id: \"%s\") { id tournamentId tournamentStatus players { "
-                    "player { displayName id } scoringData { position total thru currentRound } } } }"
+                    "player { displayName id } scoringData { position total today thru currentRound "
+                    "projectedCut roundScores { roundNumber strokes } } } } }"
                 )
                 % tournament_id
             }
@@ -182,6 +183,17 @@ class PgaGraphqlAdapter:
                 score["thru"] = thru
             if scoring.get("currentRound") not in (None, ""):
                 score["round"] = scoring.get("currentRound")
+            if scoring.get("today") not in (None, ""):
+                score["today"] = scoring.get("today")
+            rounds = scoring.get("roundScores") or []
+            if rounds:
+                extra_rounds = [
+                    {"label": item.get("roundNumber"), "home": item.get("strokes"), "away": None}
+                    for item in rounds
+                    if isinstance(item, dict)
+                ]
+            else:
+                extra_rounds = []
             events.append(
                 {
                     "id": f"pga:{tournament_id}:{player.get('id') or name}",
@@ -195,13 +207,20 @@ class PgaGraphqlAdapter:
                     "event_family": "leaderboard",
                     "source_family": "pga-graphql",
                     "source_competition_id": tournament_id,
+                    "source_event_id": str(tournament_id),
+                    "source_event_ids": {"pga-graphql": str(tournament_id)},
+                    "periods": extra_rounds or None,
                     "extra": {
                         "source_family": "pga-graphql",
+                        "source_event_id": str(tournament_id),
+                        "source_event_ids": {"pga-graphql": str(tournament_id)},
                         "source_status": status,
                         "status_inferred": False,
                         "position": scoring.get("position"),
                         "thru": thru,
                         "round": scoring.get("currentRound"),
+                        "today": scoring.get("today"),
+                        "cut": scoring.get("projectedCut"),
                     },
                 }
             )
@@ -315,9 +334,13 @@ class ClickTtRemixAdapter:
             "competition_key": "germany-click-tt",
             "event_family": "team_match",
             "source_family": "click-tt-remix",
+            "source_event_id": str(row.get("meeting_id") or ""),
+            "source_event_ids": {"click-tt-remix": str(row.get("meeting_id") or "")},
             "source_competition_id": row.get("league_id") or "493079",
             "extra": {
                 "source_family": "click-tt-remix",
+                "source_event_id": str(row.get("meeting_id") or ""),
+                "source_event_ids": {"click-tt-remix": str(row.get("meeting_id") or "")},
                 "source_status": status,
                 "status_inferred": False,
                 "live_flag": bool(row.get("live")),
@@ -350,8 +373,12 @@ class ClickTtRemixAdapter:
             "competition_key": "germany-click-tt",
             "event_family": "team_match",
             "source_family": "click-tt-remix",
+            "source_event_id": str(meeting_id or ""),
+            "source_event_ids": {"click-tt-remix": str(meeting_id or "")},
             "extra": {
                 "source_family": "click-tt-remix",
+                "source_event_id": str(meeting_id or ""),
+                "source_event_ids": {"click-tt-remix": str(meeting_id or "")},
                 "source_status": status,
                 "status_inferred": False,
                 "live_flag": bool(data.get("live")),
@@ -487,21 +514,32 @@ class ChampionDataNetballAdapter:
             score["period"] = period
         if clock not in (None, "") and status == "live":
             score["clock"] = clock
+        periods = []
+        for index in range(1, 5):
+            home_q = row.get(f"homeSquadScoreQ{index}") or row.get(f"homePeriod{index}")
+            away_q = row.get(f"awaySquadScoreQ{index}") or row.get(f"awayPeriod{index}")
+            if home_q is not None or away_q is not None:
+                periods.append({"label": index, "home": home_q, "away": away_q})
         return {
             "id": f"championdata:{row.get('matchId') or row.get('id') or home}-{away}",
             "home": {"id": str(row.get("homeSquadId") or ""), "name": str(home)},
             "away": {"id": str(row.get("awaySquadId") or ""), "name": str(away)},
             "status": status,
             "score": score,
+            "periods": periods or None,
             "start_time": row.get("utcStartTime") or row.get("localStartTime"),
             "sport": "netball",
             "competition": "Super Netball",
             "competition_key": "ssn-australia",
             "event_family": "team_match",
             "source_family": "championdata-netball",
+            "source_event_id": f"{comp_id}:{row.get('matchId') or row.get('id') or ''}",
+            "source_event_ids": {"championdata-netball": f"{comp_id}:{row.get('matchId') or row.get('id') or ''}"},
             "source_competition_id": comp_id,
             "extra": {
                 "source_family": "championdata-netball",
+                "source_event_id": f"{comp_id}:{row.get('matchId') or row.get('id') or ''}",
+                "source_event_ids": {"championdata-netball": f"{comp_id}:{row.get('matchId') or row.get('id') or ''}"},
                 "source_status": status,
                 "status_inferred": False,
                 "period": period,
