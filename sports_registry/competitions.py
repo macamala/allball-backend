@@ -8,6 +8,7 @@ NOT scored by the news resolver.
 
 from __future__ import annotations
 
+from functools import lru_cache
 from typing import Dict, List, Optional
 
 from .geography import canonical_geo_id, region_for_country
@@ -313,6 +314,7 @@ def _wrap_taxonomy(key: str, meta: dict) -> CompetitionRecord:
     }
 
 
+@lru_cache(maxsize=1)
 def all_competitions() -> Dict[str, CompetitionRecord]:
     out: Dict[str, CompetitionRecord] = {}
     for key, meta in _taxonomy_competitions().items():

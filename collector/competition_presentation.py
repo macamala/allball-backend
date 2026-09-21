@@ -6,6 +6,7 @@ Does not mutate source_matrix_final.json. Geography is never the sport name.
 from __future__ import annotations
 
 import re
+from functools import lru_cache
 from typing import Any, Dict, List, Optional
 
 from collector.matrix_guard import frozen_competition_ids, matrix_status
@@ -346,6 +347,7 @@ def _from_registry(key: str) -> Dict[str, Any]:
     }
 
 
+@lru_cache(maxsize=256)
 def metadata_for(competition_key: str, sport: str = "") -> Dict[str, Any]:
     key = str(competition_key or "").strip()
     sport_id = str(sport or "").strip()

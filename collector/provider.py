@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import os
+import time
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import and_, or_
-from sqlalchemy.orm import Session, defer
+from sqlalchemy.orm import Session, load_only
 
 from collector.cache import cache_get, cache_set, list_cache_key
 from collector.models import (
@@ -96,6 +97,34 @@ HEADER_KEYS = (
 )
 
 
+LIST_LOAD_COLUMNS = (
+    SportsEvent.event_id,
+    SportsEvent.sport_id,
+    SportsEvent.competition_id,
+    SportsEvent.event_family,
+    SportsEvent.status,
+    SportsEvent.start_time,
+    SportsEvent.season,
+    SportsEvent.venue,
+    SportsEvent.score_json,
+    SportsEvent.participants_json,
+    SportsEvent.list_extra_json,
+    SportsEvent.series_id,
+    SportsEvent.session_type,
+    SportsEvent.game_id,
+    SportsEvent.country_id,
+    SportsEvent.meeting_id,
+    SportsEvent.display_eligible,
+    SportsEvent.canonical_event_id,
+    SportsEvent.live,
+    SportsEvent.retrieved_at,
+    SportsEvent.stage,
+    SportsEvent.updated_at,
+)
+
+_STATUS_CACHE: Dict[str, Any] = {"at": 0.0, "payload": None}
+_STATUS_TTL_S = 20.0
+
 INTERNAL_EVENT_KEYS = {
     "field_sources",
     "source_event_ids",
@@ -168,6 +197,18 @@ def _public_value(value: Any) -> Any:
 
 def public_event(payload: Dict[str, Any]) -> Dict[str, Any]:
     return _public_value(payload)
+
+
+def _list_public_event(payload: Dict[str, Any]) -> Dict[str, Any]:
+    out: Dict[str, Any] = {}
+    for key, value in payload.items():
+        if key in INTERNAL_EVENT_KEYS or key in NESTED_SOURCE_ID_KEYS or key in {"provider", "provider_id"}:
+            continue
+        if key in {"home", "away", "participant_a", "participant_b", "score"}:
+            out[key] = _public_value(value)
+        else:
+            out[key] = value
+    return out
 
 
 def public_event_detail(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -293,11 +334,15 @@ class NinkoCollectedSportsDataProvider:
         self._session_factory = session_factory
 
     def status(self) -> Dict[str, Any]:
+        now = time.monotonic()
+        cached = _STATUS_CACHE.get("payload")
+        if cached is not None and now - float(_STATUS_CACHE.get("at") or 0) < _STATUS_TTL_S:
+            return cached
         db = _session(self._session_factory)
         try:
-            event_count = db.query(SportsEvent).count()
-            source_count = db.query(SportsSource).filter_by(enabled=True).count()
-            mapping_count = db.query(SportsSourceCompetition).filter_by(enabled=True).count()
+            event_count = db.query(SportsEvent.event_id).count()
+            source_count = db.query(SportsSource.source_id).filter_by(enabled=True).count()
+            mapping_count = db.query(SportsSourceCompetition.competition_id).filter_by(enabled=True).count()
             connected = event_count > 0
             payload = {
                 "connected": connected,
@@ -316,6 +361,8 @@ class NinkoCollectedSportsDataProvider:
                 },
                 "attribution": [],
             }
+            _STATUS_CACHE["at"] = now
+            _STATUS_CACHE["payload"] = payload
             return payload
         finally:
             db.close()
@@ -371,7 +418,7 @@ class NinkoCollectedSportsDataProvider:
             if cached is not None:
                 return cached
             frozen = frozen_competition_ids()
-            query = db.query(SportsEvent)
+            query = db.query(SportsEvent).options(load_only(*LIST_LOAD_COLUMNS))
             if sport:
                 query = query.filter_by(sport_id=sport)
             if competition:
@@ -389,7 +436,6 @@ class NinkoCollectedSportsDataProvider:
             if start_to is not None:
                 query = query.filter(SportsEvent.start_time <= start_to)
             query = query.filter(SportsEvent.canonical_event_id.is_(None))
-            query = query.options(defer(SportsEvent.extra_json))
             query = query.filter(
                 or_(
                     SportsEvent.display_eligible.is_(True),
@@ -409,8 +455,14 @@ class NinkoCollectedSportsDataProvider:
                 for item in db.query(SportsStandingSnapshot.competition_id).distinct().all()
                 if item[0]
             }
-            events = [self._to_normalized(row, standing_ids=standing_ids) for row in rows]
-            events = [row for row in events if row and is_display_eligible(row)]
+            warmed = set()
+            for row in rows:
+                key = (row.competition_id, row.sport_id or "")
+                if key not in warmed:
+                    attach_competition_metadata({"competition_key": key[0], "sport": key[1]})
+                    warmed.add(key)
+            events = [self._to_normalized(row, standing_ids=standing_ids, list_mode=True) for row in rows]
+            events = [row for row in events if row]
             if date_from:
                 events = [row for row in events if (row.get("start_time") or "") >= date_from]
             if date_to:
@@ -426,8 +478,8 @@ class NinkoCollectedSportsDataProvider:
                     if public_live_visible(row) and row.get("live_class") == "CONFIRMED_LIVE"
                 ]
             else:
-                events = [public_event(row) for row in events]
-            events = [row for row in events if is_frozen_public_competition(row)]
+                events = [_list_public_event(row) for row in events]
+            events = [row for row in events if (row.get("competition_key") or "") in frozen]
             cache_set(db, cache_key, events, "upcoming_fixtures" if status != "live" else "live_events")
             db.commit()
             return events
@@ -565,6 +617,7 @@ class NinkoCollectedSportsDataProvider:
         row: SportsEvent,
         include_detail: bool = False,
         standing_ids: Optional[set] = None,
+        list_mode: bool = False,
     ) -> NormalizedEvent:
         participants = load_json(row.participants_json, {}) or {}
         score = load_json(row.score_json, {}) or {}
@@ -624,11 +677,16 @@ class NinkoCollectedSportsDataProvider:
         payload["quality_flags"] = extra.get("quality_flags") if include_detail else None
         if include_detail and payload["quality_flags"] is None:
             payload["quality_flags"] = quality_flags_for_event({**raw_sides, "sport": row.sport_id, "score": score})
-        if extra.get("display_eligible") is not None:
+        if list_mode:
+            payload["display_eligible"] = True if row.display_eligible is None else bool(row.display_eligible)
+        elif extra.get("display_eligible") is not None:
             payload["display_eligible"] = extra.get("display_eligible")
         else:
             payload["display_eligible"] = is_display_eligible(raw_sides)
-        payload["observation_count"] = len(load_json(row.contributing_sources_json, []) or []) or 1
+        if include_detail:
+            payload["observation_count"] = len(load_json(row.contributing_sources_json, []) or []) or 1
+        else:
+            payload["observation_count"] = 1
         payload["source_fetch_time"] = extra.get("source_fetch_time") or extra.get("last_contact_at") or isoformat(row.retrieved_at)
         payload["last_contact_at"] = extra.get("last_contact_at") or payload["source_fetch_time"]
         payload["canonical_updated_at"] = extra.get("canonical_updated_at") or isoformat(row.updated_at)
@@ -641,11 +699,14 @@ class NinkoCollectedSportsDataProvider:
         payload["incidents"] = extra.get("incidents") or payload.get("incidents")
         payload["periods"] = extra.get("periods") or payload.get("periods")
         payload = reconcile_live_status(payload)
-        corrected = correct_public_competition_id(
-            stored_competition_id=row.competition_id,
-            source_competition_name=extra.get("source_competition_name") or extra.get("competition"),
-            sport_id=row.sport_id or "",
-        )
+        if list_mode:
+            corrected = row.competition_id if row.competition_id in frozen_competition_ids() else None
+        else:
+            corrected = correct_public_competition_id(
+                stored_competition_id=row.competition_id,
+                source_competition_name=extra.get("source_competition_name") or extra.get("competition"),
+                sport_id=row.sport_id or "",
+            )
         if corrected is None:
             return None
         payload["competition_key"] = corrected

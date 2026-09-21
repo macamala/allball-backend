@@ -17,6 +17,7 @@ def reset_collector_state():
     import collector.models  # noqa: F401
     from collector.adapters import ADAPTERS
     from collector.limits import _hits
+    from collector.provider import _STATUS_CACHE
     from collector.adapters_wta import reset_wta_caches
     from collector.models import (
         SportsCollectorJob,
@@ -44,6 +45,8 @@ def reset_collector_state():
 
     Base.metadata.create_all(bind=engine)
     reset_wta_caches()
+    _STATUS_CACHE["at"] = 0.0
+    _STATUS_CACHE["payload"] = None
     yield
     ADAPTERS.clear()
     _hits.clear()

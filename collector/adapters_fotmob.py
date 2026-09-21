@@ -53,9 +53,20 @@ SCORE_URL = "https://www.fotmob.com/api/data/match-score?matchId={match_id}"
 _BOARD: Dict[str, List[Dict[str, Any]]] = {}
 
 
+def board_dates(*, past_days: int = 3, future_days: int = 1) -> List[str]:
+    now = datetime.now(timezone.utc).date()
+    days: List[str] = []
+    cursor = now - timedelta(days=past_days)
+    end = now + timedelta(days=future_days)
+    while cursor <= end:
+        days.append(cursor.strftime("%Y%m%d"))
+        cursor += timedelta(days=1)
+    return days
+
+
 def _dates() -> List[str]:
-    now = datetime.now(timezone.utc)
-    return [(now + timedelta(days=delta)).strftime("%Y%m%d") for delta in (-3, -2, -1, 0, 1)]
+    """Live poll window. Do not widen; date-board backfill uses board_dates(past_days=7)."""
+    return board_dates(past_days=3, future_days=1)
 
 
 def _extract_matches(payload: Any) -> List[Dict[str, Any]]:
@@ -168,11 +179,16 @@ def match_to_event(match: Dict[str, Any], competition_id: str) -> Optional[Dict[
     }
 
 
-def _load_boards(getter) -> List[Dict[str, Any]]:
-    if _BOARD.get("all") is not None:
+def _load_boards(getter, dates: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+    days = list(dates or _dates())
+    cache_key = "d:" + ",".join(days)
+    cached = _BOARD.get(cache_key)
+    if cached is not None:
+        return cached
+    if dates is None and _BOARD.get("all") is not None:
         return _BOARD["all"]
     rows: List[Dict[str, Any]] = []
-    for day in _dates():
+    for day in days:
         url = MATCHES_URL.format(date=day)
         result = getter(url) if getter else fetch_url(url)
         payload = result.payload if isinstance(getattr(result, "payload", None), (dict, list)) else None
@@ -184,8 +200,12 @@ def _load_boards(getter) -> List[Dict[str, Any]]:
             except (TypeError, ValueError):
                 payload = None
         if payload is not None:
-            rows.extend(_extract_matches(payload))
-    _BOARD["all"] = rows
+            for match in _extract_matches(payload):
+                match["_board_date"] = day
+                rows.append(match)
+    _BOARD[cache_key] = rows
+    if dates is None:
+        _BOARD["all"] = rows
     return rows
 
 

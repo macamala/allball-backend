@@ -128,6 +128,21 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
                     logger.info("Bounded backfill %s", backfill.get("enrich"))
             except Exception:
                 logger.exception("Bounded backfill failed")
+            try:
+                from collector.fotmob_crosswalk import run_date_boards_if_due
+
+                def _pulse_boards() -> None:
+                    heartbeat_scheduler_lock(db, owner=owner)
+                    db.commit()
+
+                boards = run_date_boards_if_due(db, owner=owner, heartbeat=_pulse_boards)
+                if boards:
+                    logger.info(
+                        "FotMob date boards %s",
+                        {k: boards.get(k) for k in ("attached", "upstream_eligible", "unmatched", "ambiguous")},
+                    )
+            except Exception:
+                logger.exception("FotMob date-board backfill failed")
             if not collection_enabled():
                 logger.info("Collection disabled; holding lock idle")
             elif enabled_source_count(db) == 0:
