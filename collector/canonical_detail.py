@@ -159,8 +159,68 @@ def canonicalize_lineups(raw: Any) -> Optional[Dict[str, Any]]:
     return None
 
 
-def canonicalize_periods(raw: Any) -> List[Dict[str, Any]]:
+def _as_int(value: Any) -> Optional[int]:
+    if value in (None, ""):
+        return None
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def volleyball_sets_from_scalars(values: List[Any]) -> List[Dict[str, Any]]:
+    """Rebuild set pairs from a flattened point list.
+
+    PlusLiga/DataProject stored [25,25,25,19,21,14] for 25-19, 25-21, 25-14.
+    Interleaved pairing would invent a 25-25 set, which is not a volleyball result.
+    """
+    nums = [_as_int(item) for item in values]
+    if any(item is None for item in nums) or len(nums) < 2 or len(nums) % 2:
+        return []
+    n = len(nums) // 2
+    interleaved = [{"label": f"Set {i + 1}", "home": nums[2 * i], "away": nums[2 * i + 1]} for i in range(n)]
+    split = [{"label": f"Set {i + 1}", "home": nums[i], "away": nums[n + i]} for i in range(n)]
+
+    def winners(rows: List[Dict[str, Any]]) -> int:
+        return sum(1 for row in rows if row["home"] != row["away"])
+
+    if winners(interleaved) == n:
+        return interleaved
+    if winners(split) == n:
+        return split
+    return split if winners(split) >= winners(interleaved) else interleaved
+
+
+def volleyball_match_score(periods: List[Dict[str, Any]]) -> Optional[Dict[str, int]]:
+    home = away = 0
+    complete = 0
+    for row in periods:
+        hv = _as_int(row.get("home"))
+        av = _as_int(row.get("away"))
+        if hv is None or av is None or hv == av:
+            continue
+        complete += 1
+        if hv > av:
+            home += 1
+        else:
+            away += 1
+    if complete == 0:
+        return None
+    return {"home": home, "away": away}
+
+
+def canonicalize_periods(raw: Any, *, sport: str = "") -> List[Dict[str, Any]]:
     rows = raw if isinstance(raw, list) else []
+    if rows and all(not isinstance(item, dict) for item in rows):
+        folded = str(sport or "").lower()
+        if folded in {"volleyball", "table-tennis"} or (
+            len(rows) >= 4
+            and len(rows) % 2 == 0
+            and all((_as_int(item) or -1) <= 33 for item in rows)
+            and any((_as_int(item) or 0) >= 15 for item in rows)
+        ):
+            return volleyball_sets_from_scalars(rows)
+        return []
     out = []
     for index, item in enumerate(rows):
         if not isinstance(item, dict):
@@ -210,7 +270,10 @@ def attach_canonical_detail(event: Dict[str, Any]) -> Dict[str, Any]:
     timeline = canonicalize_timeline(event.get("incidents") or event.get("timeline"))
     statistics = canonicalize_statistics(event.get("statistics"))
     lineups = canonicalize_lineups(event.get("lineups"))
-    periods = canonicalize_periods(event.get("periods") or event.get("innings") or (event.get("score") or {}).get("periods"))
+    periods = canonicalize_periods(
+        event.get("periods") or event.get("innings") or (event.get("score") or {}).get("periods"),
+        sport=str(event.get("sport") or ""),
+    )
     if timeline:
         event["timeline"] = timeline
         event["incidents"] = timeline
@@ -226,6 +289,15 @@ def attach_canonical_detail(event: Dict[str, Any]) -> Dict[str, Any]:
         event.pop("lineups", None)
     if periods:
         event["periods"] = periods
+        if str(event.get("sport") or "").lower() == "volleyball":
+            derived = volleyball_match_score(periods)
+            if derived:
+                score = dict(event.get("score") or {})
+                score["home"] = derived["home"]
+                score["away"] = derived["away"]
+                event["score"] = score
+    elif isinstance(event.get("periods"), list) and event.get("periods") and not isinstance(event["periods"][0], dict):
+        event.pop("periods", None)
     existing = event.get("sport_detail") if isinstance(event.get("sport_detail"), dict) else {}
     sport_detail = {**existing, **sport_detail_from_event(event)}
     if sport_detail:

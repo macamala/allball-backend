@@ -178,6 +178,8 @@ class CricsheetAdapter:
                 if "t20" in str(row.get("match_type") or "").lower()
                 or "t20" in str(row.get("competition") or "").lower()
             ]
+            finished = [row for row in events if row.get("status") == "finished"]
+            events = finished or events
         return FetchResult(
             ok=True,
             http_status=result.http_status,

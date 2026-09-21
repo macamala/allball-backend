@@ -146,7 +146,11 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
             try:
                 from collector.provider_crosswalk import run_provider_id_attach_if_due
 
-                attached = run_provider_id_attach_if_due(db, owner=owner)
+                def _pulse_attach() -> None:
+                    heartbeat_scheduler_lock(db, owner=owner)
+                    db.commit()
+
+                attached = run_provider_id_attach_if_due(db, owner=owner, heartbeat=_pulse_attach)
                 if attached:
                     logger.info(
                         "Provider ID attach %s",

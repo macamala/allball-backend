@@ -167,3 +167,61 @@ def test_euroleague_xml_child_tags_keep_gamecode():
 def test_squiggle_standings_url_is_season_scoped():
     assert "year={year}" in SQUIGGLE_STANDINGS
     assert SQUIGGLE_STANDINGS.format(year=2025).endswith("year=2025")
+
+
+def test_attach_keeps_euroleague_compound_id():
+    start = datetime(2025, 10, 17, 19, 0, 0)
+    row = _row(
+        event_id="ninko-xw-el",
+        fingerprint="xw-el",
+        start_time=start,
+        sport_id="basketball",
+        competition_id="euroleague",
+        home="Olympiacos",
+        away="Monaco",
+        extra={"source_family": "openligadb"},
+    )
+    changed = attach_family_id(row, "euroleague-live", "E2025:47")
+    assert changed
+    ids = families_with_ids(load_json(row.extra_json, {}))
+    assert ids["euroleague-live"] == "E2025:47"
+
+
+def test_crosswalk_historical_ingest_under_persist_flag(monkeypatch):
+    db = SessionLocal()
+    ingested = {"n": 0}
+
+    def fake_ingest(session, incoming, source_id):
+        ingested["n"] += 1
+        return True
+
+    monkeypatch.setattr("collector.provider_crosswalk._ingest", fake_ingest)
+    try:
+        incoming = {
+            "sport": "dota-2",
+            "competition_key": "professional",
+            "home": {"name": "Team Liquid"},
+            "away": {"name": "Team Spirit"},
+            "start_time": "2026-09-01T12:00:00Z",
+            "source_event_ids": {"opendota": "888001122"},
+        }
+        stats = crosswalk_family(
+            db,
+            family="opendota",
+            source_id="opendota",
+            events=[incoming],
+            persist_missing=True,
+        )
+        assert stats["ingested"] == 1
+        assert stats["unmatched"] == 1
+        assert ingested["n"] == 1
+        stats_off = crosswalk_family(
+            db,
+            family="opendota",
+            source_id="opendota",
+            events=[incoming],
+            persist_missing=False,
+        )
+        assert stats_off["ingested"] == 0
+    finally:
+        db.close()

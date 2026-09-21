@@ -197,8 +197,13 @@ def fetch_competition_standings(competition_id: str, getter=None) -> Dict[str, A
                 return wrap_standings(rows, competition=competition_id, sport="baseball", source="mlb-statsapi")
     if competition_id == "australia-afl":
         year = datetime.utcnow().year
+        urls = []
         for season in (year, year - 1):
-            result = getter(SQUIGGLE_STANDINGS.format(year=season))
+            urls.append(SQUIGGLE_STANDINGS.format(year=season))
+            urls.append(f"https://api.squiggle.com.au/?q=standings&year={season}")
+        urls.append("https://api.squiggle.com.au/?q=standings")
+        for url in urls:
+            result = getter(url)
             payload = result.payload if result.ok else None
             if not isinstance(payload, dict) and result.ok and isinstance(getattr(result, "payload", None), str):
                 try:
@@ -209,10 +214,13 @@ def fetch_competition_standings(competition_id: str, getter=None) -> Dict[str, A
                     payload = None
             rows = parse_squiggle_standings(payload)
             if rows:
+                season = None
+                if "year=" in url:
+                    season = url.rsplit("year=", 1)[-1]
                 return wrap_standings(
                     rows,
                     competition=competition_id,
-                    season=str(season),
+                    season=str(season or year),
                     sport="australian-rules",
                     source="squiggle-afl",
                 )

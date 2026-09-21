@@ -587,14 +587,10 @@ class EuroleagueLiveAdapter:
                 event = self._from_catalog(row, season)
                 if event:
                     events.append(event)
-            if events:
-                break
             xml = fetch_text(f"https://api-live.euroleague.net/v1/results?seasonCode={season}")
             if xml.ok and isinstance(xml.payload, str):
                 events.extend(self._from_results_xml(xml.payload, season))
                 last = xml
-            if events:
-                break
         if not events:
             last = self._get(f"https://live.euroleague.net/api/Header?gamecode=1&seasoncode={primary}")
             if not last.ok:
@@ -709,7 +705,10 @@ class EuroleagueLiveAdapter:
             "score": score,
             "start_time": row.get("utc") or row.get("date") or row.get("startDate"),
             "venue": row.get("Stadium") or row.get("venue"),
+            "sport": "basketball",
             "competition": "euroleague",
+            "competition_key": "euroleague",
+            "event_family": "team_match",
             "source_family": "euroleague-live",
             "source_event_id": f"{season}:{code}",
             "source_event_ids": {"euroleague-live": f"{season}:{code}"},

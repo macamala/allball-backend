@@ -187,8 +187,18 @@ def parse_opendota_match(payload: Any) -> Dict[str, Any]:
             "away": {"start": [p for p in players if p["side"] == "away"], "bench": [], "formation": None, "coach": None},
         }
     duration = payload.get("duration")
+    detail = {}
     if duration:
-        out["sport_detail"] = {"duration": duration, "radiant_win": payload.get("radiant_win")}
+        detail["duration"] = duration
+        detail["radiant_win"] = payload.get("radiant_win")
+    if payload.get("radiant_score") is not None or payload.get("dire_score") is not None:
+        out["statistics"] = [
+            {"label": "Kills", "home": payload.get("radiant_score"), "away": payload.get("dire_score")},
+        ]
+        if payload.get("duration"):
+            out["statistics"].append({"label": "Duration", "home": duration, "away": duration})
+    if detail:
+        out["sport_detail"] = detail
     return out
 
 
@@ -272,21 +282,32 @@ def parse_lol_event(payload: Any) -> Dict[str, Any]:
     for index, game in enumerate(games):
         if not isinstance(game, dict):
             continue
+        gid = game.get("id") or game.get("gameId")
         teams = game.get("teams") or []
         home = teams[0] if teams else {}
         away = teams[1] if len(teams) > 1 else {}
+        home_win = ((home.get("result") or {}) if isinstance(home, dict) else {}).get("outcome") or (
+            (home.get("result") or {}) if isinstance(home, dict) else {}
+        ).get("gameWins")
+        away_win = ((away.get("result") or {}) if isinstance(away, dict) else {}).get("outcome") or (
+            (away.get("result") or {}) if isinstance(away, dict) else {}
+        ).get("gameWins")
         maps.append(
             {
+                "id": gid,
                 "name": game.get("number") or index + 1,
-                "home": (home.get("result") or {}).get("gameWins") if isinstance(home, dict) else None,
-                "away": (away.get("result") or {}).get("gameWins") if isinstance(away, dict) else None,
-                "map": (game.get("vod") or {}).get("parameter") if isinstance(game.get("vod"), dict) else None,
+                "state": game.get("state"),
+                "home": home_win,
+                "away": away_win,
             }
         )
     out: Dict[str, Any] = {}
-    if maps:
+    if maps and any(item.get("id") or item.get("state") not in (None, "", "unstarted") for item in maps):
         out["maps"] = maps
-        out["sport_detail"] = {"best_of": match.get("strategy", {}).get("count") if isinstance(match.get("strategy"), dict) else None}
+        out["sport_detail"] = {
+            "best_of": match.get("strategy", {}).get("count") if isinstance(match.get("strategy"), dict) else None,
+            "game_ids": [item.get("id") for item in maps if item.get("id")],
+        }
     return out
 
 
@@ -372,21 +393,66 @@ def parse_championdata_match(row: Dict[str, Any]) -> Dict[str, Any]:
 def parse_clicktt_live(data: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(data, dict):
         return {}
+    if isinstance(data.get("data"), dict):
+        data = data.get("data") or {}
     out: Dict[str, Any] = {}
-    rows = data.get("matches") or data.get("einzel") or data.get("games") or []
+    rows = data.get("matches") or data.get("einzel") or data.get("games") or data.get("rubbers") or []
+    rubbers = []
     periods = []
     if isinstance(rows, list):
         for index, item in enumerate(rows):
             if not isinstance(item, dict):
                 continue
             home = item.get("sets_home") or item.get("matches_home") or item.get("home")
-            away = item.get("sets_guest") or item.get("matches_guest") or item.get("away")
-            if home is None and away is None:
+            away = item.get("sets_guest") or item.get("matches_guest") or item.get("away") or item.get("sets_away")
+            home_player = (
+                item.get("player_home")
+                or item.get("playerHome")
+                or ((item.get("home_players") or [{}])[0] if isinstance(item.get("home_players"), list) else None)
+            )
+            away_player = (
+                item.get("player_guest")
+                or item.get("playerAway")
+                or ((item.get("guest_players") or [{}])[0] if isinstance(item.get("guest_players"), list) else None)
+            )
+            if isinstance(home_player, dict):
+                home_player = home_player.get("name") or home_player.get("display")
+            if isinstance(away_player, dict):
+                away_player = away_player.get("name") or away_player.get("display")
+            games = []
+            raw_games = item.get("set_scores") or item.get("sets") or item.get("games") or item.get("points") or []
+            if isinstance(raw_games, list):
+                for g_index, game in enumerate(raw_games):
+                    if isinstance(game, dict):
+                        games.append(
+                            {
+                                "label": g_index + 1,
+                                "home": game.get("home") or game.get("home_points"),
+                                "away": game.get("away") or game.get("guest_points") or game.get("away_points"),
+                            }
+                        )
+                    elif isinstance(game, (list, tuple)) and len(game) >= 2:
+                        games.append({"label": g_index + 1, "home": game[0], "away": game[1]})
+            if home is None and away is None and not games:
                 continue
-            periods.append({"label": index + 1, "home": home, "away": away})
+            rubber = {
+                "label": item.get("position") or item.get("nr") or index + 1,
+                "home": home,
+                "away": away,
+                "home_player": home_player,
+                "away_player": away_player,
+                "games": games or None,
+            }
+            rubbers.append({key: value for key, value in rubber.items() if value not in (None, "", [])})
+            periods.append({"label": f"Rubber {index + 1}", "home": home, "away": away})
     if periods:
         out["periods"] = periods
-        out["sport_detail"] = {"current_set": data.get("current_match") or data.get("current")}
+    if rubbers:
+        out["sport_detail"] = {
+            "meeting": True,
+            "rubbers": rubbers,
+            "current_set": data.get("current_match") or data.get("current"),
+        }
     return out
 
 

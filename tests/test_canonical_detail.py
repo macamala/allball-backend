@@ -41,3 +41,22 @@ def test_attach_canonical_detail_drops_empty_sections():
     assert "statistics" not in event
     assert "lineups" not in event
     assert event["score"]["home"] == 0
+
+
+def test_volleyball_set_pairs_and_match_score():
+    from collector.canonical_detail import volleyball_match_score, volleyball_sets_from_scalars
+
+    sets = volleyball_sets_from_scalars([25, 25, 25, 19, 21, 14])
+    assert [(row["home"], row["away"]) for row in sets] == [(25, 19), (25, 21), (25, 14)]
+    assert volleyball_match_score(sets) == {"home": 3, "away": 0}
+    event = attach_canonical_detail(
+        {
+            "sport": "volleyball",
+            "score": {"home": 2, "away": 0},
+            "periods": [25, 25, 25, 19, 21, 14],
+        }
+    )
+    assert event["score"]["home"] == 3
+    assert event["score"]["away"] == 0
+    assert event["periods"][0]["home"] == 25
+    assert event["periods"][0]["away"] == 19

@@ -287,10 +287,28 @@ class ClickTtRemixAdapter:
             if event:
                 events.append(event)
         live_ids = [row.get("meeting_id") for row in meetings if row.get("live")]
-        for meeting_id in live_ids[:5]:
+        finished_ids = [
+            row.get("meeting_id")
+            for row in meetings
+            if not row.get("live")
+            and (
+                str(row.get("state") or "").lower() in {"done", "complete", "finished"}
+                or row.get("is_meeting_complete")
+            )
+        ]
+        for meeting_id in (live_ids + finished_ids)[:8]:
             live = self._get(CLICK_TT_LIVE.format(meeting_id=meeting_id))
             if live.ok and isinstance(live.payload, dict):
-                event = self._live(live.payload.get("data") or {}, meeting_id)
+                from collector.detail_families import parse_clicktt_live
+
+                event = self._live(live.payload.get("data") or live.payload, meeting_id)
+                parsed = parse_clicktt_live(live.payload)
+                if event and parsed:
+                    event["periods"] = parsed.get("periods")
+                    extra = event.get("extra") if isinstance(event.get("extra"), dict) else {}
+                    extra["sport_detail"] = {**(extra.get("sport_detail") or {}), **(parsed.get("sport_detail") or {})}
+                    event["extra"] = extra
+                    event["sport_detail"] = extra.get("sport_detail")
                 if event:
                     events = [event if e.get("id") == event["id"] else e for e in events]
                     if event["id"] not in {e.get("id") for e in events}:
@@ -483,16 +501,24 @@ class ChampionDataNetballAdapter:
         pool = regular or hits
         if not hits:
             return FetchResult(ok=True, http_status=comps.http_status, events=[])
-        current = sorted(pool, key=lambda row: int(row.get("id") or 0), reverse=True)[0]
-        fixture = self._get(CD_FIXTURE.format(comp_id=current["id"]))
-        if not fixture.ok:
-            return fixture
-        matches = ((fixture.payload or {}).get("fixture") or {}).get("match") or []
-        if isinstance(matches, dict):
-            matches = [matches]
-        events = [self._match(row, str(current["id"])) for row in matches if isinstance(row, dict)]
-        events = [row for row in events if row]
-        return FetchResult(ok=True, http_status=fixture.http_status, events=events)
+        current = sorted(pool, key=lambda row: int(row.get("id") or 0), reverse=True)[:3]
+        events: List[Dict[str, Any]] = []
+        last = fixture = None
+        for comp in current:
+            fixture = self._get(CD_FIXTURE.format(comp_id=comp["id"]))
+            last = fixture
+            if not fixture.ok:
+                continue
+            matches = ((fixture.payload or {}).get("fixture") or {}).get("match") or []
+            if isinstance(matches, dict):
+                matches = [matches]
+            batch = [self._match(row, str(comp["id"])) for row in matches if isinstance(row, dict)]
+            events.extend(row for row in batch if row)
+            if any(row.get("status") == "finished" for row in events):
+                break
+        if last is not None and not last.ok and not events:
+            return last
+        return FetchResult(ok=True, http_status=(last.http_status if last else comps.http_status), events=events)
 
     def _match(self, row: Dict[str, Any], comp_id: str) -> Optional[Dict[str, Any]]:
         home = row.get("homeSquadName") or row.get("home") or row.get("squadNameHome")

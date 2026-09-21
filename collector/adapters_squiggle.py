@@ -51,7 +51,9 @@ def _to_event(row: Dict[str, Any]) -> Dict[str, Any]:
         "start_time": _start(row),
         "venue": row.get("venue"),
         "round": row.get("roundname") or row.get("round"),
+        "sport": "australian-rules",
         "competition": COMPETITION_ID,
+        "competition_key": COMPETITION_ID,
         "source_family": "squiggle-afl",
         "source_event_id": gid,
         "source_event_ids": {"squiggle-afl": gid},
@@ -95,8 +97,6 @@ class SquiggleAflAdapter:
             payload = last.payload if isinstance(last.payload, dict) else {}
             batch = payload.get("games") or []
             games.extend(batch)
-            if batch:
-                break
         if last is not None and not last.ok and not games:
             return last
         events = [_to_event(row) for row in games if row.get("hteam") and row.get("ateam")]

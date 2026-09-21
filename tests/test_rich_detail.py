@@ -150,8 +150,24 @@ def test_rugby_and_squiggle_and_jolpica_parsers():
 
     cd = parse_championdata_match({"homeSquadScoreQ1": 15, "awaySquadScoreQ1": 12, "homeSquadScoreQ2": 14, "awaySquadScoreQ2": 18})
     assert cd["periods"][0]["home"] == 15
-    tt = parse_clicktt_live({"matches": [{"sets_home": 3, "sets_guest": 1}]})
-    assert tt["periods"][0]["home"] == 3
+    tt = parse_clicktt_live(
+        {
+            "data": {
+                "matches": [
+                    {
+                        "sets_home": 3,
+                        "sets_guest": 1,
+                        "player_home": "Mueller",
+                        "player_guest": "Schmidt",
+                        "sets": [{"home": 11, "away": 7}, {"home": 11, "away": 9}, {"home": 9, "away": 11}, {"home": 11, "away": 8}],
+                    }
+                ]
+            }
+        }
+    )
+    assert tt["sport_detail"]["meeting"] is True
+    assert tt["sport_detail"]["rubbers"][0]["home_player"] == "Mueller"
+    assert tt["sport_detail"]["rubbers"][0]["games"][0]["home"] == 11
     ol = parse_openliga_match({"goals": [{"goalGetterName": "Müller", "matchMinute": 12, "scoreTeam1": 1, "scoreTeam2": 0}], "matchResults": [{"resultName": "Halbzeit", "pointsTeam1": 1, "pointsTeam2": 0}]})
     assert ol["incidents"] or ol["periods"]
 
@@ -174,6 +190,9 @@ def test_euroleague_boxscore_quarters_and_players():
     assert out["periods"][0]["home"] == 22
     assert out["statistics"][0]["home"] == 81
     assert out["player_statistics"][0]["name"] == "Larkin"
+    merged = attach_canonical_detail({"sport": "basketball", "score": {"home": 81, "away": 72}, **out})
+    assert merged["periods"][0]["home"] == 22
+    assert merged["player_statistics"][0]["points"] == 18
 
 
 def test_nhl_period_scores_from_score_by_period():
@@ -208,3 +227,26 @@ def test_attach_canonical_keeps_real_sections_only():
     assert event["statistics"]
     assert event["lineups"]["home"]["start"]
     assert event["periods"]
+
+
+def test_opendota_player_stats_and_afl_goals():
+    from collector.detail_families import parse_opendota_match, parse_squiggle_game
+
+    dota = parse_opendota_match(
+        {
+            "duration": 2400,
+            "radiant_win": True,
+            "radiant_score": 32,
+            "dire_score": 18,
+            "players": [
+                {"personaname": "Miracle", "isRadiant": True, "kills": 12, "deaths": 2, "assists": 8, "hero_id": 1},
+                {"personaname": "Yatoro", "isRadiant": False, "kills": 4, "deaths": 7, "assists": 6, "hero_id": 2},
+            ],
+        }
+    )
+    assert dota["player_statistics"][0]["kills"] == 12
+    assert dota["sport_detail"]["duration"] == 2400
+    afl = parse_squiggle_game({"hgoals": 15, "agoals": 10, "hbehinds": 9, "abehinds": 7, "hscore": 99, "ascore": 67, "venue": "MCG"})
+    assert afl["sport_detail"]["goals"]["home"] == 15
+    assert afl["sport_detail"]["behinds"]["away"] == 7
+    assert afl["venue"] == "MCG"
