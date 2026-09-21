@@ -67,12 +67,12 @@ def _ok(event: Optional[Dict[str, Any]], competition_id: str) -> Optional[Dict[s
     extra["source_family"] = "dataproject-web"
     extra.setdefault("event_type", TEAM_MATCH)
     sid = extra.get("source_event_id") or event.get("source_event_id") or event.get("id")
-    digits = str(sid or "").split(":")[-1]
-    if digits.isdigit():
-        event["source_event_id"] = digits
-        event["source_event_ids"] = {"dataproject-web": digits}
-        extra["source_event_id"] = digits
-        extra["source_event_ids"] = {"dataproject-web": digits}
+    token = str(sid or "").split(":")[-1] if sid else ""
+    if token:
+        event["source_event_id"] = token
+        event["source_event_ids"] = {"dataproject-web": token}
+        extra["source_event_id"] = token
+        extra["source_event_ids"] = {"dataproject-web": token}
     if event_is_valid(event, sport_id="volleyball", competition_id=competition_id):
         return event
     return None

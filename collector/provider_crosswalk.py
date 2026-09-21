@@ -23,7 +23,7 @@ from collector.util import dump_json, load_json
 
 logger = logging.getLogger(__name__)
 
-ATTACH_JOB = "provider-id-attach-v2"
+ATTACH_JOB = "provider-id-attach-v3"
 MAX_INGEST_PER_FAMILY = 40
 FAMILY_SPORT = {
     "pulselive": "rugby",
@@ -139,8 +139,7 @@ def match_keepers(
             scored.append((score, row))
             continue
         if (
-            _date_only(incoming.get("start_time"))
-            and incoming_date
+            incoming_date
             and str(view.get("start_time") or "")[:10] == incoming_date
         ):
             loose = dict(incoming)

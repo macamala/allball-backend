@@ -187,6 +187,42 @@ def test_attach_keeps_euroleague_compound_id():
     assert ids["euroleague-live"] == "E2025:47"
 
 
+def test_crosswalk_matches_same_calendar_day_with_clock_skew():
+    db = SessionLocal()
+    try:
+        row = _row(
+            event_id="ninko-xw-el-clock",
+            fingerprint="xw-el-clock",
+            start_time=datetime(2025, 10, 17, 16, 0, 0),
+            sport_id="basketball",
+            competition_id="euroleague",
+            home="Olympiacos",
+            away="Monaco",
+        )
+        db.add(row)
+        db.commit()
+        incoming = {
+            "sport": "basketball",
+            "competition_key": "euroleague",
+            "home": {"name": "Olympiacos"},
+            "away": {"name": "Monaco"},
+            "start_time": "2025-10-17T19:00:00Z",
+            "source_event_ids": {"euroleague-live": "E2025:47"},
+        }
+        stats = crosswalk_family(
+            db,
+            family="euroleague-live",
+            source_id="euroleague-live",
+            events=[incoming],
+            persist_missing=False,
+        )
+        extra = load_json(db.get(SportsEvent, "ninko-xw-el-clock").extra_json, {}) or {}
+        assert extra["source_event_ids"]["euroleague-live"] == "E2025:47"
+        assert stats["canonical_matched"] == 1
+    finally:
+        db.close()
+
+
 def test_crosswalk_historical_ingest_under_persist_flag(monkeypatch):
     db = SessionLocal()
     ingested = {"n": 0}

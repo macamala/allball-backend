@@ -12,7 +12,7 @@ COMPETITION_ID = "australia-afl"
 
 
 def _games_url(year: int) -> str:
-    return f"https://api.squiggle.com.au/?q=games;year={year}"
+    return f"https://api.squiggle.com.au/?q=games&year={year}"
 
 
 def _status(row: Dict[str, Any]) -> str:
@@ -92,6 +92,8 @@ class SquiggleAflAdapter:
         last = None
         for season in (year, year - 1):
             last = self._get(_games_url(season))
+            if not last.ok or not isinstance(last.payload, dict) or not (last.payload.get("games") or []):
+                last = self._get(f"https://api.squiggle.com.au/?q=games;year={season}")
             if not last.ok:
                 continue
             payload = last.payload if isinstance(last.payload, dict) else {}
