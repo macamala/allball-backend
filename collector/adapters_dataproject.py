@@ -60,11 +60,15 @@ def _ok(event: Optional[Dict[str, Any]], competition_id: str) -> Optional[Dict[s
     if not event:
         return None
     event["source_family"] = "dataproject-web"
+    event["sport"] = event.get("sport") or "volleyball"
+    event["competition_key"] = event.get("competition_key") or competition_id
+    event["source_competition_name"] = competition_id
     extra = event.get("extra")
     if not isinstance(extra, dict):
         extra = {}
         event["extra"] = extra
     extra["source_family"] = "dataproject-web"
+    extra["source_competition_name"] = competition_id
     extra.setdefault("event_type", TEAM_MATCH)
     sid = extra.get("source_event_id") or event.get("source_event_id") or event.get("id")
     token = str(sid or "").split(":")[-1] if sid else ""

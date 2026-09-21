@@ -356,16 +356,19 @@ def apply_competition_attribution(
             if observation.event_id and observation.source_event_id:
                 obs_by_event[observation.event_id].append(str(observation.source_event_id))
     public = db.query(SportsEvent).filter(SportsEvent.canonical_event_id.is_(None)).all()
-    public = [
-        row
-        for row in public
-        if row.display_eligible is not False
-        and not ((load_json(row.extra_json, {}) or {}).get("display_eligible") is False)
-    ]
+    kept = []
+    for row in public:
+        extra = load_json(row.extra_json, {}) or {}
+        eligible = row.display_eligible is not False and extra.get("display_eligible") is not False
+        recover = extra.get("competition_attribution") == "quarantined_unproven"
+        if eligible or recover:
+            kept.append(row)
+    public = kept
     scanned = len(public)
     affected = 0
     corrected = 0
     quarantined = 0
+    recovered = 0
     for row in public:
         extra = load_json(row.extra_json, {}) or {}
         source_id = extra.get("source_competition_id")
@@ -387,6 +390,16 @@ def apply_competition_attribution(
             sport_id=str(row.sport_id or ""),
         )
         if resolved.get("accepted"):
+            if row.display_eligible is False or extra.get("competition_attribution") == "quarantined_unproven":
+                flags = [flag for flag in (extra.get("quality_flags") or []) if flag != "competition_attribution_mismatch"]
+                extra["quality_flags"] = flags
+                extra["display_eligible"] = True
+                extra["competition_attribution"] = "recovered_mapping_owned"
+                extra["resolution_method"] = resolved.get("resolution_method")
+                extra["resolution_confidence"] = resolved.get("resolution_confidence")
+                row.display_eligible = True
+                row.extra_json = dump_json(extra)
+                recovered += 1
             continue
         affected += 1
         suggested = resolved.get("suggested_competition_id")
@@ -443,6 +456,7 @@ def apply_competition_attribution(
         "affected": affected,
         "corrected": corrected,
         "quarantined": quarantined,
+        "recovered": recovered,
         "openliga_requests": requests,
         "recrawl_request_impact": (
             f"{requests} OpenLigaDB getmatchdata requests (one per mapped shortcut). "

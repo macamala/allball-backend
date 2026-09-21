@@ -770,6 +770,7 @@ class NinkoCollectedSportsDataProvider:
                 stored_competition_id=row.competition_id,
                 source_competition_name=extra.get("source_competition_name") or extra.get("competition"),
                 sport_id=row.sport_id or "",
+                source_family=str(extra.get("source_family") or ""),
             )
         if corrected is None:
             return None

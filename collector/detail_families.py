@@ -499,10 +499,15 @@ def fetch_extra_family_detail(family: str, source_event_id: str, getter=None) ->
             return parse_jolpica_results(result.payload)
         return {}
     if family in {"squiggle-afl", "squiggle"}:
-        result = _get(getter, SQUIGGLE_GAME.format(game_id=sid))
-        games = (result.payload or {}).get("games") if result.ok and isinstance(result.payload, dict) else []
-        if games:
-            return parse_squiggle_game(games[0] if isinstance(games[0], dict) else {})
+        from collector.adapters_squiggle import SQUIGGLE_HEADERS, parse_squiggle_payload
+
+        try:
+            result = getter(SQUIGGLE_GAME.format(game_id=sid), headers=SQUIGGLE_HEADERS)
+        except TypeError:
+            result = _get(getter, SQUIGGLE_GAME.format(game_id=sid))
+        rows, _meta = parse_squiggle_payload(result.payload if result else None, "games")
+        if rows:
+            return parse_squiggle_game(rows[0])
         return {}
     if family in {"opendota"}:
         result = _get(getter, OPENDOTA_MATCH.format(match_id=sid))

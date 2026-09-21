@@ -263,6 +263,33 @@ class PgaGraphqlAdapter:
         }
 
 
+def _clicktt_start(value: Any) -> Optional[str]:
+    if value in (None, ""):
+        return None
+    if isinstance(value, (int, float)):
+        try:
+            return datetime.fromtimestamp(int(value), tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        except (OSError, OverflowError, ValueError):
+            return None
+    text = str(value).strip()
+    text = text.replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(text)
+        if parsed.tzinfo is not None:
+            parsed = parsed.replace(tzinfo=None)
+        return parsed.strftime("%Y-%m-%dT%H:%M:%SZ")
+    except ValueError:
+        pass
+    for fmt in ("%d.%m.%Y %H:%M", "%d.%m.%Y", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(text[:19] if " " in text and fmt.startswith("%Y-%m-%d %H") else text, fmt).strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
+            )
+        except ValueError:
+            continue
+    return text
+
+
 class ClickTtRemixAdapter:
     """myTischtennis.de public Remix JSON + meeting live endpoint."""
 
@@ -325,6 +352,10 @@ class ClickTtRemixAdapter:
     def _meeting(self, row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         home = row.get("team_home")
         away = row.get("team_away")
+        if isinstance(home, dict):
+            home = home.get("name") or home.get("club") or home.get("label")
+        if isinstance(away, dict):
+            away = away.get("name") or away.get("club") or away.get("label")
         if not home or not away:
             return None
         state = str(row.get("state") or "").lower()
@@ -350,10 +381,11 @@ class ClickTtRemixAdapter:
                 "home": home_score if status != "scheduled" else None,
                 "away": away_score if status != "scheduled" else None,
             },
-            "start_time": row.get("date"),
+            "start_time": _clicktt_start(row.get("date") or row.get("scheduled") or row.get("datetime")),
             "sport": "table-tennis",
             "competition": row.get("league_name") or "click-TT",
             "competition_key": "germany-click-tt",
+            "source_competition_name": "germany-click-tt",
             "event_family": "team_match",
             "source_family": "click-tt-remix",
             "source_event_id": str(row.get("meeting_id") or ""),
@@ -366,6 +398,7 @@ class ClickTtRemixAdapter:
                 "source_status": status,
                 "status_inferred": False,
                 "live_flag": bool(row.get("live")),
+                "source_competition_name": "germany-click-tt",
             },
         }
 

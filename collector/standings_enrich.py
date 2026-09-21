@@ -196,6 +196,8 @@ def fetch_competition_standings(competition_id: str, getter=None) -> Dict[str, A
             if rows:
                 return wrap_standings(rows, competition=competition_id, sport="baseball", source="mlb-statsapi")
     if competition_id == "australia-afl":
+        from collector.adapters_squiggle import SQUIGGLE_HEADERS, parse_squiggle_payload
+
         year = datetime.utcnow().year
         urls = []
         for season in (year, year - 1):
@@ -203,16 +205,13 @@ def fetch_competition_standings(competition_id: str, getter=None) -> Dict[str, A
             urls.append(f"https://api.squiggle.com.au/?q=standings&year={season}")
         urls.append("https://api.squiggle.com.au/?q=standings")
         for url in urls:
-            result = getter(url)
-            payload = result.payload if result.ok else None
-            if not isinstance(payload, dict) and result.ok and isinstance(getattr(result, "payload", None), str):
-                try:
-                    import json
-
-                    payload = json.loads(result.payload)
-                except (TypeError, ValueError):
-                    payload = None
-            rows = parse_squiggle_standings(payload)
+            try:
+                result = getter(url, headers=SQUIGGLE_HEADERS)
+            except TypeError:
+                result = getter(url)
+            payload = result.payload if result is not None else None
+            rows_raw, _meta = parse_squiggle_payload(payload, "standings")
+            rows = parse_squiggle_standings({"standings": rows_raw} if rows_raw else payload)
             if rows:
                 season = None
                 if "year=" in url:

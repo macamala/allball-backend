@@ -28,10 +28,12 @@ def _event(row: Dict[str, Any], competition_id: str = "professional") -> Dict[st
         "status": "finished" if finished else "live",
         "score": {"home": row.get("radiant_score"), "away": row.get("dire_score")},
         "start_time": iso,
+        "league": league,
         "game_id": "dota-2",
         "sport": "dota-2",
-        "competition": league,
+        "competition": "Dota 2 Professional",
         "competition_key": competition_id or "professional",
+        "source_competition_name": "Dota 2 Professional",
         "event_family": "esports_match",
         "series_id": str(row.get("series_id") or "") or None,
         "best_of": {0: 1, 1: 3, 2: 5}.get(row.get("series_type")),
@@ -45,6 +47,8 @@ def _event(row: Dict[str, Any], competition_id: str = "professional") -> Dict[st
             "source_family": "opendota",
             "source_event_id": str(row.get("match_id") or ""),
             "source_event_ids": {"opendota": str(row.get("match_id") or "")},
+            "league_name": league,
+            "source_competition_name": "Dota 2 Professional",
         },
     }
 

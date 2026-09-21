@@ -393,7 +393,8 @@ def test_opendota_pro_match():
     adapter = OpenDotaAdapter(getter=_getter({"proMatches": OPENDOTA}))
     results = adapter.fetch(FetchRequest(capability="results"))
     assert results.events[0]["game_id"] == "dota-2"
-    assert "WINLINE" in results.events[0]["competition"]
+    assert results.events[0]["competition_key"] == "professional"
+    assert "WINLINE" in (results.events[0].get("extra") or {}).get("league_name", "")
 
 
 def test_bootstrap_and_collect_with_injected_adapters():

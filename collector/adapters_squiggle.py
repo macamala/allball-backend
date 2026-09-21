@@ -2,17 +2,64 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple
 
 from collector.adapters import FetchRequest, FetchResult
 from collector.http import fetch_url
 
 COMPETITION_ID = "australia-afl"
+SQUIGGLE_HEADERS = {
+    "User-Agent": "NinkoSports/2.5 (AFL collector; +https://ninkosports.com)",
+    "Accept": "application/json, text/json, text/plain;q=0.9, */*;q=0.1",
+}
 
 
-def _games_url(year: int) -> str:
-    return f"https://api.squiggle.com.au/?q=games&year={year}"
+def _games_url(year: int, *, amp: bool = True) -> str:
+    if amp:
+        return f"https://api.squiggle.com.au/?q=games&year={year}"
+    return f"https://api.squiggle.com.au/?q=games;year={year}"
+
+
+def parse_squiggle_payload(payload: Any, key: str = "games") -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """Accept the public Squiggle envelope, a raw list, or a JSON string."""
+    meta: Dict[str, Any] = {"key": key}
+    raw = payload
+    if isinstance(raw, (bytes, bytearray)):
+        raw = raw.decode("utf-8", "replace")
+        meta["decoded_bytes"] = True
+    if isinstance(raw, str):
+        text = raw.strip()
+        meta["shape"] = "string"
+        meta["preview"] = text[:180]
+        if text.lower().startswith("<!doctype") or text.lower().startswith("<html"):
+            meta["content_type_guess"] = "text/html"
+            return [], meta
+        if text.startswith(")]}'"):
+            text = text[4:].lstrip()
+        try:
+            raw = json.loads(text)
+        except json.JSONDecodeError:
+            meta["parse"] = "json_error"
+            return [], meta
+    if isinstance(raw, list):
+        rows = [row for row in raw if isinstance(row, dict)]
+        meta["shape"] = "list"
+        meta["count"] = len(rows)
+        return rows, meta
+    if isinstance(raw, dict):
+        meta["shape"] = "dict"
+        meta["keys"] = sorted(str(item) for item in raw.keys())[:16]
+        rows = raw.get(key)
+        if isinstance(rows, list):
+            out = [row for row in rows if isinstance(row, dict)]
+            meta["count"] = len(out)
+            return out, meta
+        meta["count"] = 0
+        return [], meta
+    meta["shape"] = type(payload).__name__
+    return [], meta
 
 
 def _status(row: Dict[str, Any]) -> str:
@@ -75,6 +122,13 @@ def _to_event(row: Dict[str, Any]) -> Dict[str, Any]:
     return payload
 
 
+def _call(getter, url: str) -> FetchResult:
+    try:
+        return getter(url, headers=SQUIGGLE_HEADERS)
+    except TypeError:
+        return getter(url)
+
+
 class SquiggleAflAdapter:
     adapter_key = "squiggle-afl"
     source_id = "squiggle"
@@ -89,17 +143,33 @@ class SquiggleAflAdapter:
         year = datetime.now(timezone.utc).year
         payload: Dict[str, Any] = {}
         games: List[Dict[str, Any]] = []
-        last = None
+        last: Optional[FetchResult] = None
+        diag: List[Dict[str, Any]] = []
+        urls: List[str] = []
         for season in (year, year - 1):
-            last = self._get(_games_url(season))
-            if not last.ok or not isinstance(last.payload, dict) or not (last.payload.get("games") or []):
-                last = self._get(f"https://api.squiggle.com.au/?q=games;year={season}")
-            if not last.ok:
-                continue
-            payload = last.payload if isinstance(last.payload, dict) else {}
-            batch = payload.get("games") or []
-            games.extend(batch)
+            urls.extend((_games_url(season, amp=True), _games_url(season, amp=False)))
+        urls.append("https://api.squiggle.com.au/?q=games")
+        for url in urls:
+            last = _call(self._get, url)
+            body = last.payload if last is not None else None
+            if body is None and last is not None and last.error:
+                body = last.payload
+            rows, meta = parse_squiggle_payload(body, "games")
+            diag.append(
+                {
+                    "url": url,
+                    "http_status": last.http_status if last else 0,
+                    "ok": bool(last.ok) if last else False,
+                    "error": last.error if last else None,
+                    **meta,
+                }
+            )
+            if rows:
+                payload = body if isinstance(body, dict) else {"games": rows}
+                games.extend(rows)
+                break
         if last is not None and not last.ok and not games:
+            last.empty_reason = json.dumps(diag[:4])[:800]
             return last
         events = [_to_event(row) for row in games if row.get("hteam") and row.get("ateam")]
         if request.capability == "live_scores":
@@ -108,4 +178,12 @@ class SquiggleAflAdapter:
             events = [row for row in events if row["status"] == "finished"]
         elif request.capability == "fixtures":
             events = [row for row in events if row["status"] == "scheduled"]
-        return FetchResult(ok=True, http_status=(last.http_status if last else 200), payload=payload, events=events)
+        reason = json.dumps(diag[:3])[:800] if not events else "squiggle games"
+        return FetchResult(
+            ok=True,
+            http_status=(last.http_status if last else 200),
+            payload=payload or {"games": games, "fetch_diag": diag[:4]},
+            events=events,
+            empty_reason=None if events else (diag[0].get("shape") if diag else "SOURCE_HEALTHY_NO_EVENTS"),
+            parse_reason=reason,
+        )

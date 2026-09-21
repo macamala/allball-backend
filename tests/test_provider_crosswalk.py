@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from collector.adapters_feeds import EuroleagueLiveAdapter
+from collector.identity_events import identity_confidence
 from collector.models import SportsEvent
 from collector.provider_crosswalk import attach_family_id, crosswalk_family, match_keepers
 from collector.source_ids import families_with_ids, merge_family_ids
@@ -221,6 +222,175 @@ def test_crosswalk_matches_same_calendar_day_with_clock_skew():
         assert stats["canonical_matched"] == 1
     finally:
         db.close()
+
+
+def test_euroleague_bc_baloncesto_identity_normalization():
+    canonical = {
+        "sport": "basketball",
+        "competition": "euroleague",
+        "competition_key": "euroleague",
+        "home": {"name": "Olympiacos BC"},
+        "away": {"name": "Real Madrid Baloncesto"},
+        "start_time": "2025-10-17T16:00:00Z",
+    }
+    provider = {
+        "sport": "basketball",
+        "competition": "euroleague",
+        "competition_key": "euroleague",
+        "home": {"name": "Olympiacos"},
+        "away": {"name": "Real Madrid"},
+        "start_time": "2025-10-17T19:00:00Z",
+        "source_event_ids": {"euroleague-live": "E2025:47"},
+    }
+    assert identity_confidence(canonical, provider) >= 90
+    dotted = dict(canonical)
+    dotted["home"] = {"name": "Olympiacos B.C."}
+    assert identity_confidence(dotted, provider) >= 90
+
+
+def test_basketball_club_suffix_does_not_false_merge():
+    celtics = {
+        "sport": "basketball",
+        "competition": "nba",
+        "competition_key": "nba",
+        "home": {"name": "Boston Celtics"},
+        "away": {"name": "Miami Heat"},
+        "start_time": "2025-10-17T23:00:00Z",
+    }
+    boston = {
+        "sport": "basketball",
+        "competition": "nba",
+        "competition_key": "nba",
+        "home": {"name": "Boston"},
+        "away": {"name": "Miami"},
+        "start_time": "2025-10-17T23:00:00Z",
+    }
+    assert identity_confidence(celtics, boston) == 0
+    football = {
+        "sport": "football",
+        "competition": "spain-la-liga",
+        "competition_key": "spain-la-liga",
+        "home": {"name": "Real Madrid"},
+        "away": {"name": "Barcelona"},
+        "start_time": "2025-10-17T19:00:00Z",
+    }
+    euro = {
+        "sport": "basketball",
+        "competition": "euroleague",
+        "competition_key": "euroleague",
+        "home": {"name": "Real Madrid"},
+        "away": {"name": "Barcelona"},
+        "start_time": "2025-10-17T19:00:00Z",
+    }
+    assert identity_confidence(football, euro) == 0
+
+
+def test_opendota_owned_mapping_stays_public():
+    from collector.competition_identity import correct_public_competition_id, resolve_competition
+
+    resolved = resolve_competition(
+        mapping_competition_id="professional",
+        source_competition_name="PGL Wallachia",
+        source_family="opendota",
+        sport_id="dota-2",
+    )
+    assert resolved["accepted"] is True
+    assert (
+        correct_public_competition_id(
+            stored_competition_id="professional",
+            source_competition_name="The International",
+            sport_id="dota-2",
+            source_family="opendota",
+        )
+        == "professional"
+    )
+
+
+def test_cricsheet_historical_direct_event_keeps_frozen_id():
+    from collector.competition_identity import correct_public_competition_id
+
+    assert (
+        correct_public_competition_id(
+            stored_competition_id="t20-internationals",
+            source_competition_name="ICC Men's T20 World Cup",
+            sport_id="cricket",
+            source_family="cricsheet",
+        )
+        == "t20-internationals"
+    )
+
+
+def test_dataproject_volleyball_identity_attach():
+    start = datetime(2026, 1, 10, 18, 0, 0)
+    row = _row(
+        event_id="ninko-xw-plusliga",
+        fingerprint="xw-plusliga",
+        start_time=start,
+        sport_id="volleyball",
+        competition_id="plusliga",
+        home="Aluron CMC Warta Zawiercie",
+        away="Jastrzebski Wegiel",
+    )
+    incoming = {
+        "sport": "volleyball",
+        "competition_key": "plusliga",
+        "home": {"name": "Aluron CMC Warta Zawiercie Volley"},
+        "away": {"name": "Jastrzebski Wegiel"},
+        "start_time": "2026-01-10T18:00:00Z",
+        "source_event_ids": {"dataproject-web": "88421"},
+        "score": {"home": 3, "away": 0},
+        "periods": [
+            {"label": 1, "home": 25, "away": 19},
+            {"label": 2, "home": 25, "away": 21},
+            {"label": 3, "home": 25, "away": 14},
+        ],
+    }
+    best, n_ok, _protected = match_keepers(incoming, [row])
+    assert n_ok == 1
+    assert best is row
+    changed = attach_family_id(best, "dataproject-web", "88421", incoming=incoming)
+    assert changed
+    extra = load_json(best.extra_json, {}) or {}
+    assert extra["source_event_ids"]["dataproject-web"] == "88421"
+    assert extra["periods"][0]["home"] == 25
+
+
+def test_clicktt_meeting_identity():
+    start = datetime(2026, 9, 12, 18, 0, 0)
+    row = _row(
+        event_id="ninko-xw-clicktt",
+        fingerprint="xw-clicktt",
+        start_time=start,
+        sport_id="table-tennis",
+        competition_id="germany-click-tt",
+        home="Saarbrücken",
+        away="Mühlhausen",
+    )
+    incoming = {
+        "sport": "table-tennis",
+        "competition_key": "germany-click-tt",
+        "home": {"name": "1. FC Saarbrücken TT", "id": "101"},
+        "away": {"name": "TTC Mühlhausen", "id": "202"},
+        "start_time": "12.09.2026 18:00",
+        "source_event_ids": {"click-tt-remix": "778899"},
+        "score": {"home": 3, "away": 1},
+    }
+    best, n_ok, _protected = match_keepers(incoming, [row])
+    assert n_ok == 1
+    assert best is row
+
+
+def test_squiggle_parser_accepts_string_and_amp_query():
+    from collector.adapters_squiggle import _games_url, parse_squiggle_payload
+
+    rows, meta = parse_squiggle_payload('{"games":[{"id":1,"hteam":"Pies","ateam":"Cats"}]}', "games")
+    assert meta["shape"] == "dict"
+    assert rows[0]["hteam"] == "Pies"
+    html_rows, html_meta = parse_squiggle_payload("<html><body>blocked</body></html>", "games")
+    assert html_rows == []
+    assert html_meta.get("content_type_guess") == "text/html"
+    assert "year=" in _games_url(2026, amp=True)
+    assert ";year=" in _games_url(2026, amp=False)
 
 
 def test_crosswalk_historical_ingest_under_persist_flag(monkeypatch):

@@ -492,6 +492,7 @@ def classify_quarantine(db: Session) -> Dict[str, Any]:
             stored_competition_id=cid,
             source_competition_name=str(src_name or ""),
             sport_id=row.sport_id or "",
+            source_family=str(family or ""),
         )
         if hub and src_name and corrected:
             if corrected != cid:

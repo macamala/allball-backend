@@ -12,6 +12,22 @@ from typing import Any, Dict, List, Optional, Tuple
 _WORD_RE = re.compile(r"[a-z0-9]+")
 _STOPWORDS = {"the", "and", "of", "a", "an"}
 
+# Adapter families that bind events to a frozen mapping id themselves.
+# Series/league labels from those feeds are not hub competition identity.
+MAPPING_OWNED_FAMILIES = {
+    "opendota",
+    "cricsheet",
+    "click-tt-remix",
+    "dataproject-web",
+    "euroleague-live",
+    "squiggle-afl",
+    "pulselive",
+    "cfl-scoreboard-json",
+    "pga-graphql",
+    "championdata-netball",
+    "lolesports-json",
+}
+
 # BBC/SportScore group labels that identify a mapping. `any` is OR; `all` is AND.
 # Deny tokens block false positives (women's A-League vs men, etc.).
 COMPETITION_LABELS: Dict[str, Dict[str, Any]] = {
@@ -232,6 +248,7 @@ def resolve_competition(
             "accepted": False,
         }
     hub = source_family in {"bbc-sport", "sportscore", "espn-html"}
+    owned = source_family in MAPPING_OWNED_FAMILIES
     if not independent_name and not source_competition_id:
         return {
             **base,
@@ -241,6 +258,14 @@ def resolve_competition(
             "accepted": not hub,
         }
     if independent_name and not label_matches_competition(name, mapping_competition_id):
+        if owned:
+            return {
+                **base,
+                "canonical_competition_id": mapping_competition_id,
+                "resolution_method": "mapping_request_trusted",
+                "resolution_confidence": 55,
+                "accepted": True,
+            }
         return {
             **base,
             "canonical_competition_id": mapping_competition_id,
@@ -270,6 +295,7 @@ def correct_public_competition_id(
     stored_competition_id: str,
     source_competition_name: Optional[str] = None,
     sport_id: str = "",
+    source_family: str = "",
 ) -> Optional[str]:
     """Return a frozen-registry id, or None when the stored mapping is unsafe to show."""
     from collector.matrix_guard import frozen_competition_ids
@@ -277,6 +303,7 @@ def correct_public_competition_id(
     stored = str(stored_competition_id or "").strip()
     name = str(source_competition_name or "").strip()
     frozen = frozen_competition_ids()
+    family = str(source_family or "").strip()
     slugish = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
     if not name or slugish == stored:
         return stored if stored in frozen else None
@@ -289,6 +316,8 @@ def correct_public_competition_id(
     ]
     if len(matches) == 1:
         return matches[0]
+    if family in MAPPING_OWNED_FAMILIES:
+        return stored if stored in frozen else None
     return None
 
 

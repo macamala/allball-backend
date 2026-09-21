@@ -23,7 +23,7 @@ from collector.util import dump_json, load_json
 
 logger = logging.getLogger(__name__)
 
-ATTACH_JOB = "provider-id-attach-v3"
+ATTACH_JOB = "provider-id-attach-v4"
 MAX_INGEST_PER_FAMILY = 40
 FAMILY_SPORT = {
     "pulselive": "rugby",
@@ -131,6 +131,8 @@ def match_keepers(
         view = event_view(row)
         if incoming.get("sport") and not view.get("sport"):
             view["sport"] = incoming.get("sport")
+        if view.get("sport") and not incoming.get("sport"):
+            incoming = {**incoming, "sport": view.get("sport")}
         if _protected_conflict(view, incoming):
             protected += 1
             continue
@@ -154,6 +156,25 @@ def match_keepers(
     if len(date_candidates) == 1:
         return date_candidates[0], 1, protected
     if len(date_candidates) > 1:
+        return None, 2, protected
+    timed = []
+    for row in rows:
+        view = event_view(row)
+        if incoming.get("sport") and not view.get("sport"):
+            view["sport"] = incoming.get("sport")
+        if view.get("sport") and not incoming.get("sport"):
+            incoming = {**incoming, "sport": view.get("sport")}
+        if _protected_conflict(view, incoming):
+            continue
+        if not view.get("start_time"):
+            continue
+        loose = dict(incoming)
+        loose["start_time"] = view.get("start_time")
+        if identity_confidence(view, loose) >= IDENTITY_MERGE_THRESHOLD:
+            timed.append(row)
+    if len(timed) == 1:
+        return timed[0], 1, protected
+    if len(timed) > 1:
         return None, 2, protected
     return None, 0, protected
 

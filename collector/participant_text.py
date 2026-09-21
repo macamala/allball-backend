@@ -153,6 +153,15 @@ def fold_for_identity(name: str) -> str:
     return re.sub(r"\s+", " ", raw).strip()
 
 
+# Sport-scoped club suffixes. Never stripped globally — only when the event
+# sport/competition is basketball, volleyball, or table tennis.
+BASKETBALL_CLUB_SUFFIXES = {"bc", "basketball", "baloncesto", "basket"}
+VOLLEYBALL_CLUB_SUFFIXES = {"volley", "volleyball", "pallavolo", "vk"}
+TABLE_TENNIS_CLUB_SUFFIXES = {"ttc", "ttv", "tt", "tischtennis"}
+_BASKETBALL_CONTEXT = {"basketball", "nba", "wnba", "euroleague", "ncaa-basketball"}
+_VOLLEYBALL_CONTEXT = {"volleyball", "plusliga", "italy-superlega", "cev-eurovolley-men"}
+_TABLE_TENNIS_CONTEXT = {"table-tennis", "germany-click-tt"}
+
 LEGAL_IDENTITY_TOKENS = {
     "fc",
     "cf",
@@ -208,8 +217,30 @@ CLUB_STYLE_EXTRAS = {
 }
 
 
-def identity_core(name: str) -> str:
+def club_suffixes_for(sport: str = "", competition: str = "") -> set:
+    ctx = {str(sport or "").lower().strip(), str(competition or "").lower().strip()}
+    suffixes: set = set()
+    if ctx & _BASKETBALL_CONTEXT:
+        suffixes |= BASKETBALL_CLUB_SUFFIXES
+    if ctx & _VOLLEYBALL_CONTEXT:
+        suffixes |= VOLLEYBALL_CLUB_SUFFIXES
+    if ctx & _TABLE_TENNIS_CONTEXT:
+        suffixes |= TABLE_TENNIS_CLUB_SUFFIXES
+    return suffixes
+
+
+def identity_core(name: str, *, sport: str = "", competition: str = "") -> str:
     tokens = [tok for tok in fold_for_identity(name).split() if tok not in LEGAL_IDENTITY_TOKENS]
+    suffixes = club_suffixes_for(sport, competition)
+    while len(tokens) > 1 and tokens[-1] in suffixes:
+        tokens = tokens[:-1]
+    while len(tokens) > 1 and tokens[0] in suffixes:
+        tokens = tokens[1:]
+    # "B.C." folds to two tokens ("b", "c") — only strip that pair together.
+    if suffixes and len(tokens) >= 2 and tokens[-2:] == ["b", "c"] and "bc" in suffixes:
+        tokens = tokens[:-2]
+    if suffixes and len(tokens) >= 2 and tokens[:2] == ["b", "c"] and "bc" in suffixes:
+        tokens = tokens[2:]
     return " ".join(tokens).strip()
 
 

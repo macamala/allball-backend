@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Any, Dict, Optional
 
 from collector.participant_alias import expand_abbreviations, participants_equivalent
-from collector.participant_text import fold_for_identity, identity_core
+from collector.participant_text import club_suffixes_for, fold_for_identity, identity_core
 
 IDENTITY_MERGE_THRESHOLD = 90
 _WEAK = {"united", "city", "racing", "sporting", "athletic", "rovers", "town", "county", "stars"}
@@ -39,11 +39,20 @@ def _ts(value: Any) -> Optional[datetime]:
         return None
     if isinstance(value, datetime):
         return value
-    text = str(value).replace("Z", "+00:00")
+    text = str(value).strip().replace("Z", "+00:00")
     try:
-        return datetime.fromisoformat(text)
+        parsed = datetime.fromisoformat(text)
+        if parsed.tzinfo is not None:
+            parsed = parsed.replace(tzinfo=None)
+        return parsed
     except ValueError:
-        return None
+        pass
+    for fmt in ("%b %d, %Y %H:%M", "%b %d, %Y", "%d.%m.%Y %H:%M", "%d.%m.%Y", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(text[:19] if fmt.startswith("%Y-%m-%d %H") else text, fmt)
+        except ValueError:
+            continue
+    return None
 
 
 def _weak_pair(a: str, b: str) -> bool:
@@ -56,7 +65,7 @@ def _weak_pair(a: str, b: str) -> bool:
     return False
 
 
-def _core_contains(left: str, right: str) -> bool:
+def _core_contains(left: str, right: str, *, sport: str = "", competition: str = "") -> bool:
     if not left or not right:
         return False
     if left == right:
@@ -67,11 +76,27 @@ def _core_contains(left: str, right: str) -> bool:
     if not longer.startswith(shorter + " "):
         return False
     extra = longer[len(shorter) :].strip()
+    extra_tokens = extra.split()
+    suffixes = club_suffixes_for(sport, competition)
+    if suffixes:
+        return bool(extra_tokens) and all(tok in suffixes or (tok == "c" and extra_tokens == ["b", "c"]) for tok in extra_tokens)
     return extra not in _WEAK and extra not in {"fc", "cf"}
 
 
-def _core_pair(h0: str, a0: str, h1: str, a1: str) -> bool:
-    return (_core_contains(h0, h1) and _core_contains(a0, a1)) or (_core_contains(h0, a1) and _core_contains(a0, h1))
+def _core_pair(h0: str, a0: str, h1: str, a1: str, *, sport: str = "", competition: str = "") -> bool:
+    return (
+        _core_contains(h0, h1, sport=sport, competition=competition)
+        and _core_contains(a0, a1, sport=sport, competition=competition)
+    ) or (
+        _core_contains(h0, a1, sport=sport, competition=competition)
+        and _core_contains(a0, h1, sport=sport, competition=competition)
+    )
+
+
+def _side_id(side: Any) -> str:
+    if isinstance(side, dict):
+        return str(side.get("id") or side.get("source_id") or "").strip()
+    return ""
 
 
 def identity_confidence(canonical: Dict[str, Any], candidate: Dict[str, Any]) -> int:
@@ -79,8 +104,17 @@ def identity_confidence(canonical: Dict[str, Any], candidate: Dict[str, Any]) ->
         return 0
     if _ids(canonical) & _ids(candidate):
         return 100
+    sport = str(canonical.get("sport") or candidate.get("sport") or "")
     if (canonical.get("sport") or "") != (candidate.get("sport") or ""):
-        return 0
+        if canonical.get("sport") and candidate.get("sport"):
+            return 0
+    competition = str(
+        canonical.get("competition_key")
+        or canonical.get("competition")
+        or candidate.get("competition_key")
+        or candidate.get("competition")
+        or ""
+    )
     home = _fold_side(canonical.get("home") or canonical.get("participant_a"))
     away = _fold_side(canonical.get("away") or canonical.get("participant_b"))
     ch = _fold_side(candidate.get("home") or candidate.get("participant_a"))
@@ -91,14 +125,20 @@ def identity_confidence(canonical: Dict[str, Any], candidate: Dict[str, Any]) ->
     ca_name = _side_name(candidate.get("away") or candidate.get("participant_b"))
     if not home or not away:
         return 0
-    core_home = identity_core(home_name) or home
-    core_away = identity_core(away_name) or away
-    core_ch = identity_core(ch_name) or ch
-    core_ca = identity_core(ca_name) or ca
+    hid = _side_id(canonical.get("home") or canonical.get("participant_a"))
+    aid = _side_id(canonical.get("away") or canonical.get("participant_b"))
+    cid_h = _side_id(candidate.get("home") or candidate.get("participant_a"))
+    cid_a = _side_id(candidate.get("away") or candidate.get("participant_b"))
+    ids_match = bool(hid and aid and cid_h and cid_a) and {hid, aid} == {cid_h, cid_a}
+    core_home = identity_core(home_name, sport=sport, competition=competition) or home
+    core_away = identity_core(away_name, sport=sport, competition=competition) or away
+    core_ch = identity_core(ch_name, sport=sport, competition=competition) or ch
+    core_ca = identity_core(ca_name, sport=sport, competition=competition) or ca
     cores_match = bool(core_home and core_away) and {core_home, core_away} == {core_ch, core_ca}
-    cores_contain = _core_pair(core_home, core_away, core_ch, core_ca)
+    cores_contain = _core_pair(core_home, core_away, core_ch, core_ca, sport=sport, competition=competition)
     if (
-        {home, away} != {ch, ca}
+        not ids_match
+        and {home, away} != {ch, ca}
         and not participants_equivalent(home_name, away_name, ch_name, ca_name)
         and not cores_match
         and not cores_contain
@@ -111,11 +151,11 @@ def identity_confidence(canonical: Dict[str, Any], candidate: Dict[str, Any]) ->
     same_comp = (canonical.get("competition_key") or canonical.get("competition")) == (
         candidate.get("competition_key") or candidate.get("competition")
     )
-    sport = str(canonical.get("sport") or "")
     max_delta = 4 * 3600 if sport in {"baseball", "basketball"} else 12 * 3600
     if t0 and t1:
         delta = abs((t0 - t1).total_seconds())
-        if delta > max_delta:
+        same_cal = t0.date() == t1.date()
+        if delta > max_delta and not (same_comp and same_cal):
             return 0
         if same_comp and delta <= 15 * 60:
             return 95
@@ -124,9 +164,11 @@ def identity_confidence(canonical: Dict[str, Any], candidate: Dict[str, Any]) ->
         if delta <= 3 * 3600:
             return 88
         return 0
-    same_date = str(canonical.get("start_time") or "")[:10] == str(candidate.get("start_time") or "")[:10]
+    d0 = t0.date().isoformat() if t0 else str(canonical.get("start_time") or "")[:10]
+    d1 = t1.date().isoformat() if t1 else str(candidate.get("start_time") or "")[:10]
+    same_date = len(d0) >= 10 and d0[:10] == d1[:10] and d0[0].isdigit() and d1[0].isdigit()
     if same_date and same_comp:
-        return 70
+        return 90
     if same_date:
         return 65
     return 0

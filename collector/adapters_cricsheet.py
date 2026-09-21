@@ -165,6 +165,13 @@ class CricsheetAdapter:
         if request.competition_id:
             for event in events:
                 event["competition_key"] = request.competition_id
+                event["source_competition_name"] = str(request.competition_id).replace("-", " ")
+                extra = event.get("extra") if isinstance(event.get("extra"), dict) else {}
+                extra["source_competition_name"] = event["source_competition_name"]
+                extra["series"] = event.get("competition")
+                extra["historical"] = True
+                extra["live"] = False
+                event["extra"] = extra
         if request.capability == "live_scores":
             events = []
         elif request.capability == "results":
