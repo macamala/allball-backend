@@ -308,4 +308,47 @@ def attach_canonical_detail(event: Dict[str, Any]) -> Dict[str, Any]:
         event.pop("classification", None)
     if event.get("maps") in ([], {}, None):
         event.pop("maps", None)
+    return align_australian_rules_detail(event)
+
+
+def _afl_total(goals: Any, behinds: Any) -> Optional[int]:
+    try:
+        if goals is None or behinds is None:
+            return None
+        return int(goals) * 6 + int(behinds)
+    except (TypeError, ValueError):
+        return None
+
+
+def align_australian_rules_detail(event: Dict[str, Any]) -> Dict[str, Any]:
+    """Keep goals, behinds, and score together. Do not treat AFL as football quarters."""
+    if str(event.get("sport") or "").lower() not in {"australian-rules", "afl"}:
+        return event
+    detail = dict(event.get("sport_detail") or {})
+    goals = detail.get("goals") if isinstance(detail.get("goals"), dict) else None
+    behinds = detail.get("behinds") if isinstance(detail.get("behinds"), dict) else None
+    if not goals:
+        return event
+    home_total = _afl_total(goals.get("home"), (behinds or {}).get("home"))
+    away_total = _afl_total(goals.get("away"), (behinds or {}).get("away"))
+    if home_total is not None and away_total is not None:
+        detail["score"] = {"home": home_total, "away": away_total}
+    if event.get("venue") and not detail.get("venue"):
+        detail["venue"] = event.get("venue")
+    round_name = detail.get("round") or event.get("round")
+    if round_name and not str(round_name).isdigit():
+        detail["round"] = round_name
+    stage = detail.get("stage")
+    if str(stage or "").isdigit() and int(str(stage)) > 30:
+        detail.pop("stage", None)
+    event["sport_detail"] = {key: value for key, value in detail.items() if value not in (None, "", {})}
+    event["statistics"] = [
+        {"label": "Goals", "home": goals.get("home"), "away": goals.get("away")},
+        {"label": "Behinds", "home": (behinds or {}).get("home"), "away": (behinds or {}).get("away")},
+        {"label": "Score", "home": (detail.get("score") or {}).get("home"), "away": (detail.get("score") or {}).get("away")},
+    ]
+    event["periods"] = [
+        {"label": "G", "home": goals.get("home"), "away": goals.get("away")},
+        {"label": "B", "home": (behinds or {}).get("home"), "away": (behinds or {}).get("away")},
+    ]
     return event

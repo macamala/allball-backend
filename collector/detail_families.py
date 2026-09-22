@@ -15,7 +15,7 @@ LOL_EVENT = "https://esports-api.lolesports.com/persisted/gw/getEventDetails?hl=
 LOL_KEY = "0TvQnueqKa5mxJntVWt0w4LpLfEkrV1Ta8rQBb9Z"
 JOLPICA_RESULTS = "https://api.jolpi.ca/ergast/f1/{season}/{round}/results.json"
 OPENDOTA_MATCH = "https://api.opendota.com/api/matches/{match_id}"
-SQUIGGLE_GAME = "https://api.squiggle.com.au/?q=games;game={game_id}"
+SQUIGGLE_GAME = "https://api.squiggle.com.au/?q=games&game={game_id}"
 EUROLEAGUE_BOX = "https://live.euroleague.net/api/Boxscore?gamecode={code}&seasoncode={season}"
 EUROLEAGUE_HEADER = "https://live.euroleague.net/api/Header?gamecode={code}&seasoncode={season}"
 OPENLIGA_MATCH = "https://api.openligadb.de/getmatchbyid/{match_id}"
@@ -145,19 +145,30 @@ def parse_jolpica_results(payload: Any) -> Dict[str, Any]:
 
 def parse_squiggle_game(row: Dict[str, Any]) -> Dict[str, Any]:
     out: Dict[str, Any] = {}
-    if row.get("hgoals") is not None or row.get("agoals") is not None:
+    goals = {"home": row.get("hgoals"), "away": row.get("agoals")}
+    behinds = {"home": row.get("hbehinds"), "away": row.get("abehinds")}
+    score = {"home": row.get("hscore"), "away": row.get("ascore")}
+    if goals["home"] is not None or goals["away"] is not None:
         out["periods"] = [
-            {"label": "G", "home": row.get("hgoals"), "away": row.get("agoals")},
-            {"label": "B", "home": row.get("hbehinds"), "away": row.get("abehinds")},
+            {"label": "G", "home": goals["home"], "away": goals["away"]},
+            {"label": "B", "home": behinds["home"], "away": behinds["away"]},
         ]
         out["statistics"] = [
-            {"label": "Goals", "home": row.get("hgoals"), "away": row.get("agoals")},
-            {"label": "Behinds", "home": row.get("hbehinds"), "away": row.get("abehinds")},
-            {"label": "Score", "home": row.get("hscore"), "away": row.get("ascore")},
+            {"label": "Goals", "home": goals["home"], "away": goals["away"]},
+            {"label": "Behinds", "home": behinds["home"], "away": behinds["away"]},
+            {"label": "Score", "home": score["home"], "away": score["away"]},
         ]
-        out["sport_detail"] = {"goals": {"home": row.get("hgoals"), "away": row.get("agoals")}, "behinds": {"home": row.get("hbehinds"), "away": row.get("abehinds")}}
+        detail = {"goals": goals, "behinds": behinds, "score": score}
+        if row.get("venue"):
+            detail["venue"] = row.get("venue")
+        round_name = row.get("roundname") or row.get("round")
+        if round_name and not str(round_name).isdigit():
+            detail["round"] = round_name
+        out["sport_detail"] = detail
     if row.get("venue"):
         out["venue"] = row.get("venue")
+    if row.get("roundname"):
+        out["round"] = row.get("roundname")
     return out
 
 
@@ -396,7 +407,7 @@ def parse_clicktt_live(data: Dict[str, Any]) -> Dict[str, Any]:
     if isinstance(data.get("data"), dict):
         data = data.get("data") or {}
     out: Dict[str, Any] = {}
-    rows = data.get("matches") or data.get("einzel") or data.get("games") or data.get("rubbers") or []
+    rows = data.get("matches") or data.get("match") or data.get("einzel") or data.get("games") or data.get("rubbers") or []
     rubbers = []
     periods = []
     if isinstance(rows, list):
@@ -405,22 +416,40 @@ def parse_clicktt_live(data: Dict[str, Any]) -> Dict[str, Any]:
                 continue
             home = item.get("sets_home") or item.get("matches_home") or item.get("home")
             away = item.get("sets_guest") or item.get("matches_guest") or item.get("away") or item.get("sets_away")
-            home_player = (
+            def _player_name(value: Any) -> Any:
+                if isinstance(value, dict):
+                    named = value.get("name") or value.get("display")
+                    if named:
+                        return named
+                    return " ".join(part for part in (value.get("firstname"), value.get("lastname")) if part) or None
+                return value
+
+            home_player = _player_name(
                 item.get("player_home")
                 or item.get("playerHome")
+                or item.get("mm_player11")
                 or ((item.get("home_players") or [{}])[0] if isinstance(item.get("home_players"), list) else None)
             )
-            away_player = (
+            away_player = _player_name(
                 item.get("player_guest")
                 or item.get("playerAway")
+                or item.get("mm_player21")
                 or ((item.get("guest_players") or [{}])[0] if isinstance(item.get("guest_players"), list) else None)
             )
-            if isinstance(home_player, dict):
-                home_player = home_player.get("name") or home_player.get("display")
-            if isinstance(away_player, dict):
-                away_player = away_player.get("name") or away_player.get("display")
             games = []
             raw_games = item.get("set_scores") or item.get("sets") or item.get("games") or item.get("points") or []
+            if not raw_games:
+                for set_no in range(1, 8):
+                    hv = item.get(f"set{set_no}_home")
+                    av = item.get(f"set{set_no}_guest")
+                    if hv in (None, "") and av in (None, ""):
+                        continue
+                    try:
+                        if int(hv or 0) == 0 and int(av or 0) == 0:
+                            continue
+                    except (TypeError, ValueError):
+                        pass
+                    raw_games.append({"home": hv, "away": av})
             if isinstance(raw_games, list):
                 for g_index, game in enumerate(raw_games):
                     if isinstance(game, dict):
@@ -506,7 +535,10 @@ def fetch_extra_family_detail(family: str, source_event_id: str, getter=None) ->
         except TypeError:
             result = _get(getter, SQUIGGLE_GAME.format(game_id=sid))
         rows, _meta = parse_squiggle_payload(result.payload if result else None, "games")
-        if rows:
+        matched = [row for row in rows if str(row.get("id") or "") == str(sid)]
+        if matched:
+            return parse_squiggle_game(matched[0])
+        if len(rows) == 1:
             return parse_squiggle_game(rows[0])
         return {}
     if family in {"opendota"}:

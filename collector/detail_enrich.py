@@ -696,6 +696,10 @@ def enrich_event_row(db: Session, row: SportsEvent, getter=None) -> None:
         pass
     ids = families_with_ids(extra)
     tried = set(extra.get("detail_families_tried") or [])
+    click_detail = extra.get("sport_detail") if isinstance(extra.get("sport_detail"), dict) else {}
+    if (ids.get("click-tt-remix") or ids.get("click-tt")) and not click_detail.get("rubbers"):
+        tried.discard("click-tt-remix")
+        tried.discard("click-tt")
     pending = [fam for fam in DETAIL_FAMILIES if ids.get(fam) and fam not in tried]
     record = db.get(SportsEventDetail, row.event_id)
     missing_lineups = not (record and load_json(record.lineups_json)) and not extra.get("lineups_absent")

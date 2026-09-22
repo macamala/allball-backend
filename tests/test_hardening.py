@@ -64,12 +64,12 @@ def test_nested_iso_timestamp_resolves():
 
 
 def test_future_volleyball_score_is_scheduled():
-    assert guard_future_status("finished", "2026-09-21T19:00:00Z", inferred=True, sport_id="volleyball") == "scheduled"
+    assert guard_future_status("finished", "2026-10-21T19:00:00Z", inferred=True, sport_id="volleyball") == "scheduled"
     event = normalize_event(
         {
             "home": {"name": "Italy"},
             "away": {"name": "Poland"},
-            "start_time": "2026-09-21T19:00:00Z",
+            "start_time": "2026-10-21T19:00:00Z",
             "status": "finished",
             "status_inferred": True,
             "score": {"home": 0, "away": 0},
@@ -106,7 +106,7 @@ def test_tsdb_does_not_mark_ns_future_as_finished():
         "strStatus": "NS",
         "intHomeScore": "0",
         "intAwayScore": "0",
-        "dateEvent": "2026-09-21",
+        "dateEvent": "2026-10-21",
         "strTime": "19:00:00",
         "strSeason": "2026",
     }
