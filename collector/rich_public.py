@@ -991,10 +991,11 @@ def fetch_rich_family(family: str, source_event_id: str) -> Dict[str, Any]:
             return {}
         return {"classification": rows[:80]}
     if family == "letour-web" and sid.isdigit():
-        parsed = parse_letour_rankings(_text(LETOUR.format(stage=sid)))
-        if parsed:
-            return parsed
-        return parse_letour_rankings(_text(LETOUR_WEBVIEW.format(stage=sid)))
+        primary = parse_letour_rankings(_text(LETOUR.format(stage=sid)))
+        fallback = parse_letour_rankings(_text(LETOUR_WEBVIEW.format(stage=sid)))
+        primary_rows = primary.get("classification") or []
+        fallback_rows = fallback.get("classification") or []
+        return fallback if len(fallback_rows) > len(primary_rows) else primary
     if family == "fiawec-web" and sid.isdigit():
         return parse_wec_summary(_text(WEC_SUMMARY.format(race_id=sid)))
     if family == "altiusrt-html" and sid.isdigit():

@@ -795,17 +795,9 @@ def enrich_event_row(db: Session, row: SportsEvent, getter=None) -> None:
     from collector.rich_public import ensure_rich_source_ids
 
     ensure_rich_source_ids(row, extra)
-    if str(row.competition_id or "") == "tour-de-france" and extra.get("letour_rank_rev") != 1:
+    if str(row.competition_id or "") == "tour-de-france" and extra.get("letour_rank_rev") != 2:
         rows = extra.get("classification") if isinstance(extra.get("classification"), list) else []
-        rich = any(
-            isinstance(item, dict)
-            and (
-                ":" in str(item.get("time") or "")
-                or str(item.get("gap") or "") not in {"", "-"}
-            )
-            for item in rows
-        )
-        if not rich:
+        if len(rows) < 20:
             tried.discard("letour-web")
     ids = families_with_ids(extra)
     pending = [fam for fam in DETAIL_FAMILIES if ids.get(fam) and fam not in tried]
@@ -848,7 +840,7 @@ def enrich_event_row(db: Session, row: SportsEvent, getter=None) -> None:
                 _merge_detail(detail, part)
     extra["detail_families_tried"] = list(dict.fromkeys(used))
     if "letour-web" in extra["detail_families_tried"]:
-        extra["letour_rank_rev"] = 1
+        extra["letour_rank_rev"] = 2
     extra["detail_fetched_at"] = datetime.utcnow().isoformat()
     extra["parser_rev"] = PARSER_REV
     if not detail:
