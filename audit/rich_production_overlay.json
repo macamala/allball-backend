@@ -227,5 +227,36 @@
     "sport_detail": "PROVEN",
     "production_verified": true,
     "limitation": "Production Match Centre renders innings runs, wickets, overs, target, and the match result. No batting or bowling card is on the public payload."
+  },
+  "nrl": {
+    "stats": "PROVEN",
+    "lineups": "PROVEN",
+    "periods": "PROVEN",
+    "player_stats": "PROVEN",
+    "sport_detail": "PROVEN",
+    "production_verified": true,
+    "limitation": "Sharks vs Roosters Match Centre: tries 4-6, tackles, line breaks, metres, two periods, and both lineups."
+  },
+  "ssn-australia": {
+    "stats": "PROVEN",
+    "lineups": "PROVEN",
+    "periods": "PROVEN",
+    "player_stats": "PROVEN",
+    "production_verified": true,
+    "limitation": "Melbourne Mavericks vs GIANTS Netball: goals 53-44, four quarters, assists, misses, centre-pass receives, intercepts, penalties, and both lineups."
+  },
+  "finland-liiga": {
+    "timeline": "PROVEN",
+    "stats": "PROVEN",
+    "periods": "PROVEN",
+    "player_stats": "PROVEN",
+    "sport_detail": "PROVEN",
+    "production_verified": true,
+    "limitation": "KooKoo vs SaiPa: five period scores, goals and penalties on the timeline, shots 42-46, goalies, lines, and a shot list."
+  },
+  "tour-de-france": {
+    "sport_detail": "PROVEN",
+    "production_verified": true,
+    "limitation": "Stage 1 official ranking: 80 riders, Jonas Vingegaard 00h 21' 47'', Visma, Mathieu van der Poel 11th at +39 seconds. Stage classification only; other jerseys are not in that page."
   }
 }
