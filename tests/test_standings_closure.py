@@ -92,6 +92,20 @@ def test_standings_ttl_skips_empty_snapshot():
     assert _fresh(None) is False
 
 
+def test_afl_snapshot_without_percentage_is_stale():
+    from types import SimpleNamespace
+    from datetime import datetime
+
+    from collector.util import dump_json
+
+    cached = SimpleNamespace(
+        competition_id="australia-afl",
+        captured_at=datetime.utcnow(),
+        rows_json=dump_json([{"position": 1, "team": "Fremantle", "played": 23, "wins": 19, "points": 76}]),
+    )
+    assert _fresh(cached) is False
+
+
 def test_afl_and_f1_standings_parsers():
     afl = parse_squiggle_standings(
         {
@@ -333,6 +347,7 @@ def test_afl_sport_detail_replaces_crossed_scoring():
             "sport": "australian-rules",
             "venue": "Sydney Cricket Ground",
             "round": "150",
+            "stage": "150",
             "score": {"home": 71, "away": 83},
             "sport_detail": {"goals": {"home": 10, "away": 12}, "behinds": {"home": 11, "away": 11}, "stage": "150"},
             "statistics": [{"label": "Goals", "home": 15, "away": 10}, {"label": "Behinds", "home": 21, "away": 13}],
@@ -343,6 +358,8 @@ def test_afl_sport_detail_replaces_crossed_scoring():
     assert event["sport_detail"]["score"] == {"home": 71, "away": 83}
     assert event["sport_detail"]["venue"] == "Sydney Cricket Ground"
     assert "stage" not in event["sport_detail"]
+    assert "stage" not in event
+    assert "round" not in event
     assert event["statistics"][0]["home"] == 10
     assert event["periods"][1]["label"] == "B"
 

@@ -298,7 +298,8 @@ def _fresh(row: Optional[SportsStandingSnapshot]) -> bool:
     rows = unwrap_standings(payload)
     if not rows:
         return False
-    if isinstance(payload, dict) and payload.get("sport") == "australian-rules":
+    sport = payload.get("sport") if isinstance(payload, dict) else ""
+    if str(getattr(row, "competition_id", "") or "") == "australia-afl" or sport == "australian-rules":
         if rows[0].get("percentage") is None or rows[0].get("goals_for") is not None:
             return False
     return age < timedelta(seconds=TTL_SECONDS)

@@ -338,9 +338,15 @@ def align_australian_rules_detail(event: Dict[str, Any]) -> Dict[str, Any]:
     round_name = detail.get("round") or event.get("round")
     if round_name and not str(round_name).isdigit():
         detail["round"] = round_name
-    stage = detail.get("stage")
+        event["round"] = round_name
+    stage = detail.get("stage") or event.get("stage")
     if str(stage or "").isdigit() and int(str(stage)) > 30:
         detail.pop("stage", None)
+        if str(event.get("stage") or "") == str(stage):
+            event.pop("stage", None)
+    if str(event.get("round") or "").isdigit() and int(str(event.get("round"))) > 30:
+        event.pop("round", None)
+        detail.pop("round", None)
     event["sport_detail"] = {key: value for key, value in detail.items() if value not in (None, "", {})}
     event["statistics"] = [
         {"label": "Goals", "home": goals.get("home"), "away": goals.get("away")},
