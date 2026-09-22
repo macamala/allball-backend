@@ -30,7 +30,7 @@ def standings_supported(competition_id: Optional[str]) -> bool:
         return False
     if competition_id in FOTMOB_LEAGUES:
         return True
-    if competition_id in {"nhl", "mlb", "australia-afl", "formula-1", "euroleague", "plusliga", "italy-superlega"}:
+    if competition_id in {"nhl", "mlb", "australia-afl", "formula-1", "euroleague", "plusliga", "italy-superlega", "germany-click-tt"}:
         return True
     return _openliga_shortcut(competition_id) is not None
 
@@ -230,6 +230,37 @@ def parse_dataproject_standings(html: str) -> List[Dict[str, Any]]:
     return out
 
 
+def parse_clicktt_standings(payload: Any) -> List[Dict[str, Any]]:
+    """Bundesliga table from the public click-TT Remix tabelle payload."""
+    data = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(data, dict):
+        data = payload if isinstance(payload, dict) else {}
+    table = data.get("league_table") or []
+    if not isinstance(table, list):
+        return []
+    out = []
+    for item in table:
+        if not isinstance(item, dict) or item.get("is_excluded"):
+            continue
+        team = item.get("team_name") or item.get("team")
+        if not team:
+            continue
+        row = {
+            "position": item.get("table_rank"),
+            "team": team,
+            "played": item.get("meetings_count"),
+            "wins": item.get("meetings_won"),
+            "losses": item.get("meetings_lost"),
+            "points": item.get("points_won"),
+            "sets_for": item.get("sets_won"),
+            "sets_against": item.get("sets_lost"),
+        }
+        if item.get("meetings_tie") not in (None, 0, "0"):
+            row["draws"] = item.get("meetings_tie")
+        out.append(row)
+    return out
+
+
 def parse_legavolley_standings(html: str) -> List[Dict[str, Any]]:
     """legavolley.it classifica table. Same public host as the SuperLega calendar."""
     import re
@@ -302,6 +333,8 @@ def _fresh(row: Optional[SportsStandingSnapshot]) -> bool:
     if str(getattr(row, "competition_id", "") or "") == "australia-afl" or sport == "australian-rules":
         if rows[0].get("percentage") is None or rows[0].get("goals_for") is not None:
             return False
+    if str(getattr(row, "competition_id", "") or "") == "italy-superlega" and _played_total(rows) <= 0:
+        return False
     return age < timedelta(seconds=TTL_SECONDS)
 
 
@@ -438,19 +471,20 @@ def _volleyball_standings(competition_id: str, getter) -> Dict[str, Any]:
     home = _read_body(getter, SUPERLEGA_HOME)
     home_html = _body_text(home)
     ids = []
-    for campionato in re.findall(r"classifica/\?IdCampionato=(\d+)", home_html, re.I):
+    for campionato in re.findall(r"IdCampionato=(\d+)", home_html, re.I):
         if campionato not in ids:
             ids.append(campionato)
     best = None
     best_key = None
     best_id = None
-    for campionato in ids[:6]:
+    for campionato in ids[:12]:
         page = _read_body(getter, f"https://www.legavolley.it/classifica/?IdCampionato={campionato}")
         rows = parse_legavolley_standings(_body_text(page))
         hits = _marker_hits(rows, _SUPERLEGA_MARKERS)
-        if hits < 3 or not rows:
+        played = _played_total(rows)
+        if hits < 3 or not rows or played <= 0:
             continue
-        key = (_played_total(rows), hits, len(rows))
+        key = (played, hits, len(rows))
         if best_key is None or key > best_key:
             best = rows
             best_key = key
@@ -532,6 +566,21 @@ def fetch_competition_standings(competition_id: str, getter=None) -> Dict[str, A
         fetched = _volleyball_standings(competition_id, getter)
         if fetched:
             return fetched
+    if competition_id == "germany-click-tt":
+        from collector.adapters_final18 import CLICK_TT_TABELLE
+
+        result = getter(CLICK_TT_TABELLE)
+        payload = result.payload if getattr(result, "ok", False) else None
+        rows = parse_clicktt_standings(payload)
+        if rows and _played_total(rows) > 0:
+            return wrap_standings(
+                rows,
+                competition=competition_id,
+                season="2025/2026",
+                stage="gesamt",
+                sport="table-tennis",
+                source="click-tt-remix",
+            )
     if competition_id == "formula-1":
         result = getter(JOLPICA_DRIVERS)
         if result.ok:

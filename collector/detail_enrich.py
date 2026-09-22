@@ -500,8 +500,14 @@ def parse_nhl_landing(payload: Any) -> Dict[str, Any]:
         descriptor = period.get("periodDescriptor") if isinstance(period.get("periodDescriptor"), dict) else {}
         number = descriptor.get("number") or period.get("period")
         goals = period.get("goals") or []
-        home_goals = sum(1 for g in goals if isinstance(g, dict) and g.get("homeScore") is not None)
-        periods.append({"label": number, "home": None, "away": None})
+        last = next((g for g in reversed(goals) if isinstance(g, dict) and (g.get("homeScore") is not None or g.get("awayScore") is not None)), None)
+        periods.append(
+            {
+                "label": number,
+                "home": last.get("homeScore") if last else 0,
+                "away": last.get("awayScore") if last else 0,
+            }
+        )
         for goal in goals:
             if not isinstance(goal, dict):
                 continue
@@ -561,6 +567,8 @@ def parse_nhl_landing(payload: Any) -> Dict[str, Any]:
         filled.append({"label": index + 1, "home": hv, "away": av})
     if filled:
         out["periods"] = filled
+    elif any((row.get("home") or row.get("away")) for row in periods):
+        out["periods"] = periods
     return out
 
 
@@ -700,6 +708,51 @@ def enrich_event_row(db: Session, row: SportsEvent, getter=None) -> None:
     if (ids.get("click-tt-remix") or ids.get("click-tt")) and not click_detail.get("rubbers"):
         tried.discard("click-tt-remix")
         tried.discard("click-tt")
+    if str(row.competition_id or "") == "lol-world-championship":
+        lol_detail = extra.get("sport_detail") if isinstance(extra.get("sport_detail"), dict) else {}
+        if not lol_detail.get("games"):
+            tried.discard("lolesports-json")
+            tried.discard("lolesports")
+        if not (ids.get("lolesports-json") or ids.get("lolesports")):
+            from collector.detail_families import resolve_lol_match_id
+
+            participants = load_json(row.participants_json, {}) or {}
+            home_name = ((participants.get("home") or {}) if isinstance(participants.get("home"), dict) else {}).get("name")
+            away_name = ((participants.get("away") or {}) if isinstance(participants.get("away"), dict) else {}).get("name")
+            found = resolve_lol_match_id(str(home_name or ""), str(away_name or ""), getter or fetch_url)
+            if found:
+                extra["source_event_ids"] = merge_family_ids(
+                    extra.get("source_event_ids"),
+                    family="lolesports-json",
+                    source_event_id=found,
+                )
+                ids = families_with_ids(extra)
+    if str(getattr(row, "sport_id", "") or "") == "cricket" and not extra.get("innings"):
+        checked = extra.get("bbc_cricket_checked_at")
+        retry = True
+        if checked:
+            try:
+                checked_at = datetime.fromisoformat(str(checked))
+                retry = (datetime.utcnow() - checked_at.replace(tzinfo=None)).total_seconds() > TTL_NEGATIVE
+            except ValueError:
+                retry = True
+        if retry:
+            from collector.detail_families import fetch_bbc_cricket_match
+
+            participants = load_json(row.participants_json, {}) or {}
+            home_name = ((participants.get("home") or {}) if isinstance(participants.get("home"), dict) else {}).get("name")
+            away_name = ((participants.get("away") or {}) if isinstance(participants.get("away"), dict) else {}).get("name")
+            on_date = row.start_time.date().isoformat() if row.start_time else ""
+            found = fetch_bbc_cricket_match(str(home_name or ""), str(away_name or ""), on_date)
+            extra["bbc_cricket_checked_at"] = datetime.utcnow().isoformat()
+            if found.get("innings"):
+                extra["innings"] = found["innings"]
+                detail = dict(extra.get("sport_detail") or {}) if isinstance(extra.get("sport_detail"), dict) else {}
+                detail.update(found.get("sport_detail") or {})
+                extra["sport_detail"] = detail
+                if found.get("live") is True:
+                    row.live = True
+                    row.status = "live"
     pending = [fam for fam in DETAIL_FAMILIES if ids.get(fam) and fam not in tried]
     record = db.get(SportsEventDetail, row.event_id)
     missing_lineups = not (record and load_json(record.lineups_json)) and not extra.get("lineups_absent")
@@ -716,7 +769,12 @@ def enrich_event_row(db: Session, row: SportsEvent, getter=None) -> None:
     jobs = [(family, source_id) for family, source_id in ids.items() if family in DETAIL_FAMILIES]
     detail: Dict[str, Any] = {}
     used = list(tried)
-    getter = getter or (lambda url: fetch_url(url, timeout=8))
+    def _detail_getter(url, headers=None):
+        if headers:
+            return fetch_url(url, headers=headers, timeout=12)
+        return fetch_url(url, timeout=12)
+
+    getter = getter or _detail_getter
     from concurrent.futures import ThreadPoolExecutor
 
     def _one(item):

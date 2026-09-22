@@ -195,6 +195,151 @@ def test_euroleague_boxscore_quarters_and_players():
     assert merged["player_statistics"][0]["points"] == 18
 
 
+def test_nhl_period_scores_from_scoring_goals_and_stored_incidents():
+    from collector.canonical_detail import periods_from_hockey_goals
+    from collector.detail_enrich import parse_nhl_landing
+
+    parsed = parse_nhl_landing(
+        {
+            "homeTeam": {"score": 2, "sog": 28},
+            "awayTeam": {"score": 1, "sog": 19},
+            "summary": {
+                "scoring": [
+                    {"periodDescriptor": {"number": 1}, "goals": []},
+                    {
+                        "periodDescriptor": {"number": 2},
+                        "goals": [{"name": {"default": "C. Eiserman"}, "timeInPeriod": "00:55", "homeScore": 0, "awayScore": 1}],
+                    },
+                    {
+                        "periodDescriptor": {"number": 3},
+                        "goals": [{"name": {"default": "N. Hischier"}, "timeInPeriod": "12:00", "homeScore": 2, "awayScore": 1}],
+                    },
+                ]
+            },
+        }
+    )
+    assert parsed["periods"] == [
+        {"label": 1, "home": 0, "away": 0},
+        {"label": 2, "home": 0, "away": 1},
+        {"label": 3, "home": 2, "away": 1},
+    ]
+    assert parsed["incidents"][0]["type"] == "goal"
+    derived = periods_from_hockey_goals(parsed["incidents"])
+    assert derived[2]["home"] == 2
+    event = attach_canonical_detail(
+        {"sport": "ice-hockey", "score": {"home": 2, "away": 1}, "incidents": parsed["incidents"]}
+    )
+    assert event["periods"][0]["home"] == 0
+    assert event["periods"][2]["away"] == 1
+    sparse = parse_nhl_landing({"homeTeam": {"score": 3}, "awayTeam": {"score": 0}, "summary": {"scoring": [{"periodDescriptor": {"number": 1}, "goals": []}]}})
+    assert "periods" not in sparse
+
+
+def test_lol_series_keeps_game_identity():
+    from collector.detail_families import parse_lol_event
+
+    parsed = parse_lol_event(
+        {
+            "data": {
+                "event": {
+                    "id": "event-1",
+                    "match": {
+                        "id": "match-1",
+                        "strategy": {"count": 5},
+                        "teams": [
+                            {"id": "blue-team", "name": "KT Rolster", "result": {"gameWins": 2}},
+                            {"id": "red-team", "name": "T1", "result": {"gameWins": 3}},
+                        ],
+                        "games": [
+                            {"id": "game-1", "number": 1, "state": "completed", "teams": [{"id": "blue-team", "side": "blue"}, {"id": "red-team", "side": "red"}]},
+                        ],
+                    },
+                }
+            }
+        },
+        windows={
+            "game-1": {
+                "frames": [
+                    {"rfc460Timestamp": "2025-11-09T07:32:00Z", "gameState": "in_game"},
+                    {"rfc460Timestamp": "2025-11-09T08:24:00Z", "gameState": "finished", "blueTeam": {"totalKills": 11}, "redTeam": {"totalKills": 25}},
+                ],
+                "gameMetadata": {
+                    "blueTeamMetadata": {"esportsTeamId": "blue-team"},
+                    "redTeamMetadata": {"esportsTeamId": "red-team"},
+                },
+            }
+        },
+    )
+    game = parsed["sport_detail"]["games"][0]
+    assert parsed["sport_detail"]["series_id"] == "match-1"
+    assert parsed["sport_detail"]["best_of"] == 5
+    assert game["id"] == "game-1"
+    assert game["blue"]["name"] == "KT Rolster"
+    assert game["blue"]["kills"] == 11
+    assert game["red"]["side"] == "red"
+    assert game["duration"] == 3120
+    assert "winner" not in game
+    assert "maps" not in parsed
+
+
+def test_bbc_cricket_innings_and_live_flag_are_explicit():
+    from collector.detail_families import match_bbc_cricket, parse_bbc_cricket_payload
+
+    payload = {
+        "eventGroups": [
+            {
+                "id": "e-finished",
+                "status": "PostEvent",
+                "startDateTime": "2020-01-01T00:00:00Z",
+                "tournamentName": "Women's International Twenty20 Match",
+                "groundName": "Nisshin",
+                "matchSummary": {"winnerTeamName": "Pakistan Women", "resultString": "win by 31 runs"},
+                "participants": {
+                    "homeTeam": {"name": "Pakistan Women", "innings": [{"runs": "145", "wickets": "8", "overs": "20.0", "inningsNumber": "1", "isLive": False}]},
+                    "awayTeam": {"name": "Bangladesh Women", "innings": [{"runs": "114", "wickets": "7", "overs": "20.0", "inningsNumber": "2", "isLive": False}]},
+                },
+            },
+            {
+                "id": "e-live",
+                "status": "InPlay",
+                "tournamentName": "Men's Australia One-Day Cup",
+                "matchSummary": {"resultString": "Queensland Bulls are 4 for 0"},
+                "participants": {
+                    "homeTeam": {"name": "Queensland Bulls", "innings": [{"runs": "4", "wickets": "0", "overs": "1.3", "isLive": True}]},
+                    "awayTeam": {"name": "New South Wales", "innings": None},
+                },
+            },
+            {
+                "id": "e-soon",
+                "status": "PreEvent",
+                "startDateTime": "2026-09-22T11:30:00Z",
+                "tournamentName": "Men's One Day International Series",
+                "participants": {
+                    "homeTeam": {"name": "England", "innings": None},
+                    "awayTeam": {"name": "Sri Lanka", "innings": None},
+                },
+            },
+        ]
+    }
+    rows = parse_bbc_cricket_payload(payload)
+    finished = match_bbc_cricket(rows, "Pakistan Women", "Bangladesh Women")
+    assert finished["live"] is False
+    assert finished["sport_detail"]["live"] is False
+    assert finished["sport_detail"]["historical"] is False
+    assert finished["innings"][0]["runs"] == 145
+    assert finished["innings"][0]["wickets"] == 8
+    assert finished["innings"][0]["overs"] == "20.0"
+    assert finished["innings"][1]["runs"] == 114
+    assert finished["sport_detail"]["result"] == "win by 31 runs"
+    live = next(row for row in rows if row["id"] == "e-live")
+    assert live["live"] is True
+    assert live["innings"][0]["live"] is True
+    soon = next(row for row in rows if row["id"] == "e-soon")
+    assert soon["live"] is False
+    assert soon["status"] == "scheduled"
+    assert match_bbc_cricket(rows, "England", "Sri Lanka") == {}
+
+
 def test_nhl_period_scores_from_score_by_period():
     from collector.detail_enrich import parse_nhl_landing
 

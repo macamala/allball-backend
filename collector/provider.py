@@ -165,6 +165,7 @@ INTERNAL_EVENT_KEYS = {
     "status_inferred",
     "quality_flags",
     "detail_fetched_at",
+    "bbc_cricket_checked_at",
     "detail_empty",
     "detail_negative",
     "detail_families_tried",

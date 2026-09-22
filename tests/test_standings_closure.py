@@ -236,6 +236,63 @@ def test_volleyball_standings_keep_sets():
     assert superlega[0]["wins"] == 2
 
 
+def test_clicktt_table_uses_played_matches():
+    from collector.standings_enrich import parse_clicktt_standings
+
+    rows = canonicalize_standing_rows(
+        parse_clicktt_standings(
+            {
+                "data": {
+                    "league_table": [
+                        {
+                            "team_name": "Borussia Düsseldorf",
+                            "table_rank": 1,
+                            "meetings_count": 22,
+                            "meetings_won": 19,
+                            "meetings_lost": 3,
+                            "meetings_tie": 0,
+                            "points_won": 38,
+                            "sets_won": 210,
+                            "sets_lost": 137,
+                        }
+                    ]
+                }
+            }
+        ),
+        sport="table-tennis",
+    )
+    assert rows[0]["team"] == "Borussia Düsseldorf"
+    assert rows[0]["played"] == 22
+    assert rows[0]["points"] == 38
+    assert rows[0]["sets_for"] == 210
+    assert rows[0]["sets_against"] == 137
+    assert "draws" not in rows[0]
+    assert "goals_for" not in rows[0]
+
+
+def test_superlega_selection_skips_unplayed_season():
+    from collector.standings_enrich import _marker_hits, _played_total, parse_legavolley_standings
+
+    zero = parse_legavolley_standings(
+        """<table Id="GareGiornata"><tr><span class="pos">1</span>&nbsp; Cucine Lube Civitanova
+        <td>0</td><td>0</td><td>0</td><td>0</td></tr>
+        <tr><span class="pos">2</span>&nbsp; Allianz Milano <td>0</td><td>0</td><td>0</td><td>0</td></tr>
+        <tr><span class="pos">3</span>&nbsp; Itas Trentino <td>0</td><td>0</td><td>0</td><td>0</td></tr></table>"""
+    )
+    played = parse_legavolley_standings(
+        """<table Id="GareGiornata"><tr><span class="pos">1</span>&nbsp; Sir Susa Scai Perugia
+        <td>12</td><td>8</td><td>6</td><td>2</td><td>1</td><td>1</td><td>0</td><td>0</td><td>0</td><td>0</td><td>20</td><td>8</td></tr>
+        <tr><span class="pos">2</span>&nbsp; Cucine Lube Civitanova
+        <td>10</td><td>8</td><td>5</td><td>3</td><td>1</td><td>1</td><td>0</td><td>0</td><td>0</td><td>0</td><td>18</td><td>12</td></tr>
+        <tr><span class="pos">3</span>&nbsp; Rana Verona
+        <td>8</td><td>8</td><td>4</td><td>4</td><td>1</td><td>1</td><td>0</td><td>0</td><td>0</td><td>0</td><td>16</td><td>14</td></tr></table>"""
+    )
+    assert _marker_hits(zero, ("Perugia", "Civitanova", "Trentino", "Monza", "Milano", "Modena", "Verona")) >= 3
+    assert _played_total(zero) == 0
+    assert _played_total(played) > 0
+    assert _marker_hits(played, ("Perugia", "Civitanova", "Trentino", "Monza", "Milano", "Modena", "Verona")) >= 3
+
+
 def test_empty_standings_fetch_does_not_wipe_snapshot():
     from datetime import datetime, timedelta
 

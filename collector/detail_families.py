@@ -12,6 +12,10 @@ RUGBY_MATCH = "https://api.wr-rims-prod.pulselive.com/rugby/v3/match/{match_id}"
 RUGBY_SUMMARY = "https://api.wr-rims-prod.pulselive.com/rugby/v3/match/{match_id}/summary"
 CFL_ROUNDS = "https://cflscoreboard.cfl.ca/json/scoreboard/rounds.json"
 LOL_EVENT = "https://esports-api.lolesports.com/persisted/gw/getEventDetails?hl=en-US&id={event_id}"
+LOL_LEAGUES = "https://esports-api.lolesports.com/persisted/gw/getLeagues?hl=en-US"
+LOL_SCHEDULE = "https://esports-api.lolesports.com/persisted/gw/getSchedule?hl=en-US&leagueId={league_id}"
+LOL_WINDOW = "https://feed.lolesports.com/livestats/v1/window/{game_id}?startingTime={starting_time}"
+LOL_WINDOW_OPEN = "https://feed.lolesports.com/livestats/v1/window/{game_id}"
 LOL_KEY = "0TvQnueqKa5mxJntVWt0w4LpLfEkrV1Ta8rQBb9Z"
 JOLPICA_RESULTS = "https://api.jolpi.ca/ergast/f1/{season}/{round}/results.json"
 OPENDOTA_MATCH = "https://api.opendota.com/api/matches/{match_id}"
@@ -21,6 +25,8 @@ EUROLEAGUE_HEADER = "https://live.euroleague.net/api/Header?gamecode={code}&seas
 OPENLIGA_MATCH = "https://api.openligadb.de/getmatchbyid/{match_id}"
 CD_MATCH = "https://mc.championdata.com/data/{comp_id}/{match_id}.json"
 CLICK_TT_LIVE = "https://www.mytischtennis.de/api/meeting/{meeting_id}/live"
+BBC_CRICKET_DAY = "https://www.bbc.com/sport/cricket/scores-fixtures/{date}"
+BBC_CRICKET_TODAY = "https://www.bbc.com/sport/cricket/scores-fixtures"
 
 
 def _get(getter, url: str, headers: Optional[Dict[str, str]] = None) -> FetchResult:
@@ -284,41 +290,108 @@ def parse_euroleague_box(payload: Any) -> Dict[str, Any]:
     return out
 
 
-def parse_lol_event(payload: Any) -> Dict[str, Any]:
+def _lol_side(team: Dict[str, Any]) -> str:
+    return str(team.get("side") or "").lower()
+
+
+def _lol_names(match: Dict[str, Any]) -> Dict[str, str]:
+    names = {}
+    for team in match.get("teams") or []:
+        if isinstance(team, dict) and team.get("id"):
+            names[str(team.get("id"))] = team.get("name") or team.get("code") or ""
+    return names
+
+
+def _lol_winner(teams: List[Dict[str, Any]], names: Dict[str, str]) -> Optional[str]:
+    for team in teams:
+        if not isinstance(team, dict):
+            continue
+        result = team.get("result") if isinstance(team.get("result"), dict) else {}
+        outcome = str(result.get("outcome") or "").lower()
+        if outcome in {"win", "winner"}:
+            return names.get(str(team.get("id"))) or team.get("name") or team.get("code")
+    return None
+
+
+def _window_stats(window: Dict[str, Any]) -> Dict[str, Any]:
+    frames = window.get("frames") if isinstance(window, dict) else []
+    if not isinstance(frames, list) or not frames:
+        return {}
+    start = frames[0].get("rfc460Timestamp") if isinstance(frames[0], dict) else None
+    last = frames[-1] if isinstance(frames[-1], dict) else {}
+    meta = window.get("gameMetadata") if isinstance(window.get("gameMetadata"), dict) else {}
+    stats = {"state": last.get("gameState"), "started_at": start, "ended_at": last.get("rfc460Timestamp")}
+    for side, meta_key, frame_key in (
+        ("blue", "blueTeamMetadata", "blueTeam"),
+        ("red", "redTeamMetadata", "redTeam"),
+    ):
+        team_meta = meta.get(meta_key) if isinstance(meta.get(meta_key), dict) else {}
+        frame = last.get(frame_key) if isinstance(last.get(frame_key), dict) else {}
+        stats[side] = {
+            "team_id": team_meta.get("esportsTeamId"),
+            "kills": frame.get("totalKills"),
+            "towers": frame.get("towers"),
+            "gold": frame.get("totalGold"),
+        }
+    if start and last.get("rfc460Timestamp") and str(last.get("gameState") or "").lower() == "finished":
+        try:
+            from datetime import datetime
+
+            opened = datetime.fromisoformat(str(start).replace("Z", "+00:00"))
+            closed = datetime.fromisoformat(str(last.get("rfc460Timestamp")).replace("Z", "+00:00"))
+            seconds = int((closed - opened).total_seconds())
+            if seconds > 0:
+                stats["duration"] = seconds
+        except ValueError:
+            pass
+    return stats
+
+
+def parse_lol_event(payload: Any, windows: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     data = (payload or {}).get("data") if isinstance(payload, dict) else {}
     event = (data or {}).get("event") or {}
     match = event.get("match") or {}
     games = match.get("games") or []
-    maps = []
+    names = _lol_names(match)
+    windows = windows or {}
+    rows = []
     for index, game in enumerate(games):
         if not isinstance(game, dict):
             continue
-        gid = game.get("id") or game.get("gameId")
-        teams = game.get("teams") or []
-        home = teams[0] if teams else {}
-        away = teams[1] if len(teams) > 1 else {}
-        home_win = ((home.get("result") or {}) if isinstance(home, dict) else {}).get("outcome") or (
-            (home.get("result") or {}) if isinstance(home, dict) else {}
-        ).get("gameWins")
-        away_win = ((away.get("result") or {}) if isinstance(away, dict) else {}).get("outcome") or (
-            (away.get("result") or {}) if isinstance(away, dict) else {}
-        ).get("gameWins")
-        maps.append(
-            {
-                "id": gid,
-                "name": game.get("number") or index + 1,
-                "state": game.get("state"),
-                "home": home_win,
-                "away": away_win,
-            }
-        )
-    out: Dict[str, Any] = {}
-    if maps and any(item.get("id") or item.get("state") not in (None, "", "unstarted") for item in maps):
-        out["maps"] = maps
-        out["sport_detail"] = {
-            "best_of": match.get("strategy", {}).get("count") if isinstance(match.get("strategy"), dict) else None,
-            "game_ids": [item.get("id") for item in maps if item.get("id")],
+        gid = str(game.get("id") or game.get("gameId") or "")
+        teams = [team for team in (game.get("teams") or []) if isinstance(team, dict)]
+        blue = next((team for team in teams if _lol_side(team) == "blue"), teams[0] if teams else {})
+        red = next((team for team in teams if _lol_side(team) == "red"), teams[1] if len(teams) > 1 else {})
+        window = _window_stats(windows.get(gid) or {})
+        blue_id = str((blue or {}).get("id") or (window.get("blue") or {}).get("team_id") or "")
+        red_id = str((red or {}).get("id") or (window.get("red") or {}).get("team_id") or "")
+        row = {
+            "id": gid or None,
+            "name": game.get("number") or index + 1,
+            "state": game.get("state") or window.get("state"),
+            "blue": {"id": blue_id or None, "name": names.get(blue_id) or None, "side": "blue"},
+            "red": {"id": red_id or None, "name": names.get(red_id) or None, "side": "red"},
+            "winner": _lol_winner(teams, names),
         }
+        for side in ("blue", "red"):
+            kills = (window.get(side) or {}).get("kills")
+            if kills is not None:
+                row[side]["kills"] = kills
+        if window.get("duration"):
+            row["duration"] = window["duration"]
+        rows.append({key: value for key, value in row.items() if value not in (None, "", {})})
+    out: Dict[str, Any] = {}
+    if rows and any(item.get("id") or item.get("state") not in (None, "", "unstarted") for item in rows):
+        strategy = match.get("strategy") if isinstance(match.get("strategy"), dict) else {}
+        tournament = event.get("tournament") if isinstance(event.get("tournament"), dict) else {}
+        league = event.get("league") if isinstance(event.get("league"), dict) else {}
+        out["sport_detail"] = {
+            "series_id": str(match.get("id") or event.get("id") or "") or None,
+            "best_of": strategy.get("count"),
+            "stage": tournament.get("id") or league.get("name") or event.get("blockName"),
+            "games": rows,
+        }
+        out["sport_detail"] = {key: value for key, value in out["sport_detail"].items() if value not in (None, "", [])}
     return out
 
 
@@ -493,6 +566,221 @@ def parse_clicktt_live(data: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
+def _lol_headers() -> Dict[str, str]:
+    return {"x-api-key": LOL_KEY}
+
+
+def _pair_names(home: str, away: str, labels: List[str]) -> bool:
+    def hit(name: str) -> bool:
+        needle = (name or "").lower().strip()
+        if len(needle) < 2:
+            return False
+        for label in labels:
+            other = label.lower().strip()
+            if needle == other or (len(needle) > 2 and (needle in other or other in needle)):
+                return True
+        return False
+
+    return hit(home) and hit(away)
+
+
+def resolve_lol_match_id(home: str, away: str, getter) -> str:
+    """Find the public Worlds match id for a series that was stored without one."""
+    if not home or not away:
+        return ""
+    from urllib.parse import quote
+
+    leagues = _get(getter, LOL_LEAGUES, headers=_lol_headers())
+    league_id = ""
+    rows = (((leagues.payload or {}).get("data") or {}).get("leagues") or []) if leagues.ok else []
+    for row in rows:
+        if isinstance(row, dict) and str(row.get("slug") or "").lower() == "worlds":
+            league_id = str(row.get("id") or "")
+    if not league_id:
+        return ""
+    token = ""
+    for _page in range(4):
+        url = LOL_SCHEDULE.format(league_id=league_id)
+        if token:
+            url += "&pageToken=" + quote(token, safe="")
+        page = _get(getter, url, headers=_lol_headers())
+        if not page.ok or not isinstance(page.payload, dict):
+            break
+        schedule = ((page.payload.get("data") or {}).get("schedule") or {})
+        for row in schedule.get("events") or []:
+            match = (row or {}).get("match") or {}
+            labels = [
+                str(team.get("name") or team.get("code") or "")
+                for team in (match.get("teams") or [])
+                if isinstance(team, dict)
+            ]
+            if match.get("id") and _pair_names(home, away, labels):
+                return str(match.get("id"))
+        token = str(((schedule.get("pages") or {}).get("older")) or "")
+        if not token:
+            break
+    return ""
+
+
+def _lol_game_window(getter, game_id: str) -> Dict[str, Any]:
+    from datetime import datetime, timedelta
+    from urllib.parse import quote
+
+    opened = _get(getter, LOL_WINDOW_OPEN.format(game_id=game_id), headers=_lol_headers())
+    if not opened.ok or not isinstance(opened.payload, dict):
+        return {}
+    frames = opened.payload.get("frames") or []
+    stamp = frames[0].get("rfc460Timestamp") if frames and isinstance(frames[0], dict) else None
+    if not stamp:
+        return opened.payload
+    best = opened.payload
+    start = datetime.fromisoformat(str(stamp).replace("Z", "+00:00"))
+    for minutes in (40, 70):
+        starting = quote((start + timedelta(minutes=minutes)).strftime("%Y-%m-%dT%H:%M:%SZ"), safe=":-")
+        page = _get(getter, LOL_WINDOW.format(game_id=game_id, starting_time=starting), headers=_lol_headers())
+        if not page.ok or not isinstance(page.payload, dict):
+            continue
+        late = list(page.payload.get("frames") or [])
+        if late and isinstance(late[0], dict):
+            late[0] = {**late[0], "rfc460Timestamp": stamp}
+        best = {**page.payload, "frames": late}
+        last = late[-1] if late else {}
+        if isinstance(last, dict) and str(last.get("gameState") or "").lower() == "finished":
+            return best
+    return best
+
+
+def _cricket_number(value: Any) -> Any:
+    if value in (None, ""):
+        return None
+    text = str(value).strip()
+    try:
+        return int(text) if text.isdigit() else float(text) if "." in text else value
+    except ValueError:
+        return value
+
+
+def parse_bbc_cricket_payload(payload: Any) -> List[Dict[str, Any]]:
+    """Innings from the public BBC Sport scores-fixtures INITIAL_DATA payload."""
+    found: List[Dict[str, Any]] = []
+
+    def walk(node: Any) -> None:
+        if isinstance(node, dict):
+            participants = node.get("participants")
+            if isinstance(participants, dict) and isinstance(participants.get("homeTeam"), dict) and node.get("id"):
+                found.append(node)
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(payload or {})
+    out = []
+    for node in found:
+        participants = node.get("participants") or {}
+        home = participants.get("homeTeam") or {}
+        away = participants.get("awayTeam") or {}
+        status = str(node.get("status") or "")
+        innings = []
+        for side, team in (("home", home), ("away", away)):
+            for item in team.get("innings") or []:
+                if not isinstance(item, dict):
+                    continue
+                innings.append(
+                    {
+                        "label": team.get("name"),
+                        "side": side,
+                        "runs": _cricket_number(item.get("runs")),
+                        "wickets": _cricket_number(item.get("wickets")),
+                        "overs": item.get("overs"),
+                        "innings_number": _cricket_number(item.get("inningsNumber")),
+                        "live": item.get("isLive") is True,
+                    }
+                )
+        summary = node.get("matchSummary") if isinstance(node.get("matchSummary"), dict) else {}
+        live = status == "InPlay"
+        out.append(
+            {
+                "id": str(node.get("id") or ""),
+                "home": home.get("name") or "",
+                "away": away.get("name") or "",
+                "status": "live" if live else "finished" if status == "PostEvent" else "scheduled",
+                "live": live,
+                "innings": [row for row in innings if row.get("runs") is not None or row.get("wickets") is not None],
+                "sport_detail": {
+                    key: value
+                    for key, value in {
+                        "result": summary.get("resultString"),
+                        "winner": summary.get("winnerTeamName"),
+                        "series": node.get("tournamentName"),
+                        "venue": node.get("groundName"),
+                        "live": live,
+                        "historical": False,
+                    }.items()
+                    if value not in (None, "", {})
+                },
+            }
+        )
+    return out
+
+
+def match_bbc_cricket(events: List[Dict[str, Any]], home: str, away: str) -> Dict[str, Any]:
+    for event in events:
+        labels = [str(event.get("home") or ""), str(event.get("away") or "")]
+        if event.get("innings") and _pair_names(home, away, labels):
+            return event
+    return {}
+
+
+def fetch_bbc_cricket_match(home: str, away: str, on_date: str = "", text_getter=None) -> Dict[str, Any]:
+    from collector.html_parse import _quoted_window_json
+    from collector.http import fetch_text
+
+    getter = text_getter or fetch_text
+    urls = []
+    if on_date:
+        urls.append(BBC_CRICKET_DAY.format(date=on_date))
+    if BBC_CRICKET_TODAY not in urls:
+        urls.append(BBC_CRICKET_TODAY)
+    for url in urls:
+        try:
+            result = getter(url)
+        except TypeError:
+            result = getter(url)
+        html = result.payload if getattr(result, "ok", False) and isinstance(result.payload, str) else ""
+        if not html:
+            continue
+        payload = _quoted_window_json(html, "__INITIAL_DATA__")
+        matched = match_bbc_cricket(parse_bbc_cricket_payload(payload), home, away)
+        if matched:
+            return matched
+    return {}
+
+
+def fetch_lol_event(source_event_id: str, getter) -> Dict[str, Any]:
+    sid = str(source_event_id or "").replace("lolesports:", "")
+    if not sid:
+        return {}
+    result = _get(getter, LOL_EVENT.format(event_id=sid), headers=_lol_headers())
+    payload = result.payload if result.ok and isinstance(result.payload, dict) else {}
+    if not payload:
+        return {}
+    games = ((((payload.get("data") or {}).get("event") or {}).get("match") or {}).get("games") or [])
+    windows: Dict[str, Any] = {}
+    for game in games:
+        if not isinstance(game, dict):
+            continue
+        gid = str(game.get("id") or "")
+        if not gid or str(game.get("state") or "").lower() not in {"completed", "finished"}:
+            continue
+        try:
+            windows[gid] = _lol_game_window(getter, gid)
+        except (TypeError, ValueError, OSError):
+            continue
+    return parse_lol_event(payload, windows)
+
+
 def fetch_extra_family_detail(family: str, source_event_id: str, getter=None) -> Dict[str, Any]:
     getter = getter or fetch_url
     family = (family or "").lower()
@@ -523,10 +811,7 @@ def fetch_extra_family_detail(family: str, source_event_id: str, getter=None) ->
                         return parse_cfl_game(game)
         return {}
     if family in {"lolesports-json", "lolesports"}:
-        result = _get(getter, LOL_EVENT.format(event_id=sid), headers={"x-api-key": LOL_KEY})
-        if result.ok and isinstance(result.payload, dict):
-            return parse_lol_event(result.payload)
-        return {}
+        return fetch_lol_event(sid, getter)
     if family in {"jolpica-f1", "jolpica"}:
         parts = sid.split(":")
         season = parts[0] if parts else ""

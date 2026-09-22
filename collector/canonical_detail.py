@@ -264,14 +264,52 @@ def sport_detail_from_event(event: Dict[str, Any]) -> Dict[str, Any]:
     return {key: value for key, value in extra.items() if value not in (None, "", [], {})}
 
 
+def periods_from_hockey_goals(incidents: Any) -> List[Dict[str, Any]]:
+    """Period score is the last goal's score_after in that period. Earlier goalless periods stay 0-0."""
+    rows = incidents if isinstance(incidents, list) else []
+    by_period: Dict[int, Dict[str, Any]] = {}
+    max_period = 0
+    for item in rows:
+        if not isinstance(item, dict):
+            continue
+        kind = str(item.get("type") or item.get("family") or "").lower()
+        if kind != "goal" or not isinstance(item.get("score_after"), dict):
+            continue
+        try:
+            number = int(item.get("period"))
+        except (TypeError, ValueError):
+            continue
+        if number < 1:
+            continue
+        max_period = max(max_period, number)
+        by_period[number] = item["score_after"]
+    if not max_period:
+        return []
+    home = 0
+    away = 0
+    out = []
+    for number in range(1, max_period + 1):
+        score = by_period.get(number) or {}
+        if score.get("home") is not None:
+            home = score.get("home")
+        if score.get("away") is not None:
+            away = score.get("away")
+        out.append({"label": str(number), "home": home, "away": away})
+    return out
+
+
 def attach_canonical_detail(event: Dict[str, Any]) -> Dict[str, Any]:
     if not event:
         return event
     timeline = canonicalize_timeline(event.get("incidents") or event.get("timeline"))
     statistics = canonicalize_statistics(event.get("statistics"))
     lineups = canonicalize_lineups(event.get("lineups"))
+    raw_periods = event.get("periods") or event.get("innings") or (event.get("score") or {}).get("periods")
+    sport = str(event.get("sport") or "").lower()
+    if sport == "ice-hockey" and not raw_periods:
+        raw_periods = periods_from_hockey_goals(event.get("incidents") or event.get("timeline"))
     periods = canonicalize_periods(
-        event.get("periods") or event.get("innings") or (event.get("score") or {}).get("periods"),
+        raw_periods,
         sport=str(event.get("sport") or ""),
     )
     if timeline:
