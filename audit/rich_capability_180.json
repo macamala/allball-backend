@@ -1438,7 +1438,7 @@
       "stats": "NO_ACCESSIBLE_DATA_FOUND",
       "lineups": "NO_ACCESSIBLE_DATA_FOUND",
       "periods": "PROVEN",
-      "standings": "NO_ACCESSIBLE_DATA_FOUND",
+      "standings": "PROVEN",
       "player_stats": "NO_ACCESSIBLE_DATA_FOUND",
       "venue": "NO_ACCESSIBLE_DATA_FOUND",
       "officials": "NO_ACCESSIBLE_DATA_FOUND",
@@ -1448,7 +1448,7 @@
       "adapter": "click-tt-remix",
       "implemented": true,
       "production_verified": true,
-      "limitation": "Production Match Centre renders the team meeting and each rubber with players and game scores. Standings are not on this feed."
+      "limitation": "Production Match Centre renders rubbers. The same Remix tabelle payload has the Bundesliga table: 12 clubs, Dusseldorf 22 played, 19 wins, 38 points, sets 210-137."
     },
     {
       "competition": "germany-del",
@@ -1689,18 +1689,18 @@
       "timeline": "NO_ACCESSIBLE_DATA_FOUND",
       "stats": "NO_ACCESSIBLE_DATA_FOUND",
       "lineups": "NO_ACCESSIBLE_DATA_FOUND",
-      "periods": "PARTIAL",
+      "periods": "PROVEN",
       "standings": "NO_ACCESSIBLE_DATA_FOUND",
       "player_stats": "NO_ACCESSIBLE_DATA_FOUND",
       "venue": "PARTIAL",
       "officials": "NO_ACCESSIBLE_DATA_FOUND",
-      "sport_detail": "PARTIAL",
+      "sport_detail": "PROVEN",
       "transport": "bbc.com/sport HTML",
       "Railway_access": true,
       "adapter": "bbc-sport",
       "implemented": true,
-      "production_verified": false,
-      "limitation": "Score/status; snooker frames when BBC publishes them"
+      "production_verified": true,
+      "limitation": "BBC scores-fixtures innings for the 15 Sep 2026 England vs Sri Lanka match: 254/4 (20.0) and 135/10 (19.0), result win by 119 runs. Live is set only when BBC status is InPlay. No batting or bowling card on this page."
     },
     {
       "competition": "internationals-rwc",
@@ -1837,7 +1837,7 @@
       "stats": "NO_ACCESSIBLE_DATA_FOUND",
       "lineups": "NO_ACCESSIBLE_DATA_FOUND",
       "periods": "PARTIAL",
-      "standings": "PARTIAL",
+      "standings": "PROVEN",
       "player_stats": "NO_ACCESSIBLE_DATA_FOUND",
       "venue": "NO_ACCESSIBLE_DATA_FOUND",
       "officials": "NO_ACCESSIBLE_DATA_FOUND",
@@ -1847,7 +1847,7 @@
       "adapter": "dataproject-web",
       "implemented": true,
       "production_verified": false,
-      "limitation": "legavolley.it classifica is the same host as the calendar. The SuperLega page currently links campionato 999, and every club has played 0, so the table is not a proven results ladder."
+      "limitation": "The homepage still links campionato 999 with every club on 0 played. The season selector includes campionato 991, which has real matches: 8 clubs, 50 played, Perugia 9 played, 9 wins, 26 points, sets 27-7."
     },
     {
       "competition": "japan-j1",

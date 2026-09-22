@@ -320,20 +320,19 @@ def _window_stats(window: Dict[str, Any]) -> Dict[str, Any]:
     start = frames[0].get("rfc460Timestamp") if isinstance(frames[0], dict) else None
     last = frames[-1] if isinstance(frames[-1], dict) else {}
     meta = window.get("gameMetadata") if isinstance(window.get("gameMetadata"), dict) else {}
-    stats = {"state": last.get("gameState"), "started_at": start, "ended_at": last.get("rfc460Timestamp")}
+    finished = str(last.get("gameState") or "").lower() == "finished"
+    stats: Dict[str, Any] = {"state": last.get("gameState"), "started_at": start, "ended_at": last.get("rfc460Timestamp")}
     for side, meta_key, frame_key in (
         ("blue", "blueTeamMetadata", "blueTeam"),
         ("red", "redTeamMetadata", "redTeam"),
     ):
         team_meta = meta.get(meta_key) if isinstance(meta.get(meta_key), dict) else {}
         frame = last.get(frame_key) if isinstance(last.get(frame_key), dict) else {}
-        stats[side] = {
-            "team_id": team_meta.get("esportsTeamId"),
-            "kills": frame.get("totalKills"),
-            "towers": frame.get("towers"),
-            "gold": frame.get("totalGold"),
-        }
-    if start and last.get("rfc460Timestamp") and str(last.get("gameState") or "").lower() == "finished":
+        side_stats = {"team_id": team_meta.get("esportsTeamId")}
+        if finished and frame.get("totalKills") is not None:
+            side_stats["kills"] = frame.get("totalKills")
+        stats[side] = side_stats
+    if finished and start and last.get("rfc460Timestamp"):
         try:
             from datetime import datetime
 
@@ -383,12 +382,12 @@ def parse_lol_event(payload: Any, windows: Optional[Dict[str, Any]] = None) -> D
     out: Dict[str, Any] = {}
     if rows and any(item.get("id") or item.get("state") not in (None, "", "unstarted") for item in rows):
         strategy = match.get("strategy") if isinstance(match.get("strategy"), dict) else {}
-        tournament = event.get("tournament") if isinstance(event.get("tournament"), dict) else {}
         league = event.get("league") if isinstance(event.get("league"), dict) else {}
+        stage = league.get("name") or event.get("blockName")
         out["sport_detail"] = {
             "series_id": str(match.get("id") or event.get("id") or "") or None,
             "best_of": strategy.get("count"),
-            "stage": tournament.get("id") or league.get("name") or event.get("blockName"),
+            "stage": stage if stage and not str(stage).isdigit() else None,
             "games": rows,
         }
         out["sport_detail"] = {key: value for key, value in out["sport_detail"].items() if value not in (None, "", [])}
@@ -635,7 +634,7 @@ def _lol_game_window(getter, game_id: str) -> Dict[str, Any]:
         return opened.payload
     best = opened.payload
     start = datetime.fromisoformat(str(stamp).replace("Z", "+00:00"))
-    for minutes in (40, 70):
+    for minutes in (20, 35, 50, 70):
         starting = quote((start + timedelta(minutes=minutes)).strftime("%Y-%m-%dT%H:%M:%SZ"), safe=":-")
         page = _get(getter, LOL_WINDOW.format(game_id=game_id, starting_time=starting), headers=_lol_headers())
         if not page.ok or not isinstance(page.payload, dict):

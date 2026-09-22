@@ -197,7 +197,22 @@ def _public_value(value: Any) -> Any:
 
 
 def public_event(payload: Dict[str, Any]) -> Dict[str, Any]:
-    return _public_value(payload)
+    cleaned = _public_value(payload)
+    detail = cleaned.get("sport_detail") if isinstance(cleaned.get("sport_detail"), dict) else None
+    if isinstance(detail, dict):
+        detail.pop("series_id", None)
+        games = detail.get("games")
+        if isinstance(games, list):
+            for game in games:
+                if not isinstance(game, dict):
+                    continue
+                game.pop("id", None)
+                for side in ("blue", "red"):
+                    if isinstance(game.get(side), dict):
+                        game[side].pop("id", None)
+        if not detail:
+            cleaned.pop("sport_detail", None)
+    return cleaned
 
 
 LIST_PUBLIC_KEYS = (

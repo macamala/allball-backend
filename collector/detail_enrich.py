@@ -710,7 +710,15 @@ def enrich_event_row(db: Session, row: SportsEvent, getter=None) -> None:
         tried.discard("click-tt")
     if str(row.competition_id or "") == "lol-world-championship":
         lol_detail = extra.get("sport_detail") if isinstance(extra.get("sport_detail"), dict) else {}
-        if not lol_detail.get("games"):
+        games = lol_detail.get("games") if isinstance(lol_detail.get("games"), list) else []
+        zero_kills = any(
+            isinstance(game, dict)
+            and not game.get("duration")
+            and not game.get("winner")
+            and ((game.get("blue") or {}).get("kills") == 0 or (game.get("red") or {}).get("kills") == 0)
+            for game in games
+        )
+        if not games or zero_kills:
             tried.discard("lolesports-json")
             tried.discard("lolesports")
         if not (ids.get("lolesports-json") or ids.get("lolesports")):
@@ -818,7 +826,25 @@ def enrich_event_row(db: Session, row: SportsEvent, getter=None) -> None:
     if detail.get("player_statistics"):
         extra["player_statistics"] = extra.get("player_statistics") or detail["player_statistics"]
     if detail.get("sport_detail"):
-        extra["sport_detail"] = extra.get("sport_detail") or detail["sport_detail"]
+        current = extra.get("sport_detail") if isinstance(extra.get("sport_detail"), dict) else {}
+        incoming = detail["sport_detail"] if isinstance(detail.get("sport_detail"), dict) else {}
+        incoming_games = incoming.get("games") if isinstance(incoming.get("games"), list) else []
+        current_games = current.get("games") if isinstance(current.get("games"), list) else []
+        if incoming_games and not current_games:
+            extra["sport_detail"] = {**current, **incoming}
+        elif incoming_games and current_games and not any(
+            isinstance(game, dict)
+            and (
+                game.get("duration")
+                or game.get("winner")
+                or ((game.get("blue") or {}).get("kills") or 0) > 0
+                or ((game.get("red") or {}).get("kills") or 0) > 0
+            )
+            for game in current_games
+        ):
+            extra["sport_detail"] = {**current, **incoming}
+        else:
+            extra["sport_detail"] = current or incoming
     if detail.get("classification"):
         extra["classification"] = extra.get("classification") or detail["classification"]
     if detail.get("maps"):
