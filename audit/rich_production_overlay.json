@@ -208,5 +208,17 @@
     "standings": "PARTIAL",
     "production_verified": true,
     "limitation": "PulseLive Hurricanes vs Chiefs production Match Centre team stats, lineups, tries/conversions sport_detail."
+  },
+  "germany-click-tt": {
+    "periods": "PROVEN",
+    "sport_detail": "PROVEN",
+    "production_verified": true,
+    "limitation": "Production Match Centre renders the team meeting and each rubber with players and game scores. Standings are not on this feed."
+  },
+  "t20-internationals": {
+    "periods": "PROVEN",
+    "sport_detail": "PROVEN",
+    "production_verified": true,
+    "limitation": "Production Match Centre renders innings runs, wickets, overs, target, and the match result. No batting or bowling card is on the public payload."
   }
 }
