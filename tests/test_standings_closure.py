@@ -393,3 +393,25 @@ def test_clicktt_live_payload_exposes_players_and_sets():
     assert rubber["away_player"] == "Tom Jarvis"
     assert rubber["games"][0] == {"label": 1, "home": 2, "away": 11}
     assert len(rubber["games"]) == 2
+    assert "home_players" not in rubber
+
+    doubles = parse_clicktt_live(
+        {
+            "data": {
+                "match": [
+                    {
+                        "sets_home": 3,
+                        "sets_guest": 2,
+                        "set1_home": 11,
+                        "set1_guest": 8,
+                        "mm_player11": {"firstname": "Anna", "lastname": "One"},
+                        "mm_player12": {"firstname": "Bea", "lastname": "Two"},
+                        "mm_player21": {"firstname": "Cara", "lastname": "Three"},
+                        "mm_player22": {"firstname": "Dora", "lastname": "Four"},
+                    }
+                ]
+            }
+        }
+    )["sport_detail"]["rubbers"][0]
+    assert doubles["home_players"] == ["Anna One", "Bea Two"]
+    assert doubles["away_players"] == ["Cara Three", "Dora Four"]

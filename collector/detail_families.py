@@ -424,18 +424,24 @@ def parse_clicktt_live(data: Dict[str, Any]) -> Dict[str, Any]:
                     return " ".join(part for part in (value.get("firstname"), value.get("lastname")) if part) or None
                 return value
 
-            home_player = _player_name(
-                item.get("player_home")
-                or item.get("playerHome")
-                or item.get("mm_player11")
-                or ((item.get("home_players") or [{}])[0] if isinstance(item.get("home_players"), list) else None)
-            )
-            away_player = _player_name(
-                item.get("player_guest")
-                or item.get("playerAway")
-                or item.get("mm_player21")
-                or ((item.get("guest_players") or [{}])[0] if isinstance(item.get("guest_players"), list) else None)
-            )
+            def _named_list(keys, list_key):
+                names = []
+                raw_list = item.get(list_key)
+                if isinstance(raw_list, list):
+                    for value in raw_list:
+                        name = _player_name(value)
+                        if name and name not in names:
+                            names.append(name)
+                for key in keys:
+                    name = _player_name(item.get(key))
+                    if name and name not in names:
+                        names.append(name)
+                return names
+
+            home_names = _named_list(("player_home", "playerHome", "mm_player11", "mm_player12"), "home_players")
+            away_names = _named_list(("player_guest", "playerAway", "mm_player21", "mm_player22"), "guest_players")
+            home_player = home_names[0] if home_names else None
+            away_player = away_names[0] if away_names else None
             games = []
             raw_games = item.get("set_scores") or item.get("sets") or item.get("games") or item.get("points") or []
             if not raw_games:
@@ -470,6 +476,8 @@ def parse_clicktt_live(data: Dict[str, Any]) -> Dict[str, Any]:
                 "away": away,
                 "home_player": home_player,
                 "away_player": away_player,
+                "home_players": home_names if len(home_names) > 1 else None,
+                "away_players": away_names if len(away_names) > 1 else None,
                 "games": games or None,
             }
             rubbers.append({key: value for key, value in rubber.items() if value not in (None, "", [])})
