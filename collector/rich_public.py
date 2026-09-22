@@ -522,33 +522,43 @@ def _collect_heats(node: Any, found: List[Dict[str, Any]], depth: int) -> None:
 def parse_letour_rankings(html: str) -> Dict[str, Any]:
     rows = []
     for tr in re.findall(r"<tr class=\"rankingTables__row[\s\S]*?</tr>", html or "", re.I):
-        cells = [_cell(td) for td in re.findall(r"<td[\s\S]*?</td>", tr, re.I)]
-        cells = [cell for cell in cells if cell]
+        cells = [_plain(td) for td in re.findall(r"<td[\s\S]*?</td>", tr, re.I)]
+        cells = [cell for cell in cells if cell and cell != "\xa0"]
         if len(cells) < 3:
             continue
-        name = ""
         alt = re.search(r'alt="([^"]+)"', tr)
-        if alt:
-            name = alt.group(1).strip()
-        position = cells[0]
+        name = alt.group(1).strip() if alt else ""
         if not name:
+            name = next((cell for cell in cells if re.search(r"[A-Za-z]{2,}.*[A-Za-z]", cell) and " " in cell and not re.search(r"\d+h", cell)), "")
+        position = next((cell for cell in cells if re.fullmatch(r"\d{1,3}", cell)), "")
+        if not name or not position:
             continue
         item = {"position": position, "name": name}
-        team = next((cell for cell in cells if re.search(r"[A-Za-z]", cell) and name not in cell and cell != name), "")
+        teams = [
+            cell
+            for cell in cells
+            if cell not in {name, position}
+            and re.search(r"[A-Za-z]{3}", cell)
+            and not re.search(r"\d+h|\d:\d", cell)
+            and name not in cell
+        ]
+        team = max(teams, key=len) if teams else ""
         if team:
             item["team"] = team
-        times = [cell for cell in cells if re.search(r"\d:\d{2}", cell) or cell in {"-", "–"} or cell.startswith("+")]
-        if times:
-            item["time"] = times[0]
-        if len(times) > 1:
-            item["gap"] = times[1]
-        points = [cell for cell in cells if cell.isdigit() and cell != position]
-        if points:
-            item["points"] = points[-1]
+        clocks = [cell for cell in cells if re.search(r"\d+h|\d:\d{2}", cell) or cell.startswith("+")]
+        if clocks:
+            item["time"] = clocks[0]
+        if len(clocks) > 1:
+            item["gap"] = clocks[1]
         rows.append({key: value for key, value in item.items() if value not in (None, "")})
     if not rows:
         return {}
     return {"classification": rows[:80]}
+
+
+def _plain(value: str) -> str:
+    text = _cell(value).replace("&#039;", "'").replace("&#39;", "'").replace("&nbsp;", " ")
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def parse_wec_summary(html: str) -> Dict[str, Any]:

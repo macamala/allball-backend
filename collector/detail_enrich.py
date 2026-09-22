@@ -795,7 +795,7 @@ def enrich_event_row(db: Session, row: SportsEvent, getter=None) -> None:
     from collector.rich_public import ensure_rich_source_ids
 
     ensure_rich_source_ids(row, extra)
-    if str(row.competition_id or "") == "tour-de-france" and extra.get("letour_rank_rev") != 2:
+    if str(row.competition_id or "") == "tour-de-france" and extra.get("letour_rank_rev") != 3:
         rows = extra.get("classification") if isinstance(extra.get("classification"), list) else []
         if len(rows) < 20:
             tried.discard("letour-web")
@@ -840,7 +840,7 @@ def enrich_event_row(db: Session, row: SportsEvent, getter=None) -> None:
                 _merge_detail(detail, part)
     extra["detail_families_tried"] = list(dict.fromkeys(used))
     if "letour-web" in extra["detail_families_tried"]:
-        extra["letour_rank_rev"] = 2
+        extra["letour_rank_rev"] = 3
     extra["detail_fetched_at"] = datetime.utcnow().isoformat()
     extra["parser_rev"] = PARSER_REV
     if not detail:
