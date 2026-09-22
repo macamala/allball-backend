@@ -167,6 +167,7 @@ INTERNAL_EVENT_KEYS = {
     "detail_fetched_at",
     "bbc_cricket_checked_at",
     "rich_id_checked_at",
+    "letour_rank_rev",
     "detail_empty",
     "detail_negative",
     "detail_families_tried",

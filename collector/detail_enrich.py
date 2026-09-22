@@ -64,6 +64,29 @@ DETAIL_FAMILIES = (
 )
 
 
+def _classification_score(rows: Any) -> int:
+    if not isinstance(rows, list):
+        return 0
+    score = 0
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        score += 1
+        gap = str(row.get("gap") or "")
+        clock = str(row.get("time") or "")
+        if gap not in {"", "-"} or ":" in clock:
+            score += 5
+        if row.get("shootings") or row.get("nation"):
+            score += 3
+    return score
+
+
+def _prefer_classification(current: Any, incoming: Any) -> Any:
+    if _classification_score(incoming) > _classification_score(current):
+        return incoming
+    return current or incoming
+
+
 def _ttl(status: str, *, empty: bool) -> int:
     if empty:
         return TTL_NEGATIVE
@@ -772,6 +795,18 @@ def enrich_event_row(db: Session, row: SportsEvent, getter=None) -> None:
     from collector.rich_public import ensure_rich_source_ids
 
     ensure_rich_source_ids(row, extra)
+    if str(row.competition_id or "") == "tour-de-france" and extra.get("letour_rank_rev") != 1:
+        rows = extra.get("classification") if isinstance(extra.get("classification"), list) else []
+        rich = any(
+            isinstance(item, dict)
+            and (
+                ":" in str(item.get("time") or "")
+                or str(item.get("gap") or "") not in {"", "-"}
+            )
+            for item in rows
+        )
+        if not rich:
+            tried.discard("letour-web")
     ids = families_with_ids(extra)
     pending = [fam for fam in DETAIL_FAMILIES if ids.get(fam) and fam not in tried]
     record = db.get(SportsEventDetail, row.event_id)
@@ -812,6 +847,8 @@ def enrich_event_row(db: Session, row: SportsEvent, getter=None) -> None:
                 used.append(family)
                 _merge_detail(detail, part)
     extra["detail_families_tried"] = list(dict.fromkeys(used))
+    if "letour-web" in extra["detail_families_tried"]:
+        extra["letour_rank_rev"] = 1
     extra["detail_fetched_at"] = datetime.utcnow().isoformat()
     extra["parser_rev"] = PARSER_REV
     if not detail:
@@ -860,7 +897,7 @@ def enrich_event_row(db: Session, row: SportsEvent, getter=None) -> None:
     if detail.get("officials") and not extra.get("officials"):
         extra["officials"] = detail["officials"]
     if detail.get("classification"):
-        extra["classification"] = extra.get("classification") or detail["classification"]
+        extra["classification"] = _prefer_classification(extra.get("classification"), detail["classification"])
     if detail.get("maps"):
         extra["maps"] = extra.get("maps") or detail["maps"]
     if detail.get("referee"):
