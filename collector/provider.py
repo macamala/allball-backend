@@ -166,6 +166,7 @@ INTERNAL_EVENT_KEYS = {
     "quality_flags",
     "detail_fetched_at",
     "bbc_cricket_checked_at",
+    "rich_id_checked_at",
     "detail_empty",
     "detail_negative",
     "detail_families_tried",

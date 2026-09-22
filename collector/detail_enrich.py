@@ -53,6 +53,14 @@ DETAIL_FAMILIES = (
     "click-tt-remix",
     "dataproject-web",
     "cricsheet",
+    "liiga-web",
+    "ibu-web",
+    "letour-web",
+    "fiawec-web",
+    "altiusrt-html",
+    "gri-web",
+    "letrot-web",
+    "world-aquatics-api",
 )
 
 
@@ -761,6 +769,10 @@ def enrich_event_row(db: Session, row: SportsEvent, getter=None) -> None:
                 if found.get("live") is True:
                     row.live = True
                     row.status = "live"
+    from collector.rich_public import ensure_rich_source_ids
+
+    ensure_rich_source_ids(row, extra)
+    ids = families_with_ids(extra)
     pending = [fam for fam in DETAIL_FAMILIES if ids.get(fam) and fam not in tried]
     record = db.get(SportsEventDetail, row.event_id)
     missing_lineups = not (record and load_json(record.lineups_json)) and not extra.get("lineups_absent")
@@ -844,7 +856,9 @@ def enrich_event_row(db: Session, row: SportsEvent, getter=None) -> None:
         ):
             extra["sport_detail"] = {**current, **incoming}
         else:
-            extra["sport_detail"] = current or incoming
+            extra["sport_detail"] = {**incoming, **current} if current else incoming
+    if detail.get("officials") and not extra.get("officials"):
+        extra["officials"] = detail["officials"]
     if detail.get("classification"):
         extra["classification"] = extra.get("classification") or detail["classification"]
     if detail.get("maps"):

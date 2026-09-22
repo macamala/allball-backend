@@ -437,6 +437,12 @@ def parse_openliga_match(match: Dict[str, Any]) -> Dict[str, Any]:
 def parse_championdata_match(row: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(row, dict):
         return {}
+    if isinstance(row.get("matchStats"), dict):
+        from collector.rich_public import parse_championdata_detail
+
+        parsed = parse_championdata_detail(row)
+        if parsed:
+            return parsed
     match = row.get("match") if isinstance(row.get("match"), dict) else row
     out: Dict[str, Any] = {}
     periods = []
@@ -908,4 +914,9 @@ def fetch_extra_family_detail(family: str, source_event_id: str, getter=None) ->
         if rows:
             return {"classification": rows, "leaderboard": rows, "sport_detail": {"field": len(rows)}}
         return {}
+    from collector.rich_public import fetch_rich_family
+
+    parsed = fetch_rich_family(family, sid)
+    if parsed:
+        return parsed
     return {}

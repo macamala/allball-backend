@@ -318,6 +318,7 @@ class WorldAquaticsApiAdapter:
                     "competition_key": cid or "world-aquatics-events",
                     "event_family": "meet",
                     "source_family": "world-aquatics-api",
+                    "source_event_ids": {"world-aquatics-api": str(row.get("id") or row.get("Id") or "")},
                 }
             )
         return FetchResult(ok=True, http_status=result.http_status, events=_filter(events, request.capability))
