@@ -149,7 +149,8 @@ def label_matches_competition(label: str, competition_id: str) -> bool:
             needle = phrase.lower()
             if needle in blob:
                 allow_set = {item.lower() for item in allow}
-                if all(token in allow_set for token in _leftover_tokens(blob, needle)):
+                leftover = _leftover_tokens(blob, needle)
+                if leftover and all(token in allow_set for token in leftover):
                     return True
         for token in spec.get("any") or []:
             if token.lower() in blob:
