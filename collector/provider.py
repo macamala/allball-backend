@@ -880,7 +880,7 @@ class NinkoCollectedSportsDataProvider:
         payload["periods"] = extra.get("periods") or payload.get("periods")
         payload = reconcile_live_status(payload)
         corrected = correct_public_competition_id(
-            stored_competition_id=row.competition_id,
+            stored_competition_id=str(extra.get("public_competition_key") or row.competition_id),
             source_competition_name=extra.get("source_competition_name") or extra.get("competition"),
             sport_id=row.sport_id or "",
             source_family=str(extra.get("source_family") or ""),
