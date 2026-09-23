@@ -287,6 +287,10 @@ def _source_tournament_name(row: Dict[str, Any]) -> str:
     return str(source.get("name") or "").strip()
 
 
+def _source_season(row: Dict[str, Any]) -> Dict[str, Any]:
+    return row.get("season") if isinstance(row.get("season"), dict) else {}
+
+
 def _source_country(row: Dict[str, Any]) -> str:
     tour = row.get("tournament") if isinstance(row.get("tournament"), dict) else {}
     category = tour.get("category") if isinstance(tour.get("category"), dict) else {}
@@ -380,6 +384,9 @@ def sofa_event(row: Dict[str, Any], competition_id: str, sport_id: str) -> Optio
     source_competition_id = _source_tournament_id(row)
     source_competition_name = _source_tournament_name(row) or unique.get("name") or tour.get("name") or competition_id
     source_country = _source_country(row)
+    source_season = _source_season(row)
+    source_season_id = str(source_season.get("id") or "").strip()
+    source_season_name = str(source_season.get("name") or source_season.get("year") or "").strip()
     payload = {
         "id": f"sofascore:{row.get('id')}",
         "home": {"id": str(home.get("id") or ""), "name": home_name},
@@ -396,12 +403,21 @@ def sofa_event(row: Dict[str, Any], competition_id: str, sport_id: str) -> Optio
         "source_event_id": str(row.get("id") or ""),
         "source_competition_id": source_competition_id or None,
         "source_competition_name": source_competition_name,
+        "season": source_season_name or None,
+        "source_season_id": source_season_id or None,
+        "source_season_name": source_season_name or None,
+        "sofascore_tournament_id": source_competition_id or None,
+        "sofascore_season_id": source_season_id or None,
         "extra": {
             "source_family": "sofascore-web",
             "source_event_ids": {"sofascore-web": str(row.get("id") or "")},
             "source_event_id": str(row.get("id") or ""),
             "source_competition_id": source_competition_id or None,
             "source_competition_name": source_competition_name,
+            "source_season_id": source_season_id or None,
+            "source_season_name": source_season_name or None,
+            "sofascore_tournament_id": source_competition_id or None,
+            "sofascore_season_id": source_season_id or None,
         },
     }
     if periods:
@@ -440,6 +456,9 @@ def sofa_field_event(row: Dict[str, Any], competition_id: str, sport_id: str) ->
         start_time = datetime.fromtimestamp(int(start), tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     source_competition_id = _source_tournament_id(row)
     source_country = _source_country(row)
+    source_season = _source_season(row)
+    source_season_id = str(source_season.get("id") or "").strip()
+    source_season_name = str(source_season.get("name") or source_season.get("year") or "").strip()
     payload: Dict[str, Any] = {
         "id": f"sofascore:{event_id}",
         "source_event_id": event_id,
@@ -454,6 +473,11 @@ def sofa_field_event(row: Dict[str, Any], competition_id: str, sport_id: str) ->
         "source_family": "sofascore-web",
         "source_competition_id": source_competition_id or None,
         "source_competition_name": tournament_name,
+        "season": source_season_name or None,
+        "source_season_id": source_season_id or None,
+        "source_season_name": source_season_name or None,
+        "sofascore_tournament_id": source_competition_id or None,
+        "sofascore_season_id": source_season_id or None,
         "tournament": str(event_name),
         "session_type": round_info.get("name") or row.get("stage") or None,
         "home": {"name": str(event_name)},
@@ -465,6 +489,10 @@ def sofa_field_event(row: Dict[str, Any], competition_id: str, sport_id: str) ->
             "source_event_id": event_id,
             "source_competition_id": source_competition_id or None,
             "source_competition_name": tournament_name,
+            "source_season_id": source_season_id or None,
+            "source_season_name": source_season_name or None,
+            "sofascore_tournament_id": source_competition_id or None,
+            "sofascore_season_id": source_season_id or None,
             "tournament": str(event_name),
             "session_type": round_info.get("name") or row.get("stage") or None,
         },
