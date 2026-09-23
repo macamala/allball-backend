@@ -22,9 +22,9 @@ from collector.adapters_fotmob import (
 from collector.identity_events import identity_confidence
 from collector.list_extra import store_list_extra
 from collector.lock import lock_status
-from collector.models import SportsCollectorJob, SportsEvent
+from collector.models import SportsCollectorJob, SportsCompetition, SportsEvent, SportsSource, SportsSourceCompetition
 from collector.source_ids import families_with_ids, merge_family_ids
-from collector.util import dump_json, load_json
+from collector.util import dump_json, load_json, slugify
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +57,117 @@ def _protected_conflict(left: Dict[str, Any], right: Dict[str, Any]) -> bool:
 
 def _league_to_competition() -> Dict[str, str]:
     return {str(spec["id"]): competition_id for competition_id, spec in FOTMOB_LEAGUES.items() if spec.get("id")}
+
+
+def _fotmob_competition_identity(match: Dict[str, Any]) -> Tuple[Optional[str], str, str, str]:
+    league = match.get("_league") if isinstance(match.get("_league"), dict) else {}
+    league_id = str(league.get("id") or "").strip()
+    league_name = str(league.get("name") or "").strip()
+    ccode = str(league.get("ccode") or league.get("countryCode") or "").strip().upper()
+    known = _league_to_competition().get(league_id)
+    if known:
+        return known, league_id, league_name, ccode
+    if not league_id or not league_name:
+        return None, league_id, league_name, ccode
+    suffix = slugify(league_name)
+    if not suffix:
+        return None, league_id, league_name, ccode
+    country = ccode.lower() if ccode and ccode not in {"INT", "WORLD"} else ""
+    competition_id = f"football-{country}-{suffix}" if country else f"football-{suffix}"
+    return competition_id[:120], league_id, league_name, ccode
+
+
+def _ensure_dynamic_fotmob_mapping(
+    db: Session,
+    *,
+    competition_id: str,
+    league_id: str,
+    league_name: str,
+    ccode: str,
+) -> Optional[SportsSourceCompetition]:
+    competition = db.get(SportsCompetition, competition_id)
+    if competition is None:
+        competition = SportsCompetition(
+            competition_id=competition_id,
+            sport_id="football",
+            name=league_name or competition_id,
+            official_name=league_name or competition_id,
+            slug=competition_id,
+            country_id=ccode or None,
+            event_model="team_match",
+            country_based=bool(ccode and ccode not in {"INT", "WORLD"}),
+            active=True,
+            news_taxonomy=False,
+            identity_only=False,
+        )
+        db.add(competition)
+        db.flush()
+    source = (
+        db.query(SportsSource)
+        .filter(SportsSource.adapter_key == "fotmob", SportsSource.enabled.is_(True))
+        .first()
+    )
+    if source is None:
+        return None
+    mapping = (
+        db.query(SportsSourceCompetition)
+        .filter_by(competition_id=competition_id, source_id=source.source_id)
+        .first()
+    )
+    if mapping is None:
+        mapping = SportsSourceCompetition(
+            competition_id=competition_id,
+            source_id=source.source_id,
+            priority=900,
+            source_competition_id=league_id,
+            enabled=True,
+            coverage_scope="full",
+            coverage_notes="FotMob source-native daily-board breadth",
+            verification="source-native league id and daily board",
+            polling_class="NORMAL",
+            source_config_json=dump_json({"fotmob_league_id": league_id, "fotmob_league_name": league_name}),
+            independence_status="single-source-breadth",
+            upstream_family="fotmob",
+        )
+        db.add(mapping)
+        db.flush()
+    return mapping
+
+
+def _persist_missing_fotmob(
+    db: Session,
+    *,
+    match: Dict[str, Any],
+    parsed: Dict[str, Any],
+    competition_id: str,
+) -> bool:
+    from collector.provider_crosswalk import _ingest
+
+    league = match.get("_league") if isinstance(match.get("_league"), dict) else {}
+    league_id = str(league.get("id") or "").strip()
+    league_name = str(league.get("name") or "").strip()
+    ccode = str(league.get("ccode") or league.get("countryCode") or "").strip().upper()
+    mapping = _ensure_dynamic_fotmob_mapping(
+        db,
+        competition_id=competition_id,
+        league_id=league_id,
+        league_name=league_name,
+        ccode=ccode,
+    )
+    if mapping is None:
+        return False
+    incoming = {
+        **parsed,
+        "sport": "football",
+        "competition": league_name or competition_id,
+        "competition_key": competition_id,
+        "country_id": ccode or None,
+        "source_family": "fotmob",
+        "source_competition_id": league_id or None,
+        "source_competition_name": league_name or None,
+        "source_event_ids": {"fotmob": str(parsed.get("source_event_id") or "")},
+    }
+    return _ingest(db, incoming, mapping.source_id)
 
 
 def _event_view(row: SportsEvent) -> Dict[str, Any]:
@@ -125,6 +236,8 @@ def crosswalk_fotmob_ids(
     dates: Optional[List[str]] = None,
     past_days: Optional[int] = None,
     future_days: Optional[int] = None,
+    persist_missing: bool = False,
+    max_ingest: int = 160,
 ) -> Dict[str, int]:
     from collector.http import fetch_url
 
@@ -149,11 +262,10 @@ def crosswalk_fotmob_ids(
     for row in keepers:
         by_comp.setdefault(row.competition_id, []).append(row)
     upstream_total = len(matches)
-    eligible = attached = skipped_conflict = unmatched = ambiguous = 0
+    eligible = attached = skipped_conflict = unmatched = ambiguous = ingested = 0
     eligible_ids: List[str] = []
     for match in matches:
-        league_id = str((match.get("_league") or {}).get("id") or "")
-        competition_id = league_map.get(league_id)
+        competition_id, league_id, _league_name, _ccode = _fotmob_competition_identity(match)
         if not competition_id:
             continue
         parsed = match_to_event(match, competition_id)
@@ -177,16 +289,26 @@ def crosswalk_fotmob_ids(
             continue
         if best is None:
             unmatched += 1
+            if persist_missing and ingested < max_ingest:
+                if _persist_missing_fotmob(
+                    db,
+                    match=match,
+                    parsed=parsed,
+                    competition_id=competition_id,
+                ):
+                    ingested += 1
+                    by_comp.setdefault(competition_id, [])
             continue
         if _attach(best, str(parsed["source_event_id"])):
             attached += 1
     db.flush()
     logger.info(
-        "fotmob_crosswalk upstream_total=%s eligible=%s attached=%s unmatched=%s ambiguous=%s protected=%s",
+        "fotmob_crosswalk upstream_total=%s eligible=%s attached=%s unmatched=%s ingested=%s ambiguous=%s protected=%s",
         upstream_total,
         eligible,
         attached,
         unmatched,
+        ingested,
         ambiguous,
         skipped_conflict,
     )
@@ -195,6 +317,7 @@ def crosswalk_fotmob_ids(
         "upstream_eligible": eligible,
         "attached": attached,
         "unmatched": unmatched,
+        "ingested": ingested,
         "ambiguous": ambiguous,
         "protected_conflicts": skipped_conflict,
     }
@@ -317,6 +440,7 @@ def run_date_board_backfill(
         "attached": int(payload.get("attached") or 0),
         "unmatched": int(payload.get("unmatched") or 0),
         "ambiguous": int(payload.get("ambiguous") or 0),
+        "ingested": int(payload.get("ingested") or 0),
         "days_processed": list(payload.get("days_processed") or []),
     }
     fetch = getter or fetch_url
@@ -326,8 +450,18 @@ def run_date_board_backfill(
         if heartbeat:
             heartbeat()
         _BOARD.clear()
-        day_result = crosswalk_fotmob_ids(db, getter=fetch, dates=[day])
-        for key in ("upstream_total", "upstream_eligible", "attached", "unmatched", "ambiguous"):
+        try:
+            day_date = datetime.fromisoformat(day[:10]).date()
+        except ValueError:
+            day_date = datetime.utcnow().date()
+        persist_day = day_date >= (datetime.utcnow().date() - timedelta(days=1))
+        day_result = crosswalk_fotmob_ids(
+            db,
+            getter=fetch,
+            dates=[day],
+            persist_missing=persist_day,
+        )
+        for key in ("upstream_total", "upstream_eligible", "attached", "unmatched", "ingested", "ambiguous"):
             totals[key] = int(totals.get(key) or 0) + int(day_result.get(key) or 0)
         totals["days_processed"].append(day)
         _checkpoint(
