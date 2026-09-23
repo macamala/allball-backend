@@ -106,7 +106,7 @@ def test_fotmob_parser_maps_infobox_player_stats_and_xg():
             },
             "stats": {"Periods": {"All": {"stats": [{"stats": [{"title": "Expected goals (xG)", "stats": ["1.51", "1.47"]}]}]}}},
             "lineup": {
-                "homeTeam": {"formation": "4-3-3", "coach": {"name": "Vanoli"}, "starters": [{"name": "De Bruyne", "shirtNumber": 11, "performance": {"rating": 8.1}}], "subs": []},
+                "homeTeam": {"formation": "4-3-3", "coach": {"name": "Vanoli"}, "starters": [{"id": 174543, "name": "De Bruyne", "shirtNumber": 11, "performance": {"rating": 8.1}}], "subs": []},
                 "awayTeam": {"formation": "4-4-2", "starters": [{"name": "Keeper", "shirtNumber": 1}], "subs": []},
             },
             "playerStats": {
@@ -126,7 +126,7 @@ def test_fotmob_parser_maps_infobox_player_stats_and_xg():
     assert out["attendance"] == 38000
     assert out["statistics"][0]["label"] == "Expected goals (xG)"
     assert out["lineups"]["home"]["formation"] == "4-3-3"
-    assert out["lineups"]["home"]["coach"] == "Vanoli"
+    assert out["lineups"]["home"]["coach"] == "Vanoli"\n    assert out["lineups"]["home"]["start"][0]["image"].endswith("/playerimages/174543.png")
     assert out["player_statistics"][0]["goals"] == 1
     assert out["sport_detail"]["shots"] == 2
 
