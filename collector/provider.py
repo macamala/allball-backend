@@ -108,6 +108,7 @@ LIST_LOAD_COLUMNS = (
     SportsEvent.venue,
     SportsEvent.score_json,
     SportsEvent.participants_json,
+    SportsEvent.extra_json,
     SportsEvent.list_extra_json,
     SportsEvent.series_id,
     SportsEvent.session_type,
@@ -531,7 +532,12 @@ class NinkoCollectedSportsDataProvider:
             if competition:
                 query = query.filter_by(competition_id=competition)
             else:
-                query = query.filter(SportsEvent.competition_id.in_(public_ids))
+                query = query.filter(
+                    or_(
+                        SportsEvent.competition_id.in_(public_ids),
+                        and_(SportsEvent.sport_id == "football", SportsEvent.competition_id.like("football-%")),
+                    )
+                )
             if status == "live":
                 query = query.filter(SportsEvent.status.in_(LIVE_QUERY_STATUSES))
             elif status:
@@ -547,6 +553,7 @@ class NinkoCollectedSportsDataProvider:
                 or_(
                     SportsEvent.display_eligible.is_(True),
                     SportsEvent.display_eligible.is_(None),
+                    and_(SportsEvent.sport_id == "football", SportsEvent.competition_id.like("football-%")),
                 )
             )
             unbounded = not date_from and not date_to
@@ -594,7 +601,12 @@ class NinkoCollectedSportsDataProvider:
             else:
                 events = [_list_public_event(row) for row in events]
             serialize_done = time.perf_counter()
-            events = [row for row in events if (row.get("competition_key") or "") in public_ids]
+            events = [
+                row
+                for row in events
+                if (row.get("competition_key") or "") in public_ids
+                or (row.get("sport") == "football" and str(row.get("competition_key") or "").startswith("football-"))
+            ]
             cache_set(db, cache_key, events, "upcoming_fixtures" if status != "live" else "live_events")
             db.commit()
             self._last_profile = {
@@ -746,6 +758,11 @@ class NinkoCollectedSportsDataProvider:
         participants = load_json(row.participants_json, {}) or {}
         score = load_json(row.score_json, {}) or {}
         extra = extra_for_list(row) if not include_detail else (load_json(row.extra_json, {}) or {})
+        if not include_detail and (not extra.get("source_competition_name") or not extra.get("source_family")):
+            full_extra = load_json(row.extra_json, {}) or {}
+            for identity_key in ("source_competition_name", "source_family", "resolution_method", "resolution_confidence", "quality_flags", "display_eligible"):
+                if extra.get(identity_key) in (None, "", [], {} ) and full_extra.get(identity_key) not in (None, "", [], {}):
+                    extra[identity_key] = full_extra.get(identity_key)
         extra_for_payload = extra if include_detail else extra
         raw_sides = {
             "home": participants.get("home") or {},
@@ -823,18 +840,12 @@ class NinkoCollectedSportsDataProvider:
         payload["incidents"] = extra.get("incidents") or payload.get("incidents")
         payload["periods"] = extra.get("periods") or payload.get("periods")
         payload = reconcile_live_status(payload)
-        if list_mode:
-            from collector.competition_identity import OFFICIAL_PUBLIC_COMPETITIONS
-
-            allowed = frozen_competition_ids() | OFFICIAL_PUBLIC_COMPETITIONS
-            corrected = row.competition_id if row.competition_id in allowed else None
-        else:
-            corrected = correct_public_competition_id(
-                stored_competition_id=row.competition_id,
-                source_competition_name=extra.get("source_competition_name") or extra.get("competition"),
-                sport_id=row.sport_id or "",
-                source_family=str(extra.get("source_family") or ""),
-            )
+        corrected = correct_public_competition_id(
+            stored_competition_id=row.competition_id,
+            source_competition_name=extra.get("source_competition_name") or extra.get("competition"),
+            sport_id=row.sport_id or "",
+            source_family=str(extra.get("source_family") or ""),
+        )
         if corrected is None:
             return None
         payload["competition_key"] = corrected
@@ -842,6 +853,9 @@ class NinkoCollectedSportsDataProvider:
         payload = attach_competition_metadata(payload)
         source_name = str(extra.get("source_competition_name") or extra.get("competition") or "").strip()
         if corrected == "fifa-connected-competitions" and "world cup" in source_name.lower():
+            payload["competition"] = source_name
+            payload["competition_name"] = source_name
+        elif corrected.startswith("football-") and corrected not in frozen_competition_ids() and source_name:
             payload["competition"] = source_name
             payload["competition_name"] = source_name
         country = payload.get("country_id")
