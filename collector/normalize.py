@@ -111,6 +111,10 @@ def normalize_event(raw: Dict[str, Any], *, sport_id: str, competition_id: str) 
         "coverage": raw.get("coverage") or raw.get("coverage_kind"),
         "coverage_kind": raw.get("coverage_kind") or raw.get("coverage"),
         "source_competition_name": raw.get("source_competition_name") or raw.get("competition"),
+        "source_season_id": raw.get("source_season_id") or ((raw.get("extra") or {}).get("source_season_id") if isinstance(raw.get("extra"), dict) else None),
+        "source_season_name": raw.get("source_season_name") or ((raw.get("extra") or {}).get("source_season_name") if isinstance(raw.get("extra"), dict) else None),
+        "sofascore_tournament_id": raw.get("sofascore_tournament_id") or ((raw.get("extra") or {}).get("sofascore_tournament_id") if isinstance(raw.get("extra"), dict) else None),
+        "sofascore_season_id": raw.get("sofascore_season_id") or ((raw.get("extra") or {}).get("sofascore_season_id") if isinstance(raw.get("extra"), dict) else None),
         "source_family": raw.get("source_family"),
         "source_event_ids": (raw.get("source_event_ids") if isinstance(raw.get("source_event_ids"), dict) else None)
         or ((raw.get("extra") or {}).get("source_event_ids") if isinstance(raw.get("extra"), dict) else None),
