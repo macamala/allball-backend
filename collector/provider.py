@@ -976,12 +976,12 @@ class NinkoCollectedSportsDataProvider:
             if start_to is not None:
                 query = query.filter(SportsEvent.start_time <= start_to)
             query = query.filter(SportsEvent.canonical_event_id.is_(None))
+            # display_eligible=False is authoritative. Dynamic/global
+            # competition IDs expand the catalog but never bypass quality.
             query = query.filter(
                 or_(
                     SportsEvent.display_eligible.is_(True),
                     SportsEvent.display_eligible.is_(None),
-                    SportsEvent.competition_id.in_(source_native_ids),
-                    and_(SportsEvent.sport_id == "football", SportsEvent.competition_id.like("football-%")),
                 )
             )
             unbounded = not date_from and not date_to

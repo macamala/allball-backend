@@ -502,6 +502,17 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
                     logger.exception("FIFA identity reconcile failed")
                     db.rollback()
             try:
+                from collector.source_native_reconcile import run_if_due as run_source_native_revalidate_if_due
+
+                native_stats = run_source_native_revalidate_if_due(db)
+                if native_stats:
+                    logger.info("Source-native football revalidate %s", native_stats)
+                    _maybe_log_breadth(db, force=True)
+            except Exception:
+                logger.exception("Source-native football revalidate failed")
+                db.rollback()
+
+            try:
                 from collector.openfootball_breadth import run_if_due as run_openfootball_breadth_if_due
 
                 def _pulse_openfootball() -> None:

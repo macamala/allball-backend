@@ -169,6 +169,10 @@ def quality_flags_for_name(name: Optional[str]) -> List[str]:
 def quality_flags_for_event(event: Dict[str, Any]) -> List[str]:
     flags: List[str] = []
     for key in ("home", "away", "participant_a", "participant_b"):
+        # participant_a / participant_b are optional alternate shapes. Team
+        # matches using home/away must not get false empty-name warnings.
+        if key in {"participant_a", "participant_b"} and not event.get(key):
+            continue
         side = event.get(key) or {}
         name = side.get("name") if isinstance(side, dict) else side
         for flag in quality_flags_for_name(name if isinstance(name, str) else ""):
