@@ -244,6 +244,16 @@ def parse_sportscore_detail(payload: Any) -> Dict[str, Any]:
         }]
     return out
 
+def _fotmob_player_image(player: Dict[str, Any]) -> Optional[str]:
+    explicit = player.get("image") or player.get("photo") or player.get("avatar") or player.get("imageUrl")
+    if explicit:
+        return str(explicit)
+    player_id = player.get("id") or player.get("playerId")
+    if player_id not in (None, ""):
+        return f"https://images.fotmob.com/image_resources/playerimages/{player_id}.png"
+    return None
+
+
 def parse_fotmob_details(payload: Any) -> Dict[str, Any]:
     root = payload if isinstance(payload, dict) else {}
     content = root.get("content") if isinstance(root.get("content"), dict) else root
@@ -371,7 +381,7 @@ def parse_fotmob_details(payload: Any) -> Dict[str, Any]:
                 "number": player.get("shirtNumber") or player.get("number"),
                 "position": player.get("position") or player.get("positionId") or player.get("usualPosition"),
                 "rating": rating,
-                "image": player.get("image") or player.get("photo") or player.get("avatar") or player.get("imageUrl"),
+                "image": _fotmob_player_image(player),
             })
         return players
 
