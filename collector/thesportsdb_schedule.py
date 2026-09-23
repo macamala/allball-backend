@@ -13,8 +13,20 @@ from collector.lock import lock_status
 from collector.models import SportsCollectorJob, SportsCompetition, SportsSource, SportsSourceCompetition
 from collector.util import dump_json, load_json
 
-JOB_KEY = "thesportsdb-known-league-fixtures-v1"
-TARGET_SPORTS = ("handball", "volleyball", "ice-hockey", "baseball")
+JOB_KEY = "thesportsdb-known-league-fixtures-v2"
+TARGET_SPORTS = (
+    "handball",
+    "volleyball",
+    "ice-hockey",
+    "baseball",
+    "basketball",
+    "american-football",
+    "rugby",
+    "rugby-league",
+    "netball",
+    "australian-rules",
+    "cricket",
+)
 
 
 def _job(db: Session) -> SportsCollectorJob:
