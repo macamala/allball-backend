@@ -408,10 +408,11 @@ def _maybe_log_breadth(db, *, force: bool = False) -> None:
         public_snapshot = tomorrow_public_football_snapshot()
         logger.info("TOMORROW_FOOTBALL_PUBLIC %s", public_snapshot)
         logger.info("TOMORROW_MULTISPORT_PUBLIC %s", tomorrow_public_multisport_snapshot())
-        from collector.breadth_audit import sportscore_breadth_probe
-        logger.info("SPORTSCORE_BREADTH_PROBE %s", sportscore_breadth_probe())
-        from collector.breadth_audit import sportscore_team_schedule_probe
-        logger.info("SPORTSCORE_TEAM_SCHEDULE_PROBE %s", sportscore_team_schedule_probe())
+        from collector.breadth_audit import rolling_multisport_public_snapshot, unknown_sport_rows_snapshot
+        logger.info("MULTISPORT_PUBLIC_WINDOWS %s", rolling_multisport_public_snapshot())
+        unknown_rows = unknown_sport_rows_snapshot(db)
+        if unknown_rows:
+            logger.warning("UNKNOWN_SPORT_ROWS %s", unknown_rows)
         logger.info("FIFA_COMPETITION_SAMPLES %s", fifa_competition_samples())
         _breadth_logged_at = now_audit
     except Exception:

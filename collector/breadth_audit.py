@@ -160,12 +160,12 @@ def fifa_competition_samples() -> List[Dict[str, Any]]:
 
 
 
-def tomorrow_public_multisport_snapshot() -> Dict[str, Any]:
-    """Sydney-local canary for all public sports. Diagnostics only, never business logic."""
+def public_multisport_day_snapshot(day_offset: int = 1, *, include_samples: bool = True) -> Dict[str, Any]:
+    """Sydney-local public canary for any nearby day. Diagnostics only."""
     from collector.provider import NinkoCollectedSportsDataProvider
 
     now_local = datetime.now(timezone.utc).astimezone(SYDNEY)
-    day = now_local.date() + timedelta(days=1)
+    day = now_local.date() + timedelta(days=day_offset)
     local_start = datetime.combine(day, datetime.min.time(), tzinfo=SYDNEY)
     local_end = local_start + timedelta(days=1)
     utc_start = local_start.astimezone(timezone.utc)
@@ -178,22 +178,23 @@ def tomorrow_public_multisport_snapshot() -> Dict[str, Any]:
         allow_unfiltered=True,
     )
     sport_counts = Counter(str(row.get("sport") or "unknown") for row in events)
-    competition_counts: Dict[str, int] = {}
     samples: Dict[str, List[Dict[str, Any]]] = {}
-    for row in events:
-        sport = str(row.get("sport") or "unknown")
-        competition_counts[sport] = competition_counts.get(sport, 0) + 1
-        bucket = samples.setdefault(sport, [])
-        if len(bucket) < 8:
-            bucket.append(
-                {
-                    "competition": row.get("competition_name") or row.get("competition"),
-                    "competition_key": row.get("competition_key"),
-                    "home": (row.get("home") or {}).get("name"),
-                    "away": (row.get("away") or {}).get("name"),
-                    "utc": row.get("start_time"),
-                }
-            )
+    if include_samples:
+        for row in events:
+            sport = str(row.get("sport") or "unknown")
+            bucket = samples.setdefault(sport, [])
+            if len(bucket) < 8:
+                bucket.append(
+                    {
+                        "id": row.get("id"),
+                        "competition": row.get("competition_name") or row.get("competition"),
+                        "competition_key": row.get("competition_key"),
+                        "home": (row.get("home") or {}).get("name"),
+                        "away": (row.get("away") or {}).get("name"),
+                        "utc": row.get("start_time"),
+                        "source_family": row.get("source_family"),
+                    }
+                )
 
     distinct_competitions: Dict[str, int] = {}
     for sport in sport_counts:
@@ -206,6 +207,7 @@ def tomorrow_public_multisport_snapshot() -> Dict[str, Any]:
         )
 
     return {
+        "day_offset": day_offset,
         "local_date": day.isoformat(),
         "utc_from": utc_start.isoformat().replace("+00:00", "Z"),
         "utc_to": utc_end.isoformat().replace("+00:00", "Z"),
@@ -214,6 +216,50 @@ def tomorrow_public_multisport_snapshot() -> Dict[str, Any]:
         "competitions_by_sport": distinct_competitions,
         "samples": samples,
     }
+
+
+def tomorrow_public_multisport_snapshot() -> Dict[str, Any]:
+    return public_multisport_day_snapshot(1, include_samples=True)
+
+
+def rolling_multisport_public_snapshot() -> Dict[str, Any]:
+    return {
+        str(offset): public_multisport_day_snapshot(offset, include_samples=False)
+        for offset in (0, 1, 2)
+    }
+
+
+def unknown_sport_rows_snapshot(db, *, limit: int = 20) -> List[Dict[str, Any]]:
+    rows = (
+        db.query(SportsEvent)
+        .filter(SportsEvent.sport_id.in_(["", "unknown"]))
+        .order_by(SportsEvent.updated_at.desc())
+        .limit(limit)
+        .all()
+    )
+    out: List[Dict[str, Any]] = []
+    for row in rows:
+        participants = load_json(row.participants_json, {}) or {}
+        extra = load_json(row.extra_json, {}) or {}
+        home = participants.get("home") if isinstance(participants.get("home"), dict) else {}
+        away = participants.get("away") if isinstance(participants.get("away"), dict) else {}
+        out.append(
+            {
+                "id": row.event_id,
+                "sport": row.sport_id,
+                "competition": row.competition_id,
+                "home": home.get("name"),
+                "away": away.get("name"),
+                "start_time": row.start_time.isoformat() + "Z" if row.start_time else None,
+                "primary_source": row.primary_source_id,
+                "source_family": extra.get("source_family"),
+                "source_competition_id": extra.get("source_competition_id"),
+                "source_competition_name": extra.get("source_competition_name"),
+                "resolution_method": extra.get("resolution_method"),
+                "quality_flags": extra.get("quality_flags") or [],
+            }
+        )
+    return out
 
 
 

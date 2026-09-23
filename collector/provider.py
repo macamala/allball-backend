@@ -771,6 +771,11 @@ class NinkoCollectedSportsDataProvider:
                 if (row.get("competition_key") or "") in public_ids
                 or (row.get("sport") == "football" and str(row.get("competition_key") or "").startswith("football-"))
             ]
+            events = [
+                row
+                for row in events
+                if row.get("sport") not in {None, "", "unknown"}
+            ]
             events = _dedupe_public_fixture_rows(events, preferred_ids)
             cache_set(db, cache_key, events, "upcoming_fixtures" if status != "live" else "live_events")
             db.commit()
