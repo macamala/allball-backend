@@ -187,10 +187,12 @@ def parse_sportscore_detail(payload: Any) -> Dict[str, Any]:
                 if not isinstance(player, dict) or not player.get("name"):
                     continue
                 entry: Dict[str, Any] = {
+                    "id": player.get("id") or player.get("player_id") or player.get("playerId"),
                     "name": player.get("name"),
                     "number": player.get("number"),
-                    "position": player.get("position"),
+                    "position": player.get("position") or player.get("position_name") or player.get("role"),
                     "captain": bool(player.get("captain")),
+                    "image": player.get("image") or player.get("photo") or player.get("avatar") or player.get("image_url"),
                 }
                 rating = player.get("rating")
                 if rating not in (None, "", "0", "0.0", 0, 0.0):
@@ -363,7 +365,14 @@ def parse_fotmob_details(payload: Any) -> Dict[str, Any]:
             if not name:
                 continue
             rating = (player.get("performance") or {}).get("rating") if isinstance(player.get("performance"), dict) else None
-            players.append({"name": name, "number": player.get("shirtNumber") or player.get("number"), "rating": rating})
+            players.append({
+                "id": player.get("id") or player.get("playerId"),
+                "name": name,
+                "number": player.get("shirtNumber") or player.get("number"),
+                "position": player.get("position") or player.get("positionId") or player.get("usualPosition"),
+                "rating": rating,
+                "image": player.get("image") or player.get("photo") or player.get("avatar") or player.get("imageUrl"),
+            })
         return players
 
     if isinstance(lineup, dict) and lineup.get("homeTeam") and lineup.get("awayTeam"):
@@ -398,7 +407,14 @@ def parse_fotmob_details(payload: Any) -> Dict[str, Any]:
                         name = name_blob.get("fullName") or name_blob.get("lastName")
                     else:
                         name = name_blob
-                    row = {"name": name, "number": player.get("shirtNumber") or player.get("number")}
+                    row = {
+                        "id": player.get("id") or player.get("playerId"),
+                        "name": name,
+                        "number": player.get("shirtNumber") or player.get("number"),
+                        "position": player.get("position") or player.get("positionId") or player.get("usualPosition"),
+                        "rating": ((player.get("performance") or {}).get("rating") if isinstance(player.get("performance"), dict) else None),
+                        "image": player.get("image") or player.get("photo") or player.get("avatar") or player.get("imageUrl"),
+                    }
                     if player.get("substitute") or player.get("isSubstitute"):
                         bench.append(row)
                     else:
@@ -515,9 +531,12 @@ def parse_sofa_lineups(payload: Any) -> Optional[Dict[str, Any]]:
         for player in blob.get("players") or []:
             info = player.get("player") if isinstance(player, dict) else {}
             row = {
+                "id": (info or {}).get("id") or player.get("playerId") or player.get("id"),
                 "name": (info or {}).get("name") or player.get("name"),
                 "number": player.get("jerseyNumber") or (info or {}).get("jerseyNumber"),
-                "position": player.get("position"),
+                "position": player.get("position") or (info or {}).get("position"),
+                "rating": player.get("rating"),
+                "image": (info or {}).get("image") or (info or {}).get("photo") or player.get("image") or player.get("photo"),
             }
             if player.get("substitute"):
                 bench.append(row)
