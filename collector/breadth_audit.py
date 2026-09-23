@@ -108,6 +108,7 @@ def tomorrow_public_football_snapshot() -> Dict[str, Any]:
 
 
 def fifa_competition_samples() -> List[Dict[str, Any]]:
+    from collector.adapters_feeds import loc
     from collector.http import fetch_url
 
     result = fetch_url("https://api.fifa.com/api/v3/calendar/matches?count=100&language=en")
