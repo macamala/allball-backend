@@ -411,7 +411,8 @@ def _maybe_log_breadth(db, *, force: bool = False) -> None:
         logger.info("MULTISPORT_PUBLIC_WINDOWS %s", rolling_multisport_public_snapshot())
         unknown_rows = unknown_sport_rows_snapshot(db)
         if unknown_rows:
-            logger.warning("UNKNOWN_SPORT_ROWS %s", unknown_rows)        _breadth_logged_at = now_audit
+            logger.warning("UNKNOWN_SPORT_ROWS %s", unknown_rows)
+        _breadth_logged_at = now_audit
     except Exception:
         logger.exception("Tomorrow football breadth audit failed")
 
