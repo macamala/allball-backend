@@ -394,12 +394,13 @@ def _maybe_log_breadth(db, *, force: bool = False) -> None:
     if not force and now_audit - _breadth_logged_at < 300:
         return
     try:
-        from collector.breadth_audit import tomorrow_football_snapshot, tomorrow_public_football_snapshot
+        from collector.breadth_audit import fifa_competition_samples, tomorrow_football_snapshot, tomorrow_public_football_snapshot
 
         snapshot = tomorrow_football_snapshot(db)
         logger.info("TOMORROW_FOOTBALL_BREADTH %s", snapshot)
         public_snapshot = tomorrow_public_football_snapshot()
         logger.info("TOMORROW_FOOTBALL_PUBLIC %s", public_snapshot)
+        logger.info("FIFA_COMPETITION_SAMPLES %s", fifa_competition_samples())
         _breadth_logged_at = now_audit
     except Exception:
         logger.exception("Tomorrow football breadth audit failed")
