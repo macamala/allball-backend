@@ -29,9 +29,9 @@ TEAM_URL = "https://sportscore.com/api/widget/team/?sport={sport}&slug={slug}&li
 # SportScore edge responses are cached for ~60s. Keep our own cache bounded as
 # well: match boards stay fresh, while standings/team schedules are refreshed
 # slowly enough to remain well inside the public fair-use budget.
-_MATCH_TTL_S = 75
+_MATCH_TTL_S = 90
 _STANDINGS_TTL_S = 6 * 3600
-_TEAM_TTL_S = 2 * 3600
+_TEAM_TTL_S = 4 * 3600
 _MATCH_CACHE: Dict[str, Tuple[float, List[Dict[str, Any]]]] = {}
 _STANDINGS_CACHE: Dict[str, Tuple[float, Dict[str, Any]]] = {}
 _TEAM_CACHE: Dict[str, Tuple[float, List[Dict[str, Any]]]] = {}
