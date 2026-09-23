@@ -910,6 +910,25 @@ def _competition_due(db: Session, competition: SportsCompetition, *, force: bool
     return health.last_attempt_at + timedelta(seconds=min(seconds)) <= datetime.utcnow()
 
 
+def _ensure_official_creator_source(db: Session, source_id: str, adapter_key: str, display_name: str) -> None:
+    row = db.query(SportsSource).filter_by(source_id=source_id).first()
+    if row is not None:
+        return
+    db.add(
+        SportsSource(
+            source_id=source_id,
+            display_name=display_name,
+            kind="dynamic",
+            enabled=True,
+            requires_credentials=False,
+            licensed=False,
+            adapter_key=adapter_key,
+            upstream_family=adapter_key,
+        )
+    )
+    db.flush()
+
+
 def run_cycle(
     db: Session,
     *,
@@ -925,6 +944,8 @@ def run_cycle(
     if not collection_enabled():
         return {}
     stage("PROCESS START")
+    if writes_enabled():
+        _ensure_official_creator_source(db, "ufc-web", "ufc-web", "UFC")
     caps = capabilities or due_capabilities(db)
     summary = {cap: 0 for cap in caps}
     for stale in (
