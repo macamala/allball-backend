@@ -502,6 +502,36 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
                     logger.exception("FIFA identity reconcile failed")
                     db.rollback()
             try:
+                from collector.openfootball_breadth import run_if_due as run_openfootball_breadth_if_due
+
+                def _pulse_openfootball() -> None:
+                    heartbeat_scheduler_lock(db, owner=owner)
+                    db.commit()
+
+                openfootball_breadth = run_openfootball_breadth_if_due(
+                    db,
+                    owner=owner,
+                    heartbeat=_pulse_openfootball,
+                )
+                if openfootball_breadth:
+                    logger.info(
+                        "OpenFootball global breadth %s",
+                        {
+                            "status": openfootball_breadth.get("status"),
+                            "files": openfootball_breadth.get("files"),
+                            "competitions": openfootball_breadth.get("competitions"),
+                            "events": openfootball_breadth.get("events"),
+                            "eligible": openfootball_breadth.get("eligible"),
+                            "ingested": openfootball_breadth.get("ingested"),
+                            "errors": openfootball_breadth.get("errors"),
+                        },
+                    )
+                    _maybe_log_breadth(db, force=True)
+            except Exception:
+                logger.exception("OpenFootball global breadth failed")
+                db.rollback()
+
+            try:
                 from collector.fotmob_crosswalk import run_date_boards_if_due
 
                 def _pulse_boards() -> None:
