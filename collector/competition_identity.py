@@ -12,6 +12,12 @@ from typing import Any, Dict, List, Optional, Tuple
 _WORD_RE = re.compile(r"[a-z0-9]+")
 _STOPWORDS = {"the", "and", "of", "a", "an"}
 
+# Official competitions created by a first-party collector. They are public
+# even though they are outside the frozen 180-source coverage matrix.
+OFFICIAL_PUBLIC_COMPETITIONS = {
+    "ireland-gri-meetings",
+}
+
 # Adapter families that bind events to a frozen mapping id themselves.
 # Series/league labels from those feeds are not hub competition identity.
 MAPPING_OWNED_FAMILIES = {
@@ -26,6 +32,7 @@ MAPPING_OWNED_FAMILIES = {
     "pga-graphql",
     "championdata-netball",
     "lolesports-json",
+    "gri-web",
 }
 
 # BBC/SportScore group labels that identify a mapping. `any` is OR; `all` is AND.
@@ -306,11 +313,21 @@ def correct_public_competition_id(
     family = str(source_family or "").strip()
     slugish = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
     if not name or slugish == stored:
-        return stored if stored in frozen else None
+        return stored if stored in frozen or stored in OFFICIAL_PUBLIC_COMPETITIONS else None
     if stored and label_matches_competition(name, stored):
-        return stored if stored in frozen else None
-    if family in MAPPING_OWNED_FAMILIES:
-        return stored if stored in frozen else None
+        return stored if stored in frozen or stored in OFFICIAL_PUBLIC_COMPETITIONS else None
+    if family in MAPPING_OWNED_FAMILIES or family in {
+        "fifa",
+        "fifa-digital",
+        "fifa-json",
+        "caf-web",
+        "fivb-web",
+        "ehf-web",
+        "nascar-web",
+        "arca-web",
+        "nz-football",
+    }:
+        return stored if stored in frozen or stored in OFFICIAL_PUBLIC_COMPETITIONS else None
     matches = [
         cid
         for cid in frozen

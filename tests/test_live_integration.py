@@ -78,7 +78,8 @@ def test_pga_uses_post_upcoming_schedule_not_get():
         )
 
     events = PgaGraphqlAdapter(poster=poster).fetch(FetchRequest(capability="live_scores", competition_id="pga-tour")).events
-    assert any("upcomingSchedule" in str(body.get("query")) for body in calls)
+    assert any("completeSchedule" in str(body.get("query")) for body in calls)
+    assert calls and calls[0].get("query")
     assert events[0]["status"] == "live"
     assert events[0]["extra"]["status_inferred"] is False
 

@@ -775,10 +775,56 @@ def _cell(value: str) -> str:
 def ensure_rich_source_ids(row, extra: Dict[str, Any]) -> None:
     competition = str(getattr(row, "competition_id", "") or "")
     ids = extra.get("source_event_ids") if isinstance(extra.get("source_event_ids"), dict) else {}
-    wanted = _wanted_family(competition)
+    from collector.rich_closure import closure_family, resolve_closure_id
+
+    closure = closure_family(competition)
+    wanted = closure or _wanted_family(competition)
     if not wanted:
         return
-    if ids.get(wanted):
+    existing = str(ids.get(wanted) or "")
+    weak_ibu = competition == "biathlon" and existing.endswith("__")
+    weak_fis = competition == "fis-disciplines" and not re.fullmatch(r"[A-Za-z]{2}:\d{4}:\d+", existing)
+    weak_eh = competition == "fih-eurohockey" and not re.fullmatch(r"1827:\d+", existing)
+    label = ""
+    raw_participants = getattr(row, "participants_json", None)
+    if isinstance(raw_participants, str):
+        try:
+            parsed_participants = json.loads(raw_participants) or {}
+        except json.JSONDecodeError:
+            parsed_participants = {}
+    elif isinstance(raw_participants, dict):
+        parsed_participants = raw_participants
+    else:
+        parsed_participants = {}
+    for side in ("home", "away"):
+        value = parsed_participants.get(side) or {}
+        label += " " + str(value.get("name") if isinstance(value, dict) else value or "")
+    weak_wec = (
+        competition == "wec"
+        and "prologue" in label.lower()
+        and ("morning" in label.lower() or "afternoon" in label.lower())
+        and not existing.startswith("prologue:")
+    )
+    stale = bool(closure) and int(extra.get("closure_id_rev") or 0) < 2
+    if closure and (stale or weak_fis or weak_eh or weak_wec or ((not existing or weak_ibu or weak_fis or weak_eh or weak_wec) and not _checked(extra))):
+        try:
+            source_id = resolve_closure_id(competition, row, extra)
+        except Exception:
+            source_id = ""
+        extra["closure_id_rev"] = 2
+        if source_id:
+            if weak_fis or weak_eh or weak_wec:
+                current = extra.get("source_event_ids")
+                if isinstance(current, dict):
+                    current.pop(wanted, None)
+            _store(extra, wanted, source_id)
+            extra.pop("rich_id_checked_at", None)
+            return
+        if isinstance(extra.get("source_event_ids"), dict):
+            extra["source_event_ids"].pop(wanted, None)
+        _mark_checked(extra)
+        return
+    if ids.get(wanted) and not weak_ibu and not weak_fis and not weak_eh and not weak_wec:
         return
     if _checked(extra):
         return
@@ -980,6 +1026,11 @@ def _resolve_aquatics(row) -> str:
 
 def fetch_rich_family(family: str, source_event_id: str) -> Dict[str, Any]:
     sid = str(source_event_id or "")
+    from collector.rich_closure import fetch_closure_detail
+
+    closed = fetch_closure_detail(family, sid)
+    if closed:
+        return closed
     if family == "liiga-web" and ":" in sid:
         season, game_id = sid.split(":", 1)
         detail = _json(LIIGA_GAME.format(season=season, game_id=game_id)) or {}

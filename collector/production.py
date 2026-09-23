@@ -27,6 +27,7 @@ from collector.adapters_final import (
     NrlDrawAdapter,
     RteCyclingAdapter,
     StandardbredCanadaAdapter,
+    UfcOfficialAdapter,
     WorldAthleticsAdapter,
 )
 from collector.adapters_mass import (
@@ -211,6 +212,7 @@ def register_production_adapters() -> None:
     register_adapter("ibu-web", IbuResultsAdapter)
     register_adapter("rte-cycling", RteCyclingAdapter)
     register_adapter("world-athletics-web", WorldAthleticsAdapter)
+    register_adapter("ufc-web", UfcOfficialAdapter)
     register_adapter("nrl-draw-web", NrlDrawAdapter)
     register_adapter("standardbred-canada-web", StandardbredCanadaAdapter)
     register_adapter("hrnsw-web", HrnswMeetAdapter)

@@ -145,27 +145,19 @@ class IbuResultsAdapter:
 
     def fetch(self, request: FetchRequest) -> FetchResult:
         started = time.perf_counter()
-        urls = [
-            "https://www.biathlonresults.com/modules/sportapi/api/Events?SeasonId=2627",
-            "https://www.biathlonresults.com/modules/sportapi/api/Events?SeasonId=2526",
-        ]
-        events: List[Dict[str, Any]] = []
-        last = None
-        for url in urls:
-            last = _get(self._get_text, url, timeout=25)
-            payload = last.payload if last.ok else ""
-            if isinstance(payload, str) and payload.strip():
-                events.extend(parse_ibu_events_xml(payload))
-            if events:
-                break
+        from collector.source_family_closeout import collect_ibu
+
+        collected = collect_ibu(lambda url: _get(self._get_text, url, timeout=25))
+        events = collected["events"]
         return FetchResult(
-            ok=True if events or (last and last.ok) else False,
-            http_status=(last.http_status if last else 200) or 200,
-            events=_dedupe(events),
+            ok=True if events or collected.get("standings") else False,
+            http_status=collected.get("http_status") or 200,
+            events=events,
+            standings=collected.get("standings") or [],
             latency_ms=int((time.perf_counter() - started) * 1000),
             parse_status="ok" if events else "empty",
             empty_reason=None if events else "SOURCE_HEALTHY_NO_EVENTS",
-            parse_reason="biathlonresults.com SportAPI Events XML",
+            parse_reason="biathlonresults.com SportAPI race results and cup standings",
         )
 
 
@@ -439,6 +431,55 @@ def parse_wa_calendar(html: str) -> List[Dict[str, Any]]:
     return _dedupe(events)
 
 
+def parse_wa_result_meet(html: str, championship_id: str) -> List[Dict[str, Any]]:
+    """One canonical event per official discipline, not per athlete."""
+    match = re.search(r'<script[^>]+id=["\']__NEXT_DATA__["\'][^>]*>(.*?)</script>', html or "", re.I | re.S)
+    if not match:
+        return []
+    try:
+        data = json.loads(match.group(1))
+    except (TypeError, ValueError):
+        return []
+    root = ((data.get("props") or {}).get("pageProps") or {}).get("calendarEventsResults") or {}
+    competition = root.get("competition") if isinstance(root.get("competition"), dict) else {}
+    name = str(competition.get("name") or "")
+    if "ultimate championship" not in name.lower():
+        return []
+    start = str(competition.get("startDate") or "")[:10]
+    if not start:
+        return []
+    events: List[Dict[str, Any]] = []
+    for title in root.get("eventTitles") or []:
+        for event in title.get("events") or []:
+            event_id = str(event.get("eventId") or "")
+            label = str(event.get("event") or "").strip()
+            if not event_id.isdigit() or not label:
+                continue
+            source_event_id = f"{championship_id}:{event_id}"
+            built = _event(
+                home=label,
+                away=name,
+                start=f"{start}T00:00:00Z",
+                status="finished",
+                source_id=source_event_id,
+                venue=str(competition.get("venue") or ""),
+                extra={
+                    "event_type": MULTI_EVENT_MEET,
+                    "event_family": "individual",
+                    "source_family": "world-athletics-web",
+                    "stage": event_id,
+                    "round": label,
+                    "source_event_id": source_event_id,
+                    "source_event_ids": {"world-athletics-web": source_event_id},
+                    "closure_id_rev": 2,
+                },
+            )
+            ev = _ok(built, "athletics", "wa-calendar")
+            if ev:
+                events.append(ev)
+    return events
+
+
 class WorldAthleticsAdapter:
     adapter_key = "world-athletics-web"
 
@@ -461,6 +502,57 @@ class WorldAthleticsAdapter:
                 events.extend(parse_wa_calendar(last.payload))
             if events:
                 break
+        proof = _get(
+            self._get_text,
+            "https://worldathletics.org/competition/calendar-results/results/7212925",
+            timeout=25,
+        )
+        if proof and proof.ok and isinstance(proof.payload, str) and "ultimate championship" in proof.payload.lower():
+            from collector.source_family_closeout import attach_wa_classification, wa_discipline_events
+
+            events.extend(parse_wa_result_meet(proof.payload, "7212925"))
+            events.extend(wa_discipline_events(proof.payload, "7212925"))
+            seen = {str(event.get("source_event_id") or "") for event in events}
+            by_id = {str(event.get("source_event_id") or ""): event for event in events}
+            for event in events:
+                if str(event.get("source_event_id") or "").startswith("7212925:"):
+                    attach_wa_classification(event, proof.payload)
+            discipline_ids = re.findall(r'<option value="(\d{5,})">', proof.payload)
+            option_events = re.findall(
+                r'"gender"\s*:\s*"([MW])"\s*,\s*"id"\s*:\s*(\d{5,})',
+                proof.payload,
+            )
+            targets = [(event_id, "") for event_id in discipline_ids]
+            if option_events:
+                targets = [(event_id, gender) for gender, event_id in option_events]
+            targets.sort(key=lambda item: 0 if item[0] == "10229630" else 1)
+            for event_id, gender in targets:
+                source_event_id = f"7212925:{event_id}"
+                target = by_id.get(source_event_id)
+                rows = (target or {}).get("classification") or []
+                if rows and any(isinstance(row, dict) and row.get("round") for row in rows):
+                    continue
+                query = f"eventId={event_id}"
+                if gender:
+                    query += f"&gender={gender}"
+                page = _get(
+                    self._get_text,
+                    f"https://worldathletics.org/competition/calendar-results/results/7212925?{query}",
+                    timeout=25,
+                )
+                if not page or not page.ok or not isinstance(page.payload, str):
+                    continue
+                if "ultimate championship" not in page.payload.lower():
+                    continue
+                added = parse_wa_result_meet(page.payload, "7212925")
+                events.extend(added)
+                source_event_id = f"7212925:{event_id}"
+                target = by_id.get(source_event_id)
+                if target is not None:
+                    attach_wa_classification(target, page.payload)
+                seen.update(str(event.get("source_event_id") or "") for event in added)
+                by_id.update({str(event.get("source_event_id") or ""): event for event in added})
+            last = proof
         return FetchResult(
             ok=True if events or (last and last.ok) else False,
             http_status=(last.http_status if last else 200) or 200,
@@ -470,6 +562,95 @@ class WorldAthleticsAdapter:
             empty_reason=None if events else "SOURCE_HEALTHY_NO_EVENTS",
             parse_reason="worldathletics.org calendar-results",
         )
+
+
+class UfcOfficialAdapter:
+    """Official UFC event pages and results articles. Not UFCStats."""
+
+    adapter_key = "ufc-web"
+
+    def __init__(self, source_id: str = "ufc-web", text_getter=None):
+        self.source_id = source_id
+        self._get_text = text_getter or fetch_text
+
+    def fetch(self, request: FetchRequest) -> FetchResult:
+        started = time.perf_counter()
+        index = _get(self._get_text, "https://www.ufc.com/events", timeout=25)
+        html = index.payload if index and index.ok and isinstance(index.payload, str) else ""
+        hrefs = []
+        for href in re.findall(r'c-card-event--result[\s\S]{0,1200}?href="(/event/[^"#]+)"', html):
+            if href not in hrefs:
+                hrefs.append(href)
+        events: List[Dict[str, Any]] = []
+        for href in hrefs:
+            page = _get(self._get_text, "https://www.ufc.com" + href, timeout=25)
+            body = page.payload if page and page.ok and isinstance(page.payload, str) else ""
+            results = re.findall(r'href="([^"]*?/news/[^"]*results[^"]*)"', body, re.I)
+            if not results:
+                continue
+            link = results[0]
+            if link.startswith("/"):
+                link = "https://www.ufc.com" + link
+            article = _get(self._get_text, link, timeout=25)
+            article_html = article.payload if article and article.ok and isinstance(article.payload, str) else ""
+            events.extend(ufc_bouts_from_article(article_html, href.rstrip("/").split("/")[-1]))
+        return FetchResult(
+            ok=True if events or (index and index.ok) else False,
+            http_status=(index.http_status if index else 200) or 200,
+            events=_dedupe(events),
+            latency_ms=int((time.perf_counter() - started) * 1000),
+            parse_status="ok" if events else "empty",
+            empty_reason=None if events else "SOURCE_HEALTHY_NO_EVENTS",
+            parse_reason="ufc.com event results articles",
+        )
+
+
+def ufc_bouts_from_article(html: str, event_slug: str) -> List[Dict[str, Any]]:
+    from collector.rich_closure import parse_ufc_results
+    from collector.util import slugify
+
+    text = re.sub(r"<[^>]+>", " ", html or "")
+    stamp = re.search(
+        r"(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2}),\s+(20\d{2})",
+        text,
+    )
+    months = {
+        "january": 1, "february": 2, "march": 3, "april": 4, "may": 5, "june": 6,
+        "july": 7, "august": 8, "september": 9, "october": 10, "november": 11, "december": 12,
+    }
+    start = ""
+    if stamp:
+        start = f"{int(stamp.group(3)):04d}-{months[stamp.group(1).lower()]:02d}-{int(stamp.group(2)):02d}T00:00:00Z"
+    if not start:
+        return []
+    parsed = parse_ufc_results(html)
+    events = []
+    for row in parsed.get("classification") or []:
+        winner = str(row.get("name") or "")
+        loser = str(row.get("team") or "")
+        if not winner or not loser:
+            continue
+        source_event_id = f"{event_slug}:{slugify(winner)}:{slugify(loser)}"
+        built = _event(
+            home=winner,
+            away=loser,
+            start=start,
+            status="finished",
+            source_id=source_event_id,
+            extra={
+                "event_type": "combat",
+                "event_family": "combat",
+                "source_family": "ufc-web",
+                "source_event_id": source_event_id,
+                "source_event_ids": {"ufc-web": source_event_id},
+                "closure_id_rev": 2,
+                "classification": [row],
+            },
+        )
+        ev = _ok(built, "mma", "ufc")
+        if ev:
+            events.append(ev)
+    return events
 
 
 def parse_nrl_draw(blob: str) -> List[Dict[str, Any]]:

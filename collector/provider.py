@@ -168,6 +168,13 @@ INTERNAL_EVENT_KEYS = {
     "bbc_cricket_checked_at",
     "rich_id_checked_at",
     "letour_rank_rev",
+    "closure_id_rev",
+    "fis_rev",
+    "eurohockey_rev",
+    "wec_prologue_rev",
+    "fia_class_rev",
+    "leaguepedia_rev",
+    "leaguepedia_checked_at",
     "detail_empty",
     "detail_negative",
     "detail_families_tried",
@@ -495,20 +502,36 @@ class NinkoCollectedSportsDataProvider:
         date_to: Optional[str] = None,
         allow_unfiltered: bool = False,
     ) -> List[NormalizedEvent]:
+        started = time.perf_counter()
         db = _session(self._session_factory)
+        session_ms = round((time.perf_counter() - started) * 1000, 1)
         try:
             cache_key = list_cache_key(sport, competition, status, date_from, date_to, allow_unfiltered)
             cached = cache_get(db, cache_key)
             if cached is not None:
+                self._last_profile = {
+                    "cache": "hit",
+                    "session_ms": session_ms,
+                    "db_ms": round((time.perf_counter() - started) * 1000, 1),
+                    "standings_ms": 0.0,
+                    "taxonomy_ms": 0.0,
+                    "serialize_ms": 0.0,
+                    "total_ms": round((time.perf_counter() - started) * 1000, 1),
+                    "rows": len(cached) if isinstance(cached, list) else 0,
+                    "events": len(cached) if isinstance(cached, list) else 0,
+                }
                 return cached
+            from collector.competition_identity import OFFICIAL_PUBLIC_COMPETITIONS
+
             frozen = frozen_competition_ids()
+            public_ids = frozen | OFFICIAL_PUBLIC_COMPETITIONS
             query = db.query(SportsEvent).options(load_only(*LIST_LOAD_COLUMNS))
             if sport:
                 query = query.filter_by(sport_id=sport)
             if competition:
                 query = query.filter_by(competition_id=competition)
             else:
-                query = query.filter(SportsEvent.competition_id.in_(frozen))
+                query = query.filter(SportsEvent.competition_id.in_(public_ids))
             if status == "live":
                 query = query.filter(SportsEvent.status.in_(LIVE_QUERY_STATUSES))
             elif status:
@@ -527,6 +550,7 @@ class NinkoCollectedSportsDataProvider:
                 )
             )
             unbounded = not date_from and not date_to
+            db_start = time.perf_counter()
             if unbounded and not allow_unfiltered:
                 query = query.order_by(SportsEvent.start_time.desc())
                 query = query.limit(int(os.getenv("NINKO_EVENTS_UNFILTERED_LIMIT", "400")))
@@ -534,17 +558,23 @@ class NinkoCollectedSportsDataProvider:
             else:
                 query = query.order_by(SportsEvent.start_time.asc())
                 rows = query.all()
+            db_done = time.perf_counter()
+            standings_start = time.perf_counter()
             standing_ids = {
                 item[0]
                 for item in db.query(SportsStandingSnapshot.competition_id).distinct().all()
                 if item[0]
             }
+            standings_done = time.perf_counter()
+            taxonomy_start = time.perf_counter()
             warmed = set()
             for row in rows:
                 key = (row.competition_id, row.sport_id or "")
                 if key not in warmed:
                     attach_competition_metadata({"competition_key": key[0], "sport": key[1]})
                     warmed.add(key)
+            taxonomy_done = time.perf_counter()
+            serialize_start = time.perf_counter()
             events = [self._to_normalized(row, standing_ids=standing_ids, list_mode=True) for row in rows]
             events = [row for row in events if row]
             if date_from:
@@ -563,9 +593,21 @@ class NinkoCollectedSportsDataProvider:
                 ]
             else:
                 events = [_list_public_event(row) for row in events]
-            events = [row for row in events if (row.get("competition_key") or "") in frozen]
+            serialize_done = time.perf_counter()
+            events = [row for row in events if (row.get("competition_key") or "") in public_ids]
             cache_set(db, cache_key, events, "upcoming_fixtures" if status != "live" else "live_events")
             db.commit()
+            self._last_profile = {
+                "cache": "miss",
+                "session_ms": session_ms,
+                "db_ms": round((db_done - db_start) * 1000, 1),
+                "standings_ms": round((standings_done - standings_start) * 1000, 1),
+                "taxonomy_ms": round((taxonomy_done - taxonomy_start) * 1000, 1),
+                "serialize_ms": round((serialize_done - serialize_start) * 1000, 1),
+                "total_ms": round((time.perf_counter() - started) * 1000, 1),
+                "rows": len(rows),
+                "events": len(events),
+            }
             return events
         finally:
             db.close()
@@ -782,7 +824,10 @@ class NinkoCollectedSportsDataProvider:
         payload["periods"] = extra.get("periods") or payload.get("periods")
         payload = reconcile_live_status(payload)
         if list_mode:
-            corrected = row.competition_id if row.competition_id in frozen_competition_ids() else None
+            from collector.competition_identity import OFFICIAL_PUBLIC_COMPETITIONS
+
+            allowed = frozen_competition_ids() | OFFICIAL_PUBLIC_COMPETITIONS
+            corrected = row.competition_id if row.competition_id in allowed else None
         else:
             corrected = correct_public_competition_id(
                 stored_competition_id=row.competition_id,
@@ -795,6 +840,10 @@ class NinkoCollectedSportsDataProvider:
         payload["competition_key"] = corrected
         payload["competition"] = corrected
         payload = attach_competition_metadata(payload)
+        source_name = str(extra.get("source_competition_name") or extra.get("competition") or "").strip()
+        if corrected == "fifa-connected-competitions" and "world cup" in source_name.lower():
+            payload["competition"] = source_name
+            payload["competition_name"] = source_name
         country = payload.get("country_id")
         payload["home"] = sanitize_side(raw_sides["home"], sport=row.sport_id, competition_country=country)
         payload["away"] = sanitize_side(raw_sides["away"], sport=row.sport_id, competition_country=country)

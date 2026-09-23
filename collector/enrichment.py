@@ -109,6 +109,8 @@ EXTRA_PERSIST_KEYS = (
     "display_eligible",
     "identity_confidence",
     "source_competition_name",
+    "coverage",
+    "coverage_kind",
     "source_competition_id",
     "canonical_competition_id",
     "resolution_method",

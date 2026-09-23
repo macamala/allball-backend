@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import re
 from typing import Any, Dict, List
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from collector.html_parse import (
     _event,
@@ -37,6 +37,28 @@ def events_for_host(html: str, url: str) -> List[Dict[str, Any]]:
         return parse_racing(html)
     if "abc.net.au" in host:
         return parse_abc(html)
+    if "tournamentsoftware.com" in host or "bwfbadminton.com" in host:
+        from collector.source_family_closeout import bwf_tournament_links, parse_tournamentsoftware_matches
+
+        tournament_id = ""
+        match = re.search(r"/tournament/(\d+)|/(\d{3,5})$", url)
+        if match:
+            tournament_id = match.group(1) or match.group(2) or ""
+        if not tournament_id:
+            links = bwf_tournament_links(html)
+            tournament_id = links[0]["tournament_id"] if links else ""
+        parsed = parse_tournamentsoftware_matches(html, tournament_id=tournament_id, federation="bwf" if "bwf" in host else host)
+        if parsed:
+            return parsed
+    if "grireland.ie" in host and "view-results" in url:
+        from collector.source_family_closeout import parse_gri_race_card
+
+        query = parse_qs(urlparse(url).query)
+        track = (query.get("track") or [""])[0]
+        date_token = (query.get("date") or [""])[0]
+        parsed = parse_gri_race_card(html, track=track, date_token=date_token)
+        if parsed:
+            return parsed
     if "futsalplanet.com" in host or "lnfoficial.com.br" in host or "lnf.com.br" in host:
         return parse_html(html, url)
     if "mytischtennis.de" in host or "tischtennislive.de" in host:

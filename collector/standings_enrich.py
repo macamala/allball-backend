@@ -30,7 +30,21 @@ def standings_supported(competition_id: Optional[str]) -> bool:
         return False
     if competition_id in FOTMOB_LEAGUES:
         return True
-    if competition_id in {"nhl", "mlb", "australia-afl", "formula-1", "euroleague", "plusliga", "italy-superlega", "germany-click-tt"}:
+    if competition_id in {
+        "nhl",
+        "mlb",
+        "australia-afl",
+        "formula-1",
+        "formula-2",
+        "formula-3",
+        "formula-e",
+        "wec",
+        "fih-eurohockey",
+        "euroleague",
+        "plusliga",
+        "italy-superlega",
+        "germany-click-tt",
+    }:
         return True
     return _openliga_shortcut(competition_id) is not None
 
@@ -581,6 +595,12 @@ def fetch_competition_standings(competition_id: str, getter=None) -> Dict[str, A
                 sport="table-tennis",
                 source="click-tt-remix",
             )
+    if competition_id in {"formula-2", "formula-3", "formula-e", "wec", "fih-eurohockey"}:
+        from collector.rich_closure import fetch_closure_standings
+
+        rows = fetch_closure_standings(competition_id)
+        if rows:
+            return wrap_standings(rows, competition=competition_id, sport="motorsport" if competition_id != "fih-eurohockey" else "field-hockey", source="official-html")
     if competition_id == "formula-1":
         result = getter(JOLPICA_DRIVERS)
         if result.ok:

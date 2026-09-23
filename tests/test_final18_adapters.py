@@ -46,45 +46,23 @@ def test_pga_graphql_schedule_and_live_thru():
 
     adapter = PgaGraphqlAdapter(poster=poster)
     events = adapter.fetch(FetchRequest(capability="snapshot", competition_id="pga-tour")).events
-    live = [e for e in events if e.get("status") == "live"]
-    assert live
-    assert live[0]["score"]["thru"] == "14"
-    assert live[0]["score"]["home"] == "-12"
-
-
-def test_click_tt_remix_uses_source_live_flag():
-    payload = {
-        "data": {
-            "meetings_excerpt": {
-                "meetings": [
-                    {
-                        "meeting_id": "15348642",
-                        "team_home": "Borussia Düsseldorf",
-                        "team_away": "TTC Schwalbe Bergneustadt",
-                        "team_home_id": "1",
-                        "team_away_id": "2",
-                        "live": True,
-                        "state": "running",
-                        "matches_won": "2",
-                        "matches_lost": "1",
-                        "date": "2026-09-20T17:00:00.000+00:00",
-                        "league_name": "Tischtennis Bundesliga",
-                        "league_id": "493079",
-                    }
-                ]
-            }
-        }
-    }
-    adapter = ClickTtRemixAdapter(
-        getter=lambda url: FetchResult(
-            ok=True,
-            http_status=200,
-            payload=payload if "tabelle" in url else {"data": {"live": True, "team_home": "Borussia Düsseldorf", "team_guest": "TTC Schwalbe", "matches_home": 2, "matches_guest": 1}},
-        )
-    )
-    events = adapter.fetch(FetchRequest(capability="live_scores", competition_id="germany-click-tt")).events
+    assert len(events) == 1
+    assert events[0]["id"] == "pga:R2026060"
     assert events[0]["status"] == "live"
-    assert events[0]["score"]["home"] == 2
+    assert events[0]["score"]["home"] == "-12"
+    assert events[0]["classification"][0]["player"] == "Scottie Scheffler"
+    assert events[0]["classification"][0]["thru"] == "14"
+    assert ":" not in events[0]["id"].split("pga:", 1)[-1]
+
+
+def test_click_tt_remix_is_terms_blocked():
+    called = []
+    adapter = ClickTtRemixAdapter(getter=lambda url: called.append(url) or FetchResult(ok=True, http_status=200, payload={}))
+    result = adapter.fetch(FetchRequest(capability="live_scores", competition_id="germany-click-tt"))
+    assert called == []
+    assert result.restricted is True
+    assert result.events == []
+    assert result.empty_reason == "TERMS"
 
 
 def test_altiusrt_html_does_not_infer_live_from_time():

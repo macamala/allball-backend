@@ -61,6 +61,15 @@ DETAIL_FAMILIES = (
     "gri-web",
     "letrot-web",
     "world-aquatics-api",
+    "leaguepedia-cargo",
+    "fia-f2-web",
+    "fia-f3-web",
+    "formula-e-results",
+    "fis-web",
+    "world-athletics-web",
+    "wst-web",
+    "ufc-web",
+    "eurohockey-web",
 )
 
 
@@ -76,8 +85,12 @@ def _classification_score(rows: Any) -> int:
         clock = str(row.get("time") or "")
         if gap not in {"", "-"} or ":" in clock:
             score += 5
+        if row.get("fastest_lap"):
+            score += 1
         if row.get("shootings") or row.get("nation"):
             score += 3
+        if row.get("status"):
+            score += 1
     return score
 
 
@@ -749,9 +762,22 @@ def enrich_event_row(db: Session, row: SportsEvent, getter=None) -> None:
             and ((game.get("blue") or {}).get("kills") == 0 or (game.get("red") or {}).get("kills") == 0)
             for game in games
         )
+        players = extra.get("player_statistics") if isinstance(extra.get("player_statistics"), list) else []
+        has_players = any(isinstance(player, dict) and player.get("kills") is not None for player in players)
+        recent_cargo = False
+        if extra.get("leaguepedia_rev") != 2:
+            recent_cargo = False
+        elif extra.get("leaguepedia_checked_at"):
+            try:
+                checked_at = datetime.fromisoformat(str(extra.get("leaguepedia_checked_at")))
+                recent_cargo = (datetime.utcnow() - checked_at.replace(tzinfo=None)).total_seconds() < TTL_NEGATIVE
+            except ValueError:
+                recent_cargo = False
         if not games or zero_kills:
             tried.discard("lolesports-json")
             tried.discard("lolesports")
+        if str(row.status or "") in {"finished", "complete"} and not recent_cargo and (not games or zero_kills or not has_players):
+            tried.discard("leaguepedia-cargo")
         if not (ids.get("lolesports-json") or ids.get("lolesports")):
             from collector.detail_families import resolve_lol_match_id
 
@@ -795,6 +821,20 @@ def enrich_event_row(db: Session, row: SportsEvent, getter=None) -> None:
     from collector.rich_public import ensure_rich_source_ids
 
     ensure_rich_source_ids(row, extra)
+    if str(row.competition_id or "") == "fis-disciplines" and extra.get("fis_rev") != 8:
+        tried.discard("fis-web")
+    if str(row.competition_id or "") == "fih-eurohockey" and extra.get("eurohockey_rev") != 2:
+        tried.discard("eurohockey-web")
+    if str(row.competition_id or "") == "wec" and extra.get("wec_prologue_rev") != 2:
+        home = ""
+        parts = load_json(row.participants_json, {}) or {}
+        home_value = parts.get("home") or {}
+        home = str(home_value.get("name") if isinstance(home_value, dict) else home_value or "")
+        if "prologue" in home.lower() and ("morning" in home.lower() or "afternoon" in home.lower()):
+            tried.discard("fiawec-web")
+    if str(row.competition_id or "") in {"formula-2", "formula-3"} and extra.get("fia_class_rev") != 3:
+        tried.discard("fia-f2-web")
+        tried.discard("fia-f3-web")
     if str(row.competition_id or "") == "tour-de-france" and extra.get("letour_rank_rev") != 3:
         rows = extra.get("classification") if isinstance(extra.get("classification"), list) else []
         if len(rows) < 20:
@@ -814,6 +854,8 @@ def enrich_event_row(db: Session, row: SportsEvent, getter=None) -> None:
         row.extra_json = dump_json(extra)
         return
     jobs = [(family, source_id) for family, source_id in ids.items() if family in DETAIL_FAMILIES]
+    if str(row.status or "") not in {"finished", "complete"}:
+        jobs = [item for item in jobs if item[0] != "leaguepedia-cargo"]
     detail: Dict[str, Any] = {}
     used = list(tried)
     def _detail_getter(url, headers=None):
@@ -839,6 +881,17 @@ def enrich_event_row(db: Session, row: SportsEvent, getter=None) -> None:
                 used.append(family)
                 _merge_detail(detail, part)
     extra["detail_families_tried"] = list(dict.fromkeys(used))
+    if "leaguepedia-cargo" in extra["detail_families_tried"]:
+        extra["leaguepedia_checked_at"] = datetime.utcnow().isoformat()
+        extra["leaguepedia_rev"] = 2
+    if "fia-f2-web" in extra["detail_families_tried"] or "fia-f3-web" in extra["detail_families_tried"]:
+        extra["fia_class_rev"] = 3
+    if "fis-web" in extra["detail_families_tried"]:
+        extra["fis_rev"] = 8
+    if "eurohockey-web" in extra["detail_families_tried"]:
+        extra["eurohockey_rev"] = 2
+    if "fiawec-web" in extra["detail_families_tried"]:
+        extra["wec_prologue_rev"] = 2
     if "letour-web" in extra["detail_families_tried"]:
         extra["letour_rank_rev"] = 3
     extra["detail_fetched_at"] = datetime.utcnow().isoformat()
@@ -890,6 +943,19 @@ def enrich_event_row(db: Session, row: SportsEvent, getter=None) -> None:
         extra["officials"] = detail["officials"]
     if detail.get("classification"):
         extra["classification"] = _prefer_classification(extra.get("classification"), detail["classification"])
+    official = detail.get("official_score") if isinstance(detail.get("official_score"), dict) else None
+    if official:
+        from collector.rich_closure import align_hockey_score
+
+        parts = load_json(row.participants_json, {}) or {}
+        home_value = parts.get("home") or {}
+        away_value = parts.get("away") or {}
+        home_name = str(home_value.get("name") if isinstance(home_value, dict) else home_value or "")
+        away_name = str(away_value.get("name") if isinstance(away_value, dict) else away_value or "")
+        aligned = align_hockey_score(home_name, away_name, official)
+        if aligned:
+            row.score_json = dump_json(aligned)
+            extra["score"] = aligned
     if detail.get("maps"):
         extra["maps"] = extra.get("maps") or detail["maps"]
     if detail.get("referee"):

@@ -21,6 +21,20 @@ PGA_TOURS = {
     "korn-ferry-tour": "S",
 }
 
+
+def _pga_start(value: Any) -> Optional[str]:
+    """Tournament events are dated, not tee-timed."""
+    text = str(value or "").strip()
+    if text.isdigit():
+        millis = int(text)
+        if millis > 10_000_000_000:
+            stamp = datetime.fromtimestamp(millis / 1000, timezone.utc)
+            return stamp.strftime("%Y-%m-%dT00:00:00Z")
+    match = re.search(r"(20\d{2}-\d{2}-\d{2})", text)
+    if not match:
+        return None
+    return match.group(1) + "T00:00:00Z"
+
 CLICK_TT_TABELLE = (
     "https://www.mytischtennis.de/click-tt/DTTB/25--26/ligen/Tischtennis_Bundesliga/gruppe/493079/tabelle/gesamt"
     "?_data=" + quote("routes/click-tt+/$association+/$season+/$type+/$groupname.gruppe.$urlid+/tabelle.$filter")
@@ -102,69 +116,87 @@ class PgaGraphqlAdapter:
         if request.capability not in {"fixtures", "results", "live_scores", "snapshot", "live"}:
             return FetchResult(ok=True, http_status=200, events=[])
         tour = PGA_TOURS.get(request.competition_id or "", "R")
+        fields = "id tournamentName tournamentStatus startDate sortDate champion championId"
         upcoming = self._post(
             {
                 "query": (
-                    'query { upcomingSchedule(tourCode: "%s") { tournaments { id tournamentName '
-                    "tournamentStatus startDate endDate } } }"
+                    "query { completeSchedule(tourCode: %s) { upcoming { tournaments { %s } } "
+                    "completed { tournaments { %s } } } }"
                 )
-                % tour
+                % (tour, fields, fields)
             }
         )
-        complete = self._post(
-            {
-                "query": (
-                    'query { completeSchedule(tourCode: "%s") { tournaments { id tournamentName '
-                    "tournamentStatus startDate endDate } } }"
-                )
-                % tour
-            }
-        )
-        if not upcoming.ok and not complete.ok:
-            return upcoming if not upcoming.ok else complete
-        tournaments = []
-        for payload in (upcoming.payload, complete.payload):
-            if not isinstance(payload, dict):
-                continue
-            data = payload.get("data") or {}
-            block = data.get("upcomingSchedule") or data.get("completeSchedule") or {}
-            tournaments.extend(block.get("tournaments") or [])
-        events = [self._tournament(row, request.competition_id or "pga-tour") for row in tournaments if isinstance(row, dict)]
-        events = [row for row in events if row]
-        current = next(
-            (
-                row
-                for row in tournaments
-                if str(row.get("tournamentStatus") or "").upper() in {"IN_PROGRESS", "INPROGRESS", "LIVE", "PLAYING"}
-            ),
-            None,
-        )
-        if current and current.get("id"):
-            board = self._leaderboard(str(current["id"]), request.competition_id or "pga-tour")
-            if board:
-                events = board + events
+        complete = upcoming
+        if not upcoming.ok:
+            return upcoming
+        tournaments = self._schedule_rows(upcoming.payload)
+        picked = self._pick_tournament(tournaments)
+        events = []
+        if picked and picked.get("id"):
+            board = self._leaderboard(str(picked["id"]), picked, request.competition_id or "pga-tour")
+            events = [board] if board else [self._tournament(picked, request.competition_id or "pga-tour")]
+            events = [row for row in events if row]
         status = upcoming.http_status if upcoming.ok else complete.http_status
         return FetchResult(ok=True, http_status=status or 200, events=events)
 
-    def _leaderboard(self, tournament_id: str, competition_id: str) -> List[Dict[str, Any]]:
+    def _schedule_rows(self, payload: Any) -> List[Dict[str, Any]]:
+        data = payload.get("data") if isinstance(payload, dict) else {}
+        rows: List[Dict[str, Any]] = []
+        blocks = []
+        for key in ("upcomingSchedule", "completeSchedule"):
+            block = (data or {}).get(key)
+            if isinstance(block, list):
+                blocks.extend(block)
+            elif isinstance(block, dict):
+                blocks.append(block)
+        for block in blocks:
+            if not isinstance(block, dict):
+                continue
+            rows.extend([row for row in block.get("tournaments") or [] if isinstance(row, dict)])
+            for key in ("upcoming", "completed"):
+                for month in block.get(key) or []:
+                    if isinstance(month, dict):
+                        rows.extend([row for row in month.get("tournaments") or [] if isinstance(row, dict)])
+        return rows
+
+    def _pick_tournament(self, tournaments: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        live_states = {"IN_PROGRESS", "INPROGRESS", "LIVE", "PLAYING"}
+        done_states = {"COMPLETE", "COMPLETED", "OFFICIAL", "FINISHED"}
+        live = [row for row in tournaments if str(row.get("tournamentStatus") or "").upper() in live_states and row.get("id")]
+        if live:
+            return live[0]
+        done = [row for row in tournaments if str(row.get("tournamentStatus") or "").upper() in done_states and row.get("id")]
+
+        def _sort_key(row: Dict[str, Any]) -> int:
+            try:
+                return int(row.get("sortDate") or 0)
+            except (TypeError, ValueError):
+                return 0
+
+        done.sort(key=_sort_key, reverse=True)
+        with_champion = [row for row in done if row.get("champion")]
+        return (with_champion or done or [None])[0]
+
+    def _leaderboard(self, tournament_id: str, tournament: Dict[str, Any], competition_id: str) -> Optional[Dict[str, Any]]:
         result = self._post(
             {
                 "query": (
                     "query { leaderboardV3(id: \"%s\") { id tournamentId tournamentStatus players { "
-                    "player { displayName id } scoringData { position total today thru currentRound "
-                    "projectedCut roundScores { roundNumber strokes } } } } }"
+                    "... on PlayerRowV3 { player { displayName id } scoringData { position total thru rounds } } } } }"
                 )
                 % tournament_id
             }
         )
         if not result.ok or not isinstance(result.payload, dict):
-            return []
+            return None
         data = result.payload.get("data") or {}
         board = data.get("leaderboardV3") or data.get("leaderboard") or {}
         players = board.get("players") or []
-        events: List[Dict[str, Any]] = []
-        event_name = board.get("tournamentName") or board.get("tournamentId") or tournament_id
-        for row in players[:80]:
+        event_name = tournament.get("tournamentName") or board.get("tournamentName") or tournament_id
+        classification: List[Dict[str, Any]] = []
+        leader_status = "scheduled"
+        leader_total = None
+        for row in players:
             player = row.get("player") or {}
             scoring = row.get("scoringData") or {}
             name = player.get("displayName")
@@ -174,57 +206,62 @@ class PgaGraphqlAdapter:
             status = "live" if thru not in (None, "", "F", "CUT", "WD") else "finished" if thru in {"F"} else "scheduled"
             if status == "scheduled" and scoring.get("position"):
                 status = "finished" if scoring.get("total") not in (None, "") else "scheduled"
-            score = {
-                "home": scoring.get("total") if status != "scheduled" else None,
-                "away": None,
-                "position": scoring.get("position"),
-            }
-            if thru not in (None, ""):
-                score["thru"] = thru
-            if scoring.get("currentRound") not in (None, ""):
-                score["round"] = scoring.get("currentRound")
-            if scoring.get("today") not in (None, ""):
-                score["today"] = scoring.get("today")
-            rounds = scoring.get("roundScores") or []
-            if rounds:
-                extra_rounds = [
-                    {"label": item.get("roundNumber"), "home": item.get("strokes"), "away": None}
-                    for item in rounds
-                    if isinstance(item, dict)
-                ]
-            else:
-                extra_rounds = []
-            events.append(
+            raw_rounds = scoring.get("roundScores") or scoring.get("rounds") or []
+            strokes = []
+            round_rows = []
+            for index, item in enumerate(raw_rounds, start=1):
+                if isinstance(item, dict):
+                    strokes.append(item.get("strokes"))
+                    round_rows.append({"round": item.get("roundNumber") or index, "strokes": item.get("strokes")})
+                elif item not in (None, ""):
+                    strokes.append(item)
+                    round_rows.append({"round": index, "strokes": item})
+            classification.append(
                 {
-                    "id": f"pga:{tournament_id}:{player.get('id') or name}",
-                    "home": {"id": str(player.get("id") or ""), "name": name},
-                    "away": {"id": "field", "name": event_name},
+                    "position": scoring.get("position"),
+                    "player": name,
+                    "player_id": str(player.get("id") or ""),
+                    "country": (player.get("country") or player.get("countryCode") or ""),
+                    "total": scoring.get("total"),
+                    "thru": thru,
                     "status": status,
-                    "score": score,
-                    "sport": "golf",
-                    "competition": event_name,
-                    "competition_key": competition_id,
-                    "event_family": "leaderboard",
-                    "source_family": "pga-graphql",
-                    "source_competition_id": tournament_id,
-                    "source_event_id": str(tournament_id),
-                    "source_event_ids": {"pga-graphql": str(tournament_id)},
-                    "periods": extra_rounds or None,
-                    "extra": {
-                        "source_family": "pga-graphql",
-                        "source_event_id": str(tournament_id),
-                        "source_event_ids": {"pga-graphql": str(tournament_id)},
-                        "source_status": status,
-                        "status_inferred": False,
-                        "position": scoring.get("position"),
-                        "thru": thru,
-                        "round": scoring.get("currentRound"),
-                        "today": scoring.get("today"),
-                        "cut": scoring.get("projectedCut"),
-                    },
+                    "strokes": strokes,
+                    "rounds": round_rows,
                 }
             )
-        return events
+            if leader_total is None and scoring.get("position") in {1, "1", "T1"}:
+                leader_total = scoring.get("total")
+                leader_status = status
+        if not classification:
+            return None
+        if leader_total is None:
+            leader_total = classification[0].get("total")
+            leader_status = classification[0].get("status") or leader_status
+        return {
+            "id": f"pga:{tournament_id}",
+            "home": {"id": str(tournament_id), "name": event_name},
+            "away": {"id": "pga-tour", "name": "PGA TOUR"},
+            "status": "finished" if str(tournament.get("tournamentStatus") or "").upper() in {"COMPLETE", "COMPLETED", "OFFICIAL", "FINISHED"} else leader_status,
+            "score": {"home": leader_total, "away": None},
+            "start_time": _pga_start(tournament.get("startDate") or tournament.get("sortDate")),
+            "sport": "golf",
+            "competition": event_name,
+            "competition_key": competition_id,
+            "event_family": "tournament",
+            "source_family": "pga-graphql",
+            "source_competition_id": competition_id,
+            "source_event_id": str(tournament_id),
+            "source_event_ids": {"pga-graphql": str(tournament_id)},
+            "classification": classification,
+            "extra": {
+                "source_family": "pga-graphql",
+                "source_event_id": str(tournament_id),
+                "source_event_ids": {"pga-graphql": str(tournament_id)},
+                "source_status": leader_status,
+                "status_inferred": False,
+                "coverage": "official_result",
+            },
+        }
 
     def _tournament(self, row: Dict[str, Any], competition_id: str) -> Optional[Dict[str, Any]]:
         name = row.get("tournamentName")
@@ -240,10 +277,10 @@ class PgaGraphqlAdapter:
         return {
             "id": f"pga:{row.get('id') or name}",
             "home": {"id": str(row.get("id") or ""), "name": name},
-            "away": {"id": "field", "name": "Field"},
+            "away": {"id": "pga-tour", "name": "PGA TOUR"},
             "status": status,
             "score": {"home": None, "away": None},
-            "start_time": row.get("startDate"),
+            "start_time": _pga_start(row.get("startDate") or row.get("sortDate")),
             "sport": "golf",
             "competition": name,
             "competition_key": competition_id,
@@ -303,6 +340,18 @@ class ClickTtRemixAdapter:
     def fetch(self, request: FetchRequest) -> FetchResult:
         if request.capability not in {"fixtures", "results", "live_scores", "snapshot", "live"}:
             return FetchResult(ok=True, http_status=200, events=[])
+        from collector.source_family_closeout import ingestion_allowed, terms_block_reason
+
+        if not ingestion_allowed("click-tt-remix"):
+            return FetchResult(
+                ok=False,
+                http_status=0,
+                events=[],
+                restricted=True,
+                parse_status="restricted",
+                empty_reason="TERMS",
+                parse_reason=terms_block_reason("click-tt-remix"),
+            )
         table = self._get(CLICK_TT_TABELLE)
         if not table.ok:
             return table

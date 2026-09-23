@@ -49,4 +49,13 @@ def event_unchanged(existing, incoming: Dict[str, Any]) -> bool:
     for key in OBSERVATION_ENRICH_KEYS:
         if _section_filled(incoming.get(key)) and not _section_filled(extra.get(key)):
             return False
+    stored_round = str(extra.get("round") or "")
+    if "vod" in stored_round.lower() and incoming.get("round") and incoming.get("round") != stored_round:
+        return False
+    if incoming.get("coverage") and extra.get("coverage") != incoming.get("coverage"):
+        return False
+    if incoming.get("source_competition_name") and not extra.get("source_competition_name"):
+        return False
+    if incoming.get("start_time") and existing.start_time is None:
+        return False
     return True

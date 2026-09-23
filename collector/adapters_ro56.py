@@ -287,6 +287,20 @@ class WorldAquaticsApiAdapter:
     def fetch(self, request: FetchRequest) -> FetchResult:
         if request.capability not in {"fixtures", "results", "live_scores", "snapshot", "live"}:
             return FetchResult(ok=True, http_status=200, events=[])
+        from collector.source_family_closeout import parse_world_aquatics_discipline
+
+        discipline = self._get("https://api.worldaquatics.com/fina/events/a76c06d2-2982-4fb1-8bee-b48b44d6cbc2")
+        if discipline.ok:
+            parsed = parse_world_aquatics_discipline(discipline.payload, competition_id="5135")
+            if parsed.get("events"):
+                return FetchResult(
+                    ok=True,
+                    http_status=discipline.http_status or 200,
+                    events=parsed["events"],
+                    standings=parsed.get("standings") or [],
+                    parse_status="ok",
+                    parse_reason="api.worldaquatics.com competition 5135 discipline results",
+                )
         result = self._get(WA_COMPETITIONS)
         if not result.ok:
             return result
