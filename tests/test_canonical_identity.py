@@ -369,3 +369,58 @@ def test_fifa_public_payload_keeps_stable_key_and_human_display_name():
     assert payload["competition_key"] == "fifa-connected-competitions"
     assert payload["competition"] == "FIFA World Cup"
     assert payload["competition_name"] == "FIFA World Cup"
+
+
+
+def test_fifa_source_native_competitions_are_public_but_contamination_is_rejected():
+    from collector.competition_identity import correct_public_competition_id
+
+    assert (
+        correct_public_competition_id(
+            stored_competition_id="football-npfl",
+            source_competition_name="NPFL",
+            sport_id="football",
+            source_family="fifa-digital",
+        )
+        == "football-npfl"
+    )
+    assert (
+        correct_public_competition_id(
+            stored_competition_id="england-premier-league",
+            source_competition_name="Premier League",
+            sport_id="football",
+            source_family="fifa-digital",
+        )
+        is None
+    )
+    assert (
+        correct_public_competition_id(
+            stored_competition_id="uefa-nations-league",
+            source_competition_name="Concacaf Nations League",
+            sport_id="football",
+            source_family="fifa-digital",
+        )
+        is None
+    )
+
+
+def test_fifa_dynamic_public_payload_uses_human_source_league_name():
+    from collector.provider import NinkoCollectedSportsDataProvider
+
+    row = _event(
+        event_id="ninko-test-fifa-npfl",
+        sport_id="football",
+        competition_id="football-npfl",
+        home="Enyimba",
+        away="Kano Pillars",
+        start_time=datetime(2026, 9, 24, 15, 0, 0),
+        family="fifa-digital",
+        source_competition_name="NPFL",
+    )
+    row.display_eligible = False
+    provider = NinkoCollectedSportsDataProvider()
+    payload = provider._to_normalized(row, list_mode=True)
+    assert payload is not None
+    assert payload["competition_key"] == "football-npfl"
+    assert payload["competition"] == "NPFL"
+    assert payload["competition_name"] == "NPFL"
