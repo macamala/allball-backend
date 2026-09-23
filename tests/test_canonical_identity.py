@@ -413,6 +413,29 @@ def test_fifa_source_native_competitions_are_public_but_contamination_is_rejecte
     )
 
 
+def test_fotmob_dynamic_and_core_public_identity():
+    from collector.competition_identity import correct_public_competition_id
+
+    assert (
+        correct_public_competition_id(
+            stored_competition_id="football-tun-ligue-1",
+            source_competition_name="Ligue 1",
+            sport_id="football",
+            source_family="fotmob",
+        )
+        == "football-tun-ligue-1"
+    )
+    assert (
+        correct_public_competition_id(
+            stored_competition_id="england-premier-league",
+            source_competition_name="Premier League",
+            sport_id="football",
+            source_family="fotmob",
+        )
+        == "england-premier-league"
+    )
+
+
 def test_fifa_dynamic_public_payload_uses_human_source_league_name():
     from collector.provider import NinkoCollectedSportsDataProvider
 
