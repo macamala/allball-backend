@@ -604,6 +604,35 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
                 logger.exception("SportScore team schedule backfill failed")
                 db.rollback()
 
+            try:
+                from collector.thesportsdb_schedule import run_if_due as run_tsdb_schedule_if_due
+
+                def _pulse_tsdb_schedule() -> None:
+                    heartbeat_scheduler_lock(db, owner=owner)
+                    db.commit()
+
+                tsdb_schedule = run_tsdb_schedule_if_due(
+                    db,
+                    owner=owner,
+                    heartbeat=_pulse_tsdb_schedule,
+                )
+                if tsdb_schedule:
+                    logger.info(
+                        "TheSportsDB known-league fixtures %s",
+                        {
+                            "status": tsdb_schedule.get("status"),
+                            "mappings": tsdb_schedule.get("mappings"),
+                            "requests": tsdb_schedule.get("requests"),
+                            "upstream_total": tsdb_schedule.get("upstream_total"),
+                            "ingested": tsdb_schedule.get("ingested"),
+                            "sports": tsdb_schedule.get("sports"),
+                        },
+                    )
+                    _maybe_log_breadth(db, force=True)
+            except Exception:
+                logger.exception("TheSportsDB known-league fixture backfill failed")
+                db.rollback()
+
             _collect_official_creators(db)
             from collector.watch_set import rebuild_watch_set
 
