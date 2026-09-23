@@ -8,7 +8,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from sqlalchemy.orm import Session
 
-from collector.adapters_sofascore import SCHED_URL, sofa_event, sofa_fetch_url
+from collector.adapters_sofascore import FIELD_SPORTS, SCHED_URL, sofa_event, sofa_fetch_url, sofa_field_event
 from collector.http import fetch_url
 from collector.lock import lock_status
 from collector.models import SportsCollectorJob, SportsCompetition, SportsSource, SportsSourceCompetition
@@ -42,6 +42,8 @@ SOFA_BREADTH_SPORTS: Dict[str, str] = {
     "rugby": "rugby",
     # Combat events use the same homeTeam/awayTeam nodes for fighters.
     "mma": "mma",
+    "golf": "golf",
+    "motorsport": "motorsport",
 }
 
 
@@ -121,7 +123,17 @@ def _ensure_mapping(
             official_name=tournament_name,
             slug=competition_id,
             country_id=country_id.lower() if len(country_id) == 2 else (country_id or None),
-            event_model=("individual_match" if sport_id in {"tennis", "badminton", "table-tennis", "darts", "snooker", "mma", "boxing"} else "team_match"),
+            event_model=(
+                "combat"
+                if sport_id in {"mma", "boxing"}
+                else "motorsport_race"
+                if sport_id == "motorsport"
+                else "tournament"
+                if sport_id == "golf"
+                else "individual_match"
+                if sport_id in {"tennis", "badminton", "table-tennis", "darts", "snooker"}
+                else "team_match"
+            ),
             country_based=bool(country_id),
             active=True,
             news_taxonomy=False,
@@ -222,7 +234,11 @@ def run_breadth_ingest(
                 competition_id, tournament_id, tournament_name, country_id = source_native_identity(row, sport_id)
                 if not competition_id:
                     continue
-                event = sofa_event(row, competition_id, sport_id)
+                event = (
+                    sofa_field_event(row, competition_id, sport_id)
+                    if sport_id in FIELD_SPORTS
+                    else sofa_event(row, competition_id, sport_id)
+                )
                 if not event or not event.get("start_time"):
                     continue
                 sport_stats["eligible"] += 1

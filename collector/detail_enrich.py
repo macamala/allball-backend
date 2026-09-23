@@ -23,6 +23,7 @@ SOFA_EVENT = "https://www.sofascore.com/api/v1/event/{event_id}"
 SOFA_INCIDENTS = "https://www.sofascore.com/api/v1/event/{event_id}/incidents"
 SOFA_STATS = "https://www.sofascore.com/api/v1/event/{event_id}/statistics"
 SOFA_LINEUPS = "https://www.sofascore.com/api/v1/event/{event_id}/lineups"
+SOFA_STANDINGS = "https://www.sofascore.com/api/v1/event/{event_id}/standings"
 MLB_FEED = "https://statsapi.mlb.com/api/v1.1/game/{game_pk}/feed/live"
 NHL_LANDING = "https://api-web.nhle.com/v1/gamecenter/{game_id}/landing"
 NHL_BOXSCORE = "https://api-web.nhle.com/v1/gamecenter/{game_id}/boxscore"
@@ -609,6 +610,87 @@ def parse_sofa_statistics(payload: Any) -> List[Dict[str, Any]]:
     return out
 
 
+def parse_sofa_standings(payload: Any) -> List[Dict[str, Any]]:
+    """Flatten event standings into a provider-neutral leaderboard/classification."""
+    candidates: List[Dict[str, Any]] = []
+
+    def walk(value: Any, depth: int = 0) -> None:
+        if depth > 6:
+            return
+        if isinstance(value, list):
+            for item in value:
+                walk(item, depth + 1)
+            return
+        if not isinstance(value, dict):
+            return
+        entity = (
+            value.get("player")
+            or value.get("team")
+            or value.get("competitor")
+            or value.get("driver")
+            or value.get("participant")
+        )
+        has_rank = any(value.get(key) not in (None, "") for key in ("position", "rank", "place"))
+        has_metric = any(
+            value.get(key) not in (None, "")
+            for key in ("score", "points", "time", "gap", "toPar", "to_par", "strokes", "thru")
+        )
+        if (entity or value.get("name")) and (has_rank or has_metric):
+            candidates.append(value)
+        for key in ("standings", "rows", "groups", "classification", "competitors", "results"):
+            if key in value:
+                walk(value.get(key), depth + 1)
+
+    walk(payload)
+    out: List[Dict[str, Any]] = []
+    seen = set()
+    for row in candidates:
+        entity = (
+            row.get("player")
+            or row.get("team")
+            or row.get("competitor")
+            or row.get("driver")
+            or row.get("participant")
+            or {}
+        )
+        if isinstance(entity, dict):
+            name = entity.get("name") or entity.get("shortName") or entity.get("fullName")
+            nation = (
+                (entity.get("country") or {}).get("alpha2")
+                if isinstance(entity.get("country"), dict)
+                else entity.get("country")
+            )
+        else:
+            name = str(entity or "")
+            nation = None
+        name = name or row.get("name")
+        if not name:
+            continue
+        position = row.get("position") or row.get("rank") or row.get("place")
+        key = (str(position or ""), str(name))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(
+            {
+                "position": position,
+                "name": name,
+                "player": name,
+                "driver": name,
+                "team": name,
+                "score": row.get("score") or row.get("strokes") or row.get("points"),
+                "to_par": row.get("toPar") or row.get("to_par"),
+                "thru": row.get("thru"),
+                "time": row.get("time"),
+                "gap": row.get("gap") or row.get("difference"),
+                "points": row.get("points"),
+                "nation": nation or row.get("country"),
+                "status": row.get("status"),
+            }
+        )
+    return out
+
+
 def parse_sofa_lineups(payload: Any) -> Optional[Dict[str, Any]]:
     if not isinstance(payload, dict):
         return None
@@ -960,12 +1042,14 @@ def fetch_family_detail(family: str, source_event_id: str, getter=None, sport: s
             "statistics": SOFA_STATS.format(event_id=source_event_id),
             "lineups": SOFA_LINEUPS.format(event_id=source_event_id),
         }
+        if sport in {"golf", "motorsport"}:
+            urls["standings"] = SOFA_STANDINGS.format(event_id=source_event_id)
 
         def _fetch(item):
             kind, url = item
             return kind, _get(getter, url)
 
-        with ThreadPoolExecutor(max_workers=4) as pool:
+        with ThreadPoolExecutor(max_workers=len(urls)) as pool:
             results = dict(pool.map(_fetch, urls.items()))
         core = results.get("core")
         if core and core.ok and isinstance(core.payload, dict):
@@ -985,6 +1069,11 @@ def fetch_family_detail(family: str, source_event_id: str, getter=None, sport: s
             packed = parse_sofa_lineups(line.payload)
             if packed:
                 out["lineups"] = packed
+        standings = results.get("standings")
+        if standings and standings.ok and isinstance(standings.payload, dict):
+            rows = parse_sofa_standings(standings.payload)
+            if rows:
+                out["classification"] = rows
         return out
     if family == "mlb-statsapi":
         result = _get(getter, MLB_FEED.format(game_pk=source_event_id.replace("mlb:", "")))

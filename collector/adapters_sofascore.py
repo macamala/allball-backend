@@ -14,10 +14,17 @@ from collector.http import fetch_url
 
 LIVE_URL = "https://www.sofascore.com/api/v1/sport/{sport}/events/live"
 SCHED_URL = "https://www.sofascore.com/api/v1/sport/{sport}/scheduled-events/{date}"
-HEAD_TO_HEAD_SPORTS = {"tennis", "badminton", "table-tennis", "darts", "snooker", "mma", "boxing"}
+HEAD_TO_HEAD_SPORTS = {"tennis", "badminton", "table-tennis", "darts", "snooker"}
+FIELD_SPORTS = {"golf", "motorsport"}
 
 
 def event_family_for_sport(sport_id: str) -> str:
+    if sport_id in {"mma", "boxing"}:
+        return "combat"
+    if sport_id == "motorsport":
+        return "motorsport_race"
+    if sport_id == "golf":
+        return "tournament"
     return "individual_match" if sport_id in HEAD_TO_HEAD_SPORTS else "team_match"
 
 
@@ -399,6 +406,69 @@ def sofa_event(row: Dict[str, Any], competition_id: str, sport_id: str) -> Optio
     }
     if periods:
         payload["periods"] = periods
+    return payload
+
+
+def sofa_field_event(row: Dict[str, Any], competition_id: str, sport_id: str) -> Optional[Dict[str, Any]]:
+    if sport_id not in FIELD_SPORTS:
+        return None
+    event_id = str(row.get("id") or "").strip()
+    if not event_id:
+        return None
+    tour = row.get("tournament") if isinstance(row.get("tournament"), dict) else {}
+    unique = tour.get("uniqueTournament") if isinstance(tour.get("uniqueTournament"), dict) else {}
+    round_info = row.get("roundInfo") if isinstance(row.get("roundInfo"), dict) else {}
+    tournament_name = unique.get("name") or tour.get("name") or competition_id
+    event_name = (
+        row.get("name")
+        or round_info.get("name")
+        or round_info.get("round")
+        or row.get("stage")
+        or tournament_name
+    )
+    st = row.get("status") if isinstance(row.get("status"), dict) else {}
+    stype = str(st.get("type") or "").lower()
+    if stype in {"inprogress", "in_progress"}:
+        status = "live"
+    elif stype in {"finished", "complete"}:
+        status = "finished"
+    else:
+        status = "scheduled"
+    start = row.get("startTimestamp")
+    start_time = None
+    if isinstance(start, (int, float)):
+        start_time = datetime.fromtimestamp(int(start), tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    source_competition_id = _source_tournament_id(row)
+    source_country = _source_country(row)
+    payload: Dict[str, Any] = {
+        "id": f"sofascore:{event_id}",
+        "source_event_id": event_id,
+        "source_event_ids": {"sofascore-web": event_id},
+        "sport": sport_id,
+        "competition": tournament_name,
+        "competition_key": competition_id,
+        "event_family": event_family_for_sport(sport_id),
+        "status": status,
+        "start_time": start_time,
+        "country_id": source_country or None,
+        "source_family": "sofascore-web",
+        "source_competition_id": source_competition_id or None,
+        "source_competition_name": tournament_name,
+        "tournament": str(event_name),
+        "session_type": round_info.get("name") or row.get("stage") or None,
+        "home": {"name": str(event_name)},
+        "away": {"name": str(tournament_name)},
+        "score": {"home": None, "away": None},
+        "extra": {
+            "source_family": "sofascore-web",
+            "source_event_ids": {"sofascore-web": event_id},
+            "source_event_id": event_id,
+            "source_competition_id": source_competition_id or None,
+            "source_competition_name": tournament_name,
+            "tournament": str(event_name),
+            "session_type": round_info.get("name") or row.get("stage") or None,
+        },
+    }
     return payload
 
 
