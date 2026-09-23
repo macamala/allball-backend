@@ -19,6 +19,7 @@ LOL_WINDOW_OPEN = "https://feed.lolesports.com/livestats/v1/window/{game_id}"
 LOL_KEY = "0TvQnueqKa5mxJntVWt0w4LpLfEkrV1Ta8rQBb9Z"
 JOLPICA_RESULTS = "https://api.jolpi.ca/ergast/f1/{season}/{round}/results.json"
 OPENDOTA_MATCH = "https://api.opendota.com/api/matches/{match_id}"
+OPENDOTA_HEROES = "https://api.opendota.com/api/constants/heroes"
 SQUIGGLE_GAME = "https://api.squiggle.com.au/?q=games&game={game_id}"
 EUROLEAGUE_BOX = "https://live.euroleague.net/api/Boxscore?gamecode={code}&seasoncode={season}"
 EUROLEAGUE_HEADER = "https://live.euroleague.net/api/Header?gamecode={code}&seasoncode={season}"
@@ -178,23 +179,34 @@ def parse_squiggle_game(row: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
-def parse_opendota_match(payload: Any) -> Dict[str, Any]:
+def parse_opendota_match(payload: Any, heroes: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     if not isinstance(payload, dict):
         return {}
     out: Dict[str, Any] = {}
+    hero_map = heroes if isinstance(heroes, dict) else {}
     players = []
     for item in payload.get("players") or []:
         if not isinstance(item, dict):
             continue
         name = item.get("personaname") or item.get("name") or str(item.get("account_id") or "")
+        hero_id = item.get("hero_id")
+        hero = hero_map.get(str(hero_id)) if hero_id not in (None, "") else None
+        hero = hero if isinstance(hero, dict) else {}
+        hero_name = hero.get("localized_name") or hero.get("name") or hero_id
+        hero_image = hero.get("img") or hero.get("icon")
+        if hero_image and str(hero_image).startswith("/"):
+            hero_image = f"https://cdn.cloudflare.steamstatic.com{hero_image}"
         players.append(
             {
+                "id": item.get("account_id"),
                 "name": name,
                 "side": "home" if item.get("isRadiant") else "away",
                 "kills": item.get("kills"),
                 "deaths": item.get("deaths"),
                 "assists": item.get("assists"),
-                "hero": item.get("hero_id"),
+                "hero_id": hero_id,
+                "hero": hero_name,
+                "image": hero_image,
             }
         )
     if players:
@@ -842,7 +854,9 @@ def fetch_extra_family_detail(family: str, source_event_id: str, getter=None) ->
     if family in {"opendota"}:
         result = _get(getter, OPENDOTA_MATCH.format(match_id=sid))
         if result.ok and isinstance(result.payload, dict):
-            return parse_opendota_match(result.payload)
+            heroes_result = _get(getter, OPENDOTA_HEROES)
+            heroes = heroes_result.payload if heroes_result.ok and isinstance(heroes_result.payload, dict) else {}
+            return parse_opendota_match(result.payload, heroes)
         return {}
     if family in {"euroleague-live", "euroleague"}:
         parts = sid.split(":")
