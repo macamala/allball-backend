@@ -9,6 +9,8 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
+from collector.util import slugify
+
 _WORD_RE = re.compile(r"[a-z0-9]+")
 _STOPWORDS = {"the", "and", "of", "a", "an"}
 
@@ -17,6 +19,29 @@ _STOPWORDS = {"the", "and", "of", "a", "an"}
 OFFICIAL_PUBLIC_COMPETITIONS = {
     "ireland-gri-meetings",
 }
+
+SOURCE_NATIVE_PUBLIC_FAMILIES = {"fifa", "fifa-digital", "fifa-json"}
+
+
+def source_native_public_competition_id(
+    *,
+    stored_competition_id: str,
+    source_competition_name: Optional[str],
+    sport_id: str,
+    source_family: str,
+) -> Optional[str]:
+    """Allow trusted global football competitions only under their own source identity."""
+    stored = str(stored_competition_id or "").strip()
+    name = str(source_competition_name or "").strip()
+    family = str(source_family or "").strip()
+    if sport_id not in {"football", "soccer"} or family not in SOURCE_NATIVE_PUBLIC_FAMILIES or not name:
+        return None
+    native = f"football-{slugify(name)}"
+    if stored != native:
+        return None
+    canonical = unique_label_competition(name, sport_id="football", exclude=stored)
+    return canonical or native
+
 
 # Adapter families that bind events to a frozen mapping id themselves.
 # Series/league labels from those feeds are not hub competition identity.
@@ -76,7 +101,7 @@ COMPETITION_LABELS: Dict[str, Dict[str, Any]] = {
     "womens-super-league": {"any": ["women's super league", "womens super league", "barclays wsl", " wsl"]},
     "uefa-europa-league": {"any": ["europa league", "uefa europa"]},
     "uefa-conference-league": {"any": ["conference league", "uefa conference", "europa conference"]},
-    "uefa-nations-league": {"any": ["nations league"]},
+    "uefa-nations-league": {"any": ["uefa nations league"], "bounded": {"nations league": ["uefa", "europe", "european"]}, "deny": ["concacaf"]},
     "norway-eliteserien": {"any": ["eliteserien"]},
     "denmark-superliga": {"any": ["danish superliga", "denmark superliga", "3f superliga"]},
     "sweden-allsvenskan": {"any": ["allsvenskan"]},
@@ -304,22 +329,35 @@ def correct_public_competition_id(
     sport_id: str = "",
     source_family: str = "",
 ) -> Optional[str]:
-    """Return a frozen-registry id, or None when the stored mapping is unsafe to show."""
+    """Return a safe public competition id, including trusted source-native football."""
     from collector.matrix_guard import frozen_competition_ids
 
     stored = str(stored_competition_id or "").strip()
     name = str(source_competition_name or "").strip()
     frozen = frozen_competition_ids()
     family = str(source_family or "").strip()
-    slugish = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
-    if not name or slugish == stored:
+
+    native = source_native_public_competition_id(
+        stored_competition_id=stored,
+        source_competition_name=name,
+        sport_id=sport_id,
+        source_family=family,
+    )
+    if native:
+        return native
+
+    if not name:
         return stored if stored in frozen or stored in OFFICIAL_PUBLIC_COMPETITIONS else None
     if stored and label_matches_competition(name, stored):
         return stored if stored in frozen or stored in OFFICIAL_PUBLIC_COMPETITIONS else None
+
+    if family in SOURCE_NATIVE_PUBLIC_FAMILIES:
+        if stored == "fifa-connected-competitions":
+            return stored
+        matches = [cid for cid in frozen if cid != stored and label_matches_competition(name, cid)]
+        return matches[0] if len(matches) == 1 else None
+
     if family in MAPPING_OWNED_FAMILIES or family in {
-        "fifa",
-        "fifa-digital",
-        "fifa-json",
         "caf-web",
         "fivb-web",
         "ehf-web",
