@@ -397,7 +397,6 @@ def _maybe_log_breadth(db, *, force: bool = False) -> None:
         return
     try:
         from collector.breadth_audit import (
-            fifa_competition_samples,
             tomorrow_football_snapshot,
             tomorrow_public_football_snapshot,
             tomorrow_public_multisport_snapshot,
