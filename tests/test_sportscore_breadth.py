@@ -1,4 +1,5 @@
 from collector.adapters import FetchRequest, FetchResult
+from collector.detail_enrich import fetch_family_detail, parse_sportscore_detail
 from collector.adapters_sportscore import (
     _MATCH_CACHE,
     _STANDINGS_CACHE,
@@ -131,3 +132,81 @@ def test_sportscore_live_pass_does_not_fan_out_uncached_team_schedules():
     assert result.ok is True
     assert result.events == []
     assert len(calls) == 1
+
+
+
+def test_sportscore_detail_maps_match_centre_fields_without_tracker_ids():
+    payload = {
+        "match": {
+            "home_ht_score": 0,
+            "away_ht_score": 2,
+            "incidents": [
+                {"time": 14, "type": "Goal", "side": "away", "player": "Kevin Viveros", "is_goal": True, "home_score": 0, "away_score": 1},
+                {"time": 20, "type": "Yellow card", "side": "home", "player": "Adonis Frias", "is_card": True},
+                {"time": 45, "type": "Substitution", "side": "home", "is_sub": True, "player_in": "Benja", "player_out": "Gustavo"},
+            ],
+            "lineups": {
+                "home_formation": "4-2-3-1",
+                "away_formation": "3-4-2-1",
+                "confirmed": True,
+                "home_xi": [{"name": "Home Starter", "number": 5, "position": "M", "captain": True, "rating": "7.2"}],
+                "home_subs": [{"name": "Home Sub", "number": 11, "position": "F", "captain": False, "rating": "0.0"}],
+                "away_xi": [{"name": "Away Starter", "number": 1, "position": "G", "captain": False, "rating": "0.0"}],
+                "away_subs": [],
+            },
+            "stats": [
+                {"label": "Shots", "home": 11, "away": 8},
+                {"name": "Possession", "values": ["56%", "44%"]},
+            ],
+            "tracker": {"id": "do-not-expose", "profile": "hidden"},
+        }
+    }
+    out = parse_sportscore_detail(payload)
+    assert out["periods"] == [{"label": "HT", "home": 0, "away": 2}]
+    assert out["incidents"][0]["family"] == "goal"
+    assert out["incidents"][0]["score_after"] == {"home": 0, "away": 1}
+    assert out["incidents"][2]["family"] == "substitution"
+    assert out["incidents"][2]["player_in"] == "Benja"
+    assert out["lineups"]["home"]["formation"] == "4-2-3-1"
+    assert out["lineups"]["home"]["start"][0]["captain"] is True
+    assert "rating" not in out["lineups"]["home"]["bench"][0]
+    assert out["statistics"] == [
+        {"label": "Shots", "home": 11, "away": 8},
+        {"label": "Possession", "home": "56%", "away": "44%"},
+    ]
+    assert "tracker" not in out
+    assert "do-not-expose" not in str(out)
+
+
+def test_sportscore_fetch_family_detail_uses_match_slug_and_sport():
+    seen = []
+
+    def getter(url):
+        seen.append(url)
+        return _ok(
+            {
+                "match": {
+                    "home_ht_score": 1,
+                    "away_ht_score": 0,
+                    "incidents": [{"time": 8, "type": "Goal", "side": "home", "is_goal": True, "home_score": 1, "away_score": 0}],
+                    "lineups": None,
+                    "stats": [],
+                }
+            }
+        )
+
+    out = fetch_family_detail(
+        "sportscore",
+        "red-star-vs-partizan-abc123",
+        getter=getter,
+        sport="football",
+    )
+    assert out["periods"][0] == {"label": "HT", "home": 1, "away": 0}
+    assert out["incidents"][0]["family"] == "goal"
+    assert len(seen) == 1
+    assert "sport=football" in seen[0]
+    assert "slug=red-star-vs-partizan-abc123" in seen[0]
+
+    seen.clear()
+    assert fetch_family_detail("sportscore", "x", getter=getter, sport="motorsport") == {}
+    assert seen == []
