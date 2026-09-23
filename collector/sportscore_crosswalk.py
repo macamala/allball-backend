@@ -19,6 +19,7 @@ from collector.adapters_sportscore import MATCHES_URL, TEAM_URL, _payload_matche
 from collector.http import fetch_url
 from collector.lock import lock_status
 from collector.models import SportsCollectorJob, SportsCompetition, SportsSource, SportsSourceCompetition
+from collector.sources import source_collectable
 from collector.util import dump_json, load_json, slugify
 
 logger = logging.getLogger(__name__)
@@ -59,13 +60,14 @@ def _schedule_job(db: Session) -> SportsCollectorJob:
 
 def _source(db: Session) -> Optional[SportsSource]:
     dedicated = db.get(SportsSource, "sportscore-global")
-    if dedicated is not None and dedicated.enabled:
+    if dedicated is not None and source_collectable(dedicated):
         return dedicated
-    return (
+    candidates = (
         db.query(SportsSource)
         .filter(SportsSource.adapter_key == "sportscore", SportsSource.enabled.is_(True))
-        .first()
+        .all()
     )
+    return next((source for source in candidates if source_collectable(source)), None)
 
 def _identity_material(row: Dict[str, Any]) -> Tuple[str, str]:
     name = str(row.get("competition") or "").strip()

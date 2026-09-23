@@ -116,6 +116,8 @@ LIST_LOAD_COLUMNS = (
     SportsEvent.game_id,
     SportsEvent.country_id,
     SportsEvent.meeting_id,
+    SportsEvent.primary_source_id,
+    SportsEvent.contributing_sources_json,
     SportsEvent.display_eligible,
     SportsEvent.canonical_event_id,
     SportsEvent.live,
@@ -205,6 +207,49 @@ def _public_value(value: Any) -> Any:
     if isinstance(value, list):
         return [_public_value(item) for item in value]
     return value
+
+
+def _source_id_matches_blocked_family(source_id: str, blocked_ids: set, blocked_families: set) -> bool:
+    value = str(source_id or "").strip().lower()
+    if not value:
+        return False
+    if value in {str(item).lower() for item in blocked_ids}:
+        return True
+    return any(
+        value == family
+        or value.startswith(f"{family}:")
+        or value.startswith(f"{family}-")
+        for family in {str(item).lower() for item in blocked_families if item}
+    )
+
+
+def _row_public_source_allowed(row: SportsEvent, blocked_ids: set, blocked_families: set) -> bool:
+    source_ids = set(load_json(row.contributing_sources_json, []) or [])
+    if row.primary_source_id:
+        source_ids.add(row.primary_source_id)
+    if source_ids:
+        if any(
+            not _source_id_matches_blocked_family(source_id, blocked_ids, blocked_families)
+            for source_id in source_ids
+        ):
+            return True
+        return False
+
+    extra = load_json(row.extra_json, {}) or {}
+    family = str(extra.get("source_family") or "").strip().lower()
+    return not family or family not in {str(item).lower() for item in blocked_families if item}
+
+
+def _blocked_public_sources(db: Session) -> tuple[set, set]:
+    rows = (
+        db.query(SportsSource)
+        .filter(SportsSource.enabled.is_(True), SportsSource.public_branding_required.is_(True))
+        .all()
+    )
+    return (
+        {row.source_id for row in rows if row.source_id},
+        {row.upstream_family for row in rows if row.upstream_family},
+    )
 
 
 def public_event(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -949,6 +994,13 @@ class NinkoCollectedSportsDataProvider:
                 query = query.order_by(SportsEvent.start_time.asc())
                 rows = query.all()
             db_done = time.perf_counter()
+            blocked_ids, blocked_families = _blocked_public_sources(db)
+            if blocked_ids or blocked_families:
+                rows = [
+                    row
+                    for row in rows
+                    if _row_public_source_allowed(row, blocked_ids, blocked_families)
+                ]
             standings_start = time.perf_counter()
             standing_ids = {
                 item[0]
@@ -1055,6 +1107,9 @@ class NinkoCollectedSportsDataProvider:
                 keeper = db.query(SportsEvent).filter_by(event_id=row.canonical_event_id).first()
                 if keeper:
                     row = keeper
+            blocked_ids, blocked_families = _blocked_public_sources(db)
+            if not _row_public_source_allowed(row, blocked_ids, blocked_families):
+                return None
             try:
                 from collector.detail_enrich import enrich_event_row
 
