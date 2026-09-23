@@ -574,6 +574,35 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
                 logger.exception("SportScore multi-sport breadth failed")
                 db.rollback()
 
+            try:
+                from collector.sportscore_crosswalk import run_team_schedule_if_due
+
+                def _pulse_sportscore_schedule() -> None:
+                    heartbeat_scheduler_lock(db, owner=owner)
+                    db.commit()
+
+                sportscore_schedule = run_team_schedule_if_due(
+                    db,
+                    owner=owner,
+                    heartbeat=_pulse_sportscore_schedule,
+                )
+                if sportscore_schedule:
+                    logger.info(
+                        "SportScore team schedule backfill %s",
+                        {
+                            "status": sportscore_schedule.get("status"),
+                            "requests": sportscore_schedule.get("requests"),
+                            "upstream_total": sportscore_schedule.get("upstream_total"),
+                            "eligible": sportscore_schedule.get("eligible"),
+                            "ingested": sportscore_schedule.get("ingested"),
+                            "sports": sportscore_schedule.get("sports"),
+                        },
+                    )
+                    _maybe_log_breadth(db, force=True)
+            except Exception:
+                logger.exception("SportScore team schedule backfill failed")
+                db.rollback()
+
             _collect_official_creators(db)
             from collector.watch_set import rebuild_watch_set
 
