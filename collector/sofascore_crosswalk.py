@@ -253,6 +253,18 @@ def run_breadth_ingest(
                     tournament_name=tournament_name,
                     country_id=country_id,
                 )
+                season = row.get("season") if isinstance(row.get("season"), dict) else {}
+                season_id = str(season.get("id") or "").strip()
+                season_name = str(season.get("name") or season.get("year") or "").strip()
+                if season_id:
+                    config = load_json(mapping.source_config_json, {}) or {}
+                    if config.get("sofascore_season_id") != season_id or (
+                        season_name and config.get("sofascore_season_name") != season_name
+                    ):
+                        config["sofascore_season_id"] = season_id
+                        if season_name:
+                            config["sofascore_season_name"] = season_name
+                        mapping.source_config_json = dump_json(config)
                 event["competition"] = tournament_name
                 event["competition_key"] = competition_id
                 event["source_family"] = "sofascore-web"
@@ -266,6 +278,10 @@ def run_breadth_ingest(
                         "source_competition_id": tournament_id,
                         "source_competition_name": tournament_name,
                         "public_competition_key": competition_id,
+                        "source_season_id": season_id or None,
+                        "source_season_name": season_name or None,
+                        "sofascore_tournament_id": tournament_id or None,
+                        "sofascore_season_id": season_id or None,
                     }
                 )
                 event["extra"] = extra
