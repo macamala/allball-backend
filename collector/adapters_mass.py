@@ -2480,4 +2480,25 @@ class WikiIrishGreyhoundDerbyAdapter:
         )
 
 
-class WikiOwcsWorldFina
+class WikiOwcsWorldFinalsAdapter:
+    adapter_key = "wikipedia-owcs-world-finals-web"
+
+    def __init__(self, source_id: str = "wikipedia-owcs-world-finals-web", text_getter=None):
+        self.source_id = source_id
+        self._get_text = text_getter or fetch_text
+
+    def fetch(self, request: FetchRequest) -> FetchResult:
+        started = time.perf_counter()
+        url = "https://en.wikipedia.org/wiki/Overwatch_Champions_Series"
+        last = _get(self._get_text, url, timeout=25)
+        events = parse_wiki_owcs_world_finals(last.payload if last.ok and isinstance(last.payload, str) else "")
+        return FetchResult(
+            ok=True if events or last.ok else False,
+            http_status=last.http_status or 200,
+            events=events,
+            latency_ms=int((time.perf_counter() - started) * 1000),
+            parse_status="ok" if events else "empty",
+            empty_reason=None if events else "SOURCE_HEALTHY_NO_EVENTS",
+            parse_reason="en.wikipedia.org Overwatch Champions Series World Finals results",
+        )
+
