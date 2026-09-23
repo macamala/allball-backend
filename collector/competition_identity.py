@@ -351,6 +351,10 @@ def correct_public_competition_id(
 
     if not name:
         return stored if stored in frozen or stored in OFFICIAL_PUBLIC_COMPETITIONS else None
+    # FotMob frozen IDs come only from our explicit league-id map. Keep that
+    # canonical identity even when the upstream display label is generic.
+    if family == "fotmob" and stored in frozen:
+        return stored
     if stored and label_matches_competition(name, stored):
         return stored if stored in frozen or stored in OFFICIAL_PUBLIC_COMPETITIONS else None
 
