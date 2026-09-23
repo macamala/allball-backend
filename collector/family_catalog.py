@@ -576,6 +576,7 @@ def adapter_key_for(family: str, sport_id: str = "") -> str:
         "hbl-web",
         "ibu-web",
         "rte-cycling",
+        "ufc-web",
         "world-athletics-web",
         "nrl-draw-web",
         "standardbred-canada-web",
