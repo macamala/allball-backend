@@ -303,6 +303,46 @@ def _list_public_event(payload: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
+def _u20_women_name_equivalent(left: str, right: str, left_event: Dict[str, Any], right_event: Dict[str, Any]) -> bool:
+    from collector.participant_text import fold_for_identity
+
+    competitions = " ".join(
+        str(value or "").lower()
+        for value in (
+            left_event.get("competition"),
+            left_event.get("competition_name"),
+            left_event.get("competition_key"),
+            right_event.get("competition"),
+            right_event.get("competition_name"),
+            right_event.get("competition_key"),
+        )
+    )
+    normalized_comp = re.sub(r"[^a-z0-9]+", " ", competitions)
+    if "world cup" not in normalized_comp or not re.search(r"\bu\s*20\b|\bu20\b", normalized_comp):
+        return False
+    if not any(token in normalized_comp for token in ("women", "womens", "female")):
+        return False
+
+    def core(name: str) -> str:
+        value = fold_for_identity(name)
+        value = re.sub(r"\bu\s*20\b|\bu20\b|\bwomen\b|\bwomens\b|\bfemale\b|\bw\b", " ", value)
+        value = re.sub(r"\bdpr korea\b", "north korea", value)
+        return re.sub(r"\s+", " ", value).strip()
+
+    return bool(core(left)) and core(left) == core(right)
+
+
+def _public_participant_equivalent(
+    left: str,
+    right: str,
+    left_event: Dict[str, Any],
+    right_event: Dict[str, Any],
+) -> bool:
+    from collector.participant_alias import names_equivalent
+
+    return names_equivalent(left, right) or _u20_women_name_equivalent(left, right, left_event, right_event)
+
+
 def _dedupe_public_fixture_rows(events: List[Dict[str, Any]], preferred_ids: set) -> List[Dict[str, Any]]:
     """Collapse cross-competition aliases of the same public fixture.
 
@@ -310,8 +350,6 @@ def _dedupe_public_fixture_rows(events: List[Dict[str, Any]], preferred_ids: set
     participant names equivalent. When one row is a verified/frozen mapping,
     it wins over a source-native dynamic id.
     """
-    from collector.participant_alias import names_equivalent
-
     kept: List[Dict[str, Any]] = []
     for row in events:
         home = str((row.get("home") or {}).get("name") or "")
@@ -323,7 +361,9 @@ def _dedupe_public_fixture_rows(events: List[Dict[str, Any]], preferred_ids: set
                 continue
             ex_home = str((existing.get("home") or {}).get("name") or "")
             ex_away = str((existing.get("away") or {}).get("name") or "")
-            if names_equivalent(home, ex_home) and names_equivalent(away, ex_away):
+            if _public_participant_equivalent(home, ex_home, row, existing) and _public_participant_equivalent(
+                away, ex_away, row, existing
+            ):
                 match_index = index
                 break
         if match_index is None:
