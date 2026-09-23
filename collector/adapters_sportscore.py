@@ -359,7 +359,7 @@ def match_to_event(row: Dict[str, Any], competition_id: str) -> Optional[Dict[st
         "source_competition_id": row.get("competition"),
         "extra": {
             "attribution": ATTRIBUTION,
-            "upstream_family": "sportscore",
+            "upstream_family": "thesports",
             "source_family": "sportscore",
             "source_event_id": source_event_id or None,
             "source_event_ids": {"sportscore": source_event_id} if source_event_id else {},
