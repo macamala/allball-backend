@@ -465,12 +465,19 @@ def test_opendota_player_stats_and_afl_goals():
             "radiant_score": 32,
             "dire_score": 18,
             "players": [
-                {"personaname": "Miracle", "isRadiant": True, "kills": 12, "deaths": 2, "assists": 8, "hero_id": 1},
-                {"personaname": "Yatoro", "isRadiant": False, "kills": 4, "deaths": 7, "assists": 6, "hero_id": 2},
+                {"account_id": 100, "personaname": "Miracle", "isRadiant": True, "kills": 12, "deaths": 2, "assists": 8, "hero_id": 1},
+                {"account_id": 200, "personaname": "Yatoro", "isRadiant": False, "kills": 4, "deaths": 7, "assists": 6, "hero_id": 2},
             ],
-        }
+        },
+        {
+            "1": {"localized_name": "Anti-Mage", "img": "/apps/dota2/images/dota_react/heroes/antimage.png"},
+            "2": {"localized_name": "Axe", "img": "/apps/dota2/images/dota_react/heroes/axe.png"},
+        },
     )
     assert dota["player_statistics"][0]["kills"] == 12
+    assert dota["player_statistics"][0]["hero"] == "Anti-Mage"
+    assert dota["player_statistics"][0]["image"].endswith("/heroes/antimage.png")
+    assert dota["lineups"]["away"]["start"][0]["hero"] == "Axe"
     assert dota["sport_detail"]["duration"] == 2400
     afl = parse_squiggle_game({"hgoals": 15, "agoals": 10, "hbehinds": 9, "abehinds": 7, "hscore": 99, "ascore": 67, "venue": "MCG"})
     assert afl["sport_detail"]["goals"]["home"] == 15
