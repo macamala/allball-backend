@@ -49,7 +49,22 @@ FOTMOB_LEAGUES: Dict[str, Dict[str, Any]] = {
     "spain-la-liga": {"id": 87, "name": "LaLiga", "ccode": "esp"},
     "germany-bundesliga": {"id": 54, "name": "Bundesliga", "ccode": "ger"},
     "belgium-pro-league": {"id": 40, "name": "Pro League", "ccode": "bel"},
+    "uefa-nations-league": {"ids": [9806, 9807, 9808, 9809], "name": "UEFA Nations League", "ccode": "int"},
 }
+
+def _league_ids(spec: Dict[str, Any], source_config: Optional[Dict[str, Any]] = None) -> List[str]:
+    source_config = source_config or {}
+    raw = spec.get("ids")
+    if not raw:
+        raw = source_config.get("fotmob_league_ids")
+    if raw:
+        values = raw if isinstance(raw, (list, tuple, set)) else [raw]
+        return [str(value) for value in values if value not in (None, "")]
+    value = spec.get("id")
+    if value in (None, ""):
+        value = source_config.get("fotmob_league_id")
+    return [str(value)] if value not in (None, "") else []
+
 
 MATCHES_URL = "https://www.fotmob.com/api/data/matches?date={date}"
 SCORE_URL = "https://www.fotmob.com/api/data/match-score?matchId={match_id}"
@@ -172,6 +187,7 @@ def match_to_event(match: Dict[str, Any], competition_id: str) -> Optional[Dict[
         "source_family": "fotmob",
         "source_event_id": str(match.get("id") or ""),
         "source_competition_id": str(league.get("id") or ""),
+        "source_competition_name": str(league.get("name") or ""),
         "extra": {
             "source_family": "fotmob",
             "source_status": status_obj.get("reason", {}).get("short") if isinstance(status_obj.get("reason"), dict) else status,
@@ -179,6 +195,7 @@ def match_to_event(match: Dict[str, Any], competition_id: str) -> Optional[Dict[
             "source_event_ids": {"fotmob": str(match.get("id") or "")},
             "source_event_id": str(match.get("id") or ""),
             "source_competition_id": str(league.get("id") or ""),
+            "source_competition_name": str(league.get("name") or ""),
         },
     }
 
@@ -305,8 +322,8 @@ class FotMobAdapter:
         started = time.perf_counter()
         competition_id = request.competition_id or ""
         spec = FOTMOB_LEAGUES.get(competition_id) or {}
-        league_id = spec.get("id") or (request.source_config or {}).get("fotmob_league_id")
-        if league_id is None:
+        league_ids = _league_ids(spec, request.source_config)
+        if not league_ids:
             return FetchResult(
                 ok=False,
                 http_status=0,
@@ -316,21 +333,40 @@ class FotMobAdapter:
                 error="fotmob league id missing",
             )
         if request.capability == "standings":
-            result = self._get(LEAGUE_URL.format(league_id=league_id))
-            payload = result.payload if result.ok else None
-            rows = parse_fotmob_table(payload) if isinstance(payload, dict) else []
+            rows: List[Dict[str, Any]] = []
+            payloads: List[Any] = []
+            statuses: List[int] = []
+            for league_id in league_ids:
+                result = self._get(LEAGUE_URL.format(league_id=league_id))
+                statuses.append(result.http_status or 0)
+                payload = result.payload if result.ok else None
+                if payload is not None:
+                    payloads.append(payload)
+                if isinstance(payload, dict):
+                    rows.extend(parse_fotmob_table(payload))
+            unique_rows: List[Dict[str, Any]] = []
+            seen = set()
+            for row in rows:
+                key = (str(row.get("team") or ""), str(row.get("group") or ""), str(row.get("stage") or ""))
+                if key in seen:
+                    continue
+                seen.add(key)
+                unique_rows.append(row)
+            ok = bool(payloads)
             return FetchResult(
-                ok=True if result.ok else False,
-                http_status=result.http_status or 0,
-                payload=payload,
-                standings=rows,
-                parse_status="ok" if rows else "empty",
+                ok=ok,
+                http_status=next((status for status in statuses if status), 200 if ok else 0),
+                payload=payloads[0] if len(payloads) == 1 else payloads,
+                standings=unique_rows,
+                parse_status="ok" if unique_rows else "empty",
+                request_count=len(league_ids),
             )
         matches = _load_boards(self._get)
+        allowed = set(league_ids)
         events: List[Dict[str, Any]] = []
         for match in matches:
             lid = (match.get("_league") or {}).get("id")
-            if str(lid) != str(league_id):
+            if str(lid) not in allowed:
                 continue
             event = match_to_event(match, competition_id)
             if event:
@@ -342,6 +378,6 @@ class FotMobAdapter:
             latency_ms=int((time.perf_counter() - started) * 1000),
             parse_status="ok" if events else "empty",
             empty_reason=None if events else "SOURCE_HEALTHY_NO_EVENTS",
-            parse_reason="fotmob date board + league id",
-            request_count=0 if _BOARD.get("all") is not None else 3,
+            parse_reason="fotmob date board + league id(s)",
+            request_count=0 if _BOARD.get("all") is not None else len(_dates()),
         )
