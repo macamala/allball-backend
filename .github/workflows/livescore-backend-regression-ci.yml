@@ -16,3 +16,48 @@ jobs:
           cache: pip
       - run: pip install -r requirements.txt
       - run: pytest -q
+      - name: Read-only livescore probes
+        run: |
+          python - <<'PY'
+          import json, urllib.parse, urllib.request
+          def get(url):
+              req=urllib.request.Request(url, headers={"User-Agent":"NinkoSports-CI/1.0"})
+              with urllib.request.urlopen(req, timeout=30) as r:
+                  return json.loads(r.read().decode())
+          ss=get("https://sportscore.com/api/widget/matches/?sport=football&limit=2&src=ninkosports")
+          matches=ss.get("matches") or []
+          print("SPORTSCORE_LIST_KEYS", sorted(ss.keys()))
+          print("SPORTSCORE_MATCH_COUNT", len(matches))
+          for i,m in enumerate(matches[:2]):
+              print("SPORTSCORE_MATCH", i, json.dumps({k:m.get(k) for k in ("slug","url","competition","home","away","status","status_text","time","id")}, ensure_ascii=False)[:2500])
+          if matches:
+              first=matches[0]
+              slug=first.get("slug")
+              if not slug and first.get("url"):
+                  slug=str(first["url"]).rstrip("/").rsplit("/",1)[-1]
+              if slug:
+                  detail=get("https://sportscore.com/api/widget/match/?"+urllib.parse.urlencode({"sport":"football","slug":slug,"src":"ninkosports"}))
+                  print("SPORTSCORE_DETAIL_SLUG", slug)
+                  print("SPORTSCORE_DETAIL_KEYS", sorted(detail.keys()))
+                  for k,v in detail.items():
+                      if isinstance(v,dict):
+                          print("SPORTSCORE_DETAIL_SHAPE", k, sorted(v.keys())[:80])
+                      elif isinstance(v,list):
+                          print("SPORTSCORE_DETAIL_SHAPE", k, "list", len(v), sorted(v[0].keys())[:80] if v and isinstance(v[0],dict) else "")
+          base="https://allball-backend-production.up.railway.app/sports-data/events"
+          params=urllib.parse.urlencode({"date_from":"2026-09-21T14:00:00.000Z","date_to":"2026-09-22T13:59:59.999Z"})
+          prod=get(base+"?"+params)
+          ev=prod.get("events") or prod.get("matches") or []
+          print("NINKO_2026_09_22_TOTAL",len(ev))
+          by={}
+          for x in ev:
+              by[x.get("sport") or "unknown"]=by.get(x.get("sport") or "unknown",0)+1
+          print("NINKO_2026_09_22_BY_SPORT",json.dumps(dict(sorted(by.items(), key=lambda kv:(-kv[1],kv[0]))),ensure_ascii=False))
+          foot=[x for x in ev if x.get("sport")=="football"]
+          comps={}
+          for x in foot:
+              key=x.get("competition_key") or x.get("competition")
+              comps[key]=comps.get(key,0)+1
+          print("NINKO_2026_09_22_FOOTBALL",len(foot))
+          print("NINKO_2026_09_22_FOOTBALL_COMPS",json.dumps(dict(sorted(comps.items(), key=lambda kv:(-kv[1],str(kv[0])))),ensure_ascii=False)[:12000])
+          PY
