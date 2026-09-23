@@ -58,12 +58,14 @@ def _schedule_job(db: Session) -> SportsCollectorJob:
 
 
 def _source(db: Session) -> Optional[SportsSource]:
+    dedicated = db.get(SportsSource, "sportscore-global")
+    if dedicated is not None and dedicated.enabled:
+        return dedicated
     return (
         db.query(SportsSource)
         .filter(SportsSource.adapter_key == "sportscore", SportsSource.enabled.is_(True))
         .first()
     )
-
 
 def _identity_material(row: Dict[str, Any]) -> Tuple[str, str]:
     name = str(row.get("competition") or "").strip()
