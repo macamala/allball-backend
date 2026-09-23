@@ -889,7 +889,10 @@ class NinkoCollectedSportsDataProvider:
             return None
         payload["competition_key"] = corrected
         payload["competition"] = corrected
+        source_country = payload.get("country_id")
         payload = attach_competition_metadata(payload)
+        if source_country and not payload.get("country_id"):
+            payload["country_id"] = source_country
         source_name = str(extra.get("source_competition_name") or extra.get("competition") or "").strip()
         if corrected == "fifa-connected-competitions" and "world cup" in source_name.lower():
             payload["competition"] = source_name
