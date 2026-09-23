@@ -40,6 +40,29 @@ SCOPE_WORLD = "WORLD"
 SCOPE_INTERNATIONAL = "INTERNATIONAL"
 SCOPE_REGIONAL = "REGIONAL"
 
+# FIFA/FotMob use a mixture of ISO alpha-3 and football-association codes.
+# Normalize the common football codes to the geography registry's IDs so
+# source-native competitions get a readable country and a real flag.
+SOURCE_ALPHA3_TO_GEO = {
+    "ALB": "al", "ALG": "dz", "ANG": "ao", "ARG": "ar", "ARM": "am",
+    "AUS": "au", "AUT": "at", "AZE": "az", "BEL": "be", "BIH": "ba",
+    "BOL": "bo", "BRA": "br", "BUL": "bg", "CAN": "ca", "CHI": "cl",
+    "CHL": "cl", "CHN": "cn", "COL": "co", "CRC": "cr", "CRO": "hr",
+    "CZE": "cz", "DEN": "dk", "DOM": "do", "ECU": "ec", "EGY": "eg",
+    "ENG": "england", "ESP": "es", "EST": "ee", "FIN": "fi", "FRA": "fr",
+    "GEO": "ge", "GER": "de", "GHA": "gh", "GRE": "gr", "GUA": "gt",
+    "HUN": "hu", "IDN": "id", "IND": "in", "IRL": "ie", "IRN": "ir",
+    "ISL": "is", "ISR": "il", "ITA": "it", "JPN": "jp", "KAZ": "kz",
+    "KOR": "kr", "KSA": "sa", "MAR": "ma", "MEX": "mx", "MKD": "mk",
+    "NED": "nl", "NGA": "ng", "NIR": "northern-ireland", "NOR": "no",
+    "NZL": "nz", "PAR": "py", "PER": "pe", "POL": "pl", "POR": "pt",
+    "ROU": "ro", "RSA": "za", "RUS": "ru", "SCO": "scotland", "SRB": "rs",
+    "SUI": "ch", "SVK": "sk", "SVN": "si", "SWE": "se", "THA": "th",
+    "TUN": "tn", "TUR": "tr", "UAE": "ae", "UKR": "ua", "URU": "uy",
+    "USA": "us", "UZB": "uz", "VEN": "ve", "VIE": "vn", "WAL": "wales",
+}
+
+
 # Sporting geography for domestic prefixes (not ISO UK collapse).
 COUNTRY_PREFIX = {
     "albania": ("Albania", "al", SCOPE_DOMESTIC),
@@ -381,6 +404,21 @@ def metadata_for(competition_key: str, sport: str = "") -> Dict[str, Any]:
     }
 
 
+def _source_country_geo(value: Any) -> Optional[Dict[str, Any]]:
+    raw = str(value or "").strip()
+    if not raw or raw.upper() in {"INT", "WORLD"}:
+        return None
+    geo_id = SOURCE_ALPHA3_TO_GEO.get(raw.upper(), raw.lower())
+    row = get_geo(geo_id)
+    if not row or row.get("kind") == "region":
+        return None
+    return {
+        "id": row.get("id"),
+        "name": row.get("name") or label_for(geo_id),
+        "scope_type": SCOPE_DOMESTIC,
+    }
+
+
 def attach_competition_metadata(event: Dict[str, Any]) -> Dict[str, Any]:
     if not event:
         return event
@@ -392,8 +430,15 @@ def attach_competition_metadata(event: Dict[str, Any]) -> Dict[str, Any]:
     event["competition_name"] = meta["display_name"]
     event["geography_label"] = meta["geography_label"] or None
     event["scope_type"] = meta["scope_type"] or None
+    source_country = event.get("country_id")
     event["country_id"] = meta["country_code"]
     event["country_based"] = meta["scope_type"] == SCOPE_DOMESTIC
+    source_geo = _source_country_geo(source_country)
+    if not meta.get("geography_label") and source_geo:
+        event["geography_label"] = source_geo["name"]
+        event["country_id"] = source_geo["id"]
+        event["scope_type"] = SCOPE_DOMESTIC
+        event["country_based"] = True
     if meta.get("logo") and not event.get("competition_logo"):
         event["competition_logo"] = meta["logo"]
     return event
