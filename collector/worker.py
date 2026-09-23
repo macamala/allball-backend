@@ -543,6 +543,35 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
             except Exception:
                 logger.exception("SofaScore multi-sport breadth failed")
 
+            try:
+                from collector.sportscore_crosswalk import run_if_due as run_sportscore_breadth_if_due
+
+                def _pulse_sportscore() -> None:
+                    heartbeat_scheduler_lock(db, owner=owner)
+                    db.commit()
+
+                sportscore_breadth = run_sportscore_breadth_if_due(
+                    db,
+                    owner=owner,
+                    heartbeat=_pulse_sportscore,
+                )
+                if sportscore_breadth:
+                    logger.info(
+                        "SportScore multi-sport breadth %s",
+                        {
+                            "status": sportscore_breadth.get("status"),
+                            "upstream_total": sportscore_breadth.get("upstream_total"),
+                            "eligible": sportscore_breadth.get("eligible"),
+                            "ingested": sportscore_breadth.get("ingested"),
+                            "skipped_ambiguous": sportscore_breadth.get("skipped_ambiguous"),
+                            "sports": sportscore_breadth.get("sports"),
+                        },
+                    )
+                    _maybe_log_breadth(db, force=True)
+            except Exception:
+                logger.exception("SportScore multi-sport breadth failed")
+                db.rollback()
+
             _collect_official_creators(db)
             from collector.watch_set import rebuild_watch_set
 

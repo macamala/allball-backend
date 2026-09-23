@@ -22,8 +22,8 @@ OFFICIAL_PUBLIC_COMPETITIONS = {
 
 SOURCE_NATIVE_PUBLIC_FAMILIES_BY_SPORT = {
     "football": {"fifa", "fifa-digital", "fifa-json", "fotmob", "sofascore-web"},
-    "basketball": {"sofascore-web"},
-    "tennis": {"sofascore-web"},
+    "basketball": {"sofascore-web", "sportscore"},
+    "tennis": {"sofascore-web", "sportscore"},
     "ice-hockey": {"sofascore-web"},
     "baseball": {"sofascore-web"},
     "handball": {"sofascore-web"},
@@ -32,7 +32,7 @@ SOURCE_NATIVE_PUBLIC_FAMILIES_BY_SPORT = {
     "futsal": {"sofascore-web"},
     "badminton": {"sofascore-web"},
     "table-tennis": {"sofascore-web"},
-    "cricket": {"sofascore-web"},
+    "cricket": {"sofascore-web", "sportscore"},
     "water-polo": {"sofascore-web"},
     "netball": {"sofascore-web"},
     "field-hockey": {"sofascore-web"},
@@ -80,9 +80,15 @@ def source_native_public_competition_id(
         canonical = unique_label_competition(name, sport_id="football", exclude=stored)
         return canonical or stored
 
-    if not stored.startswith(f"{sport}-") or suffix not in stored:
+    if not stored.startswith(f"{sport}-"):
         return None
-    if family == "sofascore-web" and not re.search(r"-t[a-z0-9]+$", stored):
+    if family == "sofascore-web":
+        if suffix not in stored or not re.search(r"-t[a-z0-9]+$", stored):
+            return None
+    elif family == "sportscore":
+        if not re.fullmatch(rf"{re.escape(sport)}-ss-[a-f0-9]{{10}}-[a-z0-9-]+", stored):
+            return None
+    elif suffix not in stored:
         return None
 
     canonical = unique_label_competition(name, sport_id=sport, exclude=stored)
