@@ -1,5 +1,5 @@
 from collector.canonical_detail import attach_canonical_detail
-from collector.detail_enrich import parse_fotmob_details, parse_mlb_live, parse_sofa_incidents
+from collector.detail_enrich import parse_fotmob_details, parse_mlb_live, parse_nhl_boxscore, parse_sofa_incidents
 from collector.merge import merge_event_fields
 from collector.normalize import normalize_event
 from collector.tennis_score import derive_tennis_match_score
@@ -136,6 +136,80 @@ def test_fotmob_parser_maps_infobox_player_stats_and_xg():
     assert out["lineups"]["home"]["coach"] == "Vanoli"\n    assert out["lineups"]["home"]["start"][0]["image"].endswith("/playerimages/174543.png")
     assert out["player_statistics"][0]["goals"] == 1\n    assert out["player_statistics"][0]["image"].endswith("/playerimages/174543.png")
     assert out["sport_detail"]["shots"] == 2
+
+
+def test_mlb_uses_real_batting_order_and_player_headshots():
+    payload = {
+        "liveData": {
+            "boxscore": {
+                "teams": {
+                    "home": {
+                        "battingOrder": [10],
+                        "players": {
+                            "ID10": {
+                                "person": {"id": 10, "fullName": "Starter"},
+                                "jerseyNumber": "7",
+                                "position": {"abbreviation": "CF"},
+                                "stats": {"batting": {"hits": 2, "atBats": 4, "runs": 1}},
+                            },
+                            "ID11": {
+                                "person": {"id": 11, "fullName": "Bench"},
+                                "jerseyNumber": "22",
+                                "position": {"abbreviation": "1B"},
+                                "stats": {"batting": {"hits": 0, "atBats": 0}},
+                            },
+                        },
+                    },
+                    "away": {
+                        "battingOrder": [20],
+                        "players": {
+                            "ID20": {
+                                "person": {"id": 20, "fullName": "Away Starter"},
+                                "jerseyNumber": "3",
+                                "position": {"abbreviation": "SS"},
+                                "stats": {"batting": {"hits": 1, "atBats": 3}},
+                            }
+                        },
+                    },
+                }
+            },
+            "plays": {},
+            "linescore": {},
+        }
+    }
+    out = parse_mlb_live(payload)
+    assert out["lineups"]["home"]["start"][0]["name"] == "Starter"
+    assert out["lineups"]["home"]["bench"][0]["name"] == "Bench"
+    assert "/people/10/headshot/" in out["lineups"]["home"]["start"][0]["image"]
+    assert out["player_statistics"][0]["position"] == "CF"
+
+
+def test_nhl_boxscore_preserves_player_media_and_positions():
+    payload = {
+        "playerByGameStats": {
+            "homeTeam": {
+                "forwards": [
+                    {
+                        "playerId": 8478402,
+                        "name": {"default": "Connor Example"},
+                        "sweaterNumber": 97,
+                        "position": "C",
+                        "headshot": "https://assets.nhle.com/mugs/nhl/latest/8478402.png",
+                        "goals": 1,
+                        "assists": 2,
+                        "sog": 5,
+                    }
+                ]
+            },
+            "awayTeam": {"forwards": []},
+        }
+    }
+    out = parse_nhl_boxscore(payload)
+    player = out["player_statistics"][0]
+    assert player["id"] == 8478402
+    assert player["position"] == "C"
+    assert player["image"].endswith("/8478402.png")
+    assert out["lineups"]["home"]["start"][0]["number"] == 97
 
 
 def test_rugby_and_squiggle_and_jolpica_parsers():
