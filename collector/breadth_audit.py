@@ -217,6 +217,37 @@ def tomorrow_public_multisport_snapshot() -> Dict[str, Any]:
 
 
 
+MATCH_DETAIL_URL = "https://sportscore.com/api/widget/match/?sport={sport}&slug={slug}&src=ninkosports"
+
+
+def _sportscore_detail_identity(sport: str, row: Dict[str, Any]) -> Dict[str, Any]:
+    from urllib.parse import urlparse
+    from collector.http import fetch_url
+
+    raw_url = str(row.get("url") or "").strip()
+    slug = urlparse(raw_url).path.rstrip("/").rsplit("/", 1)[-1] if raw_url else ""
+    if not slug:
+        return {}
+    result = fetch_url(MATCH_DETAIL_URL.format(sport=sport, slug=slug))
+    payload = result.payload if getattr(result, "ok", False) and isinstance(result.payload, dict) else {}
+    match = payload.get("match") if isinstance(payload.get("match"), dict) else payload
+    competition = match.get("competition") if isinstance(match.get("competition"), dict) else {}
+    return {
+        "status": int(getattr(result, "http_status", 0) or 0),
+        "ok": bool(getattr(result, "ok", False)),
+        "slug": slug,
+        "top_keys": sorted(str(key) for key in payload.keys())[:60],
+        "match_keys": sorted(str(key) for key in match.keys())[:80] if isinstance(match, dict) else [],
+        "competition": competition,
+        "competition_name": match.get("competition") if isinstance(match.get("competition"), str) else None,
+        "competition_slug": match.get("competition_slug") or match.get("league_slug") or competition.get("slug"),
+        "competition_id": match.get("competition_id") or match.get("league_id") or competition.get("id"),
+        "country": match.get("country") or competition.get("country"),
+        "season": match.get("season"),
+        "stage": match.get("stage"),
+        "round": match.get("round"),
+    }
+
 def sportscore_breadth_probe() -> Dict[str, Any]:
     """Production transport/competition probe for the public SportScore board."""
     from collector.adapters_sportscore import MATCHES_URL, _payload_matches
@@ -272,5 +303,12 @@ def sportscore_breadth_probe() -> Dict[str, Any]:
             if rows:
                 break
         best["attempts"] = attempts
+        if best.get("rows") and sport_id in {"basketball", "tennis", "cricket"}:
+            source_sport = str(best.get("upstream") or sport_id)
+            board_result = fetch_url(MATCHES_URL.format(sport=source_sport, limit=50))
+            detail_rows = _payload_matches(board_result.payload) if getattr(board_result, "ok", False) else []
+            best["detail_identity"] = _sportscore_detail_identity(
+                source_sport, detail_rows[0] if detail_rows else {}
+            )
         out[sport_id] = best
     return out
