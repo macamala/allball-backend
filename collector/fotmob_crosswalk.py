@@ -19,6 +19,7 @@ from collector.adapters_fotmob import (
     board_dates,
     match_to_event,
 )
+from collector.competition_identity import unique_label_competition
 from collector.identity_events import identity_confidence
 from collector.competition_presentation import SOURCE_ALPHA3_TO_GEO
 from collector.list_extra import store_list_extra
