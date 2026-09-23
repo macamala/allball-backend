@@ -24,7 +24,7 @@ from collector.util import dump_json, load_json, slugify
 logger = logging.getLogger(__name__)
 
 JOB_KEY = "sportscore-multisport-breadth-v1"
-SCHEDULE_JOB_KEY = "sportscore-team-schedule-v1"
+SCHEDULE_JOB_KEY = "sportscore-team-schedule-v2"
 SPORTS = ("basketball", "tennis", "cricket")
 GENERIC_LABELS = {
     "club friendship",
@@ -80,14 +80,17 @@ def source_native_identity(
     if not name or not label:
         return None, name, ""
 
-    # A provider board can reuse very generic labels across countries. Without
-    # provider country/id metadata it is safer to skip those than to merge them.
-    if name.lower().strip() in GENERIC_LABELS and not logo:
+    # A provider board can reuse very generic labels across countries.
+    # Specific full competition names are stable enough on their own and must
+    # remain identical between /matches and /team responses (the latter often
+    # omits competition_logo). Generic names require logo evidence.
+    generic = name.lower().strip() in GENERIC_LABELS
+    if generic and not logo:
         return None, name, ""
 
-    # Logo is provider-owned identity evidence when available. For specific
-    # labels, the full label itself is already a stable upstream identity.
-    material = f"{sport_id}|{name.casefold()}|{logo}"
+    material = f"{sport_id}|{name.casefold()}"
+    if generic:
+        material += f"|{logo}"
     digest = hashlib.sha1(material.encode("utf-8")).hexdigest()[:10]
     max_label = max(12, 118 - len(sport_id) - len(digest) - 5)
     competition_id = f"{sport_id}-ss-{digest}-{label[:max_label]}".rstrip("-")
