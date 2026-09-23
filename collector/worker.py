@@ -407,6 +407,7 @@ def _maybe_log_breadth(db, *, force: bool = False) -> None:
         logger.info("TOMORROW_FOOTBALL_BREADTH %s", snapshot)
         public_snapshot = tomorrow_public_football_snapshot()
         logger.info("TOMORROW_FOOTBALL_PUBLIC %s", public_snapshot)
+        logger.info("TOMORROW_MULTISPORT_PUBLIC %s", tomorrow_public_multisport_snapshot())
         logger.info("FIFA_COMPETITION_SAMPLES %s", fifa_competition_samples())
         _breadth_logged_at = now_audit
     except Exception:
