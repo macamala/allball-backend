@@ -14,6 +14,28 @@ from collector.http import fetch_url
 
 LIVE_URL = "https://www.sofascore.com/api/v1/sport/{sport}/events/live"
 SCHED_URL = "https://www.sofascore.com/api/v1/sport/{sport}/scheduled-events/{date}"
+SOFA_BROWSER_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
+    ),
+    "Accept": "application/json,text/plain,*/*",
+    "Accept-Language": "en-GB,en;q=0.9",
+    "Referer": "https://www.sofascore.com/",
+}
+
+
+def sofa_fetch_url(url: str):
+    """Public SofaScore JSON with ordinary browser headers and host fallback."""
+    result = fetch_url(url, headers=SOFA_BROWSER_HEADERS)
+    if result.ok:
+        return result
+    if "://www.sofascore.com/" in url:
+        alternate = url.replace("://www.sofascore.com/", "://api.sofascore.com/", 1)
+        retry = fetch_url(alternate, headers=SOFA_BROWSER_HEADERS)
+        if retry.ok or retry.http_status != 0:
+            return retry
+    return result
 
 # One live + dated board fetch is reused across competitions in the same sport.
 _BOARD: Dict[str, List[Dict[str, Any]]] = {}
