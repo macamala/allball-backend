@@ -8,7 +8,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from sqlalchemy.orm import Session
 
-from collector.adapters_sofascore import SCHED_URL, sofa_event
+from collector.adapters_sofascore import SCHED_URL, sofa_event, sofa_fetch_url
 from collector.http import fetch_url
 from collector.lock import lock_status
 from collector.models import SportsCollectorJob, SportsCompetition, SportsSource, SportsSourceCompetition
@@ -16,7 +16,7 @@ from collector.util import dump_json, load_json, slugify
 
 logger = logging.getLogger(__name__)
 
-JOB_ID = "sofascore-multisport-breadth-v1"
+JOB_ID = "sofascore-multisport-breadth-v2"
 
 SOFA_BREADTH_SPORTS: Dict[str, str] = {
     "basketball": "basketball",
@@ -167,7 +167,7 @@ def run_breadth_ingest(
     if source is None:
         return {"status": "missing_source", "ingested": 0, "upstream_total": 0}
 
-    fetch = getter or fetch_url
+    fetch = getter or sofa_fetch_url
     dates = board_dates()
     stats: Dict[str, Any] = {
         "status": "ok",
@@ -176,12 +176,19 @@ def run_breadth_ingest(
         "eligible": 0,
         "ingested": 0,
         "sports": {},
+        "transport": {},
     }
 
     for sofa_sport, sport_id in SOFA_BREADTH_SPORTS.items():
         sport_stats = {"upstream": 0, "eligible": 0, "ingested": 0}
         for day in dates:
             result = fetch(SCHED_URL.format(sport=sofa_sport, date=day))
+            status_key = str(getattr(result, "http_status", 0) or 0)
+            transport = stats["transport"]
+            transport[status_key] = int(transport.get(status_key) or 0) + 1
+            if not getattr(result, "ok", False) and not sport_stats.get("first_error"):
+                sport_stats["first_error"] = str(getattr(result, "error", "") or "")[:160]
+                sport_stats["first_status"] = int(getattr(result, "http_status", 0) or 0)
             payload = result.payload if getattr(result, "ok", False) and isinstance(result.payload, dict) else {}
             rows = [
                 row
