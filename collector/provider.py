@@ -494,6 +494,24 @@ def _start_within_to(start_time: Optional[str], date_to: str) -> bool:
     return start[:10] <= date_to[:10]
 
 
+def _trusted_source_native_ids(db: Session, sport: Optional[str] = None) -> set[str]:
+    """Dynamic competitions explicitly created by a trusted breadth collector."""
+    query = (
+        db.query(SportsSourceCompetition.competition_id)
+        .join(
+            SportsCompetition,
+            SportsCompetition.competition_id == SportsSourceCompetition.competition_id,
+        )
+        .filter(
+            SportsSourceCompetition.enabled.is_(True),
+            SportsSourceCompetition.independence_status == "single-source-breadth",
+        )
+    )
+    if sport:
+        query = query.filter(SportsCompetition.sport_id == sport)
+    return {row[0] for row in query.all() if row[0]}
+
+
 class NinkoCollectedSportsDataProvider:
     """Serves stored NinkoSports events. Empty store stays honestly disconnected."""
 
@@ -604,7 +622,9 @@ class NinkoCollectedSportsDataProvider:
             from collector.competition_identity import OFFICIAL_PUBLIC_COMPETITIONS
 
             frozen = frozen_competition_ids()
-            public_ids = frozen | OFFICIAL_PUBLIC_COMPETITIONS
+            preferred_ids = frozen | OFFICIAL_PUBLIC_COMPETITIONS
+            source_native_ids = _trusted_source_native_ids(db, sport=sport)
+            public_ids = preferred_ids | source_native_ids
             query = db.query(SportsEvent).options(load_only(*LIST_LOAD_COLUMNS))
             if sport:
                 query = query.filter_by(sport_id=sport)
@@ -632,6 +652,7 @@ class NinkoCollectedSportsDataProvider:
                 or_(
                     SportsEvent.display_eligible.is_(True),
                     SportsEvent.display_eligible.is_(None),
+                    SportsEvent.competition_id.in_(source_native_ids),
                     and_(SportsEvent.sport_id == "football", SportsEvent.competition_id.like("football-%")),
                 )
             )
@@ -686,7 +707,7 @@ class NinkoCollectedSportsDataProvider:
                 if (row.get("competition_key") or "") in public_ids
                 or (row.get("sport") == "football" and str(row.get("competition_key") or "").startswith("football-"))
             ]
-            events = _dedupe_public_fixture_rows(events, public_ids)
+            events = _dedupe_public_fixture_rows(events, preferred_ids)
             cache_set(db, cache_key, events, "upcoming_fixtures" if status != "live" else "live_events")
             db.commit()
             self._last_profile = {

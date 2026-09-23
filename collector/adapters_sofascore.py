@@ -235,6 +235,36 @@ def _dates() -> List[str]:
     return [(now + timedelta(days=delta)).strftime("%Y-%m-%d") for delta in (-1, 0, 1)]
 
 
+def _source_tournament(row: Dict[str, Any]) -> Dict[str, Any]:
+    tour = row.get("tournament") if isinstance(row.get("tournament"), dict) else {}
+    unique = tour.get("uniqueTournament") if isinstance(tour.get("uniqueTournament"), dict) else {}
+    return unique or tour
+
+
+def _source_tournament_id(row: Dict[str, Any]) -> str:
+    source = _source_tournament(row)
+    return str(source.get("id") or "").strip()
+
+
+def _source_tournament_name(row: Dict[str, Any]) -> str:
+    source = _source_tournament(row)
+    return str(source.get("name") or "").strip()
+
+
+def _source_country(row: Dict[str, Any]) -> str:
+    tour = row.get("tournament") if isinstance(row.get("tournament"), dict) else {}
+    category = tour.get("category") if isinstance(tour.get("category"), dict) else {}
+    country = category.get("country") if isinstance(category.get("country"), dict) else {}
+    value = (
+        country.get("alpha2")
+        or country.get("alpha3")
+        or country.get("name")
+        or category.get("countryCode")
+        or ""
+    )
+    return str(value or "").strip()
+
+
 def _blob(row: Dict[str, Any]) -> str:
     tour = row.get("tournament") or {}
     unique = tour.get("uniqueTournament") or {}
@@ -311,6 +341,9 @@ def sofa_event(row: Dict[str, Any], competition_id: str, sport_id: str) -> Optio
         start_time = datetime.fromtimestamp(int(start), tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     tour = row.get("tournament") or {}
     unique = tour.get("uniqueTournament") or {}
+    source_competition_id = _source_tournament_id(row)
+    source_competition_name = _source_tournament_name(row) or unique.get("name") or tour.get("name") or competition_id
+    source_country = _source_country(row)
     payload = {
         "id": f"sofascore:{row.get('id')}",
         "home": {"id": str(home.get("id") or ""), "name": home_name},
@@ -319,16 +352,20 @@ def sofa_event(row: Dict[str, Any], competition_id: str, sport_id: str) -> Optio
         "score": score,
         "start_time": start_time,
         "sport": sport_id,
-        "competition": unique.get("name") or tour.get("name") or competition_id,
+        "competition": source_competition_name,
         "competition_key": competition_id,
+        "country_id": source_country or None,
         "event_family": "team_match",
         "source_family": "sofascore-web",
         "source_event_id": str(row.get("id") or ""),
-        "source_competition_id": unique.get("id") or tour.get("id"),
+        "source_competition_id": source_competition_id or None,
+        "source_competition_name": source_competition_name,
         "extra": {
             "source_family": "sofascore-web",
             "source_event_ids": {"sofascore-web": str(row.get("id") or "")},
             "source_event_id": str(row.get("id") or ""),
+            "source_competition_id": source_competition_id or None,
+            "source_competition_name": source_competition_name,
         },
     }
     if periods:
@@ -347,18 +384,34 @@ class SofaScoreWebAdapter:
     def fetch(self, request: FetchRequest) -> FetchResult:
         competition_id = request.competition_id or ""
         spec = SOFA_COMPETITIONS.get(competition_id)
-        if spec is None:
-            return FetchResult(ok=True, http_status=200, events=[], empty_reason="SOURCE_HEALTHY_NO_EVENTS")
-        sport = spec["sport"]
-        # Live + dated sport boards only. unique-tournament/* is 403 from Railway.
-        rows = list(self._board(sport))
-        events = []
-        for row in rows:
-            if not _matches_spec(row, spec):
-                continue
-            event = sofa_event(row, competition_id, spec.get("sport_id") or sport)
-            if event:
-                events.append(event)
+        source_config = request.source_config or {}
+        target_tournament_id = str(source_config.get("sofascore_tournament_id") or "").strip()
+        if spec is None and target_tournament_id:
+            sport = str(source_config.get("sofascore_sport") or request.sport_id or "").strip()
+            sport_id = str(source_config.get("sport_id") or request.sport_id or sport).strip()
+            if not sport:
+                return FetchResult(ok=True, http_status=200, events=[], empty_reason="SOURCE_HEALTHY_NO_EVENTS")
+            rows = list(self._board(sport))
+            events = []
+            for row in rows:
+                if _source_tournament_id(row) != target_tournament_id:
+                    continue
+                event = sofa_event(row, competition_id, sport_id)
+                if event:
+                    events.append(event)
+        else:
+            if spec is None:
+                return FetchResult(ok=True, http_status=200, events=[], empty_reason="SOURCE_HEALTHY_NO_EVENTS")
+            sport = spec["sport"]
+            # Live + dated sport boards only. unique-tournament/* is 403 from Railway.
+            rows = list(self._board(sport))
+            events = []
+            for row in rows:
+                if not _matches_spec(row, spec):
+                    continue
+                event = sofa_event(row, competition_id, spec.get("sport_id") or sport)
+                if event:
+                    events.append(event)
         cap = request.capability
         if cap == "live_scores":
             events = [e for e in events if e.get("status") == "live"]

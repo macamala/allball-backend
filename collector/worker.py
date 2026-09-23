@@ -509,6 +509,32 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
             except Exception:
                 logger.exception("FotMob date-board backfill failed")
 
+            try:
+                from collector.sofascore_crosswalk import run_if_due as run_sofascore_breadth_if_due
+
+                def _pulse_sofa() -> None:
+                    heartbeat_scheduler_lock(db, owner=owner)
+                    db.commit()
+
+                sofa_breadth = run_sofascore_breadth_if_due(
+                    db,
+                    owner=owner,
+                    heartbeat=_pulse_sofa,
+                )
+                if sofa_breadth:
+                    logger.info(
+                        "SofaScore multi-sport breadth %s",
+                        {
+                            "status": sofa_breadth.get("status"),
+                            "upstream_total": sofa_breadth.get("upstream_total"),
+                            "eligible": sofa_breadth.get("eligible"),
+                            "ingested": sofa_breadth.get("ingested"),
+                            "sports": sofa_breadth.get("sports"),
+                        },
+                    )
+            except Exception:
+                logger.exception("SofaScore multi-sport breadth failed")
+
             _collect_official_creators(db)
             from collector.watch_set import rebuild_watch_set
 

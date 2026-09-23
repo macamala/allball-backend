@@ -20,7 +20,31 @@ OFFICIAL_PUBLIC_COMPETITIONS = {
     "ireland-gri-meetings",
 }
 
-SOURCE_NATIVE_PUBLIC_FAMILIES = {"fifa", "fifa-digital", "fifa-json", "fotmob"}
+SOURCE_NATIVE_PUBLIC_FAMILIES_BY_SPORT = {
+    "football": {"fifa", "fifa-digital", "fifa-json", "fotmob", "sofascore-web"},
+    "basketball": {"sofascore-web"},
+    "tennis": {"sofascore-web"},
+    "ice-hockey": {"sofascore-web"},
+    "baseball": {"sofascore-web"},
+    "handball": {"sofascore-web"},
+    "volleyball": {"sofascore-web"},
+    "american-football": {"sofascore-web"},
+    "futsal": {"sofascore-web"},
+    "badminton": {"sofascore-web"},
+    "table-tennis": {"sofascore-web"},
+    "cricket": {"sofascore-web"},
+    "water-polo": {"sofascore-web"},
+    "netball": {"sofascore-web"},
+    "field-hockey": {"sofascore-web"},
+    "darts": {"sofascore-web"},
+    "snooker": {"sofascore-web"},
+}
+SOURCE_NATIVE_PUBLIC_FAMILIES = set().union(*SOURCE_NATIVE_PUBLIC_FAMILIES_BY_SPORT.values())
+
+
+def _native_sport_id(value: str) -> str:
+    sport = str(value or "").strip().lower()
+    return {"soccer": "football", "waterpolo": "water-polo"}.get(sport, sport)
 
 
 def source_native_public_competition_id(
@@ -30,18 +54,38 @@ def source_native_public_competition_id(
     sport_id: str,
     source_family: str,
 ) -> Optional[str]:
-    """Allow trusted global football competitions only under their own source identity."""
+    """Allow only explicitly trusted source-native competition identities."""
     stored = str(stored_competition_id or "").strip()
     name = str(source_competition_name or "").strip()
     family = str(source_family or "").strip()
-    if sport_id not in {"football", "soccer"} or family not in SOURCE_NATIVE_PUBLIC_FAMILIES or not name:
+    sport = _native_sport_id(sport_id)
+    allowed = SOURCE_NATIVE_PUBLIC_FAMILIES_BY_SPORT.get(sport) or set()
+    if family not in allowed or not name or not stored:
         return None
+
     suffix = slugify(name)
-    native = f"football-{suffix}"
-    country_qualified = bool(re.fullmatch(rf"football-[a-z]{{2,3}}-{re.escape(suffix)}", stored))
-    if stored != native and not country_qualified:
+    if not suffix:
         return None
-    canonical = unique_label_competition(name, sport_id="football", exclude=stored)
+
+    if sport == "football":
+        native = f"football-{suffix}"
+        country_qualified = bool(re.fullmatch(rf"football-[a-z]{{2,3}}-{re.escape(suffix)}", stored))
+        provider_qualified = bool(
+            stored.startswith("football-")
+            and suffix in stored
+            and re.search(r"-t[a-z0-9]+$", stored)
+        )
+        if stored != native and not country_qualified and not provider_qualified:
+            return None
+        canonical = unique_label_competition(name, sport_id="football", exclude=stored)
+        return canonical or stored
+
+    if not stored.startswith(f"{sport}-") or suffix not in stored:
+        return None
+    if family == "sofascore-web" and not re.search(r"-t[a-z0-9]+$", stored):
+        return None
+
+    canonical = unique_label_competition(name, sport_id=sport, exclude=stored)
     return canonical or stored
 
 
@@ -332,7 +376,7 @@ def correct_public_competition_id(
     sport_id: str = "",
     source_family: str = "",
 ) -> Optional[str]:
-    """Return a safe public competition id, including trusted source-native football."""
+    """Return a safe public competition id, including trusted source-native competitions."""
     from collector.matrix_guard import frozen_competition_ids
 
     stored = str(stored_competition_id or "").strip()
@@ -353,7 +397,7 @@ def correct_public_competition_id(
         return stored if stored in frozen or stored in OFFICIAL_PUBLIC_COMPETITIONS else None
     # FotMob frozen IDs come only from our explicit league-id map. Keep that
     # canonical identity even when the upstream display label is generic.
-    if family == "fotmob" and stored in frozen:
+    if family in {"fotmob", "sofascore-web"} and stored in frozen:
         return stored
     if stored and label_matches_competition(name, stored):
         return stored if stored in frozen or stored in OFFICIAL_PUBLIC_COMPETITIONS else None
