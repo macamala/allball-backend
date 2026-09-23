@@ -8,7 +8,7 @@ from typing import List, Optional
 from xml.sax.saxutils import escape
 
 from fastapi import FastAPI, Depends, Query, HTTPException, Request
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import func, text
@@ -894,7 +894,16 @@ def sports_data_events(
     )
     payload["events"] = events
     payload["matches"] = events_to_legacy_matches(events)
-    return payload
+    profile = getattr(provider, "_last_profile", None) or {}
+    response = JSONResponse(payload)
+    if profile:
+        response.headers["Server-Timing"] = ", ".join(
+            f"{key};dur={profile[key]}"
+            for key in ("session_ms", "db_ms", "standings_ms", "taxonomy_ms", "serialize_ms", "total_ms")
+            if key in profile
+        )
+        response.headers["X-Ninko-Cache"] = str(profile.get("cache") or "")
+    return response
 
 
 def _internal_ok(request: Request) -> bool:
