@@ -33,6 +33,7 @@ LIST_EXTRA_KEYS = (
     "status_inferred",
     "source_family",
     "source_competition_name",
+    "public_competition_key",
     "coverage",
     "coverage_kind",
     "display_eligible",
