@@ -1122,14 +1122,18 @@ class NinkoCollectedSportsDataProvider:
             if payload is None:
                 return None
             extra = load_json(row.extra_json, {}) or {}
-            from collector.standings_enrich import standings_supported
+            from collector.standings_enrich import dynamic_standings_supported, standings_supported
 
             standing = (
                 db.query(SportsStandingSnapshot.competition_id)
                 .filter_by(competition_id=payload.get("competition_key"))
                 .first()
             )
-            payload["standings_available"] = bool(standing) or standings_supported(payload.get("competition_key"))
+            payload["standings_available"] = (
+                bool(standing)
+                or standings_supported(payload.get("competition_key"))
+                or dynamic_standings_supported(db, payload.get("competition_key"))
+            )
             for key in DETAIL_ONLY_KEYS:
                 if extra.get(key) is not None and payload.get(key) is None:
                     payload[key] = extra[key]
