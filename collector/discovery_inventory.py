@@ -800,12 +800,14 @@ def _extend_live_families() -> None:
         "formula-e",
     }
     for cid, spec in FOTMOB_LEAGUES.items():
+        raw_ids = spec.get("ids") or ([spec.get("id")] if spec.get("id") is not None else [])
+        league_ids = ",".join(str(value) for value in raw_ids if value not in (None, ""))
         COVERAGE.append(
             _c(
                 "football",
                 str(spec.get("ccode") or "world"),
                 cid,
-                f"FotMob allLeagues id {spec['id']} {spec.get('name')}",
+                f"FotMob allLeagues id {league_ids} {spec.get('name')}",
                 "fotmob",
                 "public JSON",
                 "Y",
@@ -818,7 +820,7 @@ def _extend_live_families() -> None:
                 True,
                 "unclear",
                 3,
-                probe=f"Railway 200 www.fotmob.com/api/data/matches league {spec['id']}; NZ not 8870",
+                probe=f"Railway 200 www.fotmob.com/api/data/matches leagues {league_ids}; NZ not 8870",
             )
         )
     sport_map = {
