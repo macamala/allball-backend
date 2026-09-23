@@ -38,6 +38,8 @@ SOURCE_NATIVE_PUBLIC_FAMILIES_BY_SPORT = {
     "field-hockey": {"sofascore-web"},
     "darts": {"sofascore-web"},
     "snooker": {"sofascore-web"},
+    "rugby": {"sofascore-web"},
+    "mma": {"sofascore-web"},
 }
 SOURCE_NATIVE_PUBLIC_FAMILIES = set().union(*SOURCE_NATIVE_PUBLIC_FAMILIES_BY_SPORT.values())
 

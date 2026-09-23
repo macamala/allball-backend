@@ -114,6 +114,8 @@ EVENT_TYPE_BY_SPORT = {
     "tennis": HEAD_TO_HEAD,
     "badminton": HEAD_TO_HEAD,
     "table-tennis": HEAD_TO_HEAD,
+    "mma": HEAD_TO_HEAD,
+    "boxing": HEAD_TO_HEAD,
     "cycling": RACE,
     "winter-sports": RACE,
     "motorsport": RACE,

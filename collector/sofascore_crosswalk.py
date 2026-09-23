@@ -12,6 +12,7 @@ from collector.adapters_sofascore import SCHED_URL, sofa_event, sofa_fetch_url
 from collector.http import fetch_url
 from collector.lock import lock_status
 from collector.models import SportsCollectorJob, SportsCompetition, SportsSource, SportsSourceCompetition
+from collector.sources import source_collectable
 from collector.util import dump_json, load_json, slugify
 
 logger = logging.getLogger(__name__)
@@ -35,6 +36,12 @@ SOFA_BREADTH_SPORTS: Dict[str, str] = {
     "field-hockey": "field-hockey",
     "darts": "darts",
     "snooker": "snooker",
+    # Sofa's rugby board covers union and league competitions worldwide. The
+    # source competition identity remains provider-native so competitions can
+    # be separated/deduped downstream rather than hard-coded one by one.
+    "rugby": "rugby",
+    # Combat events use the same homeTeam/awayTeam nodes for fighters.
+    "mma": "mma",
 }
 
 
@@ -86,11 +93,12 @@ def source_native_identity(row: Dict[str, Any], sport_id: str) -> Tuple[Optional
 
 
 def _source(db: Session) -> Optional[SportsSource]:
-    return (
+    rows = (
         db.query(SportsSource)
         .filter(SportsSource.adapter_key == "sofascore-web", SportsSource.enabled.is_(True))
-        .first()
+        .all()
     )
+    return next((row for row in rows if source_collectable(row)), None)
 
 
 def _ensure_mapping(
@@ -113,7 +121,7 @@ def _ensure_mapping(
             official_name=tournament_name,
             slug=competition_id,
             country_id=country_id.lower() if len(country_id) == 2 else (country_id or None),
-            event_model="team_match",
+            event_model=("individual_match" if sport_id in {"tennis", "badminton", "table-tennis", "darts", "snooker", "mma", "boxing"} else "team_match"),
             country_based=bool(country_id),
             active=True,
             news_taxonomy=False,

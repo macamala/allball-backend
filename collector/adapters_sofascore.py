@@ -14,6 +14,13 @@ from collector.http import fetch_url
 
 LIVE_URL = "https://www.sofascore.com/api/v1/sport/{sport}/events/live"
 SCHED_URL = "https://www.sofascore.com/api/v1/sport/{sport}/scheduled-events/{date}"
+HEAD_TO_HEAD_SPORTS = {"tennis", "badminton", "table-tennis", "darts", "snooker", "mma", "boxing"}
+
+
+def event_family_for_sport(sport_id: str) -> str:
+    return "individual_match" if sport_id in HEAD_TO_HEAD_SPORTS else "team_match"
+
+
 SOFA_BROWSER_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -377,7 +384,7 @@ def sofa_event(row: Dict[str, Any], competition_id: str, sport_id: str) -> Optio
         "competition": source_competition_name,
         "competition_key": competition_id,
         "country_id": source_country or None,
-        "event_family": "team_match",
+        "event_family": event_family_for_sport(sport_id),
         "source_family": "sofascore-web",
         "source_event_id": str(row.get("id") or ""),
         "source_competition_id": source_competition_id or None,
