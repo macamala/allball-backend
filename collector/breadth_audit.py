@@ -114,33 +114,46 @@ def fifa_competition_samples() -> List[Dict[str, Any]]:
     from collector.adapters_feeds import loc
     from collector.http import fetch_url
 
-    result = fetch_url("https://api.fifa.com/api/v3/calendar/matches?count=100&language=en")
-    payload = result.payload if getattr(result, "ok", False) and isinstance(result.payload, dict) else {}
     out: List[Dict[str, Any]] = []
-    for row in payload.get("Results") or []:
-        if not isinstance(row, dict):
-            continue
-        name = ""
-        raw_name = row.get("CompetitionName")
-        if isinstance(raw_name, list) and raw_name:
-            first = raw_name[0]
-            name = str((first or {}).get("Description") or (first or {}).get("Name") or "") if isinstance(first, dict) else str(first)
-        elif isinstance(raw_name, dict):
-            name = str(raw_name.get("Description") or raw_name.get("Name") or "")
-        else:
-            name = str(raw_name or "")
-        if name not in {"Ligue 1", "Premier League", "Concacaf Nations League", "UEFA Nations League"}:
-            continue
-        compact = {"CompetitionName": name}
-        for key, value in row.items():
-            lower = key.lower()
-            if any(token in lower for token in ("country", "competition", "association", "confeder", "federation")):
-                compact[key] = value
-        home = row.get("HomeTeam") or {}
-        away = row.get("AwayTeam") or {}
-        compact["home"] = loc(home.get("TeamName")) if isinstance(home, dict) else ""
-        compact["away"] = loc(away.get("TeamName")) if isinstance(away, dict) else ""
-        out.append(compact)
-        if len(out) >= 12:
-            break
+    urls = [
+        "https://api.fifa.com/api/v3/live/football?language=en",
+        "https://api.fifa.com/api/v3/calendar/matches?count=100&language=en",
+    ]
+    for url in urls:
+        result = fetch_url(url)
+        payload = result.payload if getattr(result, "ok", False) and isinstance(result.payload, dict) else {}
+        for row in payload.get("Results") or []:
+            if not isinstance(row, dict):
+                continue
+            raw_name = row.get("CompetitionName")
+            name = loc(raw_name)
+            home = row.get("HomeTeam") or {}
+            away = row.get("AwayTeam") or {}
+            compact: Dict[str, Any] = {
+                "endpoint": "live" if "/live/" in url else "calendar",
+                "CompetitionName": name,
+                "home": loc(home.get("TeamName")) if isinstance(home, dict) else "",
+                "away": loc(away.get("TeamName")) if isinstance(away, dict) else "",
+                "top_identity": {
+                    key: value
+                    for key, value in row.items()
+                    if any(token in key.lower() for token in ("country", "competition", "association", "confeder", "federation"))
+                },
+                "home_identity": {
+                    key: value
+                    for key, value in home.items()
+                    if any(token in key.lower() for token in ("country", "association", "confeder", "federation", "team"))
+                } if isinstance(home, dict) else {},
+                "away_identity": {
+                    key: value
+                    for key, value in away.items()
+                    if any(token in key.lower() for token in ("country", "association", "confeder", "federation", "team"))
+                } if isinstance(away, dict) else {},
+            }
+            if name in {"Ligue 1", "Premier League", "Concacaf Nations League", "UEFA Nations League"}:
+                out.append(compact)
+            elif len(out) < 4:
+                out.append(compact)
+            if len(out) >= 12:
+                return out
     return out
