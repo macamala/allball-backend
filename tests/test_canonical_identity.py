@@ -402,6 +402,15 @@ def test_fifa_source_native_competitions_are_public_but_contamination_is_rejecte
         )
         is None
     )
+    assert (
+        correct_public_competition_id(
+            stored_competition_id="football-tun-ligue-1",
+            source_competition_name="Ligue 1",
+            sport_id="football",
+            source_family="fifa-digital",
+        )
+        == "football-tun-ligue-1"
+    )
 
 
 def test_fifa_dynamic_public_payload_uses_human_source_league_name():
