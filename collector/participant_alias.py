@@ -12,6 +12,7 @@ from collector.participant_text import CLUB_STYLE_EXTRAS, fold_for_identity, ide
 from collector.util import dump_json, load_json
 
 _ABBREV = (
+    (re.compile(r"\badt\b"), "asociacion deportiva"),
     (re.compile(r"\butd\b"), "united"),
     (re.compile(r"\bath\b"), "athletic"),
     (re.compile(r"\bwolves\b"), "wolverhampton"),
@@ -19,6 +20,11 @@ _ABBREV = (
     (re.compile(r"\bkoln\b"), "cologne"),
     (re.compile(r"\binternazionale(?:\s+milano)?\b"), "inter"),
 )
+
+_KNOWN_EQUIVALENT_NAMES = {
+    frozenset({"aguilas doradas", "rionegro aguilas"}),
+}
+
 
 _LEADING_CLUB = {
     "fc",
@@ -82,6 +88,8 @@ def names_equivalent(left: str, right: str) -> bool:
     if not a or not b:
         return False
     if a == b:
+        return True
+    if frozenset({a, b}) in _KNOWN_EQUIVALENT_NAMES:
         return True
     if expand_abbreviations(a) == expand_abbreviations(b):
         return True
