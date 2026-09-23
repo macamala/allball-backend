@@ -19,6 +19,7 @@ from collector.source_ids import families_with_ids, id_for_family, merge_family_
 from collector.util import dump_json, load_json
 
 FOTMOB_DETAILS = "https://www.fotmob.com/api/data/matchDetails?matchId={match_id}"
+SOFA_EVENT = "https://www.sofascore.com/api/v1/event/{event_id}"
 SOFA_INCIDENTS = "https://www.sofascore.com/api/v1/event/{event_id}/incidents"
 SOFA_STATS = "https://www.sofascore.com/api/v1/event/{event_id}/statistics"
 SOFA_LINEUPS = "https://www.sofascore.com/api/v1/event/{event_id}/lineups"
@@ -34,7 +35,6 @@ TTL_NEGATIVE = 900
 PARSER_REV = 7
 
 DETAIL_FAMILIES = (
-    "sportscore",
     "fotmob",
     "sofascore-web",
     "mlb-statsapi",
@@ -511,6 +511,61 @@ def parse_fotmob_details(payload: Any) -> Dict[str, Any]:
     return out
 
 
+def parse_sofa_core(payload: Any) -> Dict[str, Any]:
+    root = payload.get("event") if isinstance(payload, dict) and isinstance(payload.get("event"), dict) else {}
+    if not root:
+        return {}
+    out: Dict[str, Any] = {}
+    venue = root.get("venue") if isinstance(root.get("venue"), dict) else {}
+    stadium = venue.get("stadium") if isinstance(venue.get("stadium"), dict) else {}
+    venue_name = stadium.get("name") or venue.get("name") or root.get("venueName")
+    if venue_name:
+        out["venue"] = venue_name
+
+    referee = root.get("referee")
+    if isinstance(referee, dict):
+        referee = referee.get("name") or referee.get("fullName")
+    round_info = root.get("roundInfo") if isinstance(root.get("roundInfo"), dict) else {}
+    round_name = round_info.get("name") or round_info.get("round")
+    if round_name not in (None, ""):
+        out["round"] = round_name
+
+    winner_code = root.get("winnerCode")
+    if winner_code in {1, "1"}:
+        out["winner"] = "home"
+    elif winner_code in {2, "2"}:
+        out["winner"] = "away"
+    elif winner_code in {3, "3"}:
+        out["winner"] = "draw"
+
+    status = root.get("status") if isinstance(root.get("status"), dict) else {}
+    status_text = status.get("description") or status.get("type")
+    detail_blob: Dict[str, Any] = {}
+    if referee:
+        detail_blob["referee"] = referee
+    if round_name not in (None, ""):
+        detail_blob["round"] = round_name
+    if status_text:
+        detail_blob["result_status"] = status_text
+    if root.get("bestOf") not in (None, ""):
+        detail_blob["best_of"] = root.get("bestOf")
+    if detail_blob:
+        out["sport_detail"] = detail_blob
+
+    home_score = root.get("homeScore") if isinstance(root.get("homeScore"), dict) else {}
+    away_score = root.get("awayScore") if isinstance(root.get("awayScore"), dict) else {}
+    periods = []
+    for index in range(1, 8):
+        hv = home_score.get(f"period{index}")
+        av = away_score.get(f"period{index}")
+        if hv is None and av is None:
+            continue
+        periods.append({"label": str(index), "home": hv, "away": av})
+    if periods:
+        out["periods"] = periods
+    return out
+
+
 def parse_sofa_incidents(payload: Any) -> List[Dict[str, Any]]:
     rows = payload.get("incidents") if isinstance(payload, dict) else payload
     if not isinstance(rows, list):
@@ -900,6 +955,7 @@ def fetch_family_detail(family: str, source_event_id: str, getter=None, sport: s
         from concurrent.futures import ThreadPoolExecutor
 
         urls = {
+            "core": SOFA_EVENT.format(event_id=source_event_id),
             "incidents": SOFA_INCIDENTS.format(event_id=source_event_id),
             "statistics": SOFA_STATS.format(event_id=source_event_id),
             "lineups": SOFA_LINEUPS.format(event_id=source_event_id),
@@ -909,8 +965,11 @@ def fetch_family_detail(family: str, source_event_id: str, getter=None, sport: s
             kind, url = item
             return kind, _get(getter, url)
 
-        with ThreadPoolExecutor(max_workers=3) as pool:
+        with ThreadPoolExecutor(max_workers=4) as pool:
             results = dict(pool.map(_fetch, urls.items()))
+        core = results.get("core")
+        if core and core.ok and isinstance(core.payload, dict):
+            _merge_detail(out, parse_sofa_core(core.payload))
         inc = results.get("incidents")
         if inc and inc.ok and isinstance(inc.payload, dict):
             rows = parse_sofa_incidents(inc.payload)
