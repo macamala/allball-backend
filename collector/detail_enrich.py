@@ -337,10 +337,13 @@ def parse_fotmob_details(payload: Any) -> Dict[str, Any]:
         out["incidents"] = timeline
     stats_block = content.get("stats") or content.get("statistics") or {}
     periods = stats_block.get("Periods") if isinstance(stats_block, dict) else {}
-    all_stats = (periods.get("All") or {}).get("stats") if isinstance(periods, dict) else None
-    if isinstance(all_stats, list):
-        rows = []
-        for group in all_stats:
+
+    def _fotmob_stats_rows(period_blob: Any) -> List[Dict[str, Any]]:
+        groups = period_blob.get("stats") if isinstance(period_blob, dict) else None
+        if not isinstance(groups, list):
+            return []
+        rows: List[Dict[str, Any]] = []
+        for group in groups:
             for item in (group.get("stats") if isinstance(group, dict) else []) or []:
                 if not isinstance(item, dict):
                     continue
@@ -348,8 +351,23 @@ def parse_fotmob_details(payload: Any) -> Dict[str, Any]:
                 values = item.get("stats") or item.get("values") or []
                 if title and isinstance(values, list) and len(values) >= 2:
                     rows.append({"label": title, "home": values[0], "away": values[1]})
+        return rows
+
+    all_stats_rows = _fotmob_stats_rows(periods.get("All") if isinstance(periods, dict) else None)
+    if all_stats_rows:
+        out["statistics"] = all_stats_rows
+
+    stat_periods: Dict[str, List[Dict[str, Any]]] = {}
+    for source_key, public_key in (("All", "all"), ("FirstHalf", "first_half"), ("SecondHalf", "second_half")):
+        rows = _fotmob_stats_rows(periods.get(source_key) if isinstance(periods, dict) else None)
         if rows:
-            out["statistics"] = rows
+            stat_periods[public_key] = rows
+    if len(stat_periods) > 1:
+        out["sport_detail"] = {
+            **(out.get("sport_detail") or {}),
+            "statistics_periods": stat_periods,
+        }
+
     period_rows = []
     for key, label in (("FirstHalf", "1"), ("SecondHalf", "2")):
         blob = periods.get(key) if isinstance(periods, dict) else None
