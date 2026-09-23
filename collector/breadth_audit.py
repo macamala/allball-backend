@@ -33,19 +33,28 @@ def tomorrow_football_snapshot(db) -> Dict[str, Any]:
 
     eligible = [row for row in rows if getattr(row, "display_eligible", True) is not False]
     competitions = Counter(row.competition_id for row in eligible)
-    events = []
-    for row in eligible[:160]:
+    def pack(row: SportsEvent) -> Dict[str, Any]:
         sides = load_json(row.participants_json, {}) or {}
+        extra = load_json(row.extra_json, {}) or {}
         home = (sides.get("home") or {}).get("name") if isinstance(sides.get("home"), dict) else sides.get("home")
         away = (sides.get("away") or {}).get("name") if isinstance(sides.get("away"), dict) else sides.get("away")
-        events.append(
-            {
-                "competition": row.competition_id,
-                "home": home,
-                "away": away,
-                "utc": row.start_time.isoformat() + "Z" if row.start_time else None,
-            }
-        )
+        return {
+            "competition": row.competition_id,
+            "home": home,
+            "away": away,
+            "utc": row.start_time.isoformat() + "Z" if row.start_time else None,
+            "eligible": getattr(row, "display_eligible", True) is not False,
+            "primary_source": row.primary_source_id,
+            "source_family": extra.get("source_family"),
+            "source_competition_id": extra.get("source_competition_id"),
+            "source_competition_name": extra.get("source_competition_name"),
+            "quality_flags": extra.get("quality_flags") or [],
+            "resolution_method": extra.get("resolution_method"),
+            "resolution_confidence": extra.get("resolution_confidence"),
+        }
+
+    events = [pack(row) for row in eligible[:160]]
+    hidden = [pack(row) for row in rows if getattr(row, "display_eligible", True) is False][:160]
 
     return {
         "local_date": day.isoformat(),
@@ -53,6 +62,8 @@ def tomorrow_football_snapshot(db) -> Dict[str, Any]:
         "utc_to": utc_end.isoformat() + "Z",
         "total": len(eligible),
         "all_rows": len(rows),
+        "hidden_count": len(rows) - len(eligible),
         "competitions": dict(competitions.most_common()),
         "events": events,
+        "hidden": hidden,
     }
