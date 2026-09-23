@@ -20,15 +20,17 @@ from collector.adapters_fotmob import (
     match_to_event,
 )
 from collector.identity_events import identity_confidence
+from collector.competition_presentation import SOURCE_ALPHA3_TO_GEO
 from collector.list_extra import store_list_extra
 from collector.lock import lock_status
 from collector.models import SportsCollectorJob, SportsCompetition, SportsEvent, SportsSource, SportsSourceCompetition
 from collector.source_ids import families_with_ids, merge_family_ids
 from collector.util import dump_json, load_json, slugify
+from sports_registry.geography import label_for
 
 logger = logging.getLogger(__name__)
 
-DATE_BOARD_JOB = "fotmob-date-boards-v3"
+DATE_BOARD_JOB = "fotmob-date-boards-v4"
 _YOUTH = ("u17", "u18", "u19", "u20", "u21", "u23", "youth", "junior")
 _WOMEN = ("women", "womens", "woms")
 _RESERVE = ("reserve", " ii", "2nd", "b team")
@@ -68,6 +70,28 @@ def _league_to_competition() -> Dict[str, str]:
     return mapped
 
 
+def _canonical_fotmob_competition(league_name: str, ccode: str) -> Optional[str]:
+    """Resolve a known canonical league before creating a source-native key.
+
+    Generic names such as "Premier League" need country context; otherwise a
+    Ghana/Bosnia/Egypt league can be mistaken for England or fail closed.
+    """
+    name = str(league_name or "").strip()
+    if not name:
+        return None
+    direct = unique_label_competition(name, sport_id="football")
+    if direct:
+        return direct
+    code = str(ccode or "").strip().upper()
+    if not code or code in {"INT", "WORLD"}:
+        return None
+    geo = SOURCE_ALPHA3_TO_GEO.get(code, code.lower())
+    country = str(label_for(geo) or geo or "").strip()
+    if not country:
+        return None
+    return unique_label_competition(f"{name} {country}", sport_id="football")
+
+
 def _fotmob_competition_identity(match: Dict[str, Any]) -> Tuple[Optional[str], str, str, str]:
     league = match.get("_league") if isinstance(match.get("_league"), dict) else {}
     league_id = str(league.get("id") or "").strip()
@@ -76,6 +100,9 @@ def _fotmob_competition_identity(match: Dict[str, Any]) -> Tuple[Optional[str], 
     known = _league_to_competition().get(league_id)
     if known:
         return known, league_id, league_name, ccode
+    canonical = _canonical_fotmob_competition(league_name, ccode)
+    if canonical:
+        return canonical, league_id, league_name, ccode
     if not league_id or not league_name:
         return None, league_id, league_name, ccode
     suffix = slugify(league_name)
@@ -246,7 +273,7 @@ def crosswalk_fotmob_ids(
     past_days: Optional[int] = None,
     future_days: Optional[int] = None,
     persist_missing: bool = False,
-    max_ingest: int = 160,
+    max_ingest: int = 1200,
 ) -> Dict[str, int]:
     from collector.http import fetch_url
 
@@ -339,7 +366,7 @@ def eligible_coverage(
     getter=None,
     dates: Optional[List[str]] = None,
     past_days: int = 7,
-    future_days: int = 1,
+    future_days: int = 3,
 ) -> Dict[str, Any]:
     from collector.http import fetch_url
 
@@ -423,7 +450,7 @@ def run_date_board_backfill(
     *,
     getter=None,
     past_days: int = 7,
-    future_days: int = 1,
+    future_days: int = 3,
     heartbeat: Optional[Callable[[], None]] = None,
     owner: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
