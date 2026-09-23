@@ -271,7 +271,26 @@ def merge_event_fields(
         "result_type",
         "walkover",
     ):
-        if key == "incidents" and live_wins and "incidents" in incoming:
+        if key == "classification" and isinstance(incoming.get("classification"), list):
+            incoming_rows = incoming.get("classification") or []
+            current_rows = current.get("classification") if isinstance(current.get("classification"), list) else []
+            incoming_rounds = any(isinstance(row, dict) and row.get("round") for row in incoming_rows)
+            current_rounds = any(isinstance(row, dict) and row.get("round") for row in current_rows)
+            if incoming_rounds and not current_rounds:
+                out[key] = incoming_rows
+                if incoming_source_id:
+                    provenance[key] = incoming_source_id
+                continue
+            continue
+        if (
+            key == "round"
+            and isinstance(current.get(key), str)
+            and "vod" in str(current.get(key)).lower()
+            and _filled(incoming.get(key))
+        ):
+            out[key] = incoming.get(key)
+            if incoming_source_id:
+                provenance[key] = incoming_source_id
             continue
         volatile_stats = key in {"statistics", "incidents"} and live_wins
         had = _filled(current.get(key))
