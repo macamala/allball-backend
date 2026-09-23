@@ -332,7 +332,11 @@ def _dedupe_public_fixture_rows(events: List[Dict[str, Any]], preferred_ids: set
         existing = kept[match_index]
         old_key = str(existing.get("competition_key") or "")
         new_key = str(row.get("competition_key") or "")
+        old_country = str(existing.get("country_id") or "")
+        new_country = str(row.get("country_id") or "")
         if new_key in preferred_ids and old_key not in preferred_ids:
+            kept[match_index] = row
+        elif old_key not in preferred_ids and new_key not in preferred_ids and new_country and not old_country:
             kept[match_index] = row
     return kept
 
