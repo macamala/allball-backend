@@ -497,6 +497,7 @@ def run_if_due(
     if owner and status.get("owner_id") != owner:
         return None
 
+    repair_missing_sport_ids(db)
     job = _job(db)
     payload = load_json(job.last_error, {}) or {}
     if (
