@@ -147,6 +147,10 @@ def revalidate_current_source_native(
         promoted += 1
 
     db.flush()
+    if promoted:
+        from collector.cache import cache_clear
+
+        cache_clear(db, prefix="events:")
     return {"scanned": scanned, "promoted": promoted, "blocked": blocked}
 
 
