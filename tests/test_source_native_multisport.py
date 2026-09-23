@@ -84,4 +84,4 @@ def test_sofascore_head_to_head_event_family():
         "startTimestamp": 1790100000,
     }
     event = sofa_event(row, "mma-int-ufc-t1999", "mma")
-    assert event["event_family"] == "individual_match"
+    assert event["event_family"] == "combat"
