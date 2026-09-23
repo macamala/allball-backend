@@ -851,7 +851,10 @@ def extra_config(family: str, competition_id: str) -> Dict:
         from collector.adapters_fotmob import FOTMOB_LEAGUES
 
         spec = FOTMOB_LEAGUES.get(competition_id) or {}
-        if spec.get("id") is not None:
+        if spec.get("ids"):
+            cfg["fotmob_league_ids"] = list(spec["ids"])
+            cfg["fotmob_league_name"] = spec.get("name")
+        elif spec.get("id") is not None:
             cfg["fotmob_league_id"] = spec["id"]
             cfg["fotmob_league_name"] = spec.get("name")
         cfg["url"] = FAMILY_URLS["fotmob"]
