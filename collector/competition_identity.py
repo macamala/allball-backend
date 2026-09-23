@@ -36,11 +36,13 @@ def source_native_public_competition_id(
     family = str(source_family or "").strip()
     if sport_id not in {"football", "soccer"} or family not in SOURCE_NATIVE_PUBLIC_FAMILIES or not name:
         return None
-    native = f"football-{slugify(name)}"
-    if stored != native:
+    suffix = slugify(name)
+    native = f"football-{suffix}"
+    country_qualified = bool(re.fullmatch(rf"football-[a-z]{{3}}-{re.escape(suffix)}", stored))
+    if stored != native and not country_qualified:
         return None
     canonical = unique_label_competition(name, sport_id="football", exclude=stored)
-    return canonical or native
+    return canonical or stored
 
 
 # Adapter families that bind events to a frozen mapping id themselves.
