@@ -108,8 +108,23 @@ def lock_status(db: Session) -> dict:
     }
 
 
+def advisory_locks_enabled() -> bool:
+    """Session advisory locks are opt-in.
+
+    Railway and other pooled/proxied Postgres connections can outlive an app
+    container, so session-level advisory locks may survive a rolling deploy.
+    The row leases below are transactional, TTL-bound, and remain the primary
+    single-writer guard.
+    """
+    return str(os.getenv("RESULTS_USE_POSTGRES_ADVISORY_LOCKS") or "").strip().lower() in {
+        "1", "true", "yes", "on"
+    }
+
+
 def postgres_try_advisory(db: Session) -> Optional[bool]:
-    """Optional extra guard on Postgres. None if the dialect has no advisory locks."""
+    """Optional extra guard for direct Postgres sessions only."""
+    if not advisory_locks_enabled():
+        return None
     bind = db.get_bind()
     if bind.dialect.name != "postgresql":
         return None
@@ -120,6 +135,8 @@ def postgres_try_advisory(db: Session) -> Optional[bool]:
 
 
 def postgres_advisory_unlock(db: Session) -> None:
+    if not advisory_locks_enabled():
+        return
     bind = db.get_bind()
     if bind.dialect.name != "postgresql":
         return
@@ -187,7 +204,7 @@ def acquire_write_lock(
         row.expires_at = expires
         db.flush()
     bind = db.get_bind()
-    if bind.dialect.name == "postgresql":
+    if advisory_locks_enabled() and bind.dialect.name == "postgresql":
         from sqlalchemy import text
 
         got = db.execute(text(f"SELECT pg_try_advisory_lock({WRITE_ADVISORY})")).scalar()
@@ -210,7 +227,7 @@ def release_write_lock(db: Session, *, owner: Optional[str] = None) -> None:
         row.heartbeat_at = _now()
         db.flush()
     bind = db.get_bind()
-    if bind.dialect.name == "postgresql":
+    if advisory_locks_enabled() and bind.dialect.name == "postgresql":
         from sqlalchemy import text
 
         db.execute(text(f"SELECT pg_advisory_unlock({WRITE_ADVISORY})"))
