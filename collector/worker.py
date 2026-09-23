@@ -35,6 +35,7 @@ from collector.lock import (
 )
 
 STANDBY_SLEEP_SECONDS = 45
+RUN_ONCE_LOCK_RETRIES = 3
 _standby_logged = False
 _creators_collected = False
 _breadth_logged_at = 0.0
@@ -433,6 +434,7 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
         else:
             interval = int(os.getenv("COLLECTOR_INTERVAL_SECONDS") or POLL_SECONDS["NEAR_LIVE"])
     owner = owner_identity()
+    standby_attempts = 0
     while True:
         if not collection_enabled() or (not scheduler_enabled() and not run_once_requested()):
             if once:
@@ -453,10 +455,14 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
                     _standby_logged = True
                 db.commit()
                 if once:
-                    return
+                    standby_attempts += 1
+                    if standby_attempts >= RUN_ONCE_LOCK_RETRIES:
+                        logger.info("Results worker one-shot could not acquire scheduler lease after %s attempts", standby_attempts)
+                        return
                 time.sleep(STANDBY_SLEEP_SECONDS)
                 continue
             _standby_logged = False
+            standby_attempts = 0
             advisory = postgres_try_advisory(db)
             if advisory is False:
                 logger.info("Results worker is standby; postgres advisory lock is held by another owner")
@@ -464,7 +470,10 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
                 db.commit()
                 held = False
                 if once:
-                    return
+                    standby_attempts += 1
+                    if standby_attempts >= RUN_ONCE_LOCK_RETRIES:
+                        logger.info("Results worker one-shot could not acquire postgres advisory lock after %s attempts", standby_attempts)
+                        return
                 time.sleep(STANDBY_SLEEP_SECONDS)
                 continue
             if not db.info.get("registry_bootstrapped"):
