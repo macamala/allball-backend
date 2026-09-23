@@ -8,7 +8,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from sqlalchemy.orm import Session
 
-from collector.adapters_sofascore import SCHED_URL, _extract_matches, sofa_event
+from collector.adapters_sofascore import SCHED_URL, sofa_event
 from collector.http import fetch_url
 from collector.lock import lock_status
 from collector.models import SportsCollectorJob, SportsCompetition, SportsSource, SportsSourceCompetition
@@ -183,7 +183,11 @@ def run_breadth_ingest(
         for day in dates:
             result = fetch(SCHED_URL.format(sport=sofa_sport, date=day))
             payload = result.payload if getattr(result, "ok", False) and isinstance(result.payload, dict) else {}
-            rows = _extract_matches(payload)
+            rows = [
+                row
+                for row in (payload.get("events") or [])
+                if isinstance(row, dict) and row.get("id") is not None
+            ]
             sport_stats["upstream"] += len(rows)
             stats["upstream_total"] += len(rows)
             for row in rows:
