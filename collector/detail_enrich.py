@@ -249,8 +249,9 @@ def _fotmob_player_image(player: Dict[str, Any]) -> Optional[str]:
     if explicit:
         return str(explicit)
     player_id = player.get("id") or player.get("playerId")
-    if player_id not in (None, ""):
-        return f"https://images.fotmob.com/image_resources/playerimages/{player_id}.png"
+    player_id_text = str(player_id or "").strip()
+    if player_id_text.isdigit():
+        return f"https://images.fotmob.com/image_resources/playerimages/{player_id_text}.png"
     return None
 
 
@@ -446,7 +447,7 @@ def parse_fotmob_details(payload: Any) -> Dict[str, Any]:
             out["lineups"] = packed
     player_stats_blob = content.get("playerStats") if isinstance(content.get("playerStats"), dict) else {}
     players_out = []
-    for item in player_stats_blob.values():
+    for player_key, item in player_stats_blob.items():
         if not isinstance(item, dict):
             continue
         name = item.get("name")
@@ -464,11 +465,14 @@ def parse_fotmob_details(payload: Any) -> Dict[str, Any]:
                     values[label] = stat.get("value")
         team_id = str(item.get("teamId") or "")
         side = "home" if home_id and team_id == home_id else "away" if home_id else None
+        player_id = item.get("id") or item.get("playerId") or player_key
         players_out.append(
             {
+                "id": player_id,
                 "name": name,
                 "number": item.get("shirtNumber"),
                 "side": side,
+                "image": _fotmob_player_image({**item, "id": player_id}),
                 "rating": values.get("FotMob rating"),
                 "minutes": values.get("Minutes played"),
                 "goals": values.get("Goals"),
