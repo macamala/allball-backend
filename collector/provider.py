@@ -1028,7 +1028,11 @@ class NinkoCollectedSportsDataProvider:
         if corrected == "fifa-connected-competitions" and "world cup" in source_name.lower():
             payload["competition"] = source_name
             payload["competition_name"] = source_name
-        elif corrected.startswith("football-") and corrected not in frozen_competition_ids() and source_name:
+        elif (
+            corrected not in frozen_competition_ids()
+            and corrected not in OFFICIAL_PUBLIC_COMPETITIONS
+            and source_name
+        ):
             payload["competition"] = source_name
             payload["competition_name"] = source_name
         country = payload.get("country_id")
