@@ -28,7 +28,8 @@ def loc(value: Any) -> str:
 
 FIFA_COMPETITION_NEEDLES: Dict[str, List[str]] = {
     "africa-cup-of-nations": ["africa cup of nations", "african cup of nations", "afcon", "caf africa cup"],
-    "uefa-champions-league": ["uefa champions league", "champions league"],
+    "uefa-champions-league": ["uefa champions league"],
+    "uefa-nations-league": ["uefa nations league"],
 }
 
 FIFA_RESULT_TYPE = {1: "FT", 2: "PSO", 3: "AET"}
@@ -103,8 +104,10 @@ class FifaFootballAdapter:
                 and event_is_valid(event, sport_id="futsal", competition_id=cid)
             ]
         needles = FIFA_COMPETITION_NEEDLES.get(cid)
-        if needles is None:
-            needles = [part for part in cid.split("-") if len(part) > 3]
+        # The global FIFA calendar contains many competitions with generic
+        # names. Never infer a canonical mapping from slug tokens like
+        # "premier", "league" or "nations": that contaminates unrelated
+        # competitions (e.g. Ghana EPL / CONCACAF UEFA Nations League).
         if not needles:
             return []
         return [
