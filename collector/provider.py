@@ -23,7 +23,7 @@ from collector.models import (
 from collector.live_state import parse_ts, public_live_visible, reconcile_live_status
 from collector.display import sanitize_side
 from collector.enrichment import DETAIL_ONLY_KEYS, is_display_eligible, quality_flags_for_event
-from collector.competition_identity import correct_public_competition_id
+from collector.competition_identity import OFFICIAL_PUBLIC_COMPETITIONS, correct_public_competition_id
 from collector.competition_presentation import attach_competition_metadata
 from collector.list_extra import extra_for_list
 from collector.matrix_guard import frozen_competition_ids
