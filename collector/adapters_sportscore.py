@@ -7,7 +7,9 @@ https://sportscore.com/ is required wherever this data is displayed.
 
 from __future__ import annotations
 
+import time
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import urlparse
 
 from collector.adapters import FetchRequest, FetchResult
 from collector.http import fetch_url
@@ -22,12 +24,63 @@ ATTRIBUTION = {
 
 MATCHES_URL = "https://sportscore.com/api/widget/matches/?sport={sport}&limit={limit}&src=ninkosports"
 STANDINGS_URL = "https://sportscore.com/api/widget/standings/?sport={sport}&slug={slug}&src=ninkosports"
-TEAM_URL = "https://sportscore.com/api/widget/team/?sport={sport}&slug={slug}&src=ninkosports"
+TEAM_URL = "https://sportscore.com/api/widget/team/?sport={sport}&slug={slug}&limit=30&src=ninkosports"
 
-# One fetch per sport is reused across competitions.
-_MATCH_CACHE: Dict[str, List[Dict[str, Any]]] = {}
-_STANDINGS_CACHE: Dict[str, Dict[str, Any]] = {}
-_TEAM_CACHE: Dict[str, List[Dict[str, Any]]] = {}
+# SportScore edge responses are cached for ~60s. Keep our own cache bounded as
+# well: match boards stay fresh, while standings/team schedules are refreshed
+# slowly enough to remain well inside the public fair-use budget.
+_MATCH_TTL_S = 75
+_STANDINGS_TTL_S = 6 * 3600
+_TEAM_TTL_S = 2 * 3600
+_MATCH_CACHE: Dict[str, Tuple[float, List[Dict[str, Any]]]] = {}
+_STANDINGS_CACHE: Dict[str, Tuple[float, Dict[str, Any]]] = {}
+_TEAM_CACHE: Dict[str, Tuple[float, List[Dict[str, Any]]]] = {}
+
+
+def _cached(cache: Dict[str, Tuple[float, Any]], key: str, ttl: int) -> Any:
+    hit = cache.get(key)
+    if not hit:
+        return None
+    at, value = hit
+    if time.monotonic() - at >= ttl:
+        cache.pop(key, None)
+        return None
+    return value
+
+
+def _store(cache: Dict[str, Tuple[float, Any]], key: str, value: Any) -> Any:
+    cache[key] = (time.monotonic(), value)
+    return value
+
+
+def _match_slug(row: Dict[str, Any]) -> str:
+    direct = str(row.get("slug") or row.get("match_slug") or "").strip()
+    if direct:
+        return direct.strip("/")
+    raw = str(row.get("url") or "").strip()
+    if raw:
+        path = urlparse(raw).path.rstrip("/")
+        if path:
+            return path.rsplit("/", 1)[-1]
+    return ""
+
+
+def _dedupe_matches(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    seen = set()
+    for row in rows:
+        slug = _match_slug(row)
+        key = slug or str(row.get("id") or row.get("match_id") or row.get("url") or "")
+        if not key:
+            key = "|".join(
+                str(row.get(name) or "")
+                for name in ("home", "away", "time", "competition")
+            )
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(row)
+    return out
 
 # sport, name tokens (all must match unless any=True), optional standings slugs.
 SPORTSCORE_COMPETITIONS: Dict[str, Dict[str, Any]] = {
@@ -288,18 +341,29 @@ def match_to_event(row: Dict[str, Any], competition_id: str) -> Optional[Dict[st
         score["minute"] = minute
     if period not in (None, ""):
         score["period"] = period
+    slug = _match_slug(row)
+    source_event_id = slug or str(row.get("id") or row.get("match_id") or "")
     event = {
-        "id": row.get("url") or f"sportscore:{competition_id}:{home}:{away}:{row.get('time')}",
+        "id": row.get("url") or (f"sportscore:{source_event_id}" if source_event_id else f"sportscore:{competition_id}:{home}:{away}:{row.get('time')}"),
         "home": {"name": home, "logo": row.get("home_logo")},
         "away": {"name": away, "logo": row.get("away_logo")},
         "status": status,
         "score": score,
         "start_time": row.get("time"),
         "competition": row.get("competition") or competition_id,
+        "competition_key": competition_id,
         "source_url": row.get("url"),
         "source_family": "sportscore",
+        "source_event_id": source_event_id or None,
+        "source_event_ids": {"sportscore": source_event_id} if source_event_id else {},
         "source_competition_id": row.get("competition"),
-        "extra": {"attribution": ATTRIBUTION, "upstream_family": "thesports"},
+        "extra": {
+            "attribution": ATTRIBUTION,
+            "upstream_family": "sportscore",
+            "source_family": "sportscore",
+            "source_event_id": source_event_id or None,
+            "source_event_ids": {"sportscore": source_event_id} if source_event_id else {},
+        },
     }
     return event
 
@@ -331,11 +395,22 @@ class SportScoreAdapter:
         if last is not None and not last.ok:
             return last
         events = self._filter(matches, spec, competition_id)
-        if not events:
+
+        # The global matches endpoint is capped at 50 across a sport. That is
+        # excellent for live polling but not enough for a complete daily
+        # fixture/results board. For non-live collection, expand the mapped
+        # competition through all team schedules and merge those rows.
+        if request.capability not in {"live", "live_scores"}:
             team_matches, team_last = self._team_matches(sport, spec)
             if team_last is not None and not team_last.ok and not events:
                 return team_last
-            events = self._filter(team_matches, spec, competition_id)
+            events.extend(self._filter(team_matches, spec, competition_id))
+        elif not events:
+            # Never fan out fresh requests for every team during the fast live
+            # loop. Cached schedules may still rescue a league that fell
+            # outside the global top-50 board.
+            events.extend(self._filter(self._cached_team_matches(sport, spec), spec, competition_id))
+        events = self._dedupe_events(events)
         empty_reason = None if events else "SOURCE_HEALTHY_NO_EVENTS"
         return FetchResult(
             ok=True,
@@ -357,50 +432,89 @@ class SportScoreAdapter:
                 events.append(event)
         return events
 
+    @staticmethod
+    def _dedupe_events(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        out: List[Dict[str, Any]] = []
+        seen = set()
+        for event in events:
+            source_id = str(event.get("source_event_id") or "")
+            key = source_id or "|".join(
+                [
+                    str((event.get("home") or {}).get("name") or ""),
+                    str((event.get("away") or {}).get("name") or ""),
+                    str(event.get("start_time") or ""),
+                ]
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(event)
+        return out
+
     def _matches_for_sport(self, sport: str, request: FetchRequest) -> Tuple[List[Dict[str, Any]], Optional[FetchResult]]:
         use_cache = self._get is fetch_url
-        if use_cache and sport in _MATCH_CACHE:
-            return _MATCH_CACHE[sport], None
+        if use_cache:
+            cached = _cached(_MATCH_CACHE, sport, _MATCH_TTL_S)
+            if cached is not None:
+                return cached, None
         url = MATCHES_URL.format(sport=sport, limit=50)
         result = self._get(url)
         if not result.ok:
             return [], result
         rows = _payload_matches(result.payload)
         if use_cache:
-            _MATCH_CACHE[sport] = rows
+            _store(_MATCH_CACHE, sport, rows)
         return rows, result
+
+    @staticmethod
+    def _team_slugs(payload: Dict[str, Any]) -> List[str]:
+        slugs: List[str] = []
+        for table in payload.get("tables") or []:
+            for row in table.get("rows") or []:
+                slug_row = row.get("team_slug")
+                if slug_row and slug_row not in slugs:
+                    slugs.append(str(slug_row))
+                if len(slugs) >= 40:
+                    return slugs
+        return slugs
+
+    def _cached_team_matches(self, sport: str, spec: Dict[str, Any]) -> List[Dict[str, Any]]:
+        rows: List[Dict[str, Any]] = []
+        for competition_slug in spec.get("slugs") or []:
+            standings_key = f"{sport}:{competition_slug}"
+            payload = _cached(_STANDINGS_CACHE, standings_key, _STANDINGS_TTL_S)
+            if not isinstance(payload, dict):
+                continue
+            for team_slug in self._team_slugs(payload):
+                cached = _cached(_TEAM_CACHE, f"{sport}:{team_slug}", _TEAM_TTL_S)
+                if cached:
+                    rows.extend(cached)
+        return _dedupe_matches(rows)
 
     def _team_matches(self, sport: str, spec: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], Optional[FetchResult]]:
         rows: List[Dict[str, Any]] = []
         last: Optional[FetchResult] = None
-        for slug in spec.get("slugs") or []:
-            standings_key = f"{sport}:{slug}"
-            if standings_key not in _STANDINGS_CACHE:
-                last = self._get(STANDINGS_URL.format(sport=sport, slug=slug))
+        for competition_slug in spec.get("slugs") or []:
+            standings_key = f"{sport}:{competition_slug}"
+            payload = _cached(_STANDINGS_CACHE, standings_key, _STANDINGS_TTL_S)
+            if not isinstance(payload, dict):
+                last = self._get(STANDINGS_URL.format(sport=sport, slug=competition_slug))
                 if not last.ok:
                     continue
                 payload = last.payload if isinstance(last.payload, dict) else {}
-                _STANDINGS_CACHE[standings_key] = payload
-            payload = _STANDINGS_CACHE[standings_key]
-            tables = payload.get("tables") or []
-            team_slugs: List[str] = []
-            for table in tables:
-                for row in table.get("rows") or []:
-                    slug_row = row.get("team_slug")
-                    if slug_row and slug_row not in team_slugs:
-                        team_slugs.append(slug_row)
-                    if len(team_slugs) >= 3:
-                        break
-                if len(team_slugs) >= 3:
-                    break
+                _store(_STANDINGS_CACHE, standings_key, payload)
+
+            team_slugs = self._team_slugs(payload)
             for team_slug in team_slugs:
                 team_key = f"{sport}:{team_slug}"
-                if team_key not in _TEAM_CACHE:
+                team_rows = _cached(_TEAM_CACHE, team_key, _TEAM_TTL_S)
+                if team_rows is None:
                     last = self._get(TEAM_URL.format(sport=sport, slug=team_slug))
                     if not last.ok:
                         continue
-                    _TEAM_CACHE[team_key] = _payload_matches(last.payload)
-                rows.extend(_TEAM_CACHE[team_key])
+                    team_rows = _payload_matches(last.payload)
+                    _store(_TEAM_CACHE, team_key, team_rows)
+                rows.extend(team_rows)
             if rows:
                 break
-        return rows, last
+        return _dedupe_matches(rows), last
