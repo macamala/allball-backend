@@ -215,6 +215,14 @@ def match_event(
             "stage": row.stage,
             "start_time": row.start_time.isoformat() + "Z" if row.start_time else None,
         }
+        extra = load_json(row.extra_json, {}) or {}
+        incoming_sid = str(event.get("source_event_id") or "")
+        incoming_family = str(event.get("source_family") or "")
+        from collector.source_ids import as_family_map
+
+        stored_for_family = str(as_family_map(extra.get("source_event_ids")).get(incoming_family) or "")
+        if incoming_sid and stored_for_family and incoming_sid != stored_for_family:
+            continue
         if same_canonical_event(incoming, stored):
             return row
         row_home = _name_key(parts.get("home") or parts.get("participant_a"))
