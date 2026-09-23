@@ -408,6 +408,225 @@ def _public_participant_equivalent(
     )
 
 
+
+_HISTORY_STATUSES = ("finished", "complete", "final", "ft", "ended", "aet", "pen", "awarded")
+
+
+def _history_side(row: SportsEvent, side: str) -> Dict[str, Any]:
+    participants = load_json(row.participants_json, {}) or {}
+    value = participants.get(side) if isinstance(participants, dict) else {}
+    if isinstance(value, dict):
+        return value
+    if value not in (None, ""):
+        return {"name": str(value)}
+    return {}
+
+
+def _same_history_participant(target: Dict[str, Any], candidate: Dict[str, Any]) -> bool:
+    target_id = str(target.get("id") or target.get("slug") or "").strip()
+    candidate_id = str(candidate.get("id") or candidate.get("slug") or "").strip()
+    if target_id and candidate_id and target_id == candidate_id:
+        return True
+    left = str(target.get("name") or target.get("display_name") or "").strip()
+    right = str(candidate.get("name") or candidate.get("display_name") or "").strip()
+    if not left or not right:
+        return False
+    from collector.participant_alias import names_equivalent
+
+    return names_equivalent(left, right)
+
+
+def _history_number(value: Any) -> Optional[float]:
+    if value in (None, ""):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _compact_history_row(row: SportsEvent) -> Dict[str, Any]:
+    home_raw = _history_side(row, "home")
+    away_raw = _history_side(row, "away")
+    home = sanitize_side(home_raw, sport=row.sport_id, competition_country=row.country_id)
+    away = sanitize_side(away_raw, sport=row.sport_id, competition_country=row.country_id)
+    score = load_json(row.score_json, {}) or {}
+    home_score = score.get("home")
+    away_score = score.get("away")
+    home_name = str(home.get("name") or "Home")
+    away_name = str(away.get("name") or "Away")
+    label = (
+        f"{home_name} {home_score}–{away_score} {away_name}"
+        if home_score is not None and away_score is not None
+        else f"{home_name} vs {away_name}"
+    )
+    return {
+        "id": row.event_id,
+        "competition_key": row.competition_id,
+        "start_time": isoformat(row.start_time),
+        "home": home,
+        "away": away,
+        "score": {"home": home_score, "away": away_score},
+        "status": row.status,
+        "label": label,
+    }
+
+
+def _history_outcome(target: Dict[str, Any], row: SportsEvent) -> Optional[str]:
+    candidate_home = _history_side(row, "home")
+    candidate_away = _history_side(row, "away")
+    score = load_json(row.score_json, {}) or {}
+    home_score = _history_number(score.get("home"))
+    away_score = _history_number(score.get("away"))
+    if home_score is None or away_score is None:
+        return None
+    if _same_history_participant(target, candidate_home):
+        own, other = home_score, away_score
+    elif _same_history_participant(target, candidate_away):
+        own, other = away_score, home_score
+    else:
+        return None
+    if own > other:
+        return "W"
+    if own < other:
+        return "L"
+    return "D"
+
+
+def _history_context_from_rows(
+    current: SportsEvent,
+    candidates: List[SportsEvent],
+    *,
+    limit: int = 5,
+) -> tuple[List[Dict[str, Any]], Optional[Dict[str, Any]]]:
+    current_home = _history_side(current, "home")
+    current_away = _history_side(current, "away")
+    if not (current_home.get("name") and current_away.get("name")):
+        return [], None
+
+    ordered = sorted(
+        [row for row in candidates if row.event_id != current.event_id],
+        key=lambda row: row.start_time or datetime.min,
+        reverse=True,
+    )
+    h2h: List[Dict[str, Any]] = []
+    home_form: List[Dict[str, Any]] = []
+    away_form: List[Dict[str, Any]] = []
+
+    for row in ordered:
+        candidate_home = _history_side(row, "home")
+        candidate_away = _history_side(row, "away")
+        home_in_home = _same_history_participant(current_home, candidate_home)
+        home_in_away = _same_history_participant(current_home, candidate_away)
+        away_in_home = _same_history_participant(current_away, candidate_home)
+        away_in_away = _same_history_participant(current_away, candidate_away)
+
+        compact = None
+        if len(h2h) < limit and ((home_in_home and away_in_away) or (home_in_away and away_in_home)):
+            compact = _compact_history_row(row)
+            h2h.append(compact)
+
+        if len(home_form) < limit and (home_in_home or home_in_away):
+            outcome = _history_outcome(current_home, row)
+            if outcome:
+                compact = compact or _compact_history_row(row)
+                home_form.append({**compact, "outcome": outcome})
+
+        if len(away_form) < limit and (away_in_home or away_in_away):
+            outcome = _history_outcome(current_away, row)
+            if outcome:
+                compact = compact or _compact_history_row(row)
+                away_form.append({**compact, "outcome": outcome})
+
+        if len(h2h) >= limit and len(home_form) >= limit and len(away_form) >= limit:
+            break
+
+    form: Dict[str, Any] = {}
+    if home_form:
+        form["home"] = {
+            "summary": " · ".join(row["outcome"] for row in home_form),
+            "results": home_form,
+        }
+    if away_form:
+        form["away"] = {
+            "summary": " · ".join(row["outcome"] for row in away_form),
+            "results": away_form,
+        }
+    return h2h, form or None
+
+
+def _history_context(
+    db: Session,
+    current: SportsEvent,
+    *,
+    limit: int = 5,
+) -> tuple[List[Dict[str, Any]], Optional[Dict[str, Any]]]:
+    if not current.sport_id:
+        return [], None
+    current_home = _history_side(current, "home")
+    current_away = _history_side(current, "away")
+    if not (current_home.get("name") and current_away.get("name")):
+        return [], None
+
+    cutoff = current.start_time or datetime.utcnow()
+    columns = (
+        SportsEvent.event_id,
+        SportsEvent.sport_id,
+        SportsEvent.competition_id,
+        SportsEvent.start_time,
+        SportsEvent.status,
+        SportsEvent.score_json,
+        SportsEvent.participants_json,
+        SportsEvent.country_id,
+        SportsEvent.canonical_event_id,
+    )
+    base = (
+        db.query(SportsEvent)
+        .options(load_only(*columns))
+        .filter(
+            SportsEvent.sport_id == current.sport_id,
+            SportsEvent.canonical_event_id.is_(None),
+            SportsEvent.event_id != current.event_id,
+            SportsEvent.start_time.isnot(None),
+            SportsEvent.start_time < cutoff,
+            SportsEvent.status.in_(_HISTORY_STATUSES),
+        )
+    )
+    same_competition = (
+        base.filter(SportsEvent.competition_id == current.competition_id)
+        .order_by(SportsEvent.start_time.desc())
+        .limit(350)
+        .all()
+    )
+
+    candidate_ids = {
+        str(side.get("id") or "").strip()
+        for side in (current_home, current_away)
+        if str(side.get("id") or "").strip()
+    }
+    broader: List[SportsEvent] = []
+    if candidate_ids:
+        clauses = [
+            SportsEvent.participants_json.like(f"%{participant_id}%")
+            for participant_id in candidate_ids
+        ]
+        broader = (
+            base.filter(or_(*clauses))
+            .order_by(SportsEvent.start_time.desc())
+            .limit(450)
+            .all()
+        )
+
+    merged: List[SportsEvent] = []
+    seen = set()
+    for row in [*same_competition, *broader]:
+        if row.event_id in seen:
+            continue
+        seen.add(row.event_id)
+        merged.append(row)
+    return _history_context_from_rows(current, merged, limit=limit)
+
+
 def _dedupe_public_fixture_rows(events: List[Dict[str, Any]], preferred_ids: set) -> List[Dict[str, Any]]:
     """Collapse cross-competition aliases of the same public fixture.
 
@@ -887,6 +1106,11 @@ class NinkoCollectedSportsDataProvider:
             from collector.canonical_detail import attach_canonical_detail
 
             payload = attach_canonical_detail(payload)
+            h2h, form = _history_context(db, row)
+            if h2h:
+                payload["h2h"] = h2h
+            if form:
+                payload["form"] = form
             return public_event_detail(payload)
         finally:
             db.close()

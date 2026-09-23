@@ -1066,6 +1066,8 @@ def sports_data_match(match_id: str):
         payload["lineups"] = event.get("lineups")
         payload["statistics"] = event.get("statistics")
         payload["incidents"] = event.get("incidents")
+        payload["h2h"] = event.get("h2h") or []
+        payload["form"] = event.get("form")
         payload["availability"] = event.get("availability") or []
     return payload
 
