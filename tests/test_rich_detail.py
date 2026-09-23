@@ -104,7 +104,13 @@ def test_fotmob_parser_maps_infobox_player_stats_and_xg():
                     "Attendance": 38000,
                 },
             },
-            "stats": {"Periods": {"All": {"stats": [{"stats": [{"title": "Expected goals (xG)", "stats": ["1.51", "1.47"]}]}]}}},
+            "stats": {
+                "Periods": {
+                    "All": {"stats": [{"stats": [{"title": "Expected goals (xG)", "stats": ["1.51", "1.47"]}]}]},
+                    "FirstHalf": {"stats": [{"stats": [{"title": "Expected goals (xG)", "stats": ["0.80", "0.55"]}]}]},
+                    "SecondHalf": {"stats": [{"stats": [{"title": "Expected goals (xG)", "stats": ["0.71", "0.92"]}]}]},
+                }
+            },
             "lineup": {
                 "homeTeam": {"formation": "4-3-3", "coach": {"name": "Vanoli"}, "starters": [{"id": 174543, "name": "De Bruyne", "shirtNumber": 11, "performance": {"rating": 8.1}}], "subs": []},
                 "awayTeam": {"formation": "4-4-2", "starters": [{"name": "Keeper", "shirtNumber": 1}], "subs": []},
@@ -125,7 +131,7 @@ def test_fotmob_parser_maps_infobox_player_stats_and_xg():
     assert out["venue"] == "Artemio Franchi"
     assert out["referee"] == "Daniele Doveri"
     assert out["attendance"] == 38000
-    assert out["statistics"][0]["label"] == "Expected goals (xG)"
+    assert out["statistics"][0]["label"] == "Expected goals (xG)"\n    assert out["sport_detail"]["statistics_periods"]["first_half"][0]["home"] == "0.80"\n    assert out["sport_detail"]["statistics_periods"]["second_half"][0]["away"] == "0.92"
     assert out["lineups"]["home"]["formation"] == "4-3-3"
     assert out["lineups"]["home"]["coach"] == "Vanoli"\n    assert out["lineups"]["home"]["start"][0]["image"].endswith("/playerimages/174543.png")
     assert out["player_statistics"][0]["goals"] == 1\n    assert out["player_statistics"][0]["image"].endswith("/playerimages/174543.png")
