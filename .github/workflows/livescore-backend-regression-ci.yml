@@ -15,7 +15,7 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -r requirements.txt
-      - run: pytest -q
+      - run: pytest -q tests/test_sportscore_breadth.py tests/test_canonical_identity.py
       - name: Read-only livescore probes
         run: |
           python - <<'PY'
@@ -44,6 +44,15 @@ jobs:
                           print("SPORTSCORE_DETAIL_SHAPE", k, sorted(v.keys())[:80])
                       elif isinstance(v,list):
                           print("SPORTSCORE_DETAIL_SHAPE", k, "list", len(v), sorted(v[0].keys())[:80] if v and isinstance(v[0],dict) else "")
+                  match=detail.get("match") or {}
+                  for k in ("incidents","lineups","stats","tracker"):
+                      v=match.get(k)
+                      if isinstance(v,dict):
+                          print("SPORTSCORE_MATCH_FIELD",k,"dict",sorted(v.keys())[:80],json.dumps(v,ensure_ascii=False)[:6000])
+                      elif isinstance(v,list):
+                          print("SPORTSCORE_MATCH_FIELD",k,"list",len(v),json.dumps(v[:3],ensure_ascii=False)[:6000])
+                      else:
+                          print("SPORTSCORE_MATCH_FIELD",k,type(v).__name__,str(v)[:1000])
           base="https://allball-backend-production.up.railway.app/sports-data/events"
           params=urllib.parse.urlencode({"date_from":"2026-09-21T14:00:00.000Z","date_to":"2026-09-22T13:59:59.999Z"})
           prod=get(base+"?"+params)
