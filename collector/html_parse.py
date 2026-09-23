@@ -779,7 +779,15 @@ def _dedupe(events: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
     for event in events:
         home = (event.get("home") or {}).get("name") or ""
         away = (event.get("away") or {}).get("name") or ""
-        key = (slugify(home), slugify(away), str(event.get("start_time") or "")[:10])
+        key = (
+            slugify(home),
+            slugify(away),
+            str(event.get("start_time") or "")[:16],
+            str(event.get("source_event_id") or ""),
+            str(event.get("race_number") or ""),
+            str(event.get("round") or event.get("stage") or ""),
+            str(event.get("game_id") or ""),
+        )
         if key in seen or not home:
             continue
         seen.add(key)
