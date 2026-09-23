@@ -51,3 +51,26 @@ def test_no_sport_name_as_geography():
     ):
         row = metadata_for(key, sport)
         assert row["geography_label"].lower() not in {sport, "football", "basketball", "tennis"}
+
+
+
+def test_source_native_football_country_codes_get_public_geography():
+    from collector.competition_presentation import attach_competition_metadata
+
+    cases = [
+        ("football-tun-ligue-1", "TUN", "Tunisia", "tn"),
+        ("football-alg-ligue-1", "ALG", "Algeria", "dz"),
+        ("football-nga-npfl", "NGA", "Nigeria", "ng"),
+    ]
+    for key, source_country, label, country_id in cases:
+        event = {
+            "sport": "football",
+            "competition_key": key,
+            "competition": key,
+            "country_id": source_country,
+        }
+        out = attach_competition_metadata(event)
+        assert out["geography_label"] == label
+        assert out["country_id"] == country_id
+        assert out["scope_type"] == "DOMESTIC"
+        assert out["country_based"] is True
