@@ -163,6 +163,32 @@ def _ensure_mapping(
     return mapping
 
 
+def repair_missing_sport_ids(db: Session) -> Dict[str, int]:
+    """Repair only SportScore source-native rows whose ID encodes an allowed sport."""
+    from collector.models import SportsEvent
+
+    repaired: Dict[str, int] = {}
+    for sport_id in SPORTS:
+        prefix = f"{sport_id}-ss-%"
+        rows = (
+            db.query(SportsEvent)
+            .filter(
+                SportsEvent.competition_id.like(prefix),
+                SportsEvent.sport_id.in_(["", "unknown"]),
+            )
+            .all()
+        )
+        for row in rows:
+            extra = load_json(row.extra_json, {}) or {}
+            if str(extra.get("source_family") or "") != "sportscore":
+                continue
+            row.sport_id = sport_id
+            repaired[sport_id] = repaired.get(sport_id, 0) + 1
+    if repaired:
+        db.commit()
+    return repaired
+
+
 def run_breadth_ingest(
     db: Session,
     *,
@@ -175,6 +201,7 @@ def run_breadth_ingest(
     if source is None:
         return {"status": "missing_source", "ingested": 0, "sports": {}}
 
+    repaired = repair_missing_sport_ids(db)
     fetch = getter or fetch_url
     stats: Dict[str, Any] = {
         "status": "ok",
@@ -183,6 +210,7 @@ def run_breadth_ingest(
         "ingested": 0,
         "skipped_ambiguous": 0,
         "sports": {},
+        "repaired_missing_sport": repaired,
     }
 
     for sport_id in SPORTS:
@@ -218,6 +246,8 @@ def run_breadth_ingest(
             if not event or not event.get("start_time"):
                 continue
 
+            event["sport"] = sport_id
+            event["sport_id"] = sport_id
             event["competition"] = competition_name
             event["competition_key"] = competition_id
             event["source_family"] = "sportscore"
@@ -302,6 +332,7 @@ def run_team_schedule_backfill(
     if source is None:
         return {"status": "missing_source", "requests": 0, "ingested": 0, "sports": {}}
 
+    repaired = repair_missing_sport_ids(db)
     fetch = getter or fetch_url
     now = datetime.now(timezone.utc)
     stats: Dict[str, Any] = {
@@ -311,6 +342,7 @@ def run_team_schedule_backfill(
         "eligible": 0,
         "ingested": 0,
         "sports": {},
+        "repaired_missing_sport": repaired,
     }
 
     for sport_id in SPORTS:
@@ -373,6 +405,8 @@ def run_team_schedule_backfill(
                 event = match_to_event(row, competition_id)
                 if not event or not event.get("start_time"):
                     continue
+                event["sport"] = sport_id
+                event["sport_id"] = sport_id
                 event["competition"] = competition_name
                 event["competition_key"] = competition_id
                 event["source_family"] = "sportscore"
