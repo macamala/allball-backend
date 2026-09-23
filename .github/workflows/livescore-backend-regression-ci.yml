@@ -53,6 +53,13 @@ jobs:
                           print("SPORTSCORE_MATCH_FIELD",k,"list",len(v),json.dumps(v[:3],ensure_ascii=False)[:6000])
                       else:
                           print("SPORTSCORE_MATCH_FIELD",k,type(v).__name__,str(v)[:1000])
+          rich=get("https://sportscore.com/api/widget/match/?"+urllib.parse.urlencode({"sport":"football","slug":"athletico-paranaense-vs-santos","src":"ninkosports"}))
+          rich_match=rich.get("match") or {}
+          print("SPORTSCORE_RICH_KEYS",sorted(rich_match.keys()))
+          for k in ("incidents","lineups","stats","tracker"):
+              v=rich_match.get(k)
+              print("SPORTSCORE_RICH_FIELD",k,type(v).__name__,json.dumps(v,ensure_ascii=False)[:10000])
+
           base="https://allball-backend-production.up.railway.app/sports-data/events"
           params=urllib.parse.urlencode({"date_from":"2026-09-21T14:00:00.000Z","date_to":"2026-09-22T13:59:59.999Z"})
           prod=get(base+"?"+params)
