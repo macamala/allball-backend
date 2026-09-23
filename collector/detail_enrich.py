@@ -658,31 +658,71 @@ def parse_mlb_live(payload: Any) -> Dict[str, Any]:
     if stats:
         out["statistics"] = stats
     players = []
+    lineups: Dict[str, Dict[str, Any]] = {}
     for side_name, side in (("home", teams.get("home") or {}), ("away", teams.get("away") or {})):
-        for _pid, player in (side.get("players") or {}).items():
+        player_rows: Dict[str, Dict[str, Any]] = {}
+        raw_players = side.get("players") or {}
+        for raw_pid, player in raw_players.items():
             person = player.get("person") or {}
+            player_id = person.get("id")
+            if player_id in (None, ""):
+                raw_text = str(raw_pid or "").replace("ID", "").strip()
+                player_id = int(raw_text) if raw_text.isdigit() else raw_text or None
             name = person.get("fullName")
             if not name:
                 continue
             bat = (player.get("stats") or {}).get("batting") or {}
             pit = (player.get("stats") or {}).get("pitching") or {}
-            players.append(
-                {
-                    "name": name,
-                    "side": side_name,
-                    "hits": bat.get("hits"),
-                    "at_bats": bat.get("atBats"),
-                    "rbi": bat.get("rbi"),
-                    "innings_pitched": pit.get("inningsPitched"),
-                    "strikeouts": pit.get("strikeOuts"),
-                }
+            position = player.get("position") or {}
+            image = (
+                f"https://img.mlbstatic.com/mlb-photos/image/upload/"
+                f"d_people:generic:headshot:67:current.png/w_96,q_auto:best/"
+                f"v1/people/{player_id}/headshot/67/current"
+                if str(player_id or "").isdigit()
+                else None
             )
+            row = {
+                "id": player_id,
+                "name": name,
+                "number": player.get("jerseyNumber") or person.get("jerseyNumber"),
+                "position": position.get("abbreviation") or position.get("name") if isinstance(position, dict) else position,
+                "side": side_name,
+                "image": image,
+                "runs": bat.get("runs"),
+                "hits": bat.get("hits"),
+                "at_bats": bat.get("atBats"),
+                "rbi": bat.get("rbi"),
+                "home_runs": bat.get("homeRuns"),
+                "innings_pitched": pit.get("inningsPitched"),
+                "strikeouts": pit.get("strikeOuts"),
+            }
+            players.append(row)
+            player_rows[str(player_id)] = row
+
+        order_ids = [str(value) for value in (side.get("battingOrder") or []) if value not in (None, "")]
+        starters = [player_rows[player_id] for player_id in order_ids if player_id in player_rows]
+        if not starters:
+            starters = [
+                row
+                for row in player_rows.values()
+                if str((raw_players.get(f"ID{row.get('id')}") or {}).get("battingOrder") or "").strip()
+            ]
+            starters.sort(
+                key=lambda row: str((raw_players.get(f"ID{row.get('id')}") or {}).get("battingOrder") or "999")
+            )
+        starter_ids = {str(row.get("id")) for row in starters}
+        bench = [row for key, row in player_rows.items() if key not in starter_ids]
+        if starters or bench:
+            lineups[side_name] = {
+                "start": starters[:9] if starters else list(player_rows.values())[:9],
+                "bench": bench,
+                "formation": None,
+                "coach": None,
+            }
     if players:
         out["player_statistics"] = players
-        out["lineups"] = {
-            "home": {"start": [p for p in players if p.get("side") == "home"][:9], "bench": [], "formation": None, "coach": None},
-            "away": {"start": [p for p in players if p.get("side") == "away"][:9], "bench": [], "formation": None, "coach": None},
-        }
+    if lineups:
+        out["lineups"] = lineups
     return out
 
 
@@ -780,22 +820,41 @@ def parse_nhl_boxscore(payload: Any) -> Dict[str, Any]:
         team = blob.get(key) or {}
         groups = []
         for group_key in ("forwards", "defense", "goalies"):
-            groups.extend(team.get(group_key) or [])
+            for item in team.get(group_key) or []:
+                if isinstance(item, dict):
+                    groups.append({**item, "_group": group_key})
         start = []
         for item in groups:
             if not isinstance(item, dict):
                 continue
             name = (item.get("name") or {}).get("default") if isinstance(item.get("name"), dict) else item.get("name")
+            player_id = item.get("playerId") or item.get("id")
+            position = item.get("position") or item.get("positionCode") or {
+                "forwards": "F",
+                "defense": "D",
+                "goalies": "G",
+            }.get(item.get("_group"))
+            image = item.get("headshot") or item.get("headshotUrl")
             row = {
+                "id": player_id,
                 "name": name,
+                "number": item.get("sweaterNumber"),
+                "position": position,
                 "side": side_name,
+                "image": image,
                 "goals": item.get("goals"),
                 "assists": item.get("assists"),
                 "shots": item.get("sog") or item.get("shots"),
                 "pim": item.get("pim"),
             }
             players.append(row)
-            start.append({"name": name, "number": item.get("sweaterNumber")})
+            start.append({
+                "id": player_id,
+                "name": name,
+                "number": item.get("sweaterNumber"),
+                "position": position,
+                "image": image,
+            })
         if start:
             out.setdefault("lineups", {})[side_name] = {"start": start, "bench": [], "formation": None, "coach": None}
     if players:
