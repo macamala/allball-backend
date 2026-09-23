@@ -37,6 +37,17 @@ def frozen_competition_ids() -> frozenset[str]:
     )
 
 
+@lru_cache(maxsize=1)
+def frozen_competition_sports() -> Dict[str, str]:
+    rows = json.loads(MATRIX_PATH.read_text(encoding="utf-8"))
+    source_rows = rows if isinstance(rows, list) else (rows.get("competitions") or [])
+    return {
+        str(row.get("competition") or ""): str(row.get("sport") or "")
+        for row in source_rows
+        if row.get("competition")
+    }
+
+
 def matrix_status() -> Dict[str, Any]:
     digest = matrix_checksum()
     rows = json.loads(MATRIX_PATH.read_text(encoding="utf-8"))

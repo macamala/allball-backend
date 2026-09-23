@@ -247,16 +247,30 @@ def canonical_for_source_competition_id(source_competition_id: Optional[str]) ->
     return provider_competition_crosswalk().get(_blob(source_competition_id))
 
 
+def _canonical_same_sport(competition_id: str, sport_id: str = "") -> bool:
+    if not sport_id:
+        return True
+    from collector.matrix_guard import frozen_competition_sports
+
+    canonical_sport = frozen_competition_sports().get(str(competition_id or ""))
+    return not canonical_sport or canonical_sport == sport_id
+
+
 def labeled_competition_ids(sport_id: str = "") -> Dict[str, str]:
     from collector.verified_coverage import OPENLIGADB_LEAGUES, THESPORTSDB_LEAGUES
 
-    ids = {key: "" for key in COMPETITION_LABELS}
+    ids = {
+        key: ""
+        for key in COMPETITION_LABELS
+        if _canonical_same_sport(key, sport_id)
+    }
     for row in list(OPENLIGADB_LEAGUES) + list(THESPORTSDB_LEAGUES):
         if sport_id and row.get("sport_id") and row.get("sport_id") != sport_id:
             continue
+        if not _canonical_same_sport(row["competition_id"], sport_id):
+            continue
         ids[row["competition_id"]] = row.get("sport_id") or ""
     return ids
-
 
 def unique_label_competition(label: str, *, sport_id: str = "", exclude: Optional[str] = None) -> Optional[str]:
     if not label or stamped_mapping_label(label, exclude or ""):
@@ -289,6 +303,15 @@ def resolve_competition(
         "source_competition_name": name,
         "suggested_competition_id": None,
     }
+    if mapped_from_id and not _canonical_same_sport(mapped_from_id, sport_id):
+        return {
+            **base,
+            "canonical_competition_id": mapping_competition_id,
+            "suggested_competition_id": mapped_from_id,
+            "resolution_method": "rejected_source_id_other_sport",
+            "resolution_confidence": 0,
+            "accepted": False,
+        }
     if mapped_from_id and mapped_from_id != mapping_competition_id:
         return {
             **base,
@@ -411,7 +434,13 @@ def correct_public_competition_id(
     if family in SOURCE_NATIVE_PUBLIC_FAMILIES:
         if stored == "fifa-connected-competitions":
             return stored
-        matches = [cid for cid in frozen if cid != stored and label_matches_competition(name, cid)]
+        matches = [
+            cid
+            for cid in frozen
+            if cid != stored
+            and _canonical_same_sport(cid, sport_id)
+            and label_matches_competition(name, cid)
+        ]
         return matches[0] if len(matches) == 1 else None
 
     if family in MAPPING_OWNED_FAMILIES or family in {
@@ -426,7 +455,9 @@ def correct_public_competition_id(
     matches = [
         cid
         for cid in frozen
-        if cid != stored and label_matches_competition(name, cid)
+        if cid != stored
+        and _canonical_same_sport(cid, sport_id)
+        and label_matches_competition(name, cid)
     ]
     if len(matches) == 1:
         return matches[0]
