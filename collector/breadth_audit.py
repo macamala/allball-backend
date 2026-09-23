@@ -379,3 +379,53 @@ def sportscore_directory_probe() -> Dict[str, Any]:
             "matches": found,
         }
     return out
+
+
+
+def sportscore_team_schedule_probe() -> Dict[str, Any]:
+    """Prove team/player recent+upcoming schedules using match-derived slugs."""
+    from urllib.parse import urlparse
+    from collector.adapters_sportscore import MATCHES_URL, TEAM_URL, _payload_matches
+    from collector.http import fetch_url
+
+    out: Dict[str, Any] = {}
+    for sport in ("basketball", "tennis", "cricket"):
+        board = fetch_url(MATCHES_URL.format(sport=sport, limit=10))
+        rows = _payload_matches(board.payload) if getattr(board, "ok", False) else []
+        first = rows[0] if rows else {}
+        path = urlparse(str(first.get("url") or "")).path.rstrip("/")
+        match_slug = path.rsplit("/", 1)[-1] if path else ""
+        team_slugs = [part for part in match_slug.split("-vs-", 1) if part] if "-vs-" in match_slug else []
+        probes = []
+        for team_slug in team_slugs[:2]:
+            result = fetch_url(TEAM_URL.format(sport=sport, slug=team_slug))
+            payload = result.payload if getattr(result, "ok", False) else {}
+            team_rows = _payload_matches(payload)
+            probes.append(
+                {
+                    "slug": team_slug,
+                    "status": int(getattr(result, "http_status", 0) or 0),
+                    "ok": bool(getattr(result, "ok", False)),
+                    "rows": len(team_rows),
+                    "keys": sorted(str(key) for key in payload.keys())[:50] if isinstance(payload, dict) else [],
+                    "first_time": team_rows[0].get("time") if team_rows else None,
+                    "last_time": team_rows[-1].get("time") if team_rows else None,
+                    "samples": [
+                        {
+                            "competition": row.get("competition"),
+                            "home": row.get("home"),
+                            "away": row.get("away"),
+                            "time": row.get("time"),
+                            "status": row.get("status"),
+                            "url": row.get("url"),
+                        }
+                        for row in team_rows[:6]
+                    ],
+                }
+            )
+        out[sport] = {
+            "board_status": int(getattr(board, "http_status", 0) or 0),
+            "match_slug": match_slug,
+            "probes": probes,
+        }
+    return out
