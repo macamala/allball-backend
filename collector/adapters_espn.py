@@ -11,7 +11,7 @@ new provider, and do not call play-by-play.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse, urlunparse
 
@@ -294,6 +294,7 @@ class EspnScoreboardAdapter:
                 "basketball": ESPN_HTML["nba"],
                 "baseball": ESPN_HTML["mlb"],
                 "ice-hockey": ESPN_HTML["nhl"],
+                "football": "https://www.espn.com/soccer/scoreboard",
             }.get(request.sport_id or "") or ""
         if not url:
             return FetchResult(
@@ -306,7 +307,7 @@ class EspnScoreboardAdapter:
         sport = SPORT_BY_COMP.get(request.competition_id or "") or (request.sport_id or "")
         events = []
         last = None
-        for candidate in _scoreboard_date_urls(url):
+        for candidate in _scoreboard_date_urls(url, request.date_from, request.date_to, request.capability):
             cache_key = f"{request.competition_id}:{candidate}"
             if cache_key in _DATE_CACHE:
                 events = _DATE_CACHE[cache_key]
@@ -423,15 +424,57 @@ def _parse_espnfitt_scoreboard(html: str, sport: str = "") -> List[Dict[str, Any
     return parse_espn_scoreboard(payload, sport=sport)
 
 
-def _scoreboard_date_urls(url: str) -> List[str]:
+def _parse_request_day(value: Optional[str]) -> Optional[date]:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(raw[:10]).date()
+    except ValueError:
+        return None
+
+
+def _scoreboard_date_urls(
+    url: str,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    capability: str = "",
+) -> List[str]:
     urls = [url]
     if "scoreboard" not in url or "/date/" in url:
         return urls
+
     today = datetime.utcnow().date()
+    start = _parse_request_day(date_from)
+    end = _parse_request_day(date_to) or start
+    requested: List[date] = []
+
+    if start:
+        if end and end < start:
+            end = start
+        cursor = start
+        # A collector request should be bounded. Seven days is enough for our
+        # daily/near-term fixture windows without accidentally fanning out.
+        while cursor <= (end or start) and len(requested) < 7:
+            requested.append(cursor)
+            cursor += timedelta(days=1)
+    else:
+        cap = str(capability or "").lower()
+        if cap in {"fixtures", "fixture", "schedule", "scheduled"}:
+            requested.extend([today, today + timedelta(days=1)])
+        elif cap in {"results", "result", "finished"}:
+            requested.extend([today, today - timedelta(days=1), today - timedelta(days=7)])
+        else:
+            requested.append(today)
+
     parsed = urlparse(url)
     base_path = parsed.path.rstrip("/")
-    for delta in (1, 7):
-        stamp = (today - timedelta(days=delta)).strftime("%Y%m%d")
+    # Requested dates must be tried before the undated page for fixture
+    # collection. ESPN's undated scoreboard defaults to "today".
+    dated: List[str] = []
+    for day in requested:
+        stamp = day.strftime("%Y%m%d")
         path = f"{base_path}/_/date/{stamp}"
-        urls.append(urlunparse((parsed.scheme, parsed.netloc, path, "", parsed.query, "")))
-    return list(dict.fromkeys(urls))
+        dated.append(urlunparse((parsed.scheme, parsed.netloc, path, "", parsed.query, "")))
+
+    return list(dict.fromkeys([*dated, *urls]))
