@@ -1065,17 +1065,40 @@ class TtblAdapter:
 
     def fetch(self, request: FetchRequest) -> FetchResult:
         started = time.perf_counter()
-        url = "https://www.ttbl.de/bundesliga/gameschedule/2026-2027/2/all"
-        last = _get(self._get_text, url, timeout=25)
-        events = parse_ttbl(last.payload if last.ok and isinstance(last.payload, str) else "")
+        from collector.source_family_closeout import parse_ttbl_schedule
+
+        schedule = _get(self._get_text, "https://www.ttbl.de/bundesliga/gameschedule/2026-2027/1/all", timeout=25)
+        parsed = parse_ttbl_schedule(schedule.payload if schedule.ok else "")
+        detail_id = "0c9590e2-c913-4572-b526-0ef82d28443d"
+        detail = _get(
+            self._get_text,
+            f"https://www.ttbl.de/bundesliga/gameday/2026-2027/1/{detail_id}",
+            timeout=25,
+        )
+        if detail.ok:
+            detailed = parse_ttbl_schedule(detail.payload)
+            by_id = {row.get("source_event_id"): row for row in detailed.get("events") or []}
+            events = []
+            for row in parsed.get("events") or []:
+                replacement = by_id.get(row.get("source_event_id"))
+                events.append(replacement or row)
+            if not events:
+                events = detailed.get("events") or []
+            standings = parsed.get("standings") or detailed.get("standings") or []
+        else:
+            events = parsed.get("events") or []
+            standings = parsed.get("standings") or []
+        if not events:
+            events = parse_ttbl(schedule.payload if schedule.ok and isinstance(schedule.payload, str) else "")
         return FetchResult(
-            ok=True if events or last.ok else False,
-            http_status=last.http_status or 200,
+            ok=True if events or schedule.ok else False,
+            http_status=schedule.http_status or 200,
             events=events,
+            standings=standings,
             latency_ms=int((time.perf_counter() - started) * 1000),
             parse_status="ok" if events else "empty",
             empty_reason=None if events else "SOURCE_HEALTHY_NO_EVENTS",
-            parse_reason="ttbl.de Spielplan 2026/27 Spieltag scores",
+            parse_reason="ttbl.de 2026/27 Spieltag 1 official schedule, match games, and table",
         )
 
 
@@ -2121,6 +2144,18 @@ class KpgaLeaderboardAdapter:
         self._get_text = text_getter or fetch_text
 
     def fetch(self, request: FetchRequest) -> FetchResult:
+        from collector.source_family_closeout import ingestion_allowed, terms_block_reason
+
+        if not ingestion_allowed(self.adapter_key):
+            return FetchResult(
+                ok=False,
+                http_status=0,
+                events=[],
+                restricted=True,
+                parse_status="restricted",
+                empty_reason="TERMS_REVIEW_REQUIRED",
+                parse_reason=terms_block_reason(self.adapter_key),
+            )
         started = time.perf_counter()
         url = "https://www.kpga.co.kr/tours/leaderboard/?srhGameId=202611000015M&srhYear=2026&subType=leaderboard&tourId=11"
         last = _get(self._get_text, url, timeout=25)
@@ -2167,6 +2202,18 @@ class BlizzardOwcsRecapsAdapter:
         self._get_text = text_getter or fetch_text
 
     def fetch(self, request: FetchRequest) -> FetchResult:
+        from collector.source_family_closeout import ingestion_allowed, terms_block_reason
+
+        if not ingestion_allowed(self.adapter_key):
+            return FetchResult(
+                ok=False,
+                http_status=0,
+                events=[],
+                restricted=True,
+                parse_status="restricted",
+                empty_reason="PERMISSION",
+                parse_reason=terms_block_reason(self.adapter_key),
+            )
         started = time.perf_counter()
         url = "https://overwatch.blizzard.com/en-us/news/24261476"
         last = _get(self._get_text, url, timeout=25)
@@ -2433,25 +2480,4 @@ class WikiIrishGreyhoundDerbyAdapter:
         )
 
 
-class WikiOwcsWorldFinalsAdapter:
-    adapter_key = "wikipedia-owcs-world-finals-web"
-
-    def __init__(self, source_id: str = "wikipedia-owcs-world-finals-web", text_getter=None):
-        self.source_id = source_id
-        self._get_text = text_getter or fetch_text
-
-    def fetch(self, request: FetchRequest) -> FetchResult:
-        started = time.perf_counter()
-        url = "https://en.wikipedia.org/wiki/Overwatch_Champions_Series"
-        last = _get(self._get_text, url, timeout=25)
-        events = parse_wiki_owcs_world_finals(last.payload if last.ok and isinstance(last.payload, str) else "")
-        return FetchResult(
-            ok=True if events or last.ok else False,
-            http_status=last.http_status or 200,
-            events=events,
-            latency_ms=int((time.perf_counter() - started) * 1000),
-            parse_status="ok" if events else "empty",
-            empty_reason=None if events else "SOURCE_HEALTHY_NO_EVENTS",
-            parse_reason="en.wikipedia.org Overwatch Champions Series World Finals results",
-        )
-
+class WikiOwcsWorldFina
