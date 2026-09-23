@@ -1,9 +1,10 @@
 from datetime import datetime
 
 from database import SessionLocal
-from collector.models import SportsCompetition, SportsEvent
+from collector.models import SportsCompetition, SportsEvent, SportsSourceCompetition
 from collector.standings_enrich import (
     dynamic_standings_supported,
+    fotmob_standings_context,
     parse_sofa_dynamic_standings,
     sofa_standings_context,
 )
@@ -86,5 +87,46 @@ def test_dynamic_context_uses_persisted_sofa_tournament_and_season():
             "sport_id": "football",
         }
         assert dynamic_standings_supported(db, "football-au-test-t123") is True
+    finally:
+        db.close()
+
+
+
+def test_dynamic_fotmob_mapping_exposes_standings_context():
+    db = SessionLocal()
+    try:
+        db.add(
+            SportsCompetition(
+                competition_id="football-gha-premier-league",
+                sport_id="football",
+                name="Premier League",
+                slug="football-gha-premier-league",
+                event_model="team_match",
+                active=True,
+            )
+        )
+        db.add(
+            SportsSourceCompetition(
+                competition_id="football-gha-premier-league",
+                source_id="fotmob-global",
+                priority=900,
+                source_competition_id="522",
+                enabled=True,
+                source_config_json=dump_json({
+                    "fotmob_league_id": "522",
+                    "fotmob_league_name": "Premier League",
+                }),
+                upstream_family="fotmob",
+            )
+        )
+        db.commit()
+
+        context = fotmob_standings_context(db, "football-gha-premier-league")
+        assert context == {
+            "league_id": "522",
+            "league_name": "Premier League",
+            "sport_id": "football",
+        }
+        assert dynamic_standings_supported(db, "football-gha-premier-league") is True
     finally:
         db.close()
