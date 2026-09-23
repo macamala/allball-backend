@@ -31,6 +31,16 @@ FIFA_COMPETITION_NEEDLES: Dict[str, List[str]] = {
     "uefa-champions-league": ["uefa champions league", "champions league"],
 }
 
+FIFA_RESULT_TYPE = {1: "FT", 2: "PSO", 3: "AET"}
+FIFA_WORLD_CUP_WINDOW = (
+    "https://api.fifa.com/api/v3/calendar/matches"
+    "?from=2026-07-01&to=2026-07-20&count=100&language=en&idCompetition=17"
+)
+FIFA_WORLD_CUP_KNOCKOUT = (
+    "https://api.fifa.com/api/v3/calendar/matches"
+    "?from=2026-07-14&to=2026-07-20&count=50&language=en&idCompetition=17"
+)
+
 
 def _filter(events: List[Dict[str, Any]], capability: str) -> List[Dict[str, Any]]:
     if capability in {"snapshot", "event"}:
@@ -57,11 +67,20 @@ class FifaFootballAdapter:
             return FetchResult(ok=True, http_status=200, events=[])
         live = self._get("https://api.fifa.com/api/v3/live/football?language=en")
         calendar = self._get("https://api.fifa.com/api/v3/calendar/matches?count=50&language=en")
-        if not live.ok and not calendar.ok:
+        world_cup = None
+        knockout = None
+        if request.competition_id == "fifa-connected-competitions":
+            world_cup = self._get(FIFA_WORLD_CUP_WINDOW)
+            knockout = self._get(FIFA_WORLD_CUP_KNOCKOUT)
+        if not live.ok and not calendar.ok and not (world_cup and world_cup.ok) and not (knockout and knockout.ok):
             return live if not live.ok else calendar
         events = []
         seen = set()
-        for payload in (live.payload, calendar.payload):
+        payloads = [live.payload, calendar.payload]
+        for extra in (world_cup, knockout):
+            if extra and extra.ok:
+                payloads.append(extra.payload)
+        for payload in payloads:
             rows = payload.get("Results") if isinstance(payload, dict) else None
             for row in rows or []:
                 event = self._event(row)
@@ -95,14 +114,21 @@ class FifaFootballAdapter:
         ]
 
     def _event(self, row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        home = row.get("HomeTeam") or {}
-        away = row.get("AwayTeam") or {}
+        home = row.get("HomeTeam") or row.get("Home") or {}
+        away = row.get("AwayTeam") or row.get("Away") or {}
+        if not isinstance(home, dict) or not isinstance(away, dict):
+            return None
         home_name = loc(home.get("TeamName"))
         away_name = loc(away.get("TeamName"))
         if not home_name or not away_name:
             return None
         competition = loc(row.get("CompetitionName")) or "FIFA competition"
         home_score = home.get("Score")
+        if home_score is None:
+            home_score = row.get("HomeTeamScore")
+        away_score = away.get("Score")
+        if away_score is None:
+            away_score = row.get("AwayTeamScore")
         status_code = row.get("MatchStatus")
         if status_code in {0, 10} or (home_score is not None and row.get("Winner")):
             status = "finished"
@@ -111,18 +137,36 @@ class FifaFootballAdapter:
         else:
             status = "scheduled"
         stadium = row.get("Stadium") if isinstance(row.get("Stadium"), dict) else {}
+        match_id = str(row.get("IdMatch") or "")
+        result_code = row.get("ResultType")
+        result_type = FIFA_RESULT_TYPE.get(result_code) if isinstance(result_code, int) else None
+        home_pens = row.get("HomeTeamPenaltyScore")
+        away_pens = row.get("AwayTeamPenaltyScore")
+        if home_pens is not None or away_pens is not None:
+            result_type = "PSO"
+        score: Dict[str, Any] = {"home": home_score, "away": away_score}
+        if result_type:
+            score["result_type"] = result_type
+        if home_pens is not None or away_pens is not None:
+            score["home_penalties"] = home_pens
+            score["away_penalties"] = away_pens
         return {
-            "id": f"fifa:{row.get('IdMatch')}",
+            "id": f"fifa:{match_id}",
             "home": {"id": str(home.get("IdTeam") or ""), "name": home_name},
             "away": {"id": str(away.get("IdTeam") or ""), "name": away_name},
             "status": status,
-            "score": {"home": home_score, "away": away.get("Score")},
+            "score": score,
             "start_time": row.get("Date"),
             "venue": loc(stadium.get("Name")),
             "sport": "football",
             "competition": competition,
             "competition_key": f"football-{slugify(competition)}",
             "event_family": "team_match",
+            "source_family": "fifa-digital",
+            "source_event_id": match_id,
+            "source_event_ids": {"fifa-digital": match_id},
+            "result_type": result_type,
+            "round": str(row.get("MatchNumber") or "") or None,
         }
 
 
@@ -392,6 +436,7 @@ PULSELIVE_COMP_TOKENS: Dict[str, List[str]] = {
     "france-top-14": ["top 14"],
     "france-pro-d2": ["pro d2", "prod2"],
     "nz-npc": ["npc", "bunnings"],
+    "internationals-rwc": ["pacific nations cup"],
 }
 
 
@@ -413,12 +458,23 @@ class WorldRugbyAdapter:
             "https://api.wr-rims-prod.pulselive.com/rugby/v3/match"
             f"?pageSize=100&sport=mru&startDate={start}&endDate={end}"
         )
-        if not result.ok:
+        rows = list((result.payload or {}).get("content") or []) if result.ok else []
+        if request.competition_id == "internationals-rwc":
+            bounded = self._get(
+                "https://api.wr-rims-prod.pulselive.com/rugby/v3/match"
+                "?pageSize=50&sport=mru&startDate=2026-09-18&endDate=2026-09-20"
+            )
+            if bounded.ok:
+                rows.extend((bounded.payload or {}).get("content") or [])
+                result = bounded if not result.ok else result
+        if not result.ok and not rows:
             return result
         events = []
-        for row in (result.payload or {}).get("content") or []:
+        seen = set()
+        for row in rows:
             event = self._event(row, request.competition_id)
-            if event:
+            if event and event["id"] not in seen:
+                seen.add(event["id"])
                 events.append(event)
         tokens = PULSELIVE_COMP_TOKENS.get(request.competition_id or "")
         if tokens:
@@ -478,6 +534,8 @@ class WorldRugbyAdapter:
             "source_family": "pulselive",
             "source_event_id": str(row.get("matchId") or ""),
             "source_event_ids": {"pulselive": str(row.get("matchId") or "")},
+            "round": row.get("eventPhase") or "",
+            "stage": row.get("eventPhase") or "",
             "extra": {
                 "source_family": "pulselive",
                 "source_event_id": str(row.get("matchId") or ""),
