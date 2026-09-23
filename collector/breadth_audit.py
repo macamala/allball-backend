@@ -157,3 +157,60 @@ def fifa_competition_samples() -> List[Dict[str, Any]]:
             if len(out) >= 12:
                 return out
     return out
+
+
+
+def tomorrow_public_multisport_snapshot() -> Dict[str, Any]:
+    """Sydney-local canary for all public sports. Diagnostics only, never business logic."""
+    from collector.provider import NinkoCollectedSportsDataProvider
+
+    now_local = datetime.now(timezone.utc).astimezone(SYDNEY)
+    day = now_local.date() + timedelta(days=1)
+    local_start = datetime.combine(day, datetime.min.time(), tzinfo=SYDNEY)
+    local_end = local_start + timedelta(days=1)
+    utc_start = local_start.astimezone(timezone.utc)
+    utc_end = local_end.astimezone(timezone.utc)
+
+    provider = NinkoCollectedSportsDataProvider()
+    events = provider.get_events(
+        date_from=utc_start.isoformat().replace("+00:00", "Z"),
+        date_to=utc_end.isoformat().replace("+00:00", "Z"),
+        allow_unfiltered=True,
+    )
+    sport_counts = Counter(str(row.get("sport") or "unknown") for row in events)
+    competition_counts: Dict[str, int] = {}
+    samples: Dict[str, List[Dict[str, Any]]] = {}
+    for row in events:
+        sport = str(row.get("sport") or "unknown")
+        competition_counts[sport] = competition_counts.get(sport, 0) + 1
+        bucket = samples.setdefault(sport, [])
+        if len(bucket) < 8:
+            bucket.append(
+                {
+                    "competition": row.get("competition_name") or row.get("competition"),
+                    "competition_key": row.get("competition_key"),
+                    "home": (row.get("home") or {}).get("name"),
+                    "away": (row.get("away") or {}).get("name"),
+                    "utc": row.get("start_time"),
+                }
+            )
+
+    distinct_competitions: Dict[str, int] = {}
+    for sport in sport_counts:
+        distinct_competitions[sport] = len(
+            {
+                str(row.get("competition_key") or row.get("competition") or "")
+                for row in events
+                if str(row.get("sport") or "unknown") == sport
+            }
+        )
+
+    return {
+        "local_date": day.isoformat(),
+        "utc_from": utc_start.isoformat().replace("+00:00", "Z"),
+        "utc_to": utc_end.isoformat().replace("+00:00", "Z"),
+        "total": len(events),
+        "sports": dict(sport_counts.most_common()),
+        "competitions_by_sport": distinct_competitions,
+        "samples": samples,
+    }

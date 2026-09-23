@@ -183,12 +183,23 @@ def run_breadth_ingest(
         sport_stats = {"upstream": 0, "eligible": 0, "ingested": 0}
         for day in dates:
             result = fetch(SCHED_URL.format(sport=sofa_sport, date=day))
-            status_key = str(getattr(result, "http_status", 0) or 0)
+            status_code = int(getattr(result, "http_status", 0) or 0)
+            status_key = str(status_code)
             transport = stats["transport"]
             transport[status_key] = int(transport.get(status_key) or 0) + 1
             if not getattr(result, "ok", False) and not sport_stats.get("first_error"):
                 sport_stats["first_error"] = str(getattr(result, "error", "") or "")[:160]
-                sport_stats["first_status"] = int(getattr(result, "http_status", 0) or 0)
+                sport_stats["first_status"] = status_code
+            if status_code in {403, 429}:
+                stats["status"] = "blocked"
+                stats["blocked_status"] = status_code
+                stats["sports"][sport_id] = sport_stats
+                job = _job(db)
+                job.last_run_at = datetime.utcnow()
+                job.last_status = "blocked"
+                job.last_error = dump_json({"state": "blocked", "stats": stats})[:4000]
+                db.commit()
+                return stats
             payload = result.payload if getattr(result, "ok", False) and isinstance(result.payload, dict) else {}
             rows = [
                 row
@@ -272,7 +283,9 @@ def run_if_due(
     if (
         payload.get("state") == "done"
         and job.last_run_at
-        and datetime.utcnow() - job.last_run_at < timedelta(hours=min_interval_hours)
+        and datetime.utcnow() - job.last_run_at < timedelta(
+            hours=24 if payload.get("state") == "blocked" or job.last_status == "blocked" else min_interval_hours
+        )
     ):
         return None
     job.last_error = dump_json({"state": "running"})

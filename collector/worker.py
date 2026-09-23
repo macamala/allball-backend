@@ -396,7 +396,12 @@ def _maybe_log_breadth(db, *, force: bool = False) -> None:
     if not force and now_audit - _breadth_logged_at < 300:
         return
     try:
-        from collector.breadth_audit import fifa_competition_samples, tomorrow_football_snapshot, tomorrow_public_football_snapshot
+        from collector.breadth_audit import (
+            fifa_competition_samples,
+            tomorrow_football_snapshot,
+            tomorrow_public_football_snapshot,
+            tomorrow_public_multisport_snapshot,
+        )
 
         snapshot = tomorrow_football_snapshot(db)
         logger.info("TOMORROW_FOOTBALL_BREADTH %s", snapshot)
