@@ -45,3 +45,18 @@ def test_sportscore_same_label_different_logo_stays_separate():
     assert left
     assert right
     assert left != right
+
+
+def test_specific_competition_identity_ignores_missing_logo():
+    with_logo = source_native_identity(
+        "basketball",
+        {
+            "competition": "Women's National Basketball Association",
+            "competition_logo": "https://example.test/wnba.png",
+        },
+    )[0]
+    without_logo = source_native_identity(
+        "basketball",
+        {"competition": "Women's National Basketball Association"},
+    )[0]
+    assert with_logo == without_logo
