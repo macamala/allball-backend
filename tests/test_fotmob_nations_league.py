@@ -1,5 +1,6 @@
 from collector.adapters import FetchRequest, FetchResult
 from collector.adapters_fotmob import FOTMOB_LEAGUES, FotMobAdapter, _BOARD, _league_ids
+from collector.fotmob_crosswalk import _fotmob_competition_identity, _league_to_competition
 
 
 def _league(match_id, league_id, home, away):
@@ -58,3 +59,19 @@ def test_nations_league_adapter_keeps_events_from_a_b_c_d():
     assert result.ok is True
     assert {row["source_competition_id"] for row in result.events} == {"9806", "9807", "9808", "9809"}
     assert {row["home"]["name"] for row in result.events} == {"Netherlands", "Austria", "Team C1", "Andorra"}
+
+
+def test_fotmob_unknown_daily_league_gets_country_qualified_identity():
+    competition_id, league_id, league_name, ccode = _fotmob_competition_identity(
+        {"_league": {"id": 987654, "name": "Ligue 1", "ccode": "TUN"}}
+    )
+    assert competition_id == "football-tun-ligue-1"
+    assert league_id == "987654"
+    assert league_name == "Ligue 1"
+    assert ccode == "TUN"
+
+
+def test_crosswalk_maps_all_nations_league_division_ids_to_one_canonical_competition():
+    mapped = _league_to_competition()
+    for league_id in (9806, 9807, 9808, 9809):
+        assert mapped[str(league_id)] == "uefa-nations-league"
