@@ -126,6 +126,16 @@ class FifaFootballAdapter:
         if not home_name or not away_name:
             return None
         competition = loc(row.get("CompetitionName")) or "FIFA competition"
+        source_competition_id = str(row.get("IdCompetition") or "")
+        home_country = str(home.get("IdAssociation") or home.get("IdCountry") or "").strip().upper()
+        away_country = str(away.get("IdAssociation") or away.get("IdCountry") or "").strip().upper()
+        domestic_country = home_country if home_country and home_country == away_country else ""
+        native_slug = slugify(competition)
+        competition_key = (
+            f"football-{domestic_country.lower()}-{native_slug}"
+            if domestic_country
+            else f"football-{native_slug}"
+        )
         home_score = home.get("Score")
         if home_score is None:
             home_score = row.get("HomeTeamScore")
@@ -163,9 +173,12 @@ class FifaFootballAdapter:
             "venue": loc(stadium.get("Name")),
             "sport": "football",
             "competition": competition,
-            "competition_key": f"football-{slugify(competition)}",
+            "competition_key": competition_key,
+            "country_id": domestic_country or None,
             "event_family": "team_match",
             "source_family": "fifa-digital",
+            "source_competition_id": source_competition_id or None,
+            "source_competition_name": competition,
             "source_event_id": match_id,
             "source_event_ids": {"fifa-digital": match_id},
             "result_type": result_type,
