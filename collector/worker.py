@@ -37,6 +37,7 @@ from collector.lock import (
 STANDBY_SLEEP_SECONDS = 45
 _standby_logged = False
 _creators_collected = False
+_breadth_logged_at = 0.0
 
 
 def _collect_official_creators(db) -> None:
@@ -548,6 +549,18 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
                     writes_enabled(),
                     summary,
                 )
+            global _breadth_logged_at
+            now_audit = time.monotonic()
+            if now_audit - _breadth_logged_at >= 300:
+                try:
+                    from collector.breadth_audit import tomorrow_football_snapshot
+
+                    snapshot = tomorrow_football_snapshot(db)
+                    logger.info("TOMORROW_FOOTBALL_BREADTH %s", snapshot)
+                    _breadth_logged_at = now_audit
+                except Exception:
+                    logger.exception("Tomorrow football breadth audit failed")
+
             heartbeat_scheduler_lock(db, owner=owner)
             db.commit()
         except Exception:
