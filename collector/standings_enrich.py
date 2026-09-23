@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from collector.adapters_fotmob import FOTMOB_LEAGUES, parse_fotmob_table
 from collector.canonical_standings import unwrap_standings
 from collector.http import fetch_url
-from collector.models import SportsEvent, SportsStandingSnapshot
+from collector.models import SportsCompetition, SportsEvent, SportsStandingSnapshot
 from collector.util import dump_json, load_json
 from collector.verified_coverage import OPENLIGADB_LEAGUES
 
@@ -24,6 +24,112 @@ EUROLEAGUE_STANDINGS = "https://api-live.euroleague.net/v1/standings?seasonCode=
 PLUSLIGA_STANDINGS = "https://www.plusliga.pl/table/tour/52/nocookies/1.html"
 SUPERLEGA_HOME = "https://www.legavolley.it/superlega/"
 JOLPICA_DRIVERS = "https://api.jolpi.ca/ergast/f1/current/driverStandings.json"
+SOFA_DYNAMIC_STANDINGS = "https://www.sofascore.com/api/v1/unique-tournament/{tournament_id}/season/{season_id}/standings/total"
+
+def parse_sofa_dynamic_standings(payload: Any, *, sport_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    blocks = payload.get("standings") if isinstance(payload, dict) else []
+    if not isinstance(blocks, list):
+        return []
+    out: List[Dict[str, Any]] = []
+    for block in blocks:
+        if not isinstance(block, dict):
+            continue
+        group = block.get("name") or block.get("groupName") or block.get("description")
+        rows = block.get("rows") or []
+        if not isinstance(rows, list):
+            continue
+        for item in rows:
+            if not isinstance(item, dict):
+                continue
+            team = item.get("team") or {}
+            name = team.get("name") if isinstance(team, dict) else team
+            if not name:
+                continue
+            scores_for = item.get("scoresFor")
+            scores_against = item.get("scoresAgainst")
+            row = {
+                "position": item.get("position") or item.get("rank"),
+                "team": name,
+                "played": item.get("matches") or item.get("played") or item.get("gamesPlayed"),
+                "wins": item.get("wins"),
+                "draws": item.get("draws"),
+                "losses": item.get("losses"),
+                "points": item.get("points"),
+                "form": item.get("form"),
+                "group": group,
+                "goals_for": scores_for,
+                "goals_against": scores_against,
+                "goal_difference": item.get("scoreDiff") or item.get("goalDifference"),
+                "points_for": scores_for,
+                "points_against": scores_against,
+                "sets_for": item.get("setsFor"),
+                "sets_against": item.get("setsAgainst"),
+                "ot_losses": item.get("overtimeLosses") or item.get("otLosses"),
+                "pct": item.get("percentage"),
+                "win_pct": item.get("winPercentage"),
+            }
+            out.append({key: value for key, value in row.items() if value not in (None, "", [])})
+    return out
+
+
+def sofa_standings_context(db: Session, competition_key: Optional[str]) -> Optional[Dict[str, str]]:
+    if not competition_key:
+        return None
+    competition = db.get(SportsCompetition, competition_key)
+    if competition is not None and str(competition.event_model or "") != "team_match":
+        return None
+    rows = (
+        db.query(SportsEvent)
+        .filter_by(competition_id=competition_key)
+        .order_by(SportsEvent.start_time.desc())
+        .limit(40)
+        .all()
+    )
+    for row in rows:
+        extra = load_json(row.extra_json, {}) or {}
+        tournament_id = str(extra.get("sofascore_tournament_id") or "").strip()
+        season_id = str(extra.get("sofascore_season_id") or extra.get("source_season_id") or "").strip()
+        if not tournament_id or not season_id:
+            continue
+        return {
+            "tournament_id": tournament_id,
+            "season_id": season_id,
+            "season_name": str(extra.get("source_season_name") or row.season or "").strip(),
+            "sport_id": str(row.sport_id or "").strip(),
+        }
+    return None
+
+
+def dynamic_standings_supported(db: Session, competition_key: Optional[str]) -> bool:
+    return sofa_standings_context(db, competition_key) is not None
+
+
+def _fetch_sofa_dynamic_standings(db: Session, competition_key: str, *, getter=None) -> Dict[str, Any]:
+    context = sofa_standings_context(db, competition_key)
+    if not context:
+        return {}
+    from collector.adapters_sofascore import sofa_fetch_url
+
+    fetch = getter or sofa_fetch_url
+    url = SOFA_DYNAMIC_STANDINGS.format(
+        tournament_id=context["tournament_id"],
+        season_id=context["season_id"],
+    )
+    result = fetch(url)
+    if not getattr(result, "ok", False) or not isinstance(getattr(result, "payload", None), dict):
+        return {}
+    rows = parse_sofa_dynamic_standings(result.payload, sport_id=context.get("sport_id"))
+    if not rows:
+        return {}
+    return wrap_standings(
+        rows,
+        competition=competition_key,
+        season=context.get("season_name") or context.get("season_id"),
+        stage="total",
+        sport=context.get("sport_id"),
+        source="sofascore-web",
+    )
+
 
 def standings_supported(competition_id: Optional[str]) -> bool:
     if not competition_id:
@@ -640,6 +746,8 @@ def load_standings(db: Session, competition_key: Optional[str], getter=None) -> 
     )
     if has_events:
         fetched = fetch_competition_standings(competition_key, getter=getter) or {}
+        if not fetched:
+            fetched = _fetch_sofa_dynamic_standings(db, competition_key, getter=getter) or {}
     rows = unwrap_standings(fetched) if fetched else []
     if rows:
         try:
