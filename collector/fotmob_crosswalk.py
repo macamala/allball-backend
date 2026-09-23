@@ -28,7 +28,7 @@ from collector.util import dump_json, load_json, slugify
 
 logger = logging.getLogger(__name__)
 
-DATE_BOARD_JOB = "fotmob-date-boards-v2"
+DATE_BOARD_JOB = "fotmob-date-boards-v3"
 _YOUTH = ("u17", "u18", "u19", "u20", "u21", "u23", "youth", "junior")
 _WOMEN = ("women", "womens", "woms")
 _RESERVE = ("reserve", " ii", "2nd", "b team")
@@ -56,7 +56,16 @@ def _protected_conflict(left: Dict[str, Any], right: Dict[str, Any]) -> bool:
 
 
 def _league_to_competition() -> Dict[str, str]:
-    return {str(spec["id"]): competition_id for competition_id, spec in FOTMOB_LEAGUES.items() if spec.get("id")}
+    mapped: Dict[str, str] = {}
+    for competition_id, spec in FOTMOB_LEAGUES.items():
+        if spec.get("id") not in (None, ""):
+            mapped[str(spec["id"])] = competition_id
+        raw_ids = spec.get("ids") or []
+        values = raw_ids if isinstance(raw_ids, (list, tuple, set)) else [raw_ids]
+        for value in values:
+            if value not in (None, ""):
+                mapped[str(value)] = competition_id
+    return mapped
 
 
 def _fotmob_competition_identity(match: Dict[str, Any]) -> Tuple[Optional[str], str, str, str]:
@@ -476,7 +485,7 @@ def run_date_board_backfill(
     _checkpoint(job, state="done", dates=dates, next_index=len(dates), coverage=coverage, **totals)
     job.last_run_at = datetime.utcnow()
     job.last_status = "ok"
-    job.items_written = int(totals.get("attached") or 0)
+    job.items_written = int(totals.get("attached") or 0) + int(totals.get("ingested") or 0)
     db.commit()
     logger.info("fotmob_date_boards_complete %s coverage=%s", totals, coverage)
     return {**totals, "coverage": coverage, "dates": dates}
