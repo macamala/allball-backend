@@ -25,14 +25,16 @@ SOFA_LINEUPS = "https://www.sofascore.com/api/v1/event/{event_id}/lineups"
 MLB_FEED = "https://statsapi.mlb.com/api/v1.1/game/{game_pk}/feed/live"
 NHL_LANDING = "https://api-web.nhle.com/v1/gamecenter/{game_id}/landing"
 NHL_BOXSCORE = "https://api-web.nhle.com/v1/gamecenter/{game_id}/boxscore"
+SPORTSCORE_MATCH = "https://sportscore.com/api/widget/match/?sport={sport}&slug={slug}&src=ninkosports"
 
 TTL_LIVE = 45
 TTL_SCHEDULED = 1800
 TTL_FINISHED = 7 * 24 * 3600
 TTL_NEGATIVE = 900
-PARSER_REV = 5
+PARSER_REV = 6
 
 DETAIL_FAMILIES = (
+    "sportscore",
     "fotmob",
     "sofascore-web",
     "mlb-statsapi",
@@ -140,6 +142,105 @@ def _player_name(value: Any) -> Optional[str]:
         return str(value)
     return None
 
+
+def parse_sportscore_detail(payload: Any) -> Dict[str, Any]:
+    root = payload.get("match") if isinstance(payload, dict) and isinstance(payload.get("match"), dict) else {}
+    if not root:
+        return {}
+    out: Dict[str, Any] = {}
+
+    incidents: List[Dict[str, Any]] = []
+    for item in root.get("incidents") or []:
+        if not isinstance(item, dict):
+            continue
+        raw_type = str(item.get("type") or "event").strip()
+        lowered = raw_type.lower()
+        if item.get("is_sub") or "substitution" in lowered:
+            family = "substitution"
+        elif item.get("is_goal") or "goal" in lowered:
+            family = "goal"
+        elif item.get("is_card") or "card" in lowered:
+            family = "card"
+        else:
+            family = "event"
+        score_after = None
+        if item.get("home_score") is not None or item.get("away_score") is not None:
+            score_after = {"home": item.get("home_score"), "away": item.get("away_score")}
+        incidents.append({
+            "type": lowered or "event",
+            "family": family,
+            "minute": item.get("time"),
+            "side": item.get("side"),
+            "player": item.get("player") or None,
+            "player_in": item.get("player_in") or None,
+            "player_out": item.get("player_out") or None,
+            "score_after": score_after,
+        })
+    if incidents:
+        out["incidents"] = incidents
+
+    lineup = root.get("lineups") if isinstance(root.get("lineups"), dict) else {}
+    if lineup:
+        def pack_players(rows: Any) -> List[Dict[str, Any]]:
+            packed: List[Dict[str, Any]] = []
+            for player in rows or []:
+                if not isinstance(player, dict) or not player.get("name"):
+                    continue
+                entry: Dict[str, Any] = {
+                    "name": player.get("name"),
+                    "number": player.get("number"),
+                    "position": player.get("position"),
+                    "captain": bool(player.get("captain")),
+                }
+                rating = player.get("rating")
+                if rating not in (None, "", "0", "0.0", 0, 0.0):
+                    entry["rating"] = rating
+                packed.append(entry)
+            return packed
+
+        home_start = pack_players(lineup.get("home_xi"))
+        home_bench = pack_players(lineup.get("home_subs"))
+        away_start = pack_players(lineup.get("away_xi"))
+        away_bench = pack_players(lineup.get("away_subs"))
+        if home_start or home_bench or away_start or away_bench:
+            out["lineups"] = {
+                "home": {
+                    "start": home_start,
+                    "bench": home_bench,
+                    "formation": lineup.get("home_formation"),
+                    "coach": lineup.get("home_coach"),
+                },
+                "away": {
+                    "start": away_start,
+                    "bench": away_bench,
+                    "formation": lineup.get("away_formation"),
+                    "coach": lineup.get("away_coach"),
+                },
+                "confirmed": bool(lineup.get("confirmed")),
+            }
+
+    statistics: List[Dict[str, Any]] = []
+    for item in root.get("stats") or []:
+        if not isinstance(item, dict):
+            continue
+        label = item.get("label") or item.get("name") or item.get("title") or item.get("key")
+        home = item.get("home")
+        away = item.get("away")
+        values = item.get("values")
+        if home is None and away is None and isinstance(values, list) and len(values) >= 2:
+            home, away = values[0], values[1]
+        if label and (home not in (None, "") or away not in (None, "")):
+            statistics.append({"label": str(label), "home": home, "away": away})
+    if statistics:
+        out["statistics"] = statistics
+
+    if root.get("home_ht_score") is not None or root.get("away_ht_score") is not None:
+        out["periods"] = [{
+            "label": "HT",
+            "home": root.get("home_ht_score"),
+            "away": root.get("away_ht_score"),
+        }]
+    return out
 
 def parse_fotmob_details(payload: Any) -> Dict[str, Any]:
     root = payload if isinstance(payload, dict) else {}
@@ -665,10 +766,18 @@ def _merge_detail(base: Dict[str, Any], part: Dict[str, Any]) -> Dict[str, Any]:
     return base
 
 
-def fetch_family_detail(family: str, source_event_id: str, getter=None) -> Dict[str, Any]:
+def fetch_family_detail(family: str, source_event_id: str, getter=None, sport: str = "") -> Dict[str, Any]:
     getter = getter or fetch_url
     family = (family or "").lower()
     out: Dict[str, Any] = {}
+    if family == "sportscore":
+        if sport not in {"football", "basketball", "cricket", "tennis"}:
+            return out
+        result = _get(getter, SPORTSCORE_MATCH.format(sport=sport, slug=source_event_id))
+        payload = result.payload if result.ok else None
+        if isinstance(payload, dict):
+            out.update(parse_sportscore_detail(payload))
+        return out
     if family == "fotmob":
         result = _get(getter, FOTMOB_DETAILS.format(match_id=source_event_id))
         payload = result.payload if result.ok else None
@@ -868,12 +977,12 @@ def enrich_event_row(db: Session, row: SportsEvent, getter=None) -> None:
 
     def _one(item):
         family, source_id = item
-        return family, fetch_family_detail(family, source_id, getter=getter)
+        return family, fetch_family_detail(family, source_id, getter=getter, sport=str(row.sport_id or ""))
 
     if len(jobs) == 1:
         family, source_id = jobs[0]
         if not (family in tried and _fresh(extra, row.status or "") and extra.get("detail_empty") is False):
-            _merge_detail(detail, fetch_family_detail(family, source_id, getter=getter))
+            _merge_detail(detail, fetch_family_detail(family, source_id, getter=getter, sport=str(row.sport_id or "")))
             used.append(family)
     else:
         with ThreadPoolExecutor(max_workers=min(3, len(jobs))) as pool:
