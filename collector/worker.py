@@ -483,6 +483,23 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
                 except Exception:
                     logger.exception("FIFA identity reconcile failed")
                     db.rollback()
+            try:
+                from collector.fotmob_crosswalk import run_date_boards_if_due
+
+                def _pulse_boards() -> None:
+                    heartbeat_scheduler_lock(db, owner=owner)
+                    db.commit()
+
+                boards = run_date_boards_if_due(db, owner=owner, heartbeat=_pulse_boards)
+                if boards:
+                    logger.info(
+                        "FotMob date boards %s",
+                        {k: boards.get(k) for k in ("attached", "ingested", "upstream_total", "upstream_eligible", "unmatched", "ambiguous")},
+                    )
+                    _maybe_log_breadth(db, force=True)
+            except Exception:
+                logger.exception("FotMob date-board backfill failed")
+
             _collect_official_creators(db)
             from collector.watch_set import rebuild_watch_set
 
@@ -500,21 +517,6 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
                     logger.info("Bounded backfill %s", backfill.get("enrich"))
             except Exception:
                 logger.exception("Bounded backfill failed")
-            try:
-                from collector.fotmob_crosswalk import run_date_boards_if_due
-
-                def _pulse_boards() -> None:
-                    heartbeat_scheduler_lock(db, owner=owner)
-                    db.commit()
-
-                boards = run_date_boards_if_due(db, owner=owner, heartbeat=_pulse_boards)
-                if boards:
-                    logger.info(
-                        "FotMob date boards %s",
-                        {k: boards.get(k) for k in ("attached", "upstream_eligible", "unmatched", "ambiguous")},
-                    )
-            except Exception:
-                logger.exception("FotMob date-board backfill failed")
             try:
                 from collector.provider_crosswalk import run_provider_id_attach_if_due
 
