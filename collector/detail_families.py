@@ -29,6 +29,8 @@ CLICK_TT_LIVE = "https://www.mytischtennis.de/api/meeting/{meeting_id}/live"
 BBC_CRICKET_DAY = "https://www.bbc.com/sport/cricket/scores-fixtures/{date}"
 BBC_CRICKET_TODAY = "https://www.bbc.com/sport/cricket/scores-fixtures"
 
+_OPENDOTA_HERO_CACHE: Dict[str, Any] = {}
+
 
 def _get(getter, url: str, headers: Optional[Dict[str, str]] = None) -> FetchResult:
     try:
@@ -177,6 +179,16 @@ def parse_squiggle_game(row: Dict[str, Any]) -> Dict[str, Any]:
     if row.get("roundname"):
         out["round"] = row.get("roundname")
     return out
+
+
+def _opendota_heroes(getter) -> Dict[str, Any]:
+    global _OPENDOTA_HERO_CACHE
+    if _OPENDOTA_HERO_CACHE:
+        return _OPENDOTA_HERO_CACHE
+    result = _get(getter, OPENDOTA_HEROES)
+    if result.ok and isinstance(result.payload, dict):
+        _OPENDOTA_HERO_CACHE = result.payload
+    return _OPENDOTA_HERO_CACHE
 
 
 def parse_opendota_match(payload: Any, heroes: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -854,9 +866,7 @@ def fetch_extra_family_detail(family: str, source_event_id: str, getter=None) ->
     if family in {"opendota"}:
         result = _get(getter, OPENDOTA_MATCH.format(match_id=sid))
         if result.ok and isinstance(result.payload, dict):
-            heroes_result = _get(getter, OPENDOTA_HEROES)
-            heroes = heroes_result.payload if heroes_result.ok and isinstance(heroes_result.payload, dict) else {}
-            return parse_opendota_match(result.payload, heroes)
+            return parse_opendota_match(result.payload, _opendota_heroes(getter))
         return {}
     if family in {"euroleague-live", "euroleague"}:
         parts = sid.split(":")
