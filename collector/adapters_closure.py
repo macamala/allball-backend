@@ -606,7 +606,14 @@ class GriAdapter:
             )
         url = ((request.source_config or {}).get("url") or "https://www.grireland.ie/results/").strip()
         last = _get(self._get_text, url)
-        events = parse_gri_meetings(last.payload if last.ok and isinstance(last.payload, str) else "")
+        index = last.payload if last.ok and isinstance(last.payload, str) else ""
+        from collector.source_family_closeout import collect_gri
+
+        from collector.source_family_closeout import gri_meeting_links
+
+        events = collect_gri(lambda page: _get(self._get_text, page, timeout=25), index)
+        if not events and not gri_meeting_links(index):
+            events = parse_gri_meetings(index)
         return FetchResult(
             ok=True if events or last.ok else False,
             http_status=last.http_status or 200,
