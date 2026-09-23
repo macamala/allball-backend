@@ -312,3 +312,70 @@ def sportscore_breadth_probe() -> Dict[str, Any]:
             )
         out[sport_id] = best
     return out
+
+
+
+def sportscore_directory_probe() -> Dict[str, Any]:
+    """Prove stable competition IDs and fixture extraction from SportScore hubs."""
+    import re as _re
+    from collector.http import fetch_text
+    from collector.html_parse import parse_html
+
+    out: Dict[str, Any] = {}
+    targets = {
+        "basketball": {"womens-national-basketball-association", "euroleague"},
+        "tennis": {"atp-hangzhou-china-men-singles"},
+        "cricket": {"australia-domestic-one-day-cup"},
+    }
+    link_re = _re.compile(
+        r'href=["\']/(?P<sport>basketball|tennis|cricket)/competition/'
+        r'(?P<country>[^/]+)/(?P<slug>[^/]+)/(?P<source_id>[^/"\']+)/?["\']',
+        _re.I,
+    )
+    for sport, wanted in targets.items():
+        landing_url = f"https://sportscore.com/{sport}/"
+        landing = fetch_text(landing_url)
+        html = landing.payload if getattr(landing, "ok", False) and isinstance(landing.payload, str) else ""
+        found = []
+        seen = set()
+        for match in link_re.finditer(html):
+            slug = match.group("slug").lower()
+            if slug not in wanted:
+                continue
+            key = (slug, match.group("source_id"))
+            if key in seen:
+                continue
+            seen.add(key)
+            url = (
+                f"https://sportscore.com/{sport}/competition/"
+                f"{match.group('country')}/{slug}/{match.group('source_id')}/"
+            )
+            page = fetch_text(url)
+            page_html = page.payload if getattr(page, "ok", False) and isinstance(page.payload, str) else ""
+            parsed = parse_html(page_html, url) if page_html else []
+            found.append(
+                {
+                    "country": match.group("country"),
+                    "slug": slug,
+                    "source_id": match.group("source_id"),
+                    "page_status": int(getattr(page, "http_status", 0) or 0),
+                    "page_bytes": len(page_html.encode("utf-8")) if page_html else 0,
+                    "parsed_events": len(parsed),
+                    "sample_events": [
+                        {
+                            "home": ((row.get("home") or {}).get("name") if isinstance(row.get("home"), dict) else row.get("home")),
+                            "away": ((row.get("away") or {}).get("name") if isinstance(row.get("away"), dict) else row.get("away")),
+                            "start_time": row.get("start_time"),
+                            "status": row.get("status"),
+                            "competition": row.get("competition"),
+                        }
+                        for row in parsed[:6]
+                    ],
+                }
+            )
+        out[sport] = {
+            "landing_status": int(getattr(landing, "http_status", 0) or 0),
+            "landing_bytes": len(html.encode("utf-8")) if html else 0,
+            "matches": found,
+        }
+    return out
