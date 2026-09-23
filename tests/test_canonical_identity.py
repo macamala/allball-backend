@@ -22,7 +22,12 @@ def _event(**kwargs):
         "participants_json": dump_json(
             {"home": {"name": kwargs["home"]}, "away": {"name": kwargs["away"]}}
         ),
-        "extra_json": dump_json({"display_eligible": True, "source_family": kwargs.get("family", "espn-html")}),
+        "extra_json": dump_json({
+            "display_eligible": True,
+            "source_family": kwargs.get("family", "espn-html"),
+            **({"periods": kwargs.get("periods")} if kwargs.get("periods") is not None else {}),
+            **({"source_competition_name": kwargs.get("source_competition_name")} if kwargs.get("source_competition_name") else {}),
+        }),
     }
     return SportsEvent(**payload)
 
@@ -274,3 +279,93 @@ def test_false_merge_protection_youth_women_cup_doubleheader():
         assert len(_public(db, "mlb-false")) == 2
     finally:
         db.close()
+
+
+
+def test_world_aquatics_duplicate_collapse_keeps_rich_periods():
+    """A richer official water-polo result must survive canonical collapse."""
+    db = SessionLocal()
+    competition = "world-aquatics-events"
+    rich_id = "ninko-test-wa-rich"
+    basic_id = "ninko-test-wa-basic"
+    try:
+        db.add(
+            _event(
+                event_id=rich_id,
+                sport_id="water-polo",
+                competition_id=competition,
+                home="Montenegro",
+                away="Georgia",
+                start_time=datetime(2026, 7, 19, 18, 0, 0),
+                score={"home": 19, "away": 17},
+                status="finished",
+                family="world-aquatics-api",
+                periods=[
+                    {"label": "Q1", "home": 6, "away": 2},
+                    {"label": "Q2", "home": 4, "away": 6},
+                    {"label": "Q3", "home": 4, "away": 3},
+                    {"label": "Q4", "home": 5, "away": 6},
+                ],
+            )
+        )
+        db.add(
+            _event(
+                event_id=basic_id,
+                sport_id="water-polo",
+                competition_id=competition,
+                home="Montenegro",
+                away="Georgia",
+                start_time=datetime(2026, 7, 19, 18, 0, 0),
+                score={"home": 19, "away": 17},
+                status="finished",
+                family="omega-timing",
+            )
+        )
+        db.commit()
+        result = collapse_canonical_events(db, competition_ids=[competition])
+        assert result["collapsed"] >= 1
+
+        roots = (
+            db.query(SportsEvent)
+            .filter_by(competition_id=competition)
+            .filter(SportsEvent.event_id.in_([rich_id, basic_id]))
+            .filter(SportsEvent.canonical_event_id.is_(None))
+            .all()
+        )
+        assert len(roots) == 1
+
+        root = roots[0]
+        extra = json.loads(root.extra_json or "{}")
+        assert extra.get("periods") == [
+            {"label": "Q1", "home": 6, "away": 2},
+            {"label": "Q2", "home": 4, "away": 6},
+            {"label": "Q3", "home": 4, "away": 3},
+            {"label": "Q4", "home": 5, "away": 6},
+        ]
+    finally:
+        db.query(SportsEvent).filter(SportsEvent.event_id.in_([rich_id, basic_id])).delete(synchronize_session=False)
+        db.commit()
+        db.close()
+
+
+def test_fifa_public_payload_keeps_stable_key_and_human_display_name():
+    from collector.provider import NinkoCollectedSportsDataProvider
+
+    row = _event(
+        event_id="ninko-test-fifa-display",
+        sport_id="football",
+        competition_id="fifa-connected-competitions",
+        home="Spain",
+        away="Argentina",
+        start_time=datetime(2026, 7, 19, 0, 0, 0),
+        score={"home": 1, "away": 0},
+        status="finished",
+        family="fifa-digital",
+        source_competition_name="FIFA World Cup",
+    )
+    provider = NinkoCollectedSportsDataProvider()
+    payload = provider._to_normalized(row, include_detail=True)
+    assert payload is not None
+    assert payload["competition_key"] == "fifa-connected-competitions"
+    assert payload["competition"] == "FIFA World Cup"
+    assert payload["competition_name"] == "FIFA World Cup"
