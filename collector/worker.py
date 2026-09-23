@@ -38,6 +38,7 @@ STANDBY_SLEEP_SECONDS = 45
 _standby_logged = False
 _creators_collected = False
 _breadth_logged_at = 0.0
+_fifa_identity_reconciled = False
 
 
 def _collect_official_creators(db) -> None:
@@ -470,6 +471,18 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
                 bootstrap_registry(db)
                 db.commit()
                 db.info["registry_bootstrapped"] = True
+            global _fifa_identity_reconciled
+            if not _fifa_identity_reconciled and writes_enabled():
+                try:
+                    from collector.fifa_identity_reconcile import reconcile_current_fifa_identity
+
+                    identity_stats = reconcile_current_fifa_identity(db)
+                    db.commit()
+                    _fifa_identity_reconciled = True
+                    logger.info("FIFA identity reconcile %s", identity_stats)
+                except Exception:
+                    logger.exception("FIFA identity reconcile failed")
+                    db.rollback()
             _collect_official_creators(db)
             from collector.watch_set import rebuild_watch_set
 
