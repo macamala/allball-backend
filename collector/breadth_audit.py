@@ -67,3 +67,40 @@ def tomorrow_football_snapshot(db) -> Dict[str, Any]:
         "events": events,
         "hidden": hidden,
     }
+
+
+
+def tomorrow_public_football_snapshot() -> Dict[str, Any]:
+    from collector.provider import NinkoCollectedSportsDataProvider
+
+    now_local = datetime.now(timezone.utc).astimezone(SYDNEY)
+    day = now_local.date() + timedelta(days=1)
+    local_start = datetime.combine(day, datetime.min.time(), tzinfo=SYDNEY)
+    local_end = local_start + timedelta(days=1)
+    utc_start = local_start.astimezone(timezone.utc)
+    utc_end = local_end.astimezone(timezone.utc)
+
+    provider = NinkoCollectedSportsDataProvider()
+    events = provider.get_events(
+        sport="football",
+        date_from=utc_start.isoformat().replace("+00:00", "Z"),
+        date_to=utc_end.isoformat().replace("+00:00", "Z"),
+        allow_unfiltered=True,
+    )
+    competitions = Counter(str(row.get("competition_name") or row.get("competition") or row.get("competition_key") or "") for row in events)
+    sample = [
+        {
+            "competition": row.get("competition_name") or row.get("competition"),
+            "competition_key": row.get("competition_key"),
+            "home": (row.get("home") or {}).get("name"),
+            "away": (row.get("away") or {}).get("name"),
+            "utc": row.get("start_time"),
+        }
+        for row in events[:160]
+    ]
+    return {
+        "local_date": day.isoformat(),
+        "total": len(events),
+        "competitions": dict(competitions.most_common()),
+        "events": sample,
+    }
