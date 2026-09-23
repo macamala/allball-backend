@@ -41,7 +41,7 @@ SOFA_BREADTH_SPORTS: Dict[str, str] = {
 def _job(db: Session) -> SportsCollectorJob:
     row = db.get(SportsCollectorJob, JOB_ID)
     if row is None:
-        row = SportsCollectorJob(job_id=JOB_ID, last_error=dump_json({"state": "pending"}))
+        row = SportsCollectorJob(job_key=JOB_ID, last_error=dump_json({"state": "pending"}), last_status="pending")
         db.add(row)
         db.flush()
     return row
