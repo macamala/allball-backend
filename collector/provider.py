@@ -303,6 +303,40 @@ def _list_public_event(payload: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
+def _dedupe_public_fixture_rows(events: List[Dict[str, Any]], preferred_ids: set) -> List[Dict[str, Any]]:
+    """Collapse cross-competition aliases of the same public fixture.
+
+    This is intentionally narrow: same sport, same kickoff minute and both
+    participant names equivalent. When one row is a verified/frozen mapping,
+    it wins over a source-native dynamic id.
+    """
+    from collector.participant_alias import names_equivalent
+
+    kept: List[Dict[str, Any]] = []
+    for row in events:
+        home = str((row.get("home") or {}).get("name") or "")
+        away = str((row.get("away") or {}).get("name") or "")
+        stamp = str(row.get("start_time") or "")[:16]
+        match_index = None
+        for index, existing in enumerate(kept):
+            if existing.get("sport") != row.get("sport") or str(existing.get("start_time") or "")[:16] != stamp:
+                continue
+            ex_home = str((existing.get("home") or {}).get("name") or "")
+            ex_away = str((existing.get("away") or {}).get("name") or "")
+            if names_equivalent(home, ex_home) and names_equivalent(away, ex_away):
+                match_index = index
+                break
+        if match_index is None:
+            kept.append(row)
+            continue
+        existing = kept[match_index]
+        old_key = str(existing.get("competition_key") or "")
+        new_key = str(row.get("competition_key") or "")
+        if new_key in preferred_ids and old_key not in preferred_ids:
+            kept[match_index] = row
+    return kept
+
+
 def public_event_detail(payload: Dict[str, Any]) -> Dict[str, Any]:
     """Same public sanitizer as the list. Provenance stays internal."""
     return public_event(payload)
@@ -607,6 +641,7 @@ class NinkoCollectedSportsDataProvider:
                 if (row.get("competition_key") or "") in public_ids
                 or (row.get("sport") == "football" and str(row.get("competition_key") or "").startswith("football-"))
             ]
+            events = _dedupe_public_fixture_rows(events, public_ids)
             cache_set(db, cache_key, events, "upcoming_fixtures" if status != "live" else "live_events")
             db.commit()
             self._last_profile = {
