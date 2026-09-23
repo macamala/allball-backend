@@ -20,7 +20,7 @@ OFFICIAL_PUBLIC_COMPETITIONS = {
     "ireland-gri-meetings",
 }
 
-SOURCE_NATIVE_PUBLIC_FAMILIES = {"fifa", "fifa-digital", "fifa-json"}
+SOURCE_NATIVE_PUBLIC_FAMILIES = {"fifa", "fifa-digital", "fifa-json", "fotmob"}
 
 
 def source_native_public_competition_id(
@@ -38,7 +38,7 @@ def source_native_public_competition_id(
         return None
     suffix = slugify(name)
     native = f"football-{suffix}"
-    country_qualified = bool(re.fullmatch(rf"football-[a-z]{{3}}-{re.escape(suffix)}", stored))
+    country_qualified = bool(re.fullmatch(rf"football-[a-z]{{2,3}}-{re.escape(suffix)}", stored))
     if stored != native and not country_qualified:
         return None
     canonical = unique_label_competition(name, sport_id="football", exclude=stored)
