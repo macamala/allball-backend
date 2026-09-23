@@ -111,6 +111,7 @@ def test_fotmob_parser_maps_infobox_player_stats_and_xg():
             },
             "playerStats": {
                 "11": {
+                    "id": 174543,
                     "name": "De Bruyne",
                     "teamId": 1,
                     "shirtNumber": 11,
@@ -127,7 +128,7 @@ def test_fotmob_parser_maps_infobox_player_stats_and_xg():
     assert out["statistics"][0]["label"] == "Expected goals (xG)"
     assert out["lineups"]["home"]["formation"] == "4-3-3"
     assert out["lineups"]["home"]["coach"] == "Vanoli"\n    assert out["lineups"]["home"]["start"][0]["image"].endswith("/playerimages/174543.png")
-    assert out["player_statistics"][0]["goals"] == 1
+    assert out["player_statistics"][0]["goals"] == 1\n    assert out["player_statistics"][0]["image"].endswith("/playerimages/174543.png")
     assert out["sport_detail"]["shots"] == 2
 
 
