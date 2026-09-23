@@ -657,5 +657,7 @@ if __name__ == "__main__":
         from collector.staging import main as staging_main
 
         raise SystemExit(staging_main([staging]))
-    once = (not keepalive_enabled()) or run_once_requested()
+    # Scheduler mode is persistent unless one-shot is explicitly requested.
+    # This avoids Railway restart/lease churn from legacy COLLECTOR_ONCE flags.
+    once = run_once_requested() or (not scheduler_enabled() and not keepalive_enabled())
     main(once=once)
