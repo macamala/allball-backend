@@ -380,6 +380,7 @@ def parse_fotmob_details(payload: Any) -> Dict[str, Any]:
                 "name": name,
                 "number": player.get("shirtNumber") or player.get("number"),
                 "position": player.get("position") or player.get("positionId") or player.get("usualPosition"),
+                "captain": bool(player.get("captain") or player.get("isCaptain")),
                 "rating": rating,
                 "image": _fotmob_player_image(player),
             })
@@ -422,6 +423,7 @@ def parse_fotmob_details(payload: Any) -> Dict[str, Any]:
                         "name": name,
                         "number": player.get("shirtNumber") or player.get("number"),
                         "position": player.get("position") or player.get("positionId") or player.get("usualPosition"),
+                        "captain": bool(player.get("captain") or player.get("isCaptain")),
                         "rating": ((player.get("performance") or {}).get("rating") if isinstance(player.get("performance"), dict) else None),
                         "image": player.get("image") or player.get("photo") or player.get("avatar") or player.get("imageUrl"),
                     }
