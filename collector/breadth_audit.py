@@ -255,6 +255,13 @@ def sportscore_breadth_probe() -> Dict[str, Any]:
                         "home": row.get("home"),
                         "away": row.get("away"),
                         "time": row.get("time"),
+                        "slug": row.get("slug") or row.get("match_slug"),
+                        "url": row.get("url"),
+                        "competition_slug": row.get("competition_slug") or row.get("league_slug"),
+                        "home_slug": row.get("home_slug") or row.get("home_team_slug"),
+                        "away_slug": row.get("away_slug") or row.get("away_team_slug"),
+                        "country": row.get("country") or row.get("competition_country"),
+                        "keys": sorted(str(key) for key in row.keys())[:40],
                     }
                     for row in rows[:4]
                 ],
