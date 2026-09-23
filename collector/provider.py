@@ -333,6 +333,66 @@ def _u20_women_name_equivalent(left: str, right: str, left_event: Dict[str, Any]
     return bool(core(left)) and core(left) == core(right)
 
 
+_NHL_TEAM_ALIASES = {
+    "ANA": "Anaheim Ducks",
+    "BOS": "Boston Bruins",
+    "BUF": "Buffalo Sabres",
+    "CGY": "Calgary Flames",
+    "CAR": "Carolina Hurricanes",
+    "CHI": "Chicago Blackhawks",
+    "COL": "Colorado Avalanche",
+    "CBJ": "Columbus Blue Jackets",
+    "DAL": "Dallas Stars",
+    "DET": "Detroit Red Wings",
+    "EDM": "Edmonton Oilers",
+    "FLA": "Florida Panthers",
+    "LAK": "Los Angeles Kings",
+    "MIN": "Minnesota Wild",
+    "MTL": "Montreal Canadiens",
+    "NSH": "Nashville Predators",
+    "NJD": "New Jersey Devils",
+    "NYI": "New York Islanders",
+    "NYR": "New York Rangers",
+    "OTT": "Ottawa Senators",
+    "PHI": "Philadelphia Flyers",
+    "PIT": "Pittsburgh Penguins",
+    "SJS": "San Jose Sharks",
+    "SEA": "Seattle Kraken",
+    "STL": "St. Louis Blues",
+    "TBL": "Tampa Bay Lightning",
+    "TOR": "Toronto Maple Leafs",
+    "UTA": "Utah Mammoth",
+    "VAN": "Vancouver Canucks",
+    "VGK": "Vegas Golden Knights",
+    "WSH": "Washington Capitals",
+    "WPG": "Winnipeg Jets",
+}
+
+
+def _nhl_participant_equivalent(
+    left: str,
+    right: str,
+    left_event: Dict[str, Any],
+    right_event: Dict[str, Any],
+) -> bool:
+    if left_event.get("sport") != "ice-hockey" or right_event.get("sport") != "ice-hockey":
+        return False
+    competitions = {
+        str(left_event.get("competition_key") or left_event.get("competition") or "").lower(),
+        str(right_event.get("competition_key") or right_event.get("competition") or "").lower(),
+    }
+    if not any(value == "nhl" or "national hockey league" in value for value in competitions):
+        return False
+    from collector.participant_text import fold_for_identity
+
+    def canonical(name: str) -> str:
+        raw = str(name or "").strip()
+        expanded = _NHL_TEAM_ALIASES.get(raw.upper(), raw)
+        return fold_for_identity(expanded)
+
+    return bool(canonical(left)) and canonical(left) == canonical(right)
+
+
 def _public_participant_equivalent(
     left: str,
     right: str,
@@ -341,7 +401,11 @@ def _public_participant_equivalent(
 ) -> bool:
     from collector.participant_alias import names_equivalent
 
-    return names_equivalent(left, right) or _u20_women_name_equivalent(left, right, left_event, right_event)
+    return (
+        names_equivalent(left, right)
+        or _nhl_participant_equivalent(left, right, left_event, right_event)
+        or _u20_women_name_equivalent(left, right, left_event, right_event)
+    )
 
 
 def _dedupe_public_fixture_rows(events: List[Dict[str, Any]], preferred_ids: set) -> List[Dict[str, Any]]:

@@ -214,3 +214,56 @@ def tomorrow_public_multisport_snapshot() -> Dict[str, Any]:
         "competitions_by_sport": distinct_competitions,
         "samples": samples,
     }
+
+
+
+def sportscore_breadth_probe() -> Dict[str, Any]:
+    """Production transport/competition probe for the public SportScore board."""
+    from collector.adapters_sportscore import MATCHES_URL, _payload_matches
+    from collector.http import fetch_url
+
+    probes = {
+        "basketball": ["basketball"],
+        "tennis": ["tennis"],
+        "handball": ["handball"],
+        "volleyball": ["volleyball"],
+        "baseball": ["baseball"],
+        "ice-hockey": ["ice-hockey", "hockey"],
+        "cricket": ["cricket"],
+    }
+    out: Dict[str, Any] = {}
+    for sport_id, upstream_names in probes.items():
+        best: Dict[str, Any] = {"status": 0, "rows": 0, "competitions": {}}
+        attempts: List[Dict[str, Any]] = []
+        for upstream in upstream_names:
+            result = fetch_url(MATCHES_URL.format(sport=upstream, limit=50))
+            rows = _payload_matches(result.payload) if getattr(result, "ok", False) else []
+            competitions = Counter(
+                str(row.get("competition") or "").strip()
+                for row in rows
+                if str(row.get("competition") or "").strip()
+            )
+            attempt = {
+                "upstream": upstream,
+                "status": int(getattr(result, "http_status", 0) or 0),
+                "ok": bool(getattr(result, "ok", False)),
+                "rows": len(rows),
+                "competitions": dict(competitions.most_common(12)),
+                "sample": [
+                    {
+                        "competition": row.get("competition"),
+                        "home": row.get("home"),
+                        "away": row.get("away"),
+                        "time": row.get("time"),
+                    }
+                    for row in rows[:4]
+                ],
+            }
+            attempts.append(attempt)
+            if len(rows) > int(best.get("rows") or 0) or (attempt["ok"] and not best.get("ok")):
+                best = attempt
+            if rows:
+                break
+        best["attempts"] = attempts
+        out[sport_id] = best
+    return out
