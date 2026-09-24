@@ -780,3 +780,63 @@ def test_orphan_duplicate_guard_keeps_real_canonical_loser_hidden():
         db.query(SportsEvent).filter(SportsEvent.event_id.in_([keeper_id, loser_id])).delete(synchronize_session=False)
         db.commit()
         db.close()
+
+
+
+def test_backfill_duplicate_cluster_always_keeps_one_public_candidate():
+    from datetime import datetime
+
+    from collector.integrity import plan_backfill
+    from collector.models import SportsEvent
+    from collector.util import dump_json
+    from database import SessionLocal
+
+    db = SessionLocal()
+    ids = ["ninko-evt-never-zero-a", "ninko-evt-never-zero-b"]
+    try:
+        db.query(SportsEvent).filter(SportsEvent.event_id.in_(ids)).delete(synchronize_session=False)
+        participants = dump_json({
+            "home": {"name": "Never Zero Home"},
+            "away": {"name": "Never Zero Away"},
+        })
+        db.add(SportsEvent(
+            event_id=ids[0],
+            sport_id="football",
+            competition_id="never-zero-comp-a",
+            event_family="team_match",
+            fingerprint="fp-never-zero-a",
+            start_time=datetime(2026, 9, 25, 3, 0, 0),
+            display_eligible=True,
+            participants_json=participants,
+            extra_json=dump_json({
+                "display_eligible": True,
+                "source_family": "fotmob",
+                "source_event_id": "nz-a",
+                "source_competition_id": "530",
+            }),
+        ))
+        db.add(SportsEvent(
+            event_id=ids[1],
+            sport_id="football",
+            competition_id="never-zero-comp-b",
+            event_family="team_match",
+            fingerprint="fp-never-zero-b",
+            start_time=datetime(2026, 9, 25, 3, 0, 0),
+            display_eligible=True,
+            participants_json=participants,
+            extra_json=dump_json({
+                "display_eligible": True,
+                "source_family": "unknown",
+            }),
+        ))
+        db.commit()
+
+        plan = plan_backfill(db)
+        quarantined = set(plan["quarantine"]) & set(ids)
+
+        assert len(quarantined) == 1
+        assert ids[0] not in quarantined
+    finally:
+        db.query(SportsEvent).filter(SportsEvent.event_id.in_(ids)).delete(synchronize_session=False)
+        db.commit()
+        db.close()
