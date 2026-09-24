@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy.orm import Session
 
-from collector.adapters_fotmob import FOTMOB_LEAGUES, LEAGUE_URL, _league_ids, parse_fotmob_table
+from collector.adapters_fotmob import LEAGUE_URL, asset_league_ids, parse_fotmob_table
 from collector.cache import note_list_invalidation
 from collector.http import fetch_url
 from collector.list_extra import extra_for_list, store_list_extra
@@ -265,7 +265,7 @@ def _candidate_competitions(db: Session, now: float) -> List[Tuple[str, List[str
         if not missing and not missing_competition_logo:
             continue
 
-        known_ids = _league_ids(FOTMOB_LEAGUES.get(competition_id) or {})
+        known_ids = asset_league_ids(competition_id)
         for value in known_ids:
             if str(value).isdigit():
                 source_ids[competition_id].add(str(value))
