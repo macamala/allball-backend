@@ -192,6 +192,95 @@ def fifa_competition_samples() -> List[Dict[str, Any]]:
 
 
 
+def public_football_asset_range_snapshot(*, days_back: int = 7, days_forward: int = 14) -> Dict[str, Any]:
+    """Audit every public football event across a wider Sydney-local rolling window."""
+    from collector.provider import NinkoCollectedSportsDataProvider
+
+    now_local = datetime.now(timezone.utc).astimezone(SYDNEY)
+    first_day = now_local.date() - timedelta(days=days_back)
+    last_day = now_local.date() + timedelta(days=days_forward)
+    local_start = datetime.combine(first_day, datetime.min.time(), tzinfo=SYDNEY)
+    local_end = datetime.combine(last_day + timedelta(days=1), datetime.min.time(), tzinfo=SYDNEY)
+    utc_start = local_start.astimezone(timezone.utc)
+    utc_end = local_end.astimezone(timezone.utc)
+
+    events = NinkoCollectedSportsDataProvider().get_events(
+        sport="football",
+        date_from=utc_start.isoformat().replace("+00:00", "Z"),
+        date_to=utc_end.isoformat().replace("+00:00", "Z"),
+        allow_unfiltered=True,
+    )
+
+    def side_has_logo(side: Any) -> bool:
+        if not isinstance(side, dict):
+            return False
+        return bool(
+            side.get("logo")
+            or side.get("image")
+            or side.get("crest")
+            or side.get("badge")
+            or side.get("team_logo")
+            or side.get("teamLogo")
+            or side.get("logo_url")
+            or side.get("logoUrl")
+        )
+
+    missing_by_competition: Dict[str, Dict[str, Any]] = {}
+    events_with_comp_logo = 0
+    side_slots = 0
+    side_logos = 0
+    for event in events:
+        comp = str(event.get("competition_key") or event.get("competition") or "unknown")
+        comp_logo = bool(event.get("competition_logo"))
+        if comp_logo:
+            events_with_comp_logo += 1
+        missing_sides: List[str] = []
+        for side_name in ("home", "away"):
+            side = event.get(side_name)
+            if not isinstance(side, dict):
+                continue
+            side_slots += 1
+            if side_has_logo(side):
+                side_logos += 1
+            else:
+                missing_sides.append(side_name)
+        if comp_logo and not missing_sides:
+            continue
+        item = missing_by_competition.setdefault(
+            comp,
+            {
+                "events": 0,
+                "missing_competition_logo": 0,
+                "missing_team_logo_slots": 0,
+                "examples": [],
+            },
+        )
+        item["events"] += 1
+        item["missing_competition_logo"] += 0 if comp_logo else 1
+        item["missing_team_logo_slots"] += len(missing_sides)
+        if len(item["examples"]) < 3:
+            item["examples"].append(
+                {
+                    "id": event.get("id"),
+                    "home": (event.get("home") or {}).get("name"),
+                    "away": (event.get("away") or {}).get("name"),
+                    "missing_sides": missing_sides,
+                    "missing_competition_logo": not comp_logo,
+                    "utc": event.get("start_time"),
+                }
+            )
+
+    return {
+        "local_from": str(first_day),
+        "local_to": str(last_day),
+        "events": len(events),
+        "events_with_competition_logo": events_with_comp_logo,
+        "side_slots": side_slots,
+        "side_logos": side_logos,
+        "gap_competitions": missing_by_competition,
+    }
+
+
 def public_multisport_day_snapshot(day_offset: int = 1, *, include_samples: bool = True) -> Dict[str, Any]:
     """Sydney-local public canary for any nearby day. Diagnostics only."""
     from collector.provider import NinkoCollectedSportsDataProvider
