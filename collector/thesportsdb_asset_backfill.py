@@ -14,6 +14,7 @@ from collections import defaultdict
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import quote
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from collector.adapters import FetchResult
@@ -30,6 +31,15 @@ from collector.verified_coverage import THESPORTSDB_LEAGUES
 RUN_INTERVAL_S = 150
 LEAGUE_TTL_S = 12 * 3600
 MAX_LEAGUES_PER_RUN = 32
+
+
+def _public_visibility_clause():
+    # Public read semantics are "not explicitly false". Legacy canonical rows
+    # can still have NULL here and must receive identity assets too.
+    return or_(
+        SportsEvent.display_eligible.is_(True),
+        SportsEvent.display_eligible.is_(None),
+    )
 
 _next_run_at = 0.0
 _last_fetch: Dict[str, float] = {}
@@ -157,7 +167,7 @@ def _direct_name_candidates(db: Session, now: float) -> List[Tuple[str, str, str
     rows = (
         db.query(SportsEvent)
         .filter(
-            SportsEvent.display_eligible.is_(True),
+            _public_visibility_clause(),
             SportsEvent.start_time >= window_start,
             SportsEvent.start_time <= window_end,
         )
@@ -204,7 +214,7 @@ def _apply_name_asset(
         db.query(SportsEvent)
         .filter(
             SportsEvent.competition_id == competition_id,
-            SportsEvent.display_eligible.is_(True),
+            _public_visibility_clause(),
         )
         .all()
     )
@@ -255,7 +265,7 @@ def _direct_team_ids(db: Session, now: float) -> List[str]:
     rows = (
         db.query(SportsEvent)
         .filter(
-            SportsEvent.display_eligible.is_(True),
+            _public_visibility_clause(),
             SportsEvent.start_time >= window_start,
             SportsEvent.start_time <= window_end,
         )
@@ -285,7 +295,7 @@ def _direct_team_ids(db: Session, now: float) -> List[str]:
 def _apply_direct_team_asset(db: Session, team_id: str, asset: Dict[str, str]) -> int:
     if not asset.get("logo"):
         return 0
-    rows = db.query(SportsEvent).filter(SportsEvent.display_eligible.is_(True)).all()
+    rows = db.query(SportsEvent).filter(_public_visibility_clause()).all()
     updated = 0
     for row in rows:
         extra = load_json(row.extra_json, {}) or {}
@@ -411,7 +421,7 @@ def _candidates(db: Session, now: float) -> List[Tuple[str, str, int]]:
     window_end = datetime.utcnow() + timedelta(days=3)
     rows = (
         db.query(SportsEvent)
-        .filter(SportsEvent.display_eligible.is_(True))
+        .filter(_public_visibility_clause())
         .all()
     )
     for row in rows:
@@ -551,7 +561,7 @@ def run_if_due(db: Session, *, getter=None, heartbeat=None) -> Optional[Dict[str
             db.query(SportsEvent)
             .filter(
                 SportsEvent.competition_id == competition_id,
-                SportsEvent.display_eligible.is_(True),
+                _public_visibility_clause(),
             )
             .all()
         )
