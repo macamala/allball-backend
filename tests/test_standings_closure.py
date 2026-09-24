@@ -49,12 +49,37 @@ def test_fotmob_table_parser():
     assert canonical[0]["won"] == 3
 
 
+def test_standings_identity_assets_survive_canonicalization():
+    rows = canonicalize_standing_rows(
+        [
+            {
+                "position": 1,
+                "team": {
+                    "id": "42",
+                    "name": "Alpha FC",
+                    "logo": "https://cdn.example/alpha.svg",
+                    "country": {"alpha3": "SRB"},
+                },
+                "played": 3,
+                "wins": 3,
+                "points": 9,
+            }
+        ],
+        sport="football",
+    )
+    assert rows[0]["team"] == "Alpha FC"
+    assert rows[0]["team_id"] == "42"
+    assert rows[0]["logo"] == "https://cdn.example/alpha.svg"
+    assert rows[0]["country_id"] == "SRB"
+
+
 def test_nhl_and_mlb_standings_parsers():
     nhl = parse_nhl_standings(
         {
             "standings": [
                 {
                     "teamName": {"default": "Devils"},
+                    "teamAbbrev": {"default": "NJD"},
                     "gamesPlayed": 4,
                     "wins": 3,
                     "losses": 1,
@@ -71,20 +96,24 @@ def test_nhl_and_mlb_standings_parsers():
     )
     assert nhl[0]["team"] == "Devils"
     assert nhl[0]["points"] == 6
+    assert nhl[0]["logo"].endswith("/NJD_light.svg")
     mlb = parse_mlb_standings(
         {
             "records": [
                 {
                     "division": {"name": "NL Central"},
                     "teamRecords": [
-                        {"team": {"name": "Cubs"}, "divisionRank": "1", "gamesPlayed": 150, "leagueRecord": {"wins": 90, "losses": 60, "pct": ".600"}}
+                        {"team": {"id": 112, "name": "Cubs"}, "divisionRank": "1", "gamesPlayed": 150, "leagueRecord": {"wins": 90, "losses": 60, "pct": ".600"}}
                     ],
                 }
             ]
         }
     )
     assert mlb[0]["team"] == "Cubs"
-    assert unwrap_standings(mlb)[0]["wins"] == 90
+    assert mlb[0]["logo"].endswith("/112.svg")
+    canonical_mlb = unwrap_standings(mlb)
+    assert canonical_mlb[0]["wins"] == 90
+    assert canonical_mlb[0]["logo"].endswith("/112.svg")
 
 
 def test_standings_ttl_skips_empty_snapshot():
