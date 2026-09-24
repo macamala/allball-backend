@@ -646,6 +646,7 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
                             "eligible": bbc_tennis.get("eligible"),
                             "ingested": bbc_tennis.get("ingested"),
                             "http_errors": bbc_tennis.get("http_errors"),
+                            "by_date": bbc_tennis.get("by_date"),
                         },
                     )
                     _maybe_log_breadth(db, force=True)
