@@ -212,8 +212,8 @@ class FifaFootballAdapter:
             score["away_penalties"] = away_pens
         return {
             "id": f"fifa:{match_id}",
-            "home": {"id": str(home.get("IdTeam") or ""), "name": home_name},
-            "away": {"id": str(away.get("IdTeam") or ""), "name": away_name},
+            "home": {**_feed_team(home, home_name), "name": home_name, "country_id": home_country or _feed_team(home, home_name).get("country_id", "")},
+            "away": {**_feed_team(away, away_name), "name": away_name, "country_id": away_country or _feed_team(away, away_name).get("country_id", "")},
             "status": status,
             "score": score,
             "start_time": row.get("Date"),
@@ -312,8 +312,8 @@ class NhlAdapter:
                     )
         event = {
             "id": f"nhl:{row.get('id')}",
-            "home": {"id": str(home.get("id") or ""), "name": home.get("abbrev") or place.get("default") or ""},
-            "away": {"id": str(away.get("id") or ""), "name": away.get("abbrev") or away_place.get("default") or ""},
+            "home": _feed_team(home, home.get("abbrev") or place.get("default") or ""),
+            "away": _feed_team(away, away.get("abbrev") or away_place.get("default") or ""),
             "status": status,
             "source_status": state or status,
             "score": score,
@@ -483,8 +483,8 @@ class KhlAdapter:
             score["clock"] = clock
         return {
             "id": f"khl:{row.get('id') or row.get('khl_id')}",
-            "home": {"id": str(home.get("id") or ""), "name": home.get("name") or home.get("title") or ""},
-            "away": {"id": str(away.get("id") or ""), "name": away.get("name") or away.get("title") or ""},
+            "home": _feed_team(home, home.get("name") or home.get("title") or ""),
+            "away": _feed_team(away, away.get("name") or away.get("title") or ""),
             "status": status,
             "score": score,
             "start_time": row.get("start_at") or row.get("start_at_iso"),
@@ -584,8 +584,8 @@ class WorldRugbyAdapter:
             score["period"] = period
         return {
             "id": f"worldrugby:{row.get('matchId')}",
-            "home": {"id": str(teams[0].get("id") or ""), "name": teams[0].get("name") or ""},
-            "away": {"id": str(teams[1].get("id") or ""), "name": teams[1].get("name") or ""},
+            "home": _feed_team(teams[0], teams[0].get("name") or ""),
+            "away": _feed_team(teams[1], teams[1].get("name") or ""),
             "status": status,
             "score": score,
             "start_time": start,
@@ -593,6 +593,7 @@ class WorldRugbyAdapter:
             "sport": "rugby",
             "competition": name,
             "competition_key": competition_id or f"rugby-{slugify(name)}",
+            "competition_logo": _asset_url(competition) if isinstance(competition, dict) else "",
             "event_family": "team_match",
             "source_family": "pulselive",
             "source_event_id": str(row.get("matchId") or ""),
