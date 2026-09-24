@@ -598,6 +598,16 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
                     logger.exception("FIFA identity reconcile failed")
                     db.rollback()
             try:
+                from collector.ufc_identity_repair import repair_ufc_promo_rows
+
+                ufc_repair = repair_ufc_promo_rows(db)
+                if ufc_repair.get("scanned"):
+                    logger.info("UFC_IDENTITY_REPAIR %s", ufc_repair)
+            except Exception:
+                logger.exception("UFC identity repair failed")
+                db.rollback()
+
+            try:
                 from collector.source_native_reconcile import run_if_due as run_source_native_revalidate_if_due
 
                 native_stats = run_source_native_revalidate_if_due(db)
