@@ -492,7 +492,9 @@ def _maybe_log_breadth(db, *, force: bool = False) -> None:
                 "team_logos": f"{row.get('team_participants_with_logo', 0)}/{row.get('observed_team_participants', 0)}",
                 "participant_flags": f"{row.get('individual_participants_with_country', 0)}/{row.get('observed_individual_participants', 0)}",
                 "missing": (row.get("missing_participants") or [])[:8],
+                "missing_sources": row.get("missing_participant_sources") or {},
                 "missing_countries": (row.get("missing_country_participants") or [])[:8],
+                "missing_country_sources": row.get("missing_country_sources") or {},
             }
             for row in asset_rows[:40]
         ]
