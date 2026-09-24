@@ -19,12 +19,14 @@ from collector.cache import cache_clear
 from collector.competition_identity import (
     COMPETITION_LABELS,
     MAPPING_OWNED_FAMILIES,
+    OFFICIAL_PUBLIC_COMPETITIONS,
     label_matches_competition,
     resolve_competition,
 )
 from collector.enrichment import is_display_eligible, quality_flags_for_event
 from collector.identity_events import identity_confidence
-from collector.models import SportsEvent, SportsEventObservation
+from collector.models import SportsCompetition, SportsEvent, SportsEventObservation, SportsSourceCompetition
+from collector.matrix_guard import frozen_competition_ids
 from collector.normalize import fingerprint
 from collector.participant_text import clean_participant_name, fold_for_identity, repair_mojibake
 from collector.source_ids import as_family_map
@@ -326,6 +328,25 @@ def _mutate_row(row: SportsEvent, quarantine: set, repair: set) -> bool:
     return dirty
 
 
+def _public_football_competition_ids(db: Session) -> set[str]:
+    ids = set(frozen_competition_ids()) | set(OFFICIAL_PUBLIC_COMPETITIONS)
+    native = (
+        db.query(SportsSourceCompetition.competition_id)
+        .join(
+            SportsCompetition,
+            SportsCompetition.competition_id == SportsSourceCompetition.competition_id,
+        )
+        .filter(
+            SportsCompetition.sport_id == "football",
+            SportsSourceCompetition.enabled.is_(True),
+            SportsSourceCompetition.independence_status == "single-source-breadth",
+        )
+        .all()
+    )
+    ids.update(str(row[0]) for row in native if row and row[0])
+    return ids
+
+
 def restore_orphaned_duplicate_football(
     db: Session,
     *,
@@ -354,6 +375,7 @@ def restore_orphaned_duplicate_football(
         if key:
             clusters[key].append(row)
 
+    public_competitions = _public_football_competition_ids(db)
     restored: List[str] = []
     for cluster_rows in clusters.values():
         def _extra(row: SportsEvent) -> Dict[str, Any]:
@@ -366,6 +388,10 @@ def restore_orphaned_duplicate_football(
             and _extra(row).get("display_eligible") is not False
             and not row.canonical_event_id
             and not _extra(row).get("canonical_event_id")
+            and (
+                str(row.competition_id or "") in public_competitions
+                or str(row.competition_id or "").startswith("football-")
+            )
         ]
         if public:
             continue
