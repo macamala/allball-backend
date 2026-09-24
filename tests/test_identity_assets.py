@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 from collector.dirty import event_unchanged, observation_signature
+from collector.breadth_audit import _visible_identity_requirement
 from collector.merge import merge_event_fields
 from collector.participant_text import participant_payload
 from collector.util import dump_json
@@ -92,3 +93,20 @@ def test_unchanged_event_is_reopened_for_missing_identity_assets():
         start_time=object(),
     )
     assert event_unchanged(existing, incoming) is False
+
+
+
+def test_visible_asset_audit_requires_logos_only_for_team_style_events():
+    assert _visible_identity_requirement({"event_family": "team_match", "sport": "football"}) == "logo"
+    assert _visible_identity_requirement({"event_family": "esports_match", "sport": "dota-2"}) == "logo"
+
+
+def test_visible_asset_audit_uses_country_for_individual_head_to_head():
+    assert _visible_identity_requirement({"event_family": "individual_match", "sport": "tennis"}) == "country"
+    assert _visible_identity_requirement({"event_family": "combat", "sport": "mma"}) == "country"
+
+
+def test_visible_asset_audit_does_not_invent_team_logo_gaps_for_meta_events():
+    assert _visible_identity_requirement({"event_family": "racing", "sport": "greyhound-racing"}) == "none"
+    assert _visible_identity_requirement({"event_family": "tournament", "sport": "golf"}) == "none"
+    assert _visible_identity_requirement({"event_family": "motorsport_race", "sport": "motorsport"}) == "none"
