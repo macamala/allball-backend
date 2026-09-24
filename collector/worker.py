@@ -773,7 +773,6 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
             _idle(interval)
             continue
         db = SessionLocal()
-        _maybe_log_breadth(db, force=_breadth_logged_at == 0.0)
         held = False
         advisory = None
         try:
@@ -816,6 +815,49 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
                 bootstrap_registry(db)
                 db.commit()
                 db.info["registry_bootstrapped"] = True
+
+            # LIVE FIRST: never make active or kickoff-window events wait behind
+            # artwork, breadth, discovery or backfill work.
+            priority_live_active = False
+            if scheduler_enabled():
+                priority_summary = run_incremental_tick(db)
+                db.commit()
+                priority_urgencies = set(priority_summary.get("urgencies_selected") or [])
+                priority_live_active = bool(
+                    int(priority_summary.get("live_jobs_due") or 0) > 0
+                    or priority_urgencies.intersection({"LIVE", "LIVE_CANDIDATE", "IMMINENT"})
+                )
+                logger.info(
+                    "Priority incremental tick %s",
+                    {k: priority_summary.get(k) for k in (
+                        "due_jobs",
+                        "selected_jobs",
+                        "urgencies_selected",
+                        "families_selected",
+                        "sports_selected",
+                        "events_changed",
+                        "live_jobs_due",
+                        "live_jobs_selected",
+                        "duration_s",
+                    )},
+                )
+
+            if priority_live_active:
+                # While live-ish work exists, stay on the fast lane and defer
+                # expensive maintenance until the live window clears.
+                heartbeat_scheduler_lock(db, owner=owner)
+                db.commit()
+                if advisory:
+                    try:
+                        postgres_advisory_unlock(db)
+                    finally:
+                        advisory = None
+                time.sleep(live_idle_seconds(interval))
+                continue
+
+            # Maintenance/audits run only after the priority live tick.
+            _maybe_log_breadth(db, force=_breadth_logged_at == 0.0)
+
             try:
                 from collector.source_identity_repair import repair_source_identity_leaks
 
