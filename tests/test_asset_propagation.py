@@ -278,3 +278,59 @@ def test_international_national_team_uses_country_identity_not_fake_club_logo():
     finally:
         db.rollback()
         db.close()
+
+
+
+def test_espn_numeric_team_ids_backfill_crests_only_in_espn_context():
+    db = _session()
+    ids = ["ninko-evt-espn-assets", "ninko-evt-not-espn-assets"]
+    try:
+        db.query(SportsEvent).filter(SportsEvent.event_id.in_(ids)).delete(synchronize_session=False)
+        db.add(
+            SportsEvent(
+                event_id=ids[0],
+                sport_id="american-football",
+                competition_id="ncaa-football",
+                event_family="team_match",
+                status="scheduled",
+                fingerprint="fp-espn-assets",
+                primary_source_id="espn-html",
+                participants_json=dump_json({
+                    "home": {"id": "150", "name": "Duke Blue Devils"},
+                    "away": {"id": "2390", "name": "Miami Hurricanes"},
+                }),
+                extra_json=dump_json({"source_family": "espn-html"}),
+                display_eligible=True,
+            )
+        )
+        db.add(
+            SportsEvent(
+                event_id=ids[1],
+                sport_id="american-football",
+                competition_id="ncaa-football",
+                event_family="team_match",
+                status="scheduled",
+                fingerprint="fp-not-espn-assets",
+                primary_source_id="other-provider",
+                participants_json=dump_json({
+                    "home": {"id": "150", "name": "Other Team"},
+                    "away": {"id": "2390", "name": "Other Team 2"},
+                }),
+                extra_json=dump_json({"source_family": "other"}),
+                display_eligible=True,
+            )
+        )
+        db.flush()
+        propagate_identity_assets(db)
+
+        espn = db.get(SportsEvent, ids[0])
+        parts = load_json(espn.participants_json, {}) or {}
+        assert parts["home"]["logo"].endswith("/ncaa/500/150.png")
+        assert parts["away"]["logo"].endswith("/ncaa/500/2390.png")
+
+        other = db.get(SportsEvent, ids[1])
+        other_parts = load_json(other.participants_json, {}) or {}
+        assert not other_parts["home"].get("logo")
+    finally:
+        db.rollback()
+        db.close()
