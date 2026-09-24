@@ -66,6 +66,51 @@ def _athlete_id(row: Dict[str, Any]) -> str:
     return str(athlete.get("id") or row.get("id") or "").strip()
 
 
+def _country_code(value: Any) -> str:
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, dict):
+        return str(
+            value.get("abbreviation")
+            or value.get("code")
+            or value.get("isoCode")
+            or value.get("id")
+            or value.get("alt")
+            or ""
+        ).strip()
+    return ""
+
+
+def _athlete_country(row: Dict[str, Any]) -> str:
+    athlete = row.get("athlete") if isinstance(row.get("athlete"), dict) else {}
+    for owner in (athlete, row):
+        for key in ("countryCode", "country", "nationality", "citizenship"):
+            code = _country_code(owner.get(key))
+            if code:
+                return code
+        code = _country_code(owner.get("flag"))
+        if code:
+            return code
+    return ""
+
+
+def _logo_href(node: Any) -> str:
+    if not isinstance(node, dict):
+        return ""
+    direct = node.get("logo") or node.get("image")
+    if isinstance(direct, str) and direct.strip():
+        return direct.strip()
+    for key in ("logos", "images"):
+        rows = node.get(key)
+        if isinstance(rows, list):
+            for item in rows:
+                if isinstance(item, dict):
+                    href = item.get("href") or item.get("url")
+                    if isinstance(href, str) and href.strip():
+                        return href.strip()
+    return ""
+
+
 def _status(raw: Any) -> str:
     status = raw if isinstance(raw, dict) else {}
     typ = status.get("type") if isinstance(status.get("type"), dict) else {}
@@ -117,7 +162,7 @@ def _set_wins(home_sets: List[Dict[str, Any]], away_sets: List[Dict[str, Any]]) 
     return (home, away) if seen else (None, None)
 
 
-def _competition_rows(payload: Dict[str, Any]) -> Iterable[Tuple[Dict[str, Any], str, Optional[str]]]:
+def _competition_rows(payload: Dict[str, Any]) -> Iterable[Tuple[Dict[str, Any], str, Optional[str], str]]:
     for event in payload.get("events") or []:
         if not isinstance(event, dict):
             continue
@@ -126,10 +171,10 @@ def _competition_rows(payload: Dict[str, Any]) -> Iterable[Tuple[Dict[str, Any],
         if direct:
             for comp in direct:
                 if isinstance(comp, dict):
-                    yield comp, tournament, None
+                    yield comp, tournament, None, _logo_href(event)
         # Some date boards expose a match directly at events[] level.
         if isinstance(event.get("competitors"), list) and len(event.get("competitors") or []) >= 2:
-            yield event, tournament, None
+            yield event, tournament, None, _logo_href(event)
         for grouping in event.get("groupings") or []:
             if not isinstance(grouping, dict):
                 continue
@@ -137,7 +182,7 @@ def _competition_rows(payload: Dict[str, Any]) -> Iterable[Tuple[Dict[str, Any],
             grouping_name = str(grouping_meta.get("displayName") or grouping_meta.get("name") or "").strip() or None
             for comp in grouping.get("competitions") or []:
                 if isinstance(comp, dict):
-                    yield comp, tournament, grouping_name
+                    yield comp, tournament, grouping_name, _logo_href(event)
 
 
 def parse_board(payload: Any) -> List[Dict[str, Any]]:
@@ -145,7 +190,7 @@ def parse_board(payload: Any) -> List[Dict[str, Any]]:
         return []
     events: List[Dict[str, Any]] = []
     seen = set()
-    for comp, tournament, grouping in _competition_rows(payload):
+    for comp, tournament, grouping, competition_logo in _competition_rows(payload):
         event_id = str(comp.get("id") or "").strip()
         competitors = [row for row in (comp.get("competitors") or []) if isinstance(row, dict)]
         if len(competitors) < 2:
@@ -197,8 +242,17 @@ def parse_board(payload: Any) -> List[Dict[str, Any]]:
             "source_family": "espn-json",
             "source_competition_id": str(comp.get("uid") or competition_name),
             "source_competition_name": competition_name,
-            "home": {"id": _athlete_id(home_raw), "name": home_name},
-            "away": {"id": _athlete_id(away_raw), "name": away_name},
+            "competition_logo": competition_logo or None,
+            "home": {
+                "id": _athlete_id(home_raw),
+                "name": home_name,
+                "country_id": _athlete_country(home_raw) or None,
+            },
+            "away": {
+                "id": _athlete_id(away_raw),
+                "name": away_name,
+                "country_id": _athlete_country(away_raw) or None,
+            },
             "status": status,
             "score": {"home": home_score, "away": away_score},
             "start_time": start_time,
@@ -211,6 +265,7 @@ def parse_board(payload: Any) -> List[Dict[str, Any]]:
                 "source_event_ids": {"espn-json": event_id},
                 "source_competition_id": str(comp.get("uid") or competition_name),
                 "source_competition_name": competition_name,
+                "competition_logo": competition_logo or None,
                 "public_competition_key": competition_id,
                 "round": grouping,
                 "periods": period_rows or None,
