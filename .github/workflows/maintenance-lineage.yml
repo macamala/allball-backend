@@ -1,0 +1,72 @@
+name: Maintenance lineage regression gate
+on:
+  push:
+    branches: [fix/maintenance-lineage-20260925]
+permissions:
+  contents: read
+concurrency:
+  group: maintenance-lineage-20260925
+  cancel-in-progress: false
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      DATABASE_URL: sqlite:////tmp/lineage-tests.db
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Apply exact-baseline source edits
+        run: python audit/apply_maintenance_lineage.py
+      - run: python -m pip install -r requirements.txt
+      - run: python -m compileall -q collector tests app.py
+      - name: Run lifecycle and established score/source/group regressions
+        run: >-
+          python -m pytest -q
+          tests/test_maintenance_lineage.py
+          tests/test_results_recovery.py tests/test_incremental_scheduler.py
+          tests/test_collector_architecture.py tests/test_fotmob.py
+          tests/test_fotmob_nations_league.py tests/test_fotmob_breadth.py
+          tests/test_fotmob_asset_backfill.py tests/test_live_watch.py
+          tests/test_stale_live.py tests/test_score_integrity.py
+          tests/test_public_score_assets.py tests/test_live_integration.py
+          tests/test_rich_detail.py tests/test_football_recovery_completion.py
+          tests/test_standings_closure.py tests/test_dynamic_sofa_standings.py
+          tests/test_dedupe.py tests/test_canonical_identity.py
+          tests/test_nhl_public_dedupe.py tests/test_public_source_policy.py
+          tests/test_keeper_revalidation.py tests/test_fetch_proof_normalization.py
+          tests/test_public_keeper_alias.py
+          --disable-warnings --junitxml=/tmp/lineage-tests.xml
+      - name: Preserve exact tested source patch
+        if: always()
+        run: git diff -- app.py collector > /tmp/lineage-source.patch
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lineage-regression-evidence
+          path: |
+            /tmp/lineage-tests.xml
+            /tmp/lineage-source.patch
+          retention-days: 14
+  publish-tested-branch:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - run: |
+          python3 audit/apply_maintenance_lineage.py
+          git add app.py collector/integrity.py collector/source_native_reconcile.py collector/canonical_collapse.py
+          git config user.name 'NinkoSports recovery checks'
+          git config user.email '79318740+macamala@users.noreply.github.com'
+          git commit -m 'Preserve canonical lineage and score-board visibility across maintenance; startup integrity opt-in'
+          git push origin HEAD:fix/maintenance-lineage-20260925
+          echo "TESTED_SOURCE_COMMIT=$(git rev-parse HEAD)"
