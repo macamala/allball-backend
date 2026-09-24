@@ -543,6 +543,21 @@ def _maybe_log_breadth(db, *, force: bool = False) -> None:
                 logger.exception("Pre-lock TheSportsDB artwork repair failed")
                 db.rollback()
 
+            # Asset jobs only fill identity fields, but each changed visible row
+            # records overlapping list-cache invalidations. Flush them once after
+            # the full asset batch so desktop/mobile read the repaired payload on
+            # the next request instead of waiting for a stale list TTL.
+            try:
+                from collector.cache import flush_list_invalidations
+
+                asset_cache_keys = flush_list_invalidations(db)
+                if asset_cache_keys:
+                    db.commit()
+                    logger.info("PRELOCK_ASSET_CACHE_FLUSH keys=%s", asset_cache_keys)
+            except Exception:
+                logger.exception("Pre-lock asset cache flush failed")
+                db.rollback()
+
         from collector.breadth_audit import (
             tomorrow_football_snapshot,
             tomorrow_public_football_snapshot,
