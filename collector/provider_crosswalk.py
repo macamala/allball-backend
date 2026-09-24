@@ -203,6 +203,19 @@ def _family_key(incoming: Dict[str, Any]) -> Tuple[str, str]:
 
 
 def _ingest(db: Session, incoming: Dict[str, Any], source_id: str) -> bool:
+    from collector.source_identity_repair import incoming_source_identity_reject
+
+    reject = incoming_source_identity_reject(incoming)
+    if reject:
+        logger.warning(
+            "SOURCE_SCOPED_INGEST_REJECT source=%s family=%s competition=%s reason=%s",
+            source_id,
+            incoming.get("source_family") or (incoming.get("extra") or {}).get("source_family"),
+            incoming.get("competition_key") or incoming.get("competition"),
+            reject,
+        )
+        return False
+
     from collector.collect import _upsert_event
     from collector.match import match_event
     from collector.normalize import normalize_event
