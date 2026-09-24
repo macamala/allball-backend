@@ -1,5 +1,5 @@
 from collector.asset_propagation import propagate_identity_assets
-from collector.models import SportsEvent
+from collector.models import SportsEvent, SportsStandingSnapshot
 from collector.util import dump_json, load_json
 from tests.test_collector_architecture import _session
 
@@ -120,6 +120,60 @@ def test_fotmob_native_ids_backfill_artwork_only_in_fotmob_context():
         other_extra = load_json(other.extra_json, {}) or {}
         assert not other_parts["home"].get("logo")
         assert not other_extra.get("competition_logo")
+    finally:
+        db.rollback()
+        db.close()
+
+
+
+def test_standings_logo_propagates_into_matching_event_team():
+    db = _session()
+    event_id = "ninko-evt-standing-asset-target"
+    try:
+        db.query(SportsEvent).filter(SportsEvent.event_id == event_id).delete(synchronize_session=False)
+        db.query(SportsStandingSnapshot).filter(
+            SportsStandingSnapshot.competition_id == "test-standing-assets"
+        ).delete(synchronize_session=False)
+        db.add(
+            SportsStandingSnapshot(
+                competition_id="test-standing-assets",
+                sport_id="ice-hockey",
+                season="2026",
+                source_id="nhl-web",
+                rows_json=dump_json({
+                    "rows": [
+                        {
+                            "team": "New Jersey Devils",
+                            "team_id": "NJD",
+                            "logo": "https://assets.nhle.com/logos/nhl/svg/NJD_light.svg",
+                        }
+                    ]
+                }),
+            )
+        )
+        db.add(
+            SportsEvent(
+                event_id=event_id,
+                sport_id="ice-hockey",
+                competition_id="test-standing-assets",
+                event_family="team_match",
+                status="scheduled",
+                fingerprint="fp-standing-asset-target",
+                participants_json=dump_json({
+                    "home": {"name": "New Jersey Devils"},
+                    "away": {"name": "Boston Bruins"},
+                }),
+                extra_json=dump_json({}),
+                display_eligible=True,
+            )
+        )
+        db.flush()
+
+        stats = propagate_identity_assets(db)
+        target = db.get(SportsEvent, event_id)
+        participants = load_json(target.participants_json, {}) or {}
+        assert participants["home"]["logo"].endswith("/NJD_light.svg")
+        assert stats["standing_participant_logos_filled"] >= 1
     finally:
         db.rollback()
         db.close()
