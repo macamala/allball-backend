@@ -297,7 +297,8 @@ def public_multisport_day_snapshot(day_offset: int = 1, *, include_samples: bool
                 comp_gap["missing_competition_logo"] += int(missing_competition_logo)
                 comp_gap["missing_team_logo_slots"] += len(missing_side_logos)
                 gaps = asset_gaps.setdefault(sport, [])
-                if len(gaps) < 16:
+                gap_limit = 128 if sport == "football" else 16
+                if len(gaps) < gap_limit:
                     gaps.append(
                         {
                             "id": row.get("id"),
