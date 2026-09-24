@@ -1,0 +1,264 @@
+"""Bounded FotMob league-roster identity backfill.
+
+Uses only the verified FOTMOB_LEAGUES catalogue. One league response supplies
+canonical team ids/crests for all existing rows in that competition. Matching is
+strict: exact folded identity or one unique deterministic alias equivalence.
+Existing ids/logos are never overwritten.
+"""
+
+from __future__ import annotations
+
+import time
+from collections import defaultdict
+from typing import Any, Dict, List, Optional, Tuple
+
+from sqlalchemy.orm import Session
+
+from collector.adapters_fotmob import FOTMOB_LEAGUES, LEAGUE_URL, _league_ids, parse_fotmob_table
+from collector.http import fetch_url
+from collector.list_extra import store_list_extra
+from collector.models import SportsEvent
+from collector.participant_alias import names_equivalent
+from collector.participant_text import fold_for_identity
+from collector.util import dump_json, load_json
+
+RUN_INTERVAL_S = 120
+LEAGUE_TTL_S = 12 * 3600
+MAX_LEAGUES_PER_RUN = 10
+
+_next_run_at = 0.0
+_last_league_fetch: Dict[str, float] = {}
+
+
+def _missing_logo(side: Any) -> bool:
+    if not isinstance(side, dict):
+        return False
+    return not bool(
+        side.get("logo")
+        or side.get("image")
+        or side.get("crest")
+        or side.get("badge")
+        or side.get("team_logo")
+        or side.get("teamLogo")
+        or side.get("logo_url")
+        or side.get("logoUrl")
+    )
+
+
+def _roster(payload: Any) -> List[Dict[str, str]]:
+    rows = parse_fotmob_table(payload)
+    out: List[Dict[str, str]] = []
+    seen = set()
+    for row in rows:
+        team_id = str(row.get("team_id") or "").strip()
+        name = str(row.get("team") or "").strip()
+        if not team_id or not team_id.isdigit() or not name:
+            continue
+        key = (team_id, fold_for_identity(name))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(
+            {
+                "id": team_id,
+                "name": name,
+                "folded": fold_for_identity(name),
+                "logo": str(
+                    row.get("logo")
+                    or f"https://images.fotmob.com/image_resources/logo/teamlogo/{team_id}.png"
+                ),
+            }
+        )
+    return out
+
+
+def _unique_match(name: str, roster: List[Dict[str, str]]) -> Optional[Dict[str, str]]:
+    folded = fold_for_identity(name)
+    if not folded:
+        return None
+    exact = [row for row in roster if row["folded"] == folded]
+    if len(exact) == 1:
+        return exact[0]
+    if len(exact) > 1:
+        return None
+    aliases = [row for row in roster if names_equivalent(name, row["name"])]
+    return aliases[0] if len(aliases) == 1 else None
+
+
+def _fill_side(side: Any, roster: List[Dict[str, str]]) -> Tuple[Any, bool]:
+    if not isinstance(side, dict):
+        return side, False
+    name = str(side.get("display_name") or side.get("name") or "").strip()
+    if not name:
+        return side, False
+    matched = _unique_match(name, roster)
+    if not matched:
+        return side, False
+    out = dict(side)
+    changed = False
+    if not str(out.get("id") or "").strip():
+        out["id"] = matched["id"]
+        changed = True
+    if _missing_logo(out):
+        out["logo"] = matched["logo"]
+        changed = True
+    return out, changed
+
+
+def _candidate_competitions(db: Session, now: float) -> List[Tuple[str, List[str]]]:
+    counts: Dict[str, int] = defaultdict(int)
+    rows = (
+        db.query(SportsEvent)
+        .filter(
+            SportsEvent.sport_id == "football",
+            SportsEvent.display_eligible.is_(True),
+        )
+        .all()
+    )
+    for row in rows:
+        if row.competition_id not in FOTMOB_LEAGUES:
+            continue
+        participants = load_json(row.participants_json, {}) or {}
+        missing = sum(
+            1
+            for key in ("home", "away")
+            if isinstance(participants.get(key), dict) and _missing_logo(participants.get(key))
+        )
+        if missing:
+            counts[row.competition_id] += missing
+
+    candidates: List[Tuple[str, List[str]]] = []
+    for competition_id, missing in counts.items():
+        last = float(_last_league_fetch.get(competition_id) or 0.0)
+        if now - last < LEAGUE_TTL_S:
+            continue
+        ids = _league_ids(FOTMOB_LEAGUES.get(competition_id) or {})
+        if ids:
+            candidates.append((competition_id, ids))
+    candidates.sort(key=lambda item: (-counts[item[0]], item[0]))
+    return candidates
+
+
+def run_if_due(db: Session, *, getter=None, heartbeat=None) -> Optional[Dict[str, Any]]:
+    global _next_run_at
+    now = time.monotonic()
+    if now < _next_run_at:
+        return None
+    _next_run_at = now + RUN_INTERVAL_S
+
+    getter = getter or fetch_url
+    candidates = _candidate_competitions(db, now)[:MAX_LEAGUES_PER_RUN]
+    if not candidates:
+        return {
+            "status": "idle",
+            "leagues": 0,
+            "requests": 0,
+            "rows_updated": 0,
+            "participants_filled": 0,
+        }
+
+    stats: Dict[str, Any] = {
+        "status": "ok",
+        "leagues": 0,
+        "requests": 0,
+        "rows_updated": 0,
+        "participants_filled": 0,
+        "competition_logos_filled": 0,
+        "http_errors": 0,
+        "by_competition": {},
+    }
+
+    for competition_id, league_ids in candidates:
+        merged_roster: List[Dict[str, str]] = []
+        successful_ids: List[str] = []
+        for league_id in league_ids:
+            result = getter(LEAGUE_URL.format(league_id=league_id))
+            stats["requests"] += 1
+            if heartbeat:
+                heartbeat()
+            if not result.ok:
+                stats["http_errors"] += 1
+                continue
+            successful_ids.append(str(league_id))
+            merged_roster.extend(_roster(result.payload))
+        _last_league_fetch[competition_id] = now
+        if not merged_roster:
+            stats["by_competition"][competition_id] = {
+                "league_ids": successful_ids,
+                "roster": 0,
+                "rows_updated": 0,
+                "participants_filled": 0,
+            }
+            continue
+
+        # De-duplicate by team id before matching.
+        unique: Dict[str, Dict[str, str]] = {}
+        for item in merged_roster:
+            unique.setdefault(item["id"], item)
+        roster = list(unique.values())
+
+        rows = (
+            db.query(SportsEvent)
+            .filter(
+                SportsEvent.sport_id == "football",
+                SportsEvent.competition_id == competition_id,
+                SportsEvent.display_eligible.is_(True),
+            )
+            .all()
+        )
+        comp_rows_updated = 0
+        comp_participants = 0
+        comp_logo_filled = 0
+        default_league_id = successful_ids[0] if len(successful_ids) == 1 else ""
+
+        for row in rows:
+            participants = load_json(row.participants_json, {}) or {}
+            extra = load_json(row.extra_json, {}) or {}
+            changed = False
+            for side_name in ("home", "away"):
+                filled, side_changed = _fill_side(participants.get(side_name), roster)
+                if side_changed:
+                    participants[side_name] = filled
+                    alt = "participant_a" if side_name == "home" else "participant_b"
+                    alt_side = participants.get(alt)
+                    alt_filled, alt_changed = _fill_side(alt_side, roster)
+                    if alt_changed:
+                        participants[alt] = alt_filled
+                    elif isinstance(alt_side, dict):
+                        merged_alt = dict(alt_side)
+                        if not merged_alt.get("id") and filled.get("id"):
+                            merged_alt["id"] = filled["id"]
+                        if _missing_logo(merged_alt) and filled.get("logo"):
+                            merged_alt["logo"] = filled["logo"]
+                        participants[alt] = merged_alt
+                    changed = True
+                    comp_participants += 1
+
+            if default_league_id and not extra.get("competition_logo"):
+                extra["competition_logo"] = (
+                    "https://images.fotmob.com/image_resources/logo/"
+                    f"leaguelogo/{default_league_id}.png"
+                )
+                comp_logo_filled += 1
+                changed = True
+
+            if changed:
+                row.participants_json = dump_json(participants)
+                row.extra_json = dump_json(extra)
+                store_list_extra(row, extra)
+                comp_rows_updated += 1
+
+        if comp_rows_updated:
+            db.commit()
+        stats["leagues"] += 1
+        stats["rows_updated"] += comp_rows_updated
+        stats["participants_filled"] += comp_participants
+        stats["competition_logos_filled"] += comp_logo_filled
+        stats["by_competition"][competition_id] = {
+            "league_ids": successful_ids,
+            "roster": len(roster),
+            "rows_updated": comp_rows_updated,
+            "participants_filled": comp_participants,
+        }
+
+    return stats
