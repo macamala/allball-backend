@@ -238,7 +238,14 @@ def unknown_sport_rows_snapshot(db, *, limit: int = 20) -> List[Dict[str, Any]]:
         .all()
     )
     out: List[Dict[str, Any]] = []
+    from collector.provider import _blocked_public_sources, _row_public_source_allowed
+
+    blocked_ids, blocked_families = _blocked_public_sources(db)
     for row in rows:
+        if row.display_eligible is False:
+            continue
+        if not _row_public_source_allowed(row, blocked_ids, blocked_families):
+            continue
         participants = load_json(row.participants_json, {}) or {}
         extra = load_json(row.extra_json, {}) or {}
         home = participants.get("home") if isinstance(participants.get("home"), dict) else {}
