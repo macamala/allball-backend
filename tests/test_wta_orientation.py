@@ -235,3 +235,39 @@ def test_reused_match_id_does_not_merge_different_pairs():
     finally:
         db.close()
         _cleanup_adapters("wta-json")
+
+
+def test_wta_country_lookup_normalizes_diacritics_for_doubles():
+    from collector.adapters_wta import _player_country_map
+
+    players = {
+        "entries": [
+            {"player": {"id": 1, "firstName": "Maja", "lastName": "Chwalińska", "countryCode": "POL"}},
+            {"player": {"id": 2, "firstName": "Barbora", "lastName": "Krejčíková", "countryCode": "CZE"}},
+            {"player": {"id": 3, "firstName": "Erin", "lastName": "Routliffe", "countryCode": "NZL"}},
+            {"player": {"id": 4, "firstName": "Aldila", "lastName": "Sutjiadi", "countryCode": "IDN"}},
+        ]
+    }
+    row = {
+        "MatchID": "MD-country",
+        "MatchState": "F",
+        "PlayerNameFirstA": "Maja",
+        "PlayerNameLastA": "Chwalinska",
+        "PlayerNameFirstA2": "Barbora",
+        "PlayerNameLastA2": "Krejcikova",
+        "PlayerNameFirstB": "Erin",
+        "PlayerNameLastB": "Routliffe",
+        "PlayerNameFirstB2": "Aldila",
+        "PlayerNameLastB2": "Sutjiadi",
+        "ScoreSet1A": "6",
+        "ScoreSet1B": "4",
+        "ScoreSet2A": "6",
+        "ScoreSet2B": "4",
+    }
+    event = match_to_event(
+        row,
+        "wta-tour",
+        player_countries=_player_country_map(players),
+    )
+    assert event["home"]["country_ids"] == ["POL", "CZE"]
+    assert event["away"]["country_ids"] == ["NZL", "IDN"]
