@@ -43,6 +43,11 @@ _VERIFIED_FOOTBALL_COMPETITIONS: Dict[str, str] = {
 _VERIFIED_COMPETITIONS: Dict[tuple[str, str], str] = {
     # Official WTA-hosted artwork from the current WTA brand rollout.
     ("tennis", "wta-tour"): "https://photoresources.wtatennis.com/photo-resources/2025/02/27/bf3c987a-350a-4b59-864b-a5312fd7bcbb/Frame-1-1-2.png?height=500&width=500",
+    # Current tournament-specific official/event artwork for dynamic WTA competitions.
+    ("tennis", "tennis-wta-1152-singapore"): "https://asset.thekallang.com.sg/adobe/assets/urn%3Aaaid%3Aaem%3Abbdd6705-d61e-4f87-883c-7a5d2117df49/as/asset.png",
+    ("tennis", "tennis-wta-1178-ankara-125"): "https://image.passo.com.tr/api/r/tr/p/event/03092026191130-67c7bcb6-787a-4b48-8b9c-f9f957989f2a.jpg",
+    ("tennis", "tennis-wta-1133-tolentino-125"): "https://photoresources.wtatennis.com/photo-resources/2025/10/16/d085f8ac-c711-4699-8973-0b9df45dee43/1133_bg_Tolentino-min.jpg?height=520&width=1500",
+    ("tennis", "tennis-wta-1024-seoul"): "https://wtakoreaopen.com/_astro/logo-color_ha0gcz_Z1rBKJl.svg",
     # Official Harness Racing NSW-hosted long-form identity mark.
     ("harness-racing", "nsw-hrnsw-meetings"): "https://www.hrnsw.com.au/Uploads/Logos%202/HRNSW%202009%20Colour%20Long%20Form.jpg",
     # Current official GBGB site header mark (white-on-transparent for dark headers).
