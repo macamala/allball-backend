@@ -451,8 +451,17 @@ def apply_backfill(db: Session, plan: Optional[Dict[str, Any]] = None) -> Dict[s
         db.commit()
     except OperationalError:
         db.rollback()
+
+    # Repair any pre-existing orphaned duplicate immediately after the batch.
+    # Phase2 repeats the invariant later, but the public score board should not
+    # wait through the long attribution/quarantine pass to regain a real fixture.
+    orphan_guard = restore_orphaned_duplicate_football(db)
+    if orphan_guard.get("restored"):
+        db.commit()
+
     return {
         "updated": changed,
+        "orphan_duplicate_guard": orphan_guard,
         **{k: plan[k] for k in ("quarantine_count", "repair_count", "conflict_count", "auto_merge_count") if k in plan},
     }
 
