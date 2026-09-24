@@ -10,6 +10,8 @@ from collector.adapters import FetchRequest, FetchResult
 from collector.http import fetch_url
 
 COMPETITION_ID = "australia-afl"
+TEAMS_URL = "https://api.squiggle.com.au/?q=teams"
+SQUIGGLE_ASSET_BASE = "https://squiggle.com.au"
 SQUIGGLE_HEADERS = {
     "User-Agent": "NinkoSports/2.5 (AFL collector; +https://ninkosports.com)",
     "Accept": "application/json, text/json, text/plain;q=0.9, */*;q=0.1",
@@ -87,12 +89,43 @@ def _start(row: Dict[str, Any]) -> str | None:
     return text
 
 
-def _to_event(row: Dict[str, Any]) -> Dict[str, Any]:
+def _team_assets(payload: Any) -> Dict[str, Dict[str, Any]]:
+    rows, _meta = parse_squiggle_payload(payload, "teams")
+    out: Dict[str, Dict[str, Any]] = {}
+    for row in rows:
+        team_id = str(row.get("id") or "").strip()
+        if not team_id:
+            continue
+        logo = str(row.get("logo") or "").strip()
+        if logo.startswith("/"):
+            logo = f"{SQUIGGLE_ASSET_BASE}{logo}"
+        out[team_id] = {
+            "logo": logo,
+            "name": str(row.get("name") or "").strip(),
+            "abbrev": str(row.get("abbrev") or "").strip(),
+        }
+    return out
+
+
+def _to_event(row: Dict[str, Any], team_assets: Optional[Dict[str, Dict[str, Any]]] = None) -> Dict[str, Any]:
     gid = str(row.get("id") or "")
+    assets = team_assets or {}
+    home_id = str(row.get("hteamid") or "")
+    away_id = str(row.get("ateamid") or "")
+    home_asset = assets.get(home_id) or {}
+    away_asset = assets.get(away_id) or {}
     payload = {
         "id": f"squiggle:{gid}",
-        "home": {"id": str(row.get("hteamid") or ""), "name": row.get("hteam") or ""},
-        "away": {"id": str(row.get("ateamid") or ""), "name": row.get("ateam") or ""},
+        "home": {
+            "id": home_id,
+            "name": row.get("hteam") or home_asset.get("name") or "",
+            "logo": home_asset.get("logo") or "",
+        },
+        "away": {
+            "id": away_id,
+            "name": row.get("ateam") or away_asset.get("name") or "",
+            "logo": away_asset.get("logo") or "",
+        },
         "status": _status(row),
         "score": {"home": row.get("hscore"), "away": row.get("ascore")},
         "start_time": _start(row),
@@ -143,6 +176,10 @@ class SquiggleAflAdapter:
         year = datetime.now(timezone.utc).year
         payload: Dict[str, Any] = {}
         games: List[Dict[str, Any]] = []
+        team_assets: Dict[str, Dict[str, Any]] = {}
+        teams_result = _call(self._get, TEAMS_URL)
+        if teams_result and teams_result.ok:
+            team_assets = _team_assets(teams_result.payload)
         last: Optional[FetchResult] = None
         diag: List[Dict[str, Any]] = []
         urls: List[str] = []
@@ -171,7 +208,7 @@ class SquiggleAflAdapter:
         if last is not None and not last.ok and not games:
             last.empty_reason = json.dumps(diag[:4])[:800]
             return last
-        events = [_to_event(row) for row in games if row.get("hteam") and row.get("ateam")]
+        events = [_to_event(row, team_assets) for row in games if row.get("hteam") and row.get("ateam")]
         if request.capability == "live_scores":
             events = [row for row in events if row["status"] == "live"]
         elif request.capability == "results":
