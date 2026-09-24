@@ -23,7 +23,7 @@ OFFICIAL_PUBLIC_COMPETITIONS = {
 SOURCE_NATIVE_PUBLIC_FAMILIES_BY_SPORT = {
     "football": {"fifa", "fifa-digital", "fifa-json", "fotmob", "sofascore-web"},
     "basketball": {"sofascore-web", "sportscore", "fiba-web"},
-    "tennis": {"sofascore-web", "sportscore", "bbc-sport", "espn-json"},
+    "tennis": {"sofascore-web", "sportscore", "bbc-sport", "espn-json", "wta-json"},
     "ice-hockey": {"sofascore-web"},
     "baseball": {"sofascore-web"},
     "handball": {"sofascore-web", "ehf-web"},
@@ -104,6 +104,12 @@ def source_native_public_competition_id(
     elif family == "espn-json":
         if sport != "tennis" or not (
             stored.startswith("tennis-espn-")
+            or unique_label_competition(source_competition_name, sport_id="tennis") == stored
+        ):
+            return None
+    elif family == "wta-json":
+        if sport != "tennis" or not (
+            stored.startswith("tennis-wta-")
             or unique_label_competition(source_competition_name, sport_id="tennis") == stored
         ):
             return None
