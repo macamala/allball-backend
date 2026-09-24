@@ -322,6 +322,20 @@ def test_worker_restart_recovers_due_slot():
         db.close()
 
 
+def test_live_only_due_jobs_skip_discovery_without_current_events():
+    db = _session()
+    try:
+        src = _source(db, "quiet-src", "inc-echo")
+        src.upstream_family = "openligadb"
+        _competition(db, "quiet-league", "football")
+        _map(db, "quiet-league", "quiet-src", 10, upstream_family="openligadb")
+        db.commit()
+        jobs = build_due_jobs(db, now=datetime.utcnow(), live_only=True)
+        assert all(row["competition_id"] != "quiet-league" for row in jobs)
+    finally:
+        db.close()
+
+
 def test_mapped_secondary_family_gets_refresh_job():
     db = _session()
     try:

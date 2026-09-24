@@ -205,19 +205,45 @@ def _fallback_family(db: Session, competition_id: str, primary_family: str) -> T
     return None, None
 
 
-def build_due_jobs(db: Session, *, now: Optional[datetime] = None, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+def build_due_jobs(
+    db: Session,
+    *,
+    now: Optional[datetime] = None,
+    limit: Optional[int] = None,
+    live_only: bool = False,
+) -> List[Dict[str, Any]]:
     now = now or _now()
-    rebuild_watch_set(db, now=now)
-    horizon = now + timedelta(days=30)
-    past = now - timedelta(hours=FINISHED_LOOKBACK_HOURS)
-    events = (
-        db.query(SportsEvent)
-        .filter(
-            (SportsEvent.status.in_(["live", "stale"]))
-            | ((SportsEvent.start_time >= past) & (SportsEvent.start_time <= horizon))
+    if live_only:
+        # Fast path: do not rebuild the broad watch table or scan the 30-day
+        # fixture horizon before refreshing current matches. Twelve hours covers
+        # long exact-time sports while keeping the working set small.
+        horizon = now + timedelta(hours=2)
+        past = now - timedelta(hours=12)
+        events = (
+            db.query(SportsEvent)
+            .filter(SportsEvent.canonical_event_id.is_(None))
+            .filter(
+                (SportsEvent.display_eligible.is_(True))
+                | (SportsEvent.display_eligible.is_(None))
+            )
+            .filter(
+                (SportsEvent.status.in_(["live", "halftime", "break", "stale"]))
+                | ((SportsEvent.start_time >= past) & (SportsEvent.start_time <= horizon))
+            )
+            .all()
         )
-        .all()
-    )
+    else:
+        rebuild_watch_set(db, now=now)
+        horizon = now + timedelta(days=30)
+        past = now - timedelta(hours=FINISHED_LOOKBACK_HOURS)
+        events = (
+            db.query(SportsEvent)
+            .filter(
+                (SportsEvent.status.in_(["live", "stale"]))
+                | ((SportsEvent.start_time >= past) & (SportsEvent.start_time <= horizon))
+            )
+            .all()
+        )
     jobs: List[Dict[str, Any]] = []
     seen_comp_family: set = set()
     live_jobs = 0
@@ -295,6 +321,23 @@ def build_due_jobs(db: Session, *, now: Optional[datetime] = None, limit: Option
                     last_status=slot.last_status if slot else None,
                 )
             )
+    if live_only:
+        jobs.sort(key=lambda row: (row["priority"], row["competition_id"]))
+        deduped: List[Dict[str, Any]] = []
+        seen_keys: set = set()
+        for job in jobs:
+            key = job["job_key"]
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            deduped.append(job)
+        jobs = deduped
+        set_metric("due_jobs", len(jobs))
+        set_metric("live_jobs", live_jobs)
+        if limit is not None:
+            return jobs[:limit]
+        return jobs
+
     health_rows = {row.competition_id: row for row in db.query(SportsCompetitionHealth).all()}
     mapped = (
         db.query(SportsSourceCompetition)
@@ -679,7 +722,7 @@ def run_incremental_tick(
     from collector.recompute_status import recompute_display_eligible_live
 
     recompute_display_eligible_live(db, commit=False, only_blocked_families=True)
-    due = filter_due_jobs(build_due_jobs(db, now=now), live_only=live_only)
+    due = filter_due_jobs(build_due_jobs(db, now=now, live_only=live_only), live_only=live_only)
     groups, schedule = select_fair_groups(due, now)
     groups = sorted(
         groups,
