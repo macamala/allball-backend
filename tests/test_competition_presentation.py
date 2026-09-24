@@ -74,3 +74,34 @@ def test_source_native_football_country_codes_get_public_geography():
         assert out["country_id"] == country_id
         assert out["scope_type"] == "DOMESTIC"
         assert out["country_based"] is True
+
+
+
+def test_dynamic_competition_country_inference_is_unambiguous():
+    bulgaria = metadata_for(
+        "basketball-ss-5ae6c1f64a-bulgaria-national-basketball-league",
+        "basketball",
+    )
+    assert bulgaria["geography_label"] == "Bulgaria"
+    assert bulgaria["country_code"] == "bg"
+    assert bulgaria["scope_type"] == "DOMESTIC"
+
+    singapore = metadata_for(
+        "basketball-ss-2a56bda5dc-singapore-nbl-division-1",
+        "basketball",
+    )
+    assert singapore["geography_label"] == "Singapore"
+    assert singapore["country_code"] == "sg"
+
+    cross_border = metadata_for(
+        "basketball-ss-10dc5bd3fc-estonia-and-latvia-basketball-league",
+        "basketball",
+    )
+    assert cross_border["country_code"] is None
+    assert cross_border["scope_type"] != "DOMESTIC"
+
+
+def test_unknown_registry_row_is_not_declared_domestic_without_country():
+    row = metadata_for("basketball-ss-deadbeef-unknown-league", "basketball")
+    assert row["country_code"] is None
+    assert row["scope_type"] == ""
