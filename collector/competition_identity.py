@@ -22,7 +22,7 @@ OFFICIAL_PUBLIC_COMPETITIONS = {
 
 SOURCE_NATIVE_PUBLIC_FAMILIES_BY_SPORT = {
     "football": {"fifa", "fifa-digital", "fifa-json", "fotmob", "sofascore-web"},
-    "basketball": {"sofascore-web", "sportscore"},
+    "basketball": {"sofascore-web", "sportscore", "fiba-web"},
     "tennis": {"sofascore-web", "sportscore", "bbc-sport"},
     "ice-hockey": {"sofascore-web"},
     "baseball": {"sofascore-web"},
