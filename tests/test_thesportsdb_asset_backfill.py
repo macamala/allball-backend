@@ -2,6 +2,7 @@ from collector.thesportsdb_asset_backfill import (
     TSDB_BY_COMP,
     TSDB_LOGO_BY_COMP,
     _league_logo,
+    _public_visibility_clause,
     _teams,
     _unique_match,
 )
@@ -51,3 +52,9 @@ def test_tsdb_non_team_competition_artwork_catalogue_is_asset_only():
     assert "formula-1" not in TSDB_BY_COMP
     assert "formula-2" not in TSDB_BY_COMP
     assert "european-challenge-tour" not in TSDB_BY_COMP
+
+
+def test_tsdb_asset_visibility_includes_null_legacy_rows():
+    clause = str(_public_visibility_clause()).lower()
+    assert "display_eligible is true" in clause or "display_eligible = true" in clause
+    assert "display_eligible is null" in clause
