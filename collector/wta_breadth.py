@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 
 JOB_KEY = "wta-global-breadth-v2"
 SOURCE_ID = "wta-global"
+PUBLIC_BREADTH_STATUS = "single-source-breadth"
 
 
 def _job(db: Session) -> SportsCollectorJob:
@@ -121,12 +122,12 @@ def _ensure_mapping(
                 "year": meta.get("year"),
                 "source_competition_name": competition_name,
             }),
-            independence_status="single-source-breadth",
+            independence_status=PUBLIC_BREADTH_STATUS,
             upstream_family="wta-json",
         )
         db.add(mapping)
         db.flush()
-    mapping.independence_status = "single-source-breadth"
+    mapping.independence_status = PUBLIC_BREADTH_STATUS
     mapping.upstream_family = "wta-json"
     mapping.enabled = True
     mapping.coverage_scope = "full"
