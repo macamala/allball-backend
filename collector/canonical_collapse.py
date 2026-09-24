@@ -595,11 +595,26 @@ def apply_phase2(db: Session) -> Dict[str, Any]:
 
     attribution = apply_competition_attribution(db)
     quarantine = classify_quarantine(db)
+
+    # Final safety pass: startup integrity is allowed to merge/correct rows, but
+    # it must not leave already-valid source-native football hidden because a
+    # generic competition-attribution heuristic was inconclusive.
+    from collector.source_native_reconcile import revalidate_current_source_native
+
+    source_native = revalidate_current_source_native(
+        db,
+        days_back=3,
+        days_forward=14,
+    )
+    if source_native.get("promoted"):
+        db.commit()
+
     enrichment = promote_observation_enrichment(db)
     return {
         "collapse": collapse,
         "precision": precision,
         "attribution": attribution,
         "quarantine": quarantine,
+        "source_native_revalidated": source_native,
         "enrichment": enrichment,
     }
