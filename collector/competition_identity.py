@@ -27,7 +27,7 @@ SOURCE_NATIVE_PUBLIC_FAMILIES_BY_SPORT = {
     "ice-hockey": {"sofascore-web"},
     "baseball": {"sofascore-web"},
     "handball": {"sofascore-web", "ehf-web"},
-    "volleyball": {"sofascore-web"},
+    "volleyball": {"sofascore-web", "volleyballworld", "fivb-web"},
     "american-football": {"sofascore-web"},
     "futsal": {"sofascore-web"},
     "badminton": {"sofascore-web"},
@@ -94,6 +94,12 @@ def source_native_public_competition_id(
             return None
     elif family == "ehf-web":
         if sport != "handball" or not re.fullmatch(r"handball-ehf-[a-z0-9-]+", stored):
+            return None
+    elif family in {"volleyballworld", "fivb-web"}:
+        if sport != "volleyball" or not (
+            re.fullmatch(r"volleyball-vw-[a-z0-9-]+", stored)
+            or stored == "fivb-competitions"
+        ):
             return None
     elif family == "espn-json":
         if sport != "tennis" or not (
