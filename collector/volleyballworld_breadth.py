@@ -22,7 +22,7 @@ from collector.util import dump_json, load_json, parse_datetime, slugify
 
 logger = logging.getLogger(__name__)
 
-JOB_KEY = "volleyballworld-global-breadth-v1"
+JOB_KEY = "volleyballworld-global-breadth-v2"
 SOURCE_ID = "volleyballworld-global"
 SITEMAP_URL = f"{BASE}/sitemap.xml"
 COMP_RE = re.compile(
@@ -262,11 +262,10 @@ def run_breadth_ingest(
         if not landing.ok or not isinstance(landing.payload, str):
             stats["http_errors"] += 1
             continue
-        # Ignore stale archive-only competition pages. Current official pages
-        # normally expose the season year in title/body/schedule metadata.
-        if "2026" not in landing.payload:
-            continue
-
+        # Do not infer activity from a year string in the landing page.
+        # Volleyball World changes page titles/templates independently of the
+        # underlying schedule. Fetch the schedule and let event dates decide
+        # whether the competition belongs in the live window.
         competition_name = _title(landing.payload, slug)
         competition_id = _competition_id(slug)
         result = adapter.fetch(
@@ -295,8 +294,12 @@ def run_breadth_ingest(
         if not rows:
             continue
 
-        stats["active_slugs"] += 1
+        eligible_rows = [event for event in rows if _in_window(event, now=now)]
         stats["events"] += len(rows)
+        if not eligible_rows:
+            continue
+
+        stats["active_slugs"] += 1
         _ensure_mapping(
             db,
             source=source,
@@ -311,9 +314,7 @@ def run_breadth_ingest(
         )
         bucket["events"] += len(rows)
 
-        for event in rows:
-            if not _in_window(event, now=now):
-                continue
+        for event in eligible_rows:
             stats["eligible"] += 1
             bucket["eligible"] += 1
             if _ingest(db, event, source.source_id):
