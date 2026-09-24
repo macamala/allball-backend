@@ -70,10 +70,28 @@ def _teams(payload: Any) -> List[Dict[str, str]]:
         ).strip()
         if not logo:
             continue
+        aliases = []
+        for value in (
+            name,
+            item.get("strTeamShort"),
+            item.get("strAlternate"),
+            item.get("strTeamAlternate"),
+        ):
+            text = str(value or "").strip()
+            if text and text not in aliases:
+                aliases.append(text)
+        keywords = str(item.get("strKeywords") or "").strip()
+        if keywords:
+            for value in keywords.split(","):
+                text = value.strip()
+                if text and len(text) >= 3 and text not in aliases:
+                    aliases.append(text)
         out.append({
             "id": team_id,
             "name": name,
             "folded": fold_for_identity(name),
+            "aliases": aliases,
+            "folded_aliases": [fold_for_identity(value) for value in aliases if fold_for_identity(value)],
             "logo": logo,
             "country_id": str(item.get("strCountry") or "").strip(),
         })
@@ -98,12 +116,20 @@ def _unique_match(name: str, roster: List[Dict[str, str]]) -> Optional[Dict[str,
     folded = fold_for_identity(name)
     if not folded:
         return None
-    exact = [row for row in roster if row["folded"] == folded]
+    exact = [
+        row
+        for row in roster
+        if row.get("folded") == folded or folded in (row.get("folded_aliases") or [])
+    ]
     if len(exact) == 1:
         return exact[0]
     if len(exact) > 1:
         return None
-    aliases = [row for row in roster if names_equivalent(name, row["name"])]
+    aliases = []
+    for row in roster:
+        candidate_names = row.get("aliases") or [row.get("name")]
+        if any(names_equivalent(name, candidate) for candidate in candidate_names if candidate):
+            aliases.append(row)
     return aliases[0] if len(aliases) == 1 else None
 
 
