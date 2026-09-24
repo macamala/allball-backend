@@ -42,7 +42,10 @@ def reset_wta_caches() -> None:
 
 
 def _fold_player_name(value: Any) -> str:
-    return " ".join(str(value or "").strip().casefold().split())
+    import re
+    text = str(value or "").strip().casefold()
+    text = re.sub(r"[,.;:_-]+", " ", text)
+    return " ".join(text.split())
 
 
 def _player_country_map(payload: Any) -> Dict[str, str]:
@@ -62,25 +65,27 @@ def _player_country_map(payload: Any) -> Dict[str, str]:
             ).strip()
             if country:
                 player_id = str(player.get("id") or node.get("playerId") or node.get("playerID") or "").strip()
+                first_name = str(player.get("firstName") or "").strip()
+                last_name = str(player.get("lastName") or player.get("surname") or "").strip()
                 full_name = str(
                     player.get("fullName")
                     or player.get("displayName")
                     or player.get("name")
                     or ""
                 ).strip()
-                if not full_name:
-                    full_name = " ".join(
-                        part
-                        for part in (
-                            str(player.get("firstName") or "").strip(),
-                            str(player.get("lastName") or "").strip(),
-                        )
-                        if part
-                    )
+                constructed = " ".join(part for part in (first_name, last_name) if part)
+                reversed_name = " ".join(part for part in (last_name, first_name) if part)
+                aliases = [full_name, constructed, reversed_name]
+                if full_name and "," in full_name:
+                    pieces = [part.strip() for part in full_name.split(",", 1)]
+                    if len(pieces) == 2:
+                        aliases.append(f"{pieces[1]} {pieces[0]}")
                 if player_id:
                     out[f"id:{player_id}"] = country
-                if full_name:
-                    out[f"name:{_fold_player_name(full_name)}"] = country
+                for alias in aliases:
+                    folded = _fold_player_name(alias)
+                    if folded:
+                        out[f"name:{folded}"] = country
             stack.extend(node.values())
         elif isinstance(node, list):
             stack.extend(node)
@@ -157,6 +162,8 @@ def match_to_event(
             or row.get(f"PlayerId{prefix}")
             or row.get(f"Player{prefix}ID")
             or row.get(f"Player{prefix}Id")
+            or row.get(f"Player{prefix}Id1")
+            or row.get(f"Player{prefix}ID1")
         )
         country = _country_for_side(row, prefix, side["name"], player_countries)
         if player_id not in (None, ""):
@@ -184,6 +191,7 @@ def match_to_event(
         "start_time": row.get("MatchTimeStamp"),
         "venue": venue.get("name") or extra_meta.get("location"),
         "competition": competition_id,
+        "event_family": "individual_match",
         "round": row.get("DrawLevelType"),
         "periods": oriented["periods"],
         "source_family": "wta-json",
