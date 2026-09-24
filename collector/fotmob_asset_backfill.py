@@ -50,12 +50,61 @@ def _missing_logo(side: Any) -> bool:
 
 def _roster(payload: Any) -> List[Dict[str, str]]:
     rows = parse_fotmob_table(payload)
+    raw: List[Dict[str, str]] = []
+
+    for row in rows:
+        raw.append(
+            {
+                "id": str(row.get("team_id") or "").strip(),
+                "name": str(row.get("team") or "").strip(),
+                "logo": str(row.get("logo") or "").strip(),
+            }
+        )
+
+    # Cups and some leagues do not expose a standings table. Their league
+    # payload still carries authoritative home/away team nodes in fixtures.
+    def take_team(node: Any) -> None:
+        if not isinstance(node, dict):
+            return
+        team_id = str(node.get("id") or node.get("teamId") or "").strip()
+        name = str(node.get("name") or node.get("shortName") or "").strip()
+        if team_id.isdigit() and name:
+            raw.append(
+                {
+                    "id": team_id,
+                    "name": name,
+                    "logo": str(
+                        node.get("logo")
+                        or node.get("imageUrl")
+                        or node.get("image")
+                        or ""
+                    ).strip(),
+                }
+            )
+
+    def walk(node: Any) -> None:
+        if isinstance(node, list):
+            for item in node:
+                walk(item)
+            return
+        if not isinstance(node, dict):
+            return
+        for key in ("home", "away", "homeTeam", "awayTeam"):
+            value = node.get(key)
+            if isinstance(value, dict):
+                take_team(value)
+        for value in node.values():
+            if isinstance(value, (dict, list)):
+                walk(value)
+
+    walk(payload)
+
     out: List[Dict[str, str]] = []
     seen = set()
-    for row in rows:
-        team_id = str(row.get("team_id") or "").strip()
-        name = str(row.get("team") or "").strip()
-        if not team_id or not team_id.isdigit() or not name:
+    for row in raw:
+        team_id = str(row.get("id") or "").strip()
+        name = str(row.get("name") or "").strip()
+        if not team_id.isdigit() or not name:
             continue
         key = (team_id, fold_for_identity(name))
         if key in seen:
