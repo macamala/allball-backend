@@ -66,3 +66,44 @@ def test_fotmob_adapter_filters_shared_date_board_by_league_id():
     assert result.ok
     assert result.events[0]["status"] == "live"
     assert result.events[0]["score"] == {"home": 2, "away": 1, "minute": "64'"}
+
+
+
+def test_fotmob_preserves_postponed_status_from_reason():
+    event = match_to_event(
+        {
+            "id": 3,
+            "home": {"name": "FAR Rabat", "score": 0},
+            "away": {"name": "Raja Casablanca", "score": 0},
+            "status": {
+                "started": False,
+                "finished": False,
+                "utcTime": "2026-09-24T15:00:00.000Z",
+                "reason": {"short": "Postp.", "long": "Postponed"},
+            },
+            "_league": {"id": 530, "name": "Botola Pro"},
+        },
+        "morocco-botola",
+    )
+    assert event["status"] == "postponed"
+    assert event["score"]["home"] is None
+    assert event["score"]["away"] is None
+    assert event["extra"]["source_status"] == "Postp."
+
+
+def test_fotmob_preserves_delayed_status_from_reason():
+    event = match_to_event(
+        {
+            "id": 4,
+            "home": {"name": "A"},
+            "away": {"name": "B"},
+            "status": {
+                "started": False,
+                "finished": False,
+                "reason": {"short": "Delayed"},
+            },
+            "_league": {"id": 53},
+        },
+        "france-ligue-1",
+    )
+    assert event["status"] == "delayed"
