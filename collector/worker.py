@@ -517,6 +517,16 @@ def _maybe_log_breadth(db, *, force: bool = False) -> None:
                 db.rollback()
 
             try:
+                from collector.wta_breadth import run_country_assets_if_due as run_wta_country_assets_prelock
+
+                wta_country_assets = run_wta_country_assets_prelock(db)
+                if wta_country_assets:
+                    logger.info("PRELOCK_WTA_COUNTRY_ASSETS %s", wta_country_assets)
+            except Exception:
+                logger.exception("Pre-lock WTA country identity repair failed")
+                db.rollback()
+
+            try:
                 from collector.opendota_asset_backfill import run_if_due as run_opendota_assets_prelock
 
                 opendota_assets = run_opendota_assets_prelock(db)
