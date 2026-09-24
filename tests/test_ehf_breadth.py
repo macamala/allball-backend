@@ -1,5 +1,5 @@
 from collector.competition_identity import source_native_public_competition_id
-from collector.ehf_breadth import competition_meta, discover_round_urls, parse_current_api, parse_round_page
+from collector.ehf_breadth import competition_meta, discover_round_urls, history_mirror_url, parse_current_api, parse_round_page
 
 
 def test_ehf_index_discovers_current_round_links_and_keeps_fallbacks():
@@ -135,3 +135,35 @@ def test_current_ehf_api_scheduled_match_hides_placeholder_zeroes():
     row = parse_current_api(payload)[0]
     assert row["status"] == "scheduled"
     assert row["score"] == {"home": None, "away": None}
+
+
+
+def test_ehf_history_mirror_rewrites_legacy_family_paths():
+    assert history_mirror_url(
+        "https://old.eurohandball.com/ec/cl/men/2026-27/round/1/Group+Phase"
+    ) == "https://history.eurohandball.com/ec/cl/men/2026-27/round/1/Group+Phase"
+    assert history_mirror_url(
+        "https://old.eurohandball.com/ec/00-04/ct/men/2026-27/round/1/Round+1"
+    ) == "https://history.eurohandball.com/ec/ct/men/2026-27/round/1/Round+1"
+    assert history_mirror_url(
+        "https://old.eurohandball.com/ec/00-03/el/men/2026-27/round/1/Group+Phase"
+    ) == "https://history.eurohandball.com/ec/el/el/men/2026-27/round/1/Group+Phase"
+
+
+def test_ehf_history_competition_meta_recognises_current_families():
+    champions = competition_meta(
+        "https://history.eurohandball.com/ec/cl/men/2026-27/round/1/Group+Phase"
+    )
+    european_cup = competition_meta(
+        "https://history.eurohandball.com/ec/ct/women/2026-27/round/2/Round+2"
+    )
+    assert champions[:3] == (
+        "handball-ehf-champions-league-men",
+        "EHF Champions League Men",
+        "men",
+    )
+    assert european_cup[:3] == (
+        "handball-ehf-european-cup-women",
+        "EHF European Cup Women",
+        "women",
+    )
