@@ -14,7 +14,7 @@ from collector.list_extra import extra_for_list, store_list_extra
 from collector.models import SportsCollectorJob, SportsEvent
 from collector.util import dump_json, isoformat, load_json, slugify
 
-JOB_KEY = "source-native-football-revalidate-v2"
+JOB_KEY = "source-native-football-revalidate-v3"
 SAFE_FAMILIES = {"fotmob", "fifa", "fifa-digital", "fifa-json"}
 NON_BLOCKING_FLAGS = {
     "competition_attribution_mismatch",
@@ -123,7 +123,6 @@ def revalidate_current_source_native(
         db.query(SportsEvent)
         .filter(
             SportsEvent.sport_id == "football",
-            SportsEvent.canonical_event_id.is_(None),
             SportsEvent.display_eligible.is_(False),
             SportsEvent.start_time >= now - timedelta(days=days_back),
             SportsEvent.start_time <= now + timedelta(days=days_forward),
