@@ -138,6 +138,16 @@ def _int_or_none(value: Any) -> Optional[int]:
         return None
 
 
+def _team_logo(team: Dict[str, Any]) -> str:
+    team_id = str((team or {}).get("id") or (team or {}).get("teamId") or "").strip()
+    return f"https://images.fotmob.com/image_resources/logo/teamlogo/{team_id}.png" if team_id else ""
+
+
+def _league_logo(league: Dict[str, Any]) -> str:
+    league_id = str((league or {}).get("id") or "").strip()
+    return f"https://images.fotmob.com/image_resources/logo/leaguelogo/{league_id}.png" if league_id else ""
+
+
 def _scores(status: Dict[str, Any], match: Dict[str, Any]) -> Tuple[Optional[int], Optional[int]]:
     raw = status.get("scoreStr") or match.get("score")
     if isinstance(raw, str) and "-" in raw:
@@ -179,8 +189,16 @@ def match_to_event(match: Dict[str, Any], competition_id: str) -> Optional[Dict[
     start = ts or match.get("time") or match.get("utcTime")
     return {
         "id": str(match.get("id") or match.get("matchId") or f"{home_name}-{away_name}-{start}"),
-        "home": {"name": home_name},
-        "away": {"name": away_name},
+        "home": {
+            "id": str(home.get("id") or home.get("teamId") or ""),
+            "name": home_name,
+            "logo": _team_logo(home),
+        },
+        "away": {
+            "id": str(away.get("id") or away.get("teamId") or ""),
+            "name": away_name,
+            "logo": _team_logo(away),
+        },
         "status": status,
         "score": score,
         "start_time": start,
@@ -188,6 +206,7 @@ def match_to_event(match: Dict[str, Any], competition_id: str) -> Optional[Dict[
         "source_event_id": str(match.get("id") or ""),
         "source_competition_id": str(league.get("id") or ""),
         "source_competition_name": str(league.get("name") or ""),
+        "competition_logo": _league_logo(league),
         "extra": {
             "source_family": "fotmob",
             "source_status": status_obj.get("reason", {}).get("short") if isinstance(status_obj.get("reason"), dict) else status,
