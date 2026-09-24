@@ -1,0 +1,46 @@
+name: Results recovery checks
+on:
+  push:
+    branches: [fix/live-score-recovery-20260925]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: results-recovery-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      DATABASE_URL: sqlite:////tmp/ninkosports-recovery-tests.db
+      RESULTS_COLLECTION_ENABLED: 'true'
+      RESULTS_WRITE_ENABLED: 'true'
+      RESULTS_SCHEDULER_ENABLED: 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Preserve exact source used by these checks
+        run: git archive --format=zip HEAD > /tmp/ninkosports-recovery-source.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: results-recovery-source
+          path: /tmp/ninkosports-recovery-source.zip
+          retention-days: 2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Check syntax
+        run: python -m compileall -q collector tests
+      - name: Install existing project dependencies
+        run: python -m pip install -r requirements.txt pytest
+      - name: Check scheduler and football normalization
+        run: python -m pytest -q tests/test_incremental_scheduler.py tests/test_collector_architecture.py --junitxml=/tmp/results-recovery-tests.xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: results-recovery-test-report
+          path: /tmp/results-recovery-tests.xml
+          if-no-files-found: ignore
+          retention-days: 7
