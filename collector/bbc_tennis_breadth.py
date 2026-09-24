@@ -15,9 +15,8 @@ from typing import Any, Callable, Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
-from collector.adapters_bbc import extract_bbc_events
+from collector.adapters_bbc import extract_bbc_events_from_html
 from collector.competition_identity import unique_label_competition
-from collector.html_parse import _quoted_window_json
 from collector.http import fetch_text
 from collector.lock import lock_status
 from collector.models import SportsCollectorJob, SportsCompetition, SportsSource, SportsSourceCompetition
@@ -26,7 +25,7 @@ from collector.util import dump_json, load_json, parse_datetime, slugify
 
 logger = logging.getLogger(__name__)
 
-JOB_KEY = "bbc-tennis-breadth-v3"
+JOB_KEY = "bbc-tennis-breadth-v4"
 BASE = "https://www.bbc.com/sport/tennis/scores-and-schedule"
 
 
@@ -108,10 +107,7 @@ def _ensure_mapping(
 
 
 def parse_bbc_tennis_html(html: str) -> List[Dict[str, Any]]:
-    data = _quoted_window_json(html or "", "__INITIAL_DATA__")
-    if data is None:
-        return []
-    rows = extract_bbc_events(data, "")
+    rows = extract_bbc_events_from_html(html or "", "")
     events: List[Dict[str, Any]] = []
     for row in rows:
         if not isinstance(row, dict):
