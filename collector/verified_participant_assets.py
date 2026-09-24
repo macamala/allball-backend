@@ -21,6 +21,20 @@ _VERIFIED_FOOTBALL_COMPETITIONS: Dict[str, str] = {
     "colombia-primera-a": "https://images.fotmob.com/image_resources/logo/leaguelogo/274.png",
     "womens-super-league": "https://img.sofascore.com/api/v1/unique-tournament/1044/image",
     "uruguay-primera": "https://images.fotmob.com/image_resources/logo/leaguelogo/161.png",
+    "argentina-primera": "https://images.fotmob.com/image_resources/logo/leaguelogo/112.png",
+    "austria-bundesliga": "https://images.fotmob.com/image_resources/logo/leaguelogo/38.png",
+    "brazil-serie-a": "https://images.fotmob.com/image_resources/logo/leaguelogo/268.png",
+    "denmark-superliga": "https://images.fotmob.com/image_resources/logo/leaguelogo/46.png",
+    "football-friendlies-women": "https://images.fotmob.com/image_resources/logo/leaguelogo/293.png",
+    "germany-2-bundesliga": "https://images.fotmob.com/image_resources/logo/leaguelogo/146.png",
+    "mls": "https://images.fotmob.com/image_resources/logo/leaguelogo/130.png",
+    "spain-copa-del-rey": "https://images.fotmob.com/image_resources/logo/leaguelogo/138.png",
+    "sweden-allsvenskan": "https://images.fotmob.com/image_resources/logo/leaguelogo/67.png",
+    "switzerland-super-league": "https://images.fotmob.com/image_resources/logo/leaguelogo/69.png",
+    "thai-league-1": "https://images.fotmob.com/image_resources/logo/leaguelogo/8984.png",
+    "ukraine-premier-league": "https://images.fotmob.com/image_resources/logo/leaguelogo/441.png",
+    "uzbekistan-super-league": "https://images.fotmob.com/image_resources/logo/leaguelogo/540.png",
+    "womens-super-league": "https://images.fotmob.com/image_resources/logo/leaguelogo/9227.png",
 }
 
 
