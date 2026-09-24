@@ -21,10 +21,11 @@ from collector.util import dump_json, load_json, parse_datetime, slugify
 
 logger = logging.getLogger(__name__)
 
-JOB_KEY = "ehf-global-breadth-v3"
+JOB_KEY = "ehf-global-breadth-v4"
 SOURCE_ID = "ehf-global"
 INDEX_URL = "https://old.eurohandball.com/events/competitions"
 BASE = "https://old.eurohandball.com"
+HISTORY_BASE = "https://history.eurohandball.com"
 CURRENT_API = "https://www.eurohandball.com/umbraco/api/livescoreapi/GetLiveScoreMatches/100358"
 
 # Guaranteed current-season round pages. Index discovery adds any other
@@ -58,6 +59,19 @@ def _source(db: Session) -> Optional[SportsSource]:
     if row is not None and source_collectable(row):
         return row
     return None
+
+
+def history_mirror_url(url: str) -> str:
+    """Mirror legacy EHF round paths onto the current history host.
+
+    The history host uses simplified family segments for newer seasons.
+    """
+    parsed = urlparse(url)
+    path = parsed.path
+    path = path.replace("/ec/00-01/cl/", "/ec/cl/")
+    path = path.replace("/ec/00-03/", "/ec/el/")
+    path = path.replace("/ec/00-04/ct/", "/ec/ct/")
+    return f"{HISTORY_BASE}{path}"
 
 
 def discover_round_urls(index_html: str, *, max_urls: int = 30) -> List[str]:
@@ -97,7 +111,7 @@ def competition_meta(url: str, page_title: str = "") -> Tuple[str, str, str, str
     elif "/ct/" in lower or "/00-04/" in lower:
         family = "european-cup"
         display = "EHF European Cup"
-    elif "/00-03/" in lower:
+    elif "/00-03/" in lower or "/el/" in lower:
         family = "european-league"
         display = "EHF European League"
     else:
@@ -467,6 +481,8 @@ def run_breadth_ingest(
         "ingested": 0,
         "competitions": 0,
         "http_errors": 0,
+        "history_requests": 0,
+        "history_pages": 0,
         "by_competition": {},
     }
     seen_competitions: Set[str] = set()
@@ -528,13 +544,28 @@ def run_breadth_ingest(
             if stats["ingested"] >= max_ingest:
                 stats["status"] = "bounded"
                 break
-            result = getter(url)
-            stats["requests"] += 1
-            if not getattr(result, "ok", False) or not isinstance(getattr(result, "payload", None), str):
+            # Railway frequently blocks old.eurohandball.com while the
+            # official history mirror exposes the same current-season round
+            # pages. Prefer the mirror, then fall back to the legacy host.
+            candidates = [history_mirror_url(url), url]
+            result = None
+            page_url = url
+            for candidate in candidates:
+                attempt = getter(candidate)
+                stats["requests"] += 1
+                if candidate.startswith(HISTORY_BASE):
+                    stats["history_requests"] += 1
+                if getattr(attempt, "ok", False) and isinstance(getattr(attempt, "payload", None), str):
+                    result = attempt
+                    page_url = candidate
+                    if candidate.startswith(HISTORY_BASE):
+                        stats["history_pages"] += 1
+                    break
                 stats["http_errors"] += 1
+            if result is None:
                 continue
             stats["pages"] += 1
-            rows = parse_round_page(result.payload, url)
+            rows = parse_round_page(result.payload, page_url)
             stats["events"] += len(rows)
             if not rows:
                 continue
@@ -548,7 +579,7 @@ def run_breadth_ingest(
                 competition_id=competition_id,
                 competition_name=competition_name,
                 gender=gender,
-                source_url=url,
+                source_url=page_url,
             )
             seen_competitions.add(competition_id)
             bucket = stats["by_competition"].setdefault(
