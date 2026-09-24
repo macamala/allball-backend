@@ -134,7 +134,7 @@ def _incoming_pair(event: Dict[str, Any]) -> set[str]:
     return {home, away}
 
 
-def match_event(
+def _match_event_candidate(
     db: Session,
     event: Dict[str, Any],
     *,
@@ -236,3 +236,28 @@ def match_event(
                     if not rounds_conflict(event.get("round") or event.get("stage"), row.stage):
                         return row
     return None
+
+
+def match_event(db: Session, event: Dict[str, Any], *, source_id: str) -> Optional[SportsEvent]:
+    """Source mappings can outlive a collapse: update the verified keeper."""
+    row = _match_event_candidate(db, event, source_id=source_id)
+    if row is None or not row.canonical_event_id:
+        return row
+    visited = set()
+    while row is not None and row.canonical_event_id:
+        if row.event_id in visited or len(visited) >= 8:
+            return None
+        visited.add(row.event_id)
+        keeper = db.get(SportsEvent, row.canonical_event_id)
+        if keeper is None:
+            return None
+        if keeper.sport_id != event.get("sport") or keeper.competition_id != event.get("competition_key"):
+            return None
+        if _stored_pair(keeper) != _incoming_pair(event):
+            return None
+        if not kickoffs_compatible(keeper.start_time, _kickoff(event), kind=TEAM_MATCH):
+            return None
+        row = keeper
+    if row is not None:
+        _register_event(db, row)
+    return row

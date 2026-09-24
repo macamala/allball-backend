@@ -22,6 +22,7 @@ _ABBREV = (
 )
 
 _KNOWN_EQUIVALENT_NAMES = {
+    frozenset({"ireland", "republic ireland"}),
     frozenset({"aguilas doradas", "rionegro aguilas"}),
 }
 

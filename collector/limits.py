@@ -35,11 +35,13 @@ def retry_call(
     raise last_error
 
 
-def is_rate_limited(db: Session, source_id: str, now: Optional[datetime] = None) -> bool:
+def is_rate_limited(db: Session, source_id: str, now: Optional[datetime] = None, *, cached_only: bool = False) -> bool:
     now = now or datetime.utcnow()
     health = db.query(SportsSourceHealth).filter_by(source_id=source_id).first()
     if health and health.rate_limited_until and health.rate_limited_until > now:
         return True
+    if cached_only:
+        return False  # No HTTP request; persistent cooldown above is still enforced.
     source = db.query(SportsSource).filter_by(source_id=source_id).first()
     limit = source.rate_limit_per_minute if source else None
     if not limit:

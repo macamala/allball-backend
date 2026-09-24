@@ -522,6 +522,11 @@ def _fresh(row: Optional[SportsStandingSnapshot]) -> bool:
     rows = unwrap_standings(payload)
     if not rows:
         return False
+    if row.competition_id == "uefa-nations-league":
+        if not isinstance(payload, dict) or payload.get("schema_revision") != 2:
+            return False
+        if set(payload.get("league_ids") or []) != {"9806", "9807", "9808", "9809"}:
+            return False
     sport = payload.get("sport") if isinstance(payload, dict) else ""
     if str(getattr(row, "competition_id", "") or "") == "australia-afl" or sport == "australian-rules":
         if rows[0].get("percentage") is None or rows[0].get("goals_for") is not None:
@@ -697,12 +702,29 @@ def _volleyball_standings(competition_id: str, getter) -> Dict[str, Any]:
 def fetch_competition_standings(competition_id: str, getter=None) -> Dict[str, Any]:
     getter = getter or fetch_url
     spec = FOTMOB_LEAGUES.get(competition_id) or {}
-    if spec.get("id"):
-        result = getter(FOTMOB_LEAGUE.format(league_id=spec["id"]))
-        if result.ok and isinstance(result.payload, dict):
-            rows = parse_fotmob_table(result.payload)
-            if rows:
-                return wrap_standings(rows, competition=competition_id, source="fotmob")
+    from collector.adapters_fotmob import _league_ids
+    league_ids = _league_ids(spec)
+    if league_ids:
+        combined = []
+        seasons = set()
+        complete = True
+        for league_id in league_ids:
+            result = getter(FOTMOB_LEAGUE.format(league_id=league_id))
+            payload = result.payload if result.ok and isinstance(result.payload, dict) else {}
+            rows = parse_fotmob_table(payload)
+            if not rows:
+                complete = False
+            combined.extend(rows)
+            season = (payload.get("details") or {}).get("selectedSeason")
+            if season: seasons.add(str(season))
+        if combined and complete and len(seasons) <= 1:
+            result = wrap_standings(combined, competition=competition_id, sport="football",
+                                    season=next(iter(seasons), None), source="fotmob")
+            result["schema_revision"] = 2
+            result["league_ids"] = league_ids
+            return result
+        if len(league_ids) > 1:
+            return {}  # Never replace a complete grouped table with one division.
     shortcut = _openliga_shortcut(competition_id)
     if shortcut:
         year = datetime.utcnow().year

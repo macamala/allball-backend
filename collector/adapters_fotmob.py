@@ -334,6 +334,17 @@ def match_to_event(match: Dict[str, Any], competition_id: str, *, source_league_
     }
 
 
+def current_batch_has_board(capability: str) -> bool:
+    if capability not in {"fixtures", "results", "live_scores"}:
+        return False
+    batch = _BATCH_BOARDS.get()
+    if batch is None:
+        return False
+    days = board_dates(past_days=1, future_days=0) if capability == "live_scores" else _dates()
+    ttl = LIVE_BOARD_TTL_SECONDS if capability == "live_scores" else FIXTURE_BOARD_TTL_SECONDS
+    return ("d:" + ",".join(days), ttl) in batch
+
+
 def _load_boards(
     getter,
     dates: Optional[List[str]] = None,
@@ -384,91 +395,8 @@ def _load_boards(
 
 
 def parse_fotmob_table(payload: Any) -> List[Dict[str, Any]]:
-    found: List[Dict[str, Any]] = []
-
-    def take_rows(rows: Any, stage: Optional[str] = None, group: Optional[str] = None) -> None:
-        if not isinstance(rows, list):
-            return
-        for item in rows:
-            if not isinstance(item, dict):
-                continue
-            team_node = item.get("team") if isinstance(item.get("team"), dict) else {}
-            team = item.get("name") or item.get("shortName") or team_node
-            if isinstance(team, dict):
-                team = team.get("name") or team.get("shortName")
-            team_id = str(
-                item.get("id")
-                or item.get("teamId")
-                or team_node.get("id")
-                or team_node.get("teamId")
-                or ""
-            ).strip()
-            pts = item.get("pts") if item.get("pts") is not None else item.get("points")
-            played = item.get("played") or item.get("matchesPlayed")
-            if not team or (pts is None and played is None):
-                continue
-            scores = str(item.get("scoresStr") or "")
-            gf = ga = None
-            if "-" in scores:
-                left, right = scores.split("-", 1)
-                gf, ga = left.strip(), right.strip()
-            found.append(
-                {
-                    "position": item.get("idx") or item.get("position"),
-                    "team": team,
-                    "team_id": team_id or None,
-                    "logo": f"https://images.fotmob.com/image_resources/logo/teamlogo/{team_id}.png" if team_id else None,
-                    "played": played,
-                    "wins": item.get("wins"),
-                    "draws": item.get("draws"),
-                    "losses": item.get("losses"),
-                    "goals_for": item.get("scoresFor") or gf,
-                    "goals_against": item.get("scoresAgainst") or ga,
-                    "goal_difference": item.get("goalConDiff") or item.get("gd"),
-                    "points": pts,
-                    "form": "".join(str(x) for x in (item.get("form") or []) if x) if isinstance(item.get("form"), list) else item.get("form"),
-                    "stage": stage,
-                    "group": group,
-                }
-            )
-
-    def walk(node: Any, stage: Optional[str] = None) -> None:
-        if isinstance(node, list):
-            for item in node:
-                walk(item, stage)
-            return
-        if not isinstance(node, dict):
-            return
-        label = node.get("leagueName") or node.get("groupName") or node.get("name")
-        table = node.get("table")
-        if isinstance(table, list) and table and isinstance(table[0], dict) and (
-            table[0].get("pts") is not None or table[0].get("played") is not None or table[0].get("name")
-        ):
-            take_rows(table, stage=stage, group=label if label else None)
-            return
-        data = node.get("data")
-        if isinstance(data, dict) and isinstance(data.get("table"), dict):
-            inner = data["table"]
-            take_rows(inner.get("all") or inner.get("home") or inner.get("away") or [], stage=stage, group=label)
-        all_rows = node.get("all")
-        if isinstance(all_rows, list):
-            take_rows(all_rows, stage=stage, group=label)
-        for key, value in node.items():
-            if key in {"home", "away", "team", "stats"}:
-                continue
-            walk(value, stage or (label if key in {"table", "tables", "leagueTable", "standings"} else stage))
-
-    walk(payload)
-    # unique teams keep first
-    seen = set()
-    out = []
-    for row in found:
-        key = str(row.get("team") or "")
-        if key in seen:
-            continue
-        seen.add(key)
-        out.append(row)
-    return out
+    from collector.fotmob_tables import parse_tables
+    return parse_tables(payload)
 
 
 LEAGUE_URL = "https://www.fotmob.com/api/data/leagues?id={league_id}"

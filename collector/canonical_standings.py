@@ -5,6 +5,10 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 
+def _first(*values):
+    return next((value for value in values if value is not None and value != ""), None)
+
+
 def _num(value: Any) -> Any:
     if value in (None, ""):
         return None
@@ -84,12 +88,12 @@ def canonicalize_standing_rows(raw: Any, sport: Optional[str] = None) -> List[Di
             "team_slug": str(team_slug) if team_slug not in (None, "") else None,
             "logo": str(logo) if logo not in (None, "") else None,
             "country_id": str(country) if country not in (None, "") else None,
-            "played": _num(item.get("played") or item.get("gamesPlayed") or item.get("gp")),
+            "played": _num(_first(item.get("played"), item.get("gamesPlayed"), item.get("gp"))),
             "won": wins,
             "lost": losses,
             "wins": wins,
             "losses": losses,
-            "points": _num(item.get("points") or item.get("pts")),
+            "points": _num(_first(item.get("points"), item.get("pts"))),
             "form": item.get("form") or item.get("streak"),
             "stage": item.get("stage"),
             "group": item.get("group") or item.get("conference") or item.get("division"),
@@ -98,12 +102,12 @@ def canonicalize_standing_rows(raw: Any, sport: Optional[str] = None) -> List[Di
             row["drawn"] = draws
             row["draws"] = draws
         if football or sport_key in {"ice-hockey", "rugby"}:
-            row["goals_for"] = _num(item.get("goals_for") or item.get("goalsFor") or item.get("gf") or item.get("goalFor"))
+            row["goals_for"] = _num(_first(item.get("goals_for"), item.get("goalsFor"), item.get("gf"), item.get("goalFor")))
             row["goals_against"] = _num(
-                item.get("goals_against") or item.get("goalsAgainst") or item.get("ga") or item.get("goalAgainst")
+                _first(item.get("goals_against"), item.get("goalsAgainst"), item.get("ga"), item.get("goalAgainst"))
             )
             row["goal_difference"] = _num(
-                item.get("goal_difference") or item.get("goalDiff") or item.get("gd") or item.get("goalConDiff")
+                _first(item.get("goal_difference"), item.get("goalDiff"), item.get("gd"), item.get("goalConDiff"))
             )
         if item.get("ot_losses") is not None or item.get("otLosses") is not None:
             row["ot_losses"] = _num(item.get("ot_losses") or item.get("otLosses"))

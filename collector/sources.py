@@ -112,7 +112,11 @@ def ordered_sources(
         sport_id = competition.sport_id if competition else None
         if not source_supports_sport(source, sport_id):
             continue
-        if is_rate_limited(db, source.source_id, now=now):
+        cached_only = False
+        if source.adapter_key == "fotmob":
+            from collector.adapters_fotmob import current_batch_has_board
+            cached_only = current_batch_has_board(capability)
+        if is_rate_limited(db, source.source_id, now=now, cached_only=cached_only):
             continue
         family = mapping_family(mapping, source)
         if family_host_blocked(family):

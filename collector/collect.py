@@ -694,7 +694,12 @@ def collect_competition(
                 else:
                     fallback_status = "CONFIG_MISSING"
                 continue
-            record_hit(source.source_id)
+            cached_only = False
+            if source.adapter_key == "fotmob":
+                from collector.adapters_fotmob import current_batch_has_board
+                cached_only = current_batch_has_board(capability)
+            if not cached_only:
+                record_hit(source.source_id)
             config = load_json(mapping.source_config_json, {}) or {}
             request = FetchRequest(
                 capability=capability,
