@@ -68,6 +68,32 @@ def test_live_only_filter_excludes_background_jobs():
     assert filter_due_jobs(jobs, live_only=False) == jobs
 
 
+def test_run_incremental_tick_sport_filter_excludes_other_sports(monkeypatch):
+    db = _session()
+    try:
+        _source(db, "football-src", "inc-echo")
+        _source(db, "basketball-src", "inc-echo")
+        _competition(db, "football-comp", "football")
+        _competition(db, "basketball-comp", "basketball")
+        _map(db, "football-comp", "football-src", 10, upstream_family="inc-echo")
+        _map(db, "basketball-comp", "basketball-src", 10, upstream_family="inc-echo")
+        _event(db, "f1", "football-comp", "football", "scheduled", datetime.utcnow())
+        _event(db, "b1", "basketball-comp", "basketball", "scheduled", datetime.utcnow())
+        db.commit()
+
+        seen = []
+        def fake_collect(db, competition, capability, **kwargs):
+            seen.append(competition.sport_id)
+            return {"written": 0, "classification": "ok"}
+
+        monkeypatch.setattr("collector.collect.collect_competition", fake_collect)
+        run_incremental_tick(db, now=datetime.utcnow(), sport_id="football")
+        assert seen
+        assert set(seen) == {"football"}
+    finally:
+        db.close()
+
+
 def test_coalesce_shared_request_one_group():
     jobs = [
         {"job_key": "a", "request_key": "thesportsdb|http://x", "competition_id": "c1"},

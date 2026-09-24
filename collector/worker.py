@@ -825,7 +825,7 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
             # on the score lane while any public football event is in its
             # kickoff/live window.
             if scheduler_enabled():
-                score_summary = run_incremental_tick(db)
+                score_summary = run_incremental_tick(db, sport_id="football")
                 db.commit()
                 logger.info(
                     "FOOTBALL_SCORE_LANE %s",

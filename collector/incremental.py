@@ -643,7 +643,7 @@ def mark_slot(db: Session, job: Dict[str, Any], *, status: str, http_calls: int 
     row.priority = int(job.get("priority") or 50)
 
 
-def run_incremental_tick(db: Session, *, sleeper=None, now: Optional[datetime] = None) -> Dict[str, Any]:
+def run_incremental_tick(db: Session, *, sleeper=None, now: Optional[datetime] = None, sport_id: Optional[str] = None) -> Dict[str, Any]:
     """Execute due incremental jobs. Kill switch: scheduler off returns immediately."""
     import time
 
@@ -667,6 +667,8 @@ def run_incremental_tick(db: Session, *, sleeper=None, now: Optional[datetime] =
 
     recompute_display_eligible_live(db, commit=False, only_blocked_families=True)
     due = build_due_jobs(db, now=now)
+    if sport_id:
+        due = [job for job in due if str(job.get("sport") or "") == str(sport_id)]
     groups, schedule = select_fair_groups(due, now)
     groups = sorted(
         groups,
@@ -835,6 +837,7 @@ def run_incremental_tick(db: Session, *, sleeper=None, now: Optional[datetime] =
     tick = {
         "due_jobs": schedule["due_jobs"],
         "selected_jobs": schedule["selected_jobs"],
+        "sport_filter": sport_id,
         "oldest_due_age_s": schedule["oldest_due_age_s"],
         "families_selected": schedule["families_selected"],
         "sports_selected": schedule["sports_selected"],
