@@ -1007,6 +1007,26 @@ class NinkoCollectedSportsDataProvider:
                 for item in db.query(SportsStandingSnapshot.competition_id).distinct().all()
                 if item[0]
             }
+            visible_competition_ids = {row.competition_id for row in rows if row.competition_id}
+            if visible_competition_ids:
+                dynamic_fotmob = (
+                    db.query(SportsSourceCompetition)
+                    .filter(
+                        SportsSourceCompetition.competition_id.in_(visible_competition_ids),
+                        SportsSourceCompetition.upstream_family == "fotmob",
+                        SportsSourceCompetition.enabled.is_(True),
+                    )
+                    .all()
+                )
+                for mapping in dynamic_fotmob:
+                    config = load_json(mapping.source_config_json, {}) or {}
+                    league_id = str(
+                        config.get("fotmob_league_id")
+                        or mapping.source_competition_id
+                        or ""
+                    ).strip()
+                    if league_id:
+                        standing_ids.add(mapping.competition_id)
             standings_done = time.perf_counter()
             taxonomy_start = time.perf_counter()
             warmed = set()
