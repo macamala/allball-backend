@@ -663,6 +663,9 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
                             "http_errors": tsdb_assets.get("http_errors"),
                             "direct_team_requests": tsdb_assets.get("direct_team_requests"),
                             "direct_team_rows_updated": tsdb_assets.get("direct_team_rows_updated"),
+                            "direct_name_requests": tsdb_assets.get("direct_name_requests"),
+                            "direct_name_rows_updated": tsdb_assets.get("direct_name_rows_updated"),
+                            "direct_name_participants_filled": tsdb_assets.get("direct_name_participants_filled"),
                             "by_competition": tsdb_assets.get("by_competition"),
                         },
                     )
