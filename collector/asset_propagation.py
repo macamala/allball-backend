@@ -19,6 +19,12 @@ from collector.util import dump_json, load_json
 TEAM_FAMILIES = {"team_match", "esports_match"}
 INDIVIDUAL_FAMILIES = {"individual_match", "combat"}
 
+_NHL_ABBREVS = {
+    "ANA","BOS","BUF","CAR","CBJ","CGY","CHI","COL","DAL","DET","EDM","FLA",
+    "LAK","MIN","MTL","NJD","NSH","NYI","NYR","OTT","PHI","PIT","SEA","SJS",
+    "STL","TBL","TOR","UTA","VAN","VGK","WPG","WSH",
+}
+
 
 def _bucket(family: str) -> str:
     if family in TEAM_FAMILIES:
@@ -179,6 +185,61 @@ def _derive_fotmob_assets(row: SportsEvent, extra: Dict[str, Any], participants:
     return row_changed, extra_changed, participant_filled
 
 
+def _derive_competition_native_assets(
+    row: SportsEvent,
+    extra: Dict[str, Any],
+    participants: Dict[str, Any],
+) -> Tuple[bool, bool, int]:
+    """Fill artwork from competition-native official IDs only when unambiguous."""
+    competition = str(row.competition_id or "")
+    changed = False
+    extra_changed = False
+    participant_filled = 0
+
+    if competition == "nhl":
+        if not extra.get("competition_logo"):
+            extra["competition_logo"] = "https://assets.nhle.com/logos/nhl/svg/NHL_light.svg"
+            changed = True
+            extra_changed = True
+        for side_name in ("home", "away", "participant_a", "participant_b"):
+            side = participants.get(side_name)
+            if not isinstance(side, dict) or _asset(side).get("logo"):
+                continue
+            candidates = [
+                str(side.get("id") or "").strip().upper(),
+                str(side.get("slug") or "").strip().upper(),
+                str(side.get("name") or "").strip().upper(),
+            ]
+            abbrev = next((value for value in candidates if value in _NHL_ABBREVS), "")
+            if not abbrev:
+                continue
+            merged = dict(side)
+            merged["logo"] = f"https://assets.nhle.com/logos/nhl/svg/{abbrev}_light.svg"
+            participants[side_name] = merged
+            changed = True
+            participant_filled += 1
+
+    elif competition == "mlb":
+        if not extra.get("competition_logo"):
+            extra["competition_logo"] = "https://www.mlbstatic.com/team-logos/league-on-light/1.svg"
+            changed = True
+            extra_changed = True
+        for side_name in ("home", "away", "participant_a", "participant_b"):
+            side = participants.get(side_name)
+            if not isinstance(side, dict) or _asset(side).get("logo"):
+                continue
+            team_id = str(side.get("id") or "").strip()
+            if not team_id.isdigit():
+                continue
+            merged = dict(side)
+            merged["logo"] = f"https://www.mlbstatic.com/team-logos/{team_id}.svg"
+            participants[side_name] = merged
+            changed = True
+            participant_filled += 1
+
+    return changed, extra_changed, participant_filled
+
+
 def _sofascore_identity_context(row: SportsEvent, extra: Dict[str, Any]) -> bool:
     family = str(extra.get("source_family") or "").strip().lower()
     primary = str(getattr(row, "primary_source_id", "") or "").strip().lower()
@@ -292,6 +353,8 @@ def propagate_identity_assets(db) -> Dict[str, int]:
         "source_native_participant_logos_filled": 0,
         "sofascore_competition_logos_filled": 0,
         "sofascore_participant_logos_filled": 0,
+        "competition_native_logos_filled": 0,
+        "competition_native_participant_logos_filled": 0,
         "standing_participant_logos_filled": 0,
         "standing_participant_countries_filled": 0,
     }
@@ -327,6 +390,17 @@ def propagate_identity_assets(db) -> Dict[str, int]:
             stats["sofascore_competition_logos_filled"] += 1
         if sofa_participants:
             stats["sofascore_participant_logos_filled"] += sofa_participants
+
+        native_changed, native_extra_changed, native_participants = _derive_competition_native_assets(
+            row, extra, participants
+        )
+        if native_changed:
+            row_changed = True
+        if native_extra_changed:
+            extra_changed = True
+            stats["competition_native_logos_filled"] += 1
+        if native_participants:
+            stats["competition_native_participant_logos_filled"] += native_participants
 
         if not extra.get("competition_logo"):
             logo = competition_assets.get((sport, competition))
