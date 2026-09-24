@@ -252,6 +252,7 @@ def public_multisport_day_snapshot(day_offset: int = 1, *, include_samples: bool
 
     assets_by_sport: Dict[str, Dict[str, int]] = {}
     asset_gaps: Dict[str, List[Dict[str, Any]]] = {}
+    asset_gap_competitions: Dict[str, Dict[str, Dict[str, int]]] = {}
     for row in events:
         sport = str(row.get("sport") or "unknown")
         bucket = assets_by_sport.setdefault(
@@ -282,6 +283,19 @@ def public_multisport_day_snapshot(day_offset: int = 1, *, include_samples: bool
             missing_competition_logo = not bool(row.get("competition_logo"))
             missing_side_logos = [side_name for side_name, side in (("home", home), ("away", away)) if not _side_logo(side)]
             if missing_competition_logo or missing_side_logos:
+                competition_key = str(row.get("competition_key") or row.get("competition") or "unknown")
+                by_comp = asset_gap_competitions.setdefault(sport, {})
+                comp_gap = by_comp.setdefault(
+                    competition_key,
+                    {
+                        "events": 0,
+                        "missing_competition_logo": 0,
+                        "missing_team_logo_slots": 0,
+                    },
+                )
+                comp_gap["events"] += 1
+                comp_gap["missing_competition_logo"] += int(missing_competition_logo)
+                comp_gap["missing_team_logo_slots"] += len(missing_side_logos)
                 gaps = asset_gaps.setdefault(sport, [])
                 if len(gaps) < 16:
                     gaps.append(
@@ -321,6 +335,7 @@ def public_multisport_day_snapshot(day_offset: int = 1, *, include_samples: bool
         "competitions_by_sport": distinct_competitions,
         "assets_by_sport": assets_by_sport,
         "asset_gaps": asset_gaps,
+        "asset_gap_competitions": asset_gap_competitions,
         "samples": samples,
     }
 
