@@ -29,14 +29,14 @@ from collector.verified_coverage import THESPORTSDB_LEAGUES
 
 RUN_INTERVAL_S = 150
 LEAGUE_TTL_S = 12 * 3600
-MAX_LEAGUES_PER_RUN = 8
+MAX_LEAGUES_PER_RUN = 32
 
 _next_run_at = 0.0
 _last_fetch: Dict[str, float] = {}
 _TEAM_LAST_FETCH: Dict[str, float] = {}
 _NAME_LAST_FETCH: Dict[Tuple[str, str], float] = {}
-MAX_DIRECT_TEAM_LOOKUPS = 16
-MAX_DIRECT_NAME_LOOKUPS = 16
+MAX_DIRECT_TEAM_LOOKUPS = 40
+MAX_DIRECT_NAME_LOOKUPS = 40
 
 TSDB_BY_COMP = {
     row["competition_id"]: row
@@ -398,9 +398,12 @@ def _candidates(db: Session, now: float) -> List[Tuple[str, str, int]]:
             for key in ("home", "away")
             if isinstance(participants.get(key), dict) and _missing_logo(participants.get(key))
         )
-        counts[competition_id] += missing
-        if missing and row.start_time and window_start <= row.start_time <= window_end:
-            priority[competition_id] += 100 * missing
+        extra = load_json(row.extra_json, {}) or {}
+        missing_competition_logo = not bool(extra.get("competition_logo"))
+        gap_weight = missing + (1 if missing_competition_logo else 0)
+        counts[competition_id] += gap_weight
+        if gap_weight and row.start_time and window_start <= row.start_time <= window_end:
+            priority[competition_id] += 100 * gap_weight
     output = []
     for competition_id, missing in counts.items():
         if not missing:
