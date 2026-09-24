@@ -32,11 +32,47 @@ def canonicalize_standing_rows(raw: Any, sport: Optional[str] = None) -> List[Di
     for index, item in enumerate(rows, start=1):
         if not isinstance(item, dict):
             continue
-        team = item.get("team") or item.get("name") or item.get("club") or item.get("teamName")
+        team_raw = item.get("team") or item.get("club") or item.get("teamName")
+        team = team_raw or item.get("name")
         if isinstance(team, dict):
             team = team.get("name") or team.get("default") or team.get("fullName")
         if not team:
             continue
+        team_meta = team_raw if isinstance(team_raw, dict) else {}
+        team_id = (
+            item.get("team_id")
+            or item.get("teamId")
+            or item.get("club_id")
+            or item.get("clubId")
+            or team_meta.get("id")
+        )
+        team_slug = item.get("team_slug") or item.get("teamSlug") or team_meta.get("slug")
+        logo = (
+            item.get("logo")
+            or item.get("crest")
+            or item.get("badge")
+            or item.get("team_logo")
+            or item.get("teamLogo")
+            or item.get("image")
+            or item.get("imageUrl")
+            or item.get("logoUrl")
+            or team_meta.get("logo")
+            or team_meta.get("crest")
+            or team_meta.get("badge")
+            or team_meta.get("image")
+            or team_meta.get("imageUrl")
+            or team_meta.get("logoUrl")
+        )
+        country = (
+            item.get("country_id")
+            or item.get("country")
+            or item.get("nationality")
+            or team_meta.get("country_id")
+            or team_meta.get("country")
+            or team_meta.get("nationality")
+        )
+        if isinstance(country, dict):
+            country = country.get("alpha2") or country.get("alpha3") or country.get("code") or country.get("name")
         wins = _num(item.get("wins") if item.get("wins") is not None else item.get("won"))
         has_draws = any(item.get(key) is not None for key in ("draws", "drawn"))
         draws = _num(item.get("draws") if item.get("draws") is not None else item.get("drawn")) if has_draws else None
@@ -44,6 +80,10 @@ def canonicalize_standing_rows(raw: Any, sport: Optional[str] = None) -> List[Di
         row = {
             "position": _num(item.get("position") or item.get("rank") or item.get("idx") or index),
             "team": str(team),
+            "team_id": str(team_id) if team_id not in (None, "") else None,
+            "team_slug": str(team_slug) if team_slug not in (None, "") else None,
+            "logo": str(logo) if logo not in (None, "") else None,
+            "country_id": str(country) if country not in (None, "") else None,
             "played": _num(item.get("played") or item.get("gamesPlayed") or item.get("gp")),
             "won": wins,
             "lost": losses,
