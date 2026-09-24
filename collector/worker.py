@@ -605,6 +605,16 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
                     logger.exception("FIFA identity reconcile failed")
                     db.rollback()
             try:
+                from collector.source_identity_repair import repair_source_identity_leaks
+
+                source_identity_repair = repair_source_identity_leaks(db)
+                if source_identity_repair.get("scanned"):
+                    logger.info("SOURCE_IDENTITY_REPAIR %s", source_identity_repair)
+            except Exception:
+                logger.exception("Source identity repair failed")
+                db.rollback()
+
+            try:
                 from collector.ufc_identity_repair import repair_ufc_promo_rows
 
                 ufc_repair = repair_ufc_promo_rows(db)
