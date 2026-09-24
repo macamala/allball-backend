@@ -101,7 +101,7 @@ def test_current_ehf_livescore_api_vue_shape():
     assert len(rows) == 1
     row = rows[0]
     assert row["source_event_id"] == "ehf-live-1"
-    assert row["competition_key"] == "handball-ehf-ehf-champions-league-men-men"
+    assert row["competition_key"] == "handball-ehf-ehf-champions-league-men"
     assert row["home"]["name"] == "RK Partizan"
     assert row["away"]["name"] == "Füchse Berlin"
     assert row["status"] == "live"
