@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 from collector.dirty import event_unchanged, observation_signature
 from collector.breadth_audit import _visible_identity_requirement
+from collector.opendota_asset_backfill import _fill_side as fill_opendota_side, _parse_catalog as parse_opendota_catalog
 from collector.merge import merge_event_fields
 from collector.participant_text import participant_payload
 from collector.util import dump_json
@@ -110,3 +111,45 @@ def test_visible_asset_audit_does_not_invent_team_logo_gaps_for_meta_events():
     assert _visible_identity_requirement({"event_family": "racing", "sport": "greyhound-racing"}) == "none"
     assert _visible_identity_requirement({"event_family": "tournament", "sport": "golf"}) == "none"
     assert _visible_identity_requirement({"event_family": "motorsport_race", "sport": "motorsport"}) == "none"
+
+
+
+def test_opendota_catalog_uses_exact_team_ids_and_logo_urls():
+    catalog = parse_opendota_catalog([
+        {
+            "team_id": 8261500,
+            "name": "Xtreme Gaming",
+            "tag": "XG",
+            "logo_url": "https://cdn.example/xg.png",
+        },
+        {
+            "team_id": 0,
+            "name": "Unknown",
+            "logo_url": "",
+        },
+    ])
+    assert catalog["8261500"]["name"] == "Xtreme Gaming"
+    assert catalog["8261500"]["logo"] == "https://cdn.example/xg.png"
+    assert "0" not in catalog
+
+
+def test_opendota_logo_fill_never_overwrites_or_name_matches():
+    asset = {
+        "id": "8261500",
+        "name": "Xtreme Gaming",
+        "logo": "https://cdn.example/xg.png",
+    }
+    filled, changed = fill_opendota_side({"id": "8261500", "name": "Xtreme Gaming"}, asset)
+    assert changed is True
+    assert filled["logo"] == asset["logo"]
+
+    existing, changed = fill_opendota_side(
+        {"id": "8261500", "name": "Xtreme Gaming", "logo": "https://cdn.example/original.png"},
+        asset,
+    )
+    assert changed is False
+    assert existing["logo"] == "https://cdn.example/original.png"
+
+    wrong_id, changed = fill_opendota_side({"id": "123", "name": "Xtreme Gaming"}, asset)
+    assert changed is False
+    assert not wrong_id.get("logo")
