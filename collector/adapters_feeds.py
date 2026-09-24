@@ -32,6 +32,7 @@ def _asset_url(node: Any) -> str:
         "logo", "Logo", "image", "Image", "badge", "Badge", "crest", "Crest",
         "picture", "Picture", "pictureUrl", "PictureUrl", "imageUrl", "ImageUrl",
         "logoUrl", "LogoUrl", "teamLogo", "TeamLogo", "darkLogo",
+        "PictureUrl", "pictureUrl",
     ):
         value = node.get(key)
         if isinstance(value, str) and value.strip():
