@@ -60,3 +60,10 @@ def test_volleyballworld_source_native_prefix_is_validated():
     )
     assert accepted == "volleyball-vw-avc-men-nations-cup"
     assert rejected is None
+
+
+
+def test_volleyballworld_v2_checks_schedule_even_without_year_in_landing():
+    from collector.volleyballworld_breadth import JOB_KEY
+
+    assert JOB_KEY == "volleyballworld-global-breadth-v2"
