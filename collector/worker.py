@@ -510,6 +510,16 @@ def _maybe_log_breadth(db, *, force: bool = False) -> None:
                 db.rollback()
 
             try:
+                from collector.opendota_asset_backfill import run_if_due as run_opendota_assets_prelock
+
+                opendota_assets = run_opendota_assets_prelock(db)
+                if opendota_assets:
+                    logger.info("PRELOCK_OPENDOTA_ASSETS %s", opendota_assets)
+            except Exception:
+                logger.exception("Pre-lock OpenDota artwork repair failed")
+                db.rollback()
+
+            try:
                 from collector.thesportsdb_asset_backfill import run_if_due as run_tsdb_assets_prelock
 
                 tsdb_assets = run_tsdb_assets_prelock(db)
