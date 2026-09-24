@@ -547,6 +547,16 @@ def _maybe_log_breadth(db, *, force: bool = False) -> None:
                 db.rollback()
 
             try:
+                from collector.liquipedia_dota_asset_backfill import run_if_due as run_liquipedia_dota_assets_prelock
+
+                liquipedia_dota_assets = run_liquipedia_dota_assets_prelock(db)
+                if liquipedia_dota_assets:
+                    logger.info("PRELOCK_LIQUIPEDIA_DOTA_ASSETS %s", liquipedia_dota_assets)
+            except Exception:
+                logger.exception("Pre-lock Liquipedia Dota artwork repair failed")
+                db.rollback()
+
+            try:
                 from collector.thesportsdb_asset_backfill import run_if_due as run_tsdb_assets_prelock
 
                 tsdb_assets = run_tsdb_assets_prelock(db)
