@@ -87,6 +87,17 @@ def _player_country_map(payload: Any) -> Dict[str, str]:
     return out
 
 
+def _countries_for_name(name: str, player_countries: Optional[Dict[str, str]]) -> List[str]:
+    lookup = player_countries or {}
+    countries: List[str] = []
+    for part in str(name or "").split("/"):
+        folded = _fold_player_name(part)
+        country = lookup.get(f"name:{folded}", "")
+        if country and country not in countries:
+            countries.append(country)
+    return countries
+
+
 def _country_for_side(row: Dict[str, Any], prefix: str, name: str, player_countries: Optional[Dict[str, str]]) -> str:
     country = (
         row.get(f"CountryCode{prefix}")
@@ -152,6 +163,12 @@ def match_to_event(
             side["id"] = str(player_id)
         if country not in (None, ""):
             side["country_id"] = str(country)
+        else:
+            country_ids = _countries_for_name(side["name"], player_countries)
+            if len(country_ids) == 1:
+                side["country_id"] = country_ids[0]
+            elif country_ids:
+                side["country_ids"] = country_ids
         if seed not in (None, ""):
             side["seed"] = seed
         if rank not in (None, ""):
