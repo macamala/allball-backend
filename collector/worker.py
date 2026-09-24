@@ -429,6 +429,13 @@ def _maybe_log_breadth(db, *, force: bool = False) -> None:
     if not force and now_audit - _breadth_logged_at < 300:
         return
     try:
+        from collector.integrity import restore_orphaned_duplicate_football
+
+        orphan_guard = restore_orphaned_duplicate_football(db)
+        if orphan_guard.get("restored"):
+            db.commit()
+            logger.info("ORPHAN_DUPLICATE_GUARD %s", orphan_guard)
+
         from collector.asset_propagation import propagate_identity_assets
 
         propagation = propagate_identity_assets(db)
