@@ -13,7 +13,7 @@ from typing import Any, Callable, Dict, Optional, Set
 
 from sqlalchemy.orm import Session
 
-from collector.adapters_wta import BASE, discover_current_tournaments, match_to_event
+from collector.adapters_wta import BASE, _player_country_map, discover_current_tournaments, match_to_event
 from collector.competition_identity import unique_label_competition
 from collector.http import fetch_url
 from collector.lock import lock_status
@@ -239,6 +239,12 @@ def run_breadth_ingest(
             source_competition_id=native_id,
             meta=meta,
         )
+        player_countries: Dict[str, str] = {}
+        players_result = fetch(f"{BASE}/tournaments/{group_id}/{year}/players")
+        stats["requests"] += 1
+        if getattr(players_result, "ok", False):
+            player_countries = _player_country_map(getattr(players_result, "payload", None))
+
         result = fetch(f"{BASE}/tournaments/{group_id}/{year}/matches")
         stats["requests"] += 1
         if not getattr(result, "ok", False) or not isinstance(getattr(result, "payload", None), dict):
@@ -249,7 +255,12 @@ def run_breadth_ingest(
         stats["events"] += len(rows)
         written = eligible = 0
         for row in rows:
-            event = match_to_event(row, competition_id, meta)
+            event = match_to_event(
+                row,
+                competition_id,
+                meta,
+                player_countries=player_countries,
+            )
             if not event:
                 continue
             if not _event_in_window(event, low=low, high=high):
@@ -283,6 +294,7 @@ def run_breadth_ingest(
             "upstream": len(rows),
             "eligible": eligible,
             "ingested": written,
+            "player_country_keys": len(player_countries),
         }
         db.commit()
         if heartbeat:
