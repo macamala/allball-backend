@@ -557,6 +557,16 @@ def _maybe_log_breadth(db, *, force: bool = False) -> None:
                 db.rollback()
 
             try:
+                from collector.cyberscore_dota_asset_backfill import run_if_due as run_cyberscore_dota_assets_prelock
+
+                cyberscore_dota_assets = run_cyberscore_dota_assets_prelock(db)
+                if cyberscore_dota_assets:
+                    logger.info("PRELOCK_CYBERSCORE_DOTA_ASSETS %s", cyberscore_dota_assets)
+            except Exception:
+                logger.exception("Pre-lock CyberScore Dota artwork repair failed")
+                db.rollback()
+
+            try:
                 from collector.thesportsdb_asset_backfill import run_if_due as run_tsdb_assets_prelock
 
                 tsdb_assets = run_tsdb_assets_prelock(db)
