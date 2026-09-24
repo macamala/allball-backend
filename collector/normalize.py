@@ -164,7 +164,7 @@ def normalize_event(raw: Dict[str, Any], *, sport_id: str, competition_id: str) 
         "walkover": raw.get("walkover"),
         "forfeit": raw.get("forfeit"),
         "retrieved_at": raw.get("retrieved_at") or raw.get("source_fetch_time"),
-        "source_fetch_time": raw.get("source_fetch_time") or raw.get("retrieved_at"),
+        "source_fetch_time": raw.get("source_fetch_time") or raw.get("retrieved_at") or raw.get("fetch_completed_at"),
         "source_event_updated_at": raw.get("source_event_updated_at") or raw.get("event_updated_at"),
         "observed_at": raw.get("observed_at")
         or raw.get("source_event_updated_at")
