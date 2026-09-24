@@ -896,13 +896,38 @@ def parse_sofa_lineups(payload: Any) -> Optional[Dict[str, Any]]:
         bench = []
         for player in blob.get("players") or []:
             info = player.get("player") if isinstance(player, dict) else {}
+            player_id = (info or {}).get("id") or player.get("playerId") or player.get("id")
+            country = (
+                (info or {}).get("country")
+                or (info or {}).get("countryCode")
+                or player.get("country")
+                or player.get("countryCode")
+                or player.get("nationality")
+            )
+            if isinstance(country, dict):
+                country = (
+                    country.get("alpha2")
+                    or country.get("alpha3")
+                    or country.get("code")
+                    or country.get("name")
+                )
+            image = (
+                (info or {}).get("image")
+                or (info or {}).get("photo")
+                or player.get("image")
+                or player.get("photo")
+            )
+            if not image and str(player_id or "").isdigit():
+                image = f"https://img.sofascore.com/api/v1/player/{player_id}/image"
             row = {
-                "id": (info or {}).get("id") or player.get("playerId") or player.get("id"),
+                "id": player_id,
                 "name": (info or {}).get("name") or player.get("name"),
                 "number": player.get("jerseyNumber") or (info or {}).get("jerseyNumber"),
                 "position": player.get("position") or (info or {}).get("position"),
+                "captain": bool(player.get("captain") or player.get("isCaptain")),
                 "rating": player.get("rating"),
-                "image": (info or {}).get("image") or (info or {}).get("photo") or player.get("image") or player.get("photo"),
+                "image": image,
+                "country_id": country or None,
             }
             if player.get("substitute"):
                 bench.append(row)
@@ -919,7 +944,10 @@ def parse_sofa_lineups(payload: Any) -> Optional[Dict[str, Any]]:
     away = pack(payload.get("away"))
     if not home["start"] and not away["start"]:
         return None
-    return {"home": home, "away": away}
+    result = {"home": home, "away": away}
+    if payload.get("confirmed") is not None:
+        result["confirmed"] = bool(payload.get("confirmed"))
+    return result
 
 
 def parse_mlb_live(payload: Any) -> Dict[str, Any]:
