@@ -82,6 +82,24 @@ COUNTRY_PREFIX = {
     "czech": ("Czech Republic", "cz", SCOPE_DOMESTIC),
     "denmark": ("Denmark", "dk", SCOPE_DOMESTIC),
     "ecuador": ("Ecuador", "ec", SCOPE_DOMESTIC),
+    "estonia": ("Estonia", "ee", SCOPE_DOMESTIC),
+    "latvia": ("Latvia", "lv", SCOPE_DOMESTIC),
+    "lithuania": ("Lithuania", "lt", SCOPE_DOMESTIC),
+    "singapore": ("Singapore", "sg", SCOPE_DOMESTIC),
+    "puerto-rico": ("Puerto Rico", "pr", SCOPE_DOMESTIC),
+    "el-salvador": ("El Salvador", "sv", SCOPE_DOMESTIC),
+    "taiwan": ("Taiwan", "tw", SCOPE_DOMESTIC),
+    "israel": ("Israel", "il", SCOPE_DOMESTIC),
+    "qatar": ("Qatar", "qa", SCOPE_DOMESTIC),
+    "bahrain": ("Bahrain", "bh", SCOPE_DOMESTIC),
+    "philippines": ("Philippines", "ph", SCOPE_DOMESTIC),
+    "thailand": ("Thailand", "th", SCOPE_DOMESTIC),
+    "south-korea": ("South Korea", "kr", SCOPE_DOMESTIC),
+    "new-zealand": ("New Zealand", "nz", SCOPE_DOMESTIC),
+    "dominican-republic": ("Dominican Republic", "do", SCOPE_DOMESTIC),
+    "guatemala": ("Guatemala", "gt", SCOPE_DOMESTIC),
+    "nigeria": ("Nigeria", "ng", SCOPE_DOMESTIC),
+    "ghana": ("Ghana", "gh", SCOPE_DOMESTIC),
     "egypt": ("Egypt", "eg", SCOPE_DOMESTIC),
     "england": ("England", "england", SCOPE_DOMESTIC),
     "finland": ("Finland", "fi", SCOPE_DOMESTIC),
@@ -330,6 +348,25 @@ def _prefix_geo(key: str) -> Optional[tuple]:
     return None
 
 
+def _embedded_geo(value: Any) -> Optional[tuple]:
+    """Infer one unambiguous country token from a dynamic competition id/name."""
+    slug = re.sub(r"[^a-z0-9]+", "-", str(value or "").strip().lower()).strip("-")
+    if not slug:
+        return None
+    spans = []
+    found = []
+    for country_slug in sorted(COUNTRY_PREFIX, key=len, reverse=True):
+        for match in re.finditer(rf"(?:^|-){re.escape(country_slug)}(?:-|$)", slug):
+            start, end = match.span()
+            if any(not (end <= left or start >= right) for left, right in spans):
+                continue
+            spans.append((start, end))
+            found.append(COUNTRY_PREFIX[country_slug])
+            break
+    unique = {(row[1], row[2]): row for row in found}
+    return next(iter(unique.values())) if len(unique) == 1 else None
+
+
 def _from_registry(key: str) -> Dict[str, Any]:
     row = get_competition(key) or {}
     country_id = row.get("country_id")
@@ -338,7 +375,7 @@ def _from_registry(key: str) -> Dict[str, Any]:
         country_id = None
     geo = ""
     code = country_id
-    scope = SCOPE_DOMESTIC
+    scope = ""
     if country_id in {"england", "scotland", "wales", "northern-ireland"}:
         geo = label_for(country_id)
         code = country_id
@@ -388,6 +425,10 @@ def metadata_for(competition_key: str, sport: str = "") -> Dict[str, Any]:
         geography = explicit["geography_label"]
         country_code = explicit.get("country_code")
         scope = explicit.get("scope_type") or scope
+    if not geography:
+        embedded = _embedded_geo(key)
+        if embedded:
+            geography, country_code, scope = embedded
     if geography.lower().replace("-", " ") in SPORT_GEOGRAPHY_BLOCKLIST or geography.lower() == sport_id.replace("-", " "):
         geography = ""
         country_code = None
@@ -439,6 +480,20 @@ def attach_competition_metadata(event: Dict[str, Any]) -> Dict[str, Any]:
         event["country_id"] = source_geo["id"]
         event["scope_type"] = SCOPE_DOMESTIC
         event["country_based"] = True
+    if not event.get("geography_label"):
+        source_label = (
+            event.get("source_competition_name")
+            or event.get("competition_name")
+            or event.get("competition")
+            or ""
+        )
+        embedded = _embedded_geo(source_label)
+        if embedded:
+            geography, country_code, scope = embedded
+            event["geography_label"] = geography
+            event["country_id"] = country_code
+            event["scope_type"] = scope
+            event["country_based"] = scope == SCOPE_DOMESTIC
     if meta.get("logo") and not event.get("competition_logo"):
         event["competition_logo"] = meta["logo"]
     return event
