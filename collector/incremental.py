@@ -33,9 +33,9 @@ from collector.util import load_json
 
 
 MAX_LOGICAL = 80
-MAX_PHYSICAL = 12
+MAX_PHYSICAL = 18
 MAX_LIVE_PHYSICAL = 8
-MAX_BACKGROUND_PHYSICAL = 4
+MAX_BACKGROUND_PHYSICAL = 8
 VERIFICATION_EVERY = 12
 STARVE_SECONDS = 600
 LIVE_STARVE_SECONDS = 90
@@ -492,7 +492,12 @@ def select_fair_groups(
     other_groups = [group for group in groups if _lane(group) == 3]
     live_family_count = len({_family(group) for group in p0})
     background_due_families = len({_family(group) for group in other_groups if not family_blocks_live_path(_family(group))})
-    live_cap = min(max_physical, max(MAX_LIVE_PHYSICAL, live_family_count))
+    has_liveish_work = bool(p0 or p1 or p2)
+    live_cap = (
+        min(max_physical, max(MAX_LIVE_PHYSICAL, live_family_count))
+        if has_liveish_work
+        else 0
+    )
     background_cap = min(MAX_BACKGROUND_PHYSICAL, max(0, max_physical - live_cap))
 
     live_taken = _family_first(p0, live_cap, extra_urls=False)
@@ -500,6 +505,16 @@ def select_fair_groups(
     live_taken += _family_first(p1, leftover_live)
     leftover_live = max(0, live_cap - live_taken)
     live_taken += _family_first(p2, leftover_live)
+
+    # Do not leave reserved live capacity idle when there are fewer live-ish
+    # request groups than the reservation. Donate unused slots to the
+    # background lane, still bounded by MAX_BACKGROUND_PHYSICAL.
+    unused_live_capacity = max(0, live_cap - live_taken)
+    if unused_live_capacity:
+        background_cap = min(
+            MAX_BACKGROUND_PHYSICAL,
+            background_cap + unused_live_capacity,
+        )
 
     selected_live_family = {_family(group) for group in selected if _lane(group) == 0}
     leftover_unselected_live = [
