@@ -132,6 +132,7 @@ EXTRA_PERSIST_KEYS = (
     "source_event_id",
     "source_event_ids",
     "sport_detail",
+    "competition_logo",
 )
 
 _DATE = re.compile(
