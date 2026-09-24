@@ -156,6 +156,36 @@ def _event_rows(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
     return out
 
 
+def _espn_logo(node: Any) -> str:
+    if not isinstance(node, dict):
+        return ""
+    direct = node.get("logo") or node.get("image") or node.get("crest")
+    if isinstance(direct, str) and direct.strip():
+        return direct.strip()
+    team = node.get("team") if isinstance(node.get("team"), dict) else {}
+    direct = team.get("logo") or team.get("image") or team.get("crest")
+    if isinstance(direct, str) and direct.strip():
+        return direct.strip()
+    for owner in (node, team):
+        logos = owner.get("logos") if isinstance(owner, dict) else None
+        if isinstance(logos, list):
+            for item in logos:
+                if isinstance(item, dict):
+                    href = item.get("href") or item.get("url")
+                    if isinstance(href, str) and href.strip():
+                        return href.strip()
+    return ""
+
+
+def _espn_league_logo(leagues: Any, board: Dict[str, Any]) -> str:
+    league = leagues[0] if isinstance(leagues, list) and leagues and isinstance(leagues[0], dict) else {}
+    for owner in (league, board.get("league") if isinstance(board.get("league"), dict) else {}):
+        logo = _espn_logo(owner)
+        if logo:
+            return logo
+    return ""
+
+
 def _sides(teams: List[Any]) -> tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
     home = next((item for item in teams if isinstance(item, dict) and (item.get("homeAway") == "home" or item.get("isHome") is True)), None)
     away = next((item for item in teams if isinstance(item, dict) and (item.get("homeAway") == "away" or item.get("isHome") is False)), None)
@@ -230,8 +260,16 @@ def parse_espn_scoreboard(payload: Any, *, sport: str = "") -> List[Dict[str, An
             events.append(
                 {
                     "id": str(comp.get("id") or row.get("id") or ""),
-                    "home": {"name": competitor_name(home) or home.get("displayName") or home.get("abbrev")},
-                    "away": {"name": competitor_name(away) or away.get("displayName") or away.get("abbrev")},
+                    "home": {
+                        "id": str(home.get("id") or ((home.get("team") or {}).get("id") if isinstance(home.get("team"), dict) else "") or ""),
+                        "name": competitor_name(home) or home.get("displayName") or home.get("abbrev"),
+                        "logo": _espn_logo(home),
+                    },
+                    "away": {
+                        "id": str(away.get("id") or ((away.get("team") or {}).get("id") if isinstance(away.get("team"), dict) else "") or ""),
+                        "name": competitor_name(away) or away.get("displayName") or away.get("abbrev"),
+                        "logo": _espn_logo(away),
+                    },
                     "status": status,
                     "score": {key: value for key, value in score.items() if value is not None},
                     "start_time": row.get("date") or comp.get("date") or comp.get("startDate"),
@@ -243,6 +281,7 @@ def parse_espn_scoreboard(payload: Any, *, sport: str = "") -> List[Dict[str, An
                         if leagues and isinstance(leagues[0], dict)
                         else None
                     ),
+                    "competition_logo": _espn_league_logo(leagues, board),
                     "season": ((row.get("season") or {}).get("year") if isinstance(row.get("season"), dict) else row.get("season")),
                     "periods": periods,
                     "winner": competitor_name(home)
