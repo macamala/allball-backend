@@ -295,6 +295,17 @@ def _jsonld_node(node: Any) -> List[Dict[str, Any]]:
             source_id=str(node.get("@id") or node.get("identifier") or name),
         )
         if event:
+            home_raw = node.get("homeTeam")
+            away_raw = node.get("awayTeam")
+            if isinstance(competitors, list) and len(competitors) >= 2:
+                home_raw = competitors[0]
+                away_raw = competitors[1]
+            home_identity = _identity_payload(home_raw, home)
+            away_identity = _identity_payload(away_raw, away)
+            if any(home_identity.get(key) for key in ("id", "logo", "country_id")):
+                event["home"] = {**(event.get("home") or {}), **{k: v for k, v in home_identity.items() if v not in (None, "")}}
+            if any(away_identity.get(key) for key in ("id", "logo", "country_id")):
+                event["away"] = {**(event.get("away") or {}), **{k: v for k, v in away_identity.items() if v not in (None, "")}}
             out.append(event)
     for key in ("@graph", "itemListElement", "subEvent", "event"):
         if key in node:
