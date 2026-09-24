@@ -32,6 +32,7 @@ FUTURE_DAYS = 15
 MAX_SEARCH_LOOKUPS = 90
 
 _next_run_at = 0.0
+_cleanup_done = False
 _last_search: Dict[str, float] = {}
 
 
@@ -260,7 +261,12 @@ def _apply_asset(
 
 
 def cleanup_unsafe_prior_search_assets(db: Session) -> Dict[str, int]:
-    """Remove all old search-derived crests before league-roster revalidation."""
+    """Remove old search-derived crests once, before league-roster revalidation."""
+    global _cleanup_done
+    if _cleanup_done:
+        return {"rows_updated": 0, "logos_removed": 0}
+    _cleanup_done = True
+
     rows = (
         db.query(SportsEvent)
         .filter(
