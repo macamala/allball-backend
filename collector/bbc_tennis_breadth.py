@@ -26,7 +26,7 @@ from collector.util import dump_json, load_json, parse_datetime, slugify
 
 logger = logging.getLogger(__name__)
 
-JOB_KEY = "bbc-tennis-breadth-v1"
+JOB_KEY = "bbc-tennis-breadth-v2"
 BASE = "https://www.bbc.com/sport/tennis/scores-and-schedule"
 
 
