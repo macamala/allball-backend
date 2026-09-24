@@ -140,8 +140,16 @@ _DATE = re.compile(
     r"\d{4}-\d{2}-\d{2}([ T]\d{1,2}:\d{2}(:\d{2})?)?|"
     r"\d{1,2}\s+\w+\s+\d{4})$"
 )
-_TIME = re.compile(r"^\d{1,2}:\d{2}(:\d{2})?(\s*(am|pm))?$", re.I)
+_TIME = re.compile(r"^(?:\d{1,2}:\d{2}(?::\d{2})?(?:\s*(?:am|pm))?|\d{1,2}h\d{2})$", re.I)
 _SCORE = re.compile(r"^\d{1,3}\s*[-–:/]\s*\d{1,3}$")
+_NUMERIC_CELL = re.compile(r"^[\d\s,.;:+|/\\-]+$")
+_SOURCE_TEXT_JUNK = re.compile(
+    r"(?:\bh2h\s+stats\b|\ba\s+visitor\s+from\b|\bis\s+analyzing\b|"
+    r"\bminutes?\s+ago\b|\bsquad\s+update\b|\btables?\s+fixtures?\s+results?\b|"
+    r"\blivescore\s+hent\s+kamprapport\b|\bhighlights?\b.*\b(?:cup|league|championship)\b|"
+    r"^mt:\s*\d+)",
+    re.I,
+)
 _HTML = re.compile(r"<[^>]+>")
 _URL = re.compile(r"https?://|www\.", re.I)
 _HEADING = re.compile(
@@ -166,7 +174,11 @@ def quality_flags_for_name(name: Optional[str]) -> List[str]:
         flags.append("name_is_time")
     if _SCORE.match(compact):
         flags.append("name_is_score")
-    if _HEADING.match(compact):
+    if _NUMERIC_CELL.match(compact) and any(ch.isdigit() for ch in compact):
+        flags.append("numeric_table_cell")
+    if _SOURCE_TEXT_JUNK.search(compact):
+        flags.append("source_text_contamination")
+    if _HEADING.match(compact) or compact.lower() in {"total", "final"}:
         flags.append("generic_heading")
     return flags
 
@@ -200,7 +212,17 @@ def quality_flags_for_event(event: Dict[str, Any]) -> List[str]:
 def is_display_eligible(event: Dict[str, Any]) -> bool:
     if event.get("display_eligible") is False:
         return False
-    blocking = {"name_is_date", "name_is_time", "name_is_score", "html_in_name", "generic_heading", "url_in_name", "implausible_football_score"}
+    blocking = {
+        "name_is_date",
+        "name_is_time",
+        "name_is_score",
+        "numeric_table_cell",
+        "source_text_contamination",
+        "html_in_name",
+        "generic_heading",
+        "url_in_name",
+        "implausible_football_score",
+    }
     for flag in quality_flags_for_event(event):
         kind = flag.split(":", 1)[-1]
         if kind in blocking:
