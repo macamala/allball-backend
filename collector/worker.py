@@ -1089,6 +1089,7 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
                             "eligible": wta_breadth.get("eligible"),
                             "ingested": wta_breadth.get("ingested"),
                             "http_errors": wta_breadth.get("http_errors"),
+                            "country_repair": wta_breadth.get("country_repair"),
                             "by_competition": wta_breadth.get("by_competition"),
                         },
                     )
