@@ -83,6 +83,48 @@ def _asset(side: Any) -> Dict[str, str]:
     return out
 
 
+def _fotmob_identity_context(row: SportsEvent, extra: Dict[str, Any]) -> bool:
+    family = str(extra.get("source_family") or "").strip().lower()
+    primary = str(getattr(row, "primary_source_id", "") or "").strip().lower()
+    if family == "fotmob" or primary.startswith("fotmob"):
+        return True
+    field_sources = extra.get("field_sources") if isinstance(extra.get("field_sources"), dict) else {}
+    return any("fotmob" in str(value or "").lower() for value in field_sources.values())
+
+
+def _derive_fotmob_assets(row: SportsEvent, extra: Dict[str, Any], participants: Dict[str, Any]) -> Tuple[bool, bool, int]:
+    """Derive official FotMob CDN artwork only when stored IDs are known to be FotMob-owned."""
+    if not _fotmob_identity_context(row, extra):
+        return False, False, 0
+    row_changed = False
+    extra_changed = False
+    participant_filled = 0
+    competition_id = str(extra.get("source_competition_id") or "").strip()
+    if competition_id and competition_id.isdigit() and not extra.get("competition_logo"):
+        extra["competition_logo"] = (
+            f"https://images.fotmob.com/image_resources/logo/leaguelogo/{competition_id}.png"
+        )
+        row_changed = True
+        extra_changed = True
+    field_sources = extra.get("field_sources") if isinstance(extra.get("field_sources"), dict) else {}
+    for side_name in ("home", "away", "participant_a", "participant_b"):
+        side = participants.get(side_name)
+        if not isinstance(side, dict) or _asset(side).get("logo"):
+            continue
+        source_owner = str(field_sources.get(side_name) or "").lower()
+        if source_owner and "fotmob" not in source_owner:
+            continue
+        team_id = str(side.get("id") or "").strip()
+        if not team_id.isdigit():
+            continue
+        merged = dict(side)
+        merged["logo"] = f"https://images.fotmob.com/image_resources/logo/teamlogo/{team_id}.png"
+        participants[side_name] = merged
+        row_changed = True
+        participant_filled += 1
+    return row_changed, extra_changed, participant_filled
+
+
 def propagate_identity_assets(db) -> Dict[str, int]:
     rows = (
         db.query(SportsEvent)
@@ -124,6 +166,8 @@ def propagate_identity_assets(db) -> Dict[str, int]:
         "competition_logos_filled": 0,
         "participant_logos_filled": 0,
         "participant_countries_filled": 0,
+        "source_native_competition_logos_filled": 0,
+        "source_native_participant_logos_filled": 0,
     }
 
     # Pass 2: fill blanks only. Never overwrite a non-empty value.
@@ -135,6 +179,17 @@ def propagate_identity_assets(db) -> Dict[str, int]:
         extra = load_json(row.extra_json, {}) or {}
         row_changed = False
         extra_changed = False
+
+        direct_changed, direct_extra_changed, direct_participants = _derive_fotmob_assets(
+            row, extra, participants
+        )
+        if direct_changed:
+            row_changed = True
+        if direct_extra_changed:
+            extra_changed = True
+            stats["source_native_competition_logos_filled"] += 1
+        if direct_participants:
+            stats["source_native_participant_logos_filled"] += direct_participants
 
         if not extra.get("competition_logo"):
             logo = competition_assets.get((sport, competition))
