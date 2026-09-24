@@ -21,20 +21,28 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Preserve exact source used by these checks
-        run: git archive --format=zip HEAD > /tmp/ninkosports-recovery-source.zip
-      - uses: actions/upload-artifact@v4
-        with:
-          name: results-recovery-source
-          path: /tmp/ninkosports-recovery-source.zip
-          retention-days: 2
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
+      - name: Audit public football responses without changing production
+        run: python audit/recovery_probe.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: score-public-audit
+          path: /tmp/score-public-audit
+          retention-days: 3
+      - name: Install existing project dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Package missing dependencies for offline local tests
+        run: python -m pip download --dest /tmp/recovery-wheels feedparser==6.0.11 apscheduler python-slugify 'openai<2'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: recovery-test-dependencies
+          path: /tmp/recovery-wheels
+          retention-days: 2
       - name: Check syntax
         run: python -m compileall -q collector tests
-      - name: Install existing project dependencies
-        run: python -m pip install -r requirements.txt pytest
       - name: Check scheduler and football normalization
         run: python -m pytest -q tests/test_incremental_scheduler.py tests/test_collector_architecture.py --junitxml=/tmp/results-recovery-tests.xml
       - uses: actions/upload-artifact@v4
