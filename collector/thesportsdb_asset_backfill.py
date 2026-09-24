@@ -32,6 +32,8 @@ MAX_LEAGUES_PER_RUN = 8
 
 _next_run_at = 0.0
 _last_fetch: Dict[str, float] = {}
+_TEAM_LAST_FETCH: Dict[str, float] = {}
+MAX_DIRECT_TEAM_LOOKUPS = 16
 
 TSDB_BY_COMP = {
     row["competition_id"]: row
@@ -51,6 +53,102 @@ def _missing_logo(side: Any) -> bool:
         or side.get("team_logo")
         or side.get("teamLogo")
     )
+
+
+def _team_lookup_asset(payload: Any) -> Dict[str, str]:
+    rows = payload.get("teams") if isinstance(payload, dict) else []
+    if not isinstance(rows, list) or not rows or not isinstance(rows[0], dict):
+        return {}
+    item = rows[0]
+    logo = str(
+        item.get("strBadge")
+        or item.get("strTeamBadge")
+        or item.get("strLogo")
+        or item.get("strTeamLogo")
+        or ""
+    ).strip()
+    if not logo:
+        return {}
+    return {
+        "id": str(item.get("idTeam") or "").strip(),
+        "name": str(item.get("strTeam") or item.get("strTeamShort") or "").strip(),
+        "logo": logo,
+        "country_id": str(item.get("strCountry") or "").strip(),
+    }
+
+
+def _direct_team_ids(db: Session, now: float) -> List[str]:
+    window_start = datetime.utcnow() - timedelta(days=1)
+    window_end = datetime.utcnow() + timedelta(days=3)
+    counts: Dict[str, int] = defaultdict(int)
+    rows = (
+        db.query(SportsEvent)
+        .filter(
+            SportsEvent.display_eligible.is_(True),
+            SportsEvent.start_time >= window_start,
+            SportsEvent.start_time <= window_end,
+        )
+        .all()
+    )
+    for row in rows:
+        extra = load_json(row.extra_json, {}) or {}
+        if str(extra.get("source_family") or "").strip().lower() != "thesportsdb":
+            continue
+        participants = load_json(row.participants_json, {}) or {}
+        for key in ("home", "away"):
+            side = participants.get(key)
+            if not isinstance(side, dict) or not _missing_logo(side):
+                continue
+            team_id = str(side.get("id") or "").strip()
+            if not team_id.isdigit():
+                continue
+            last = float(_TEAM_LAST_FETCH.get(team_id) or 0.0)
+            if now - last >= LEAGUE_TTL_S:
+                counts[team_id] += 1
+    return [
+        team_id
+        for team_id, _count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+    ][:MAX_DIRECT_TEAM_LOOKUPS]
+
+
+def _apply_direct_team_asset(db: Session, team_id: str, asset: Dict[str, str]) -> int:
+    if not asset.get("logo"):
+        return 0
+    rows = db.query(SportsEvent).filter(SportsEvent.display_eligible.is_(True)).all()
+    updated = 0
+    for row in rows:
+        extra = load_json(row.extra_json, {}) or {}
+        if str(extra.get("source_family") or "").strip().lower() != "thesportsdb":
+            continue
+        participants = load_json(row.participants_json, {}) or {}
+        changed = False
+        for key, alt in (("home", "participant_a"), ("away", "participant_b")):
+            side = participants.get(key)
+            if not isinstance(side, dict) or str(side.get("id") or "").strip() != team_id:
+                continue
+            if not _missing_logo(side):
+                continue
+            merged = dict(side)
+            merged["logo"] = asset["logo"]
+            if not str(merged.get("country_id") or "").strip() and asset.get("country_id"):
+                merged["country_id"] = asset["country_id"]
+            participants[key] = merged
+            alt_side = participants.get(alt)
+            if isinstance(alt_side, dict) and _missing_logo(alt_side):
+                alt_merged = dict(alt_side)
+                alt_merged["logo"] = asset["logo"]
+                participants[alt] = alt_merged
+            changed = True
+        if changed:
+            row.participants_json = dump_json(participants)
+            note_list_invalidation(
+                db,
+                sport=row.sport_id,
+                competition=row.competition_id,
+                start_time=row.start_time,
+            )
+            updated += 1
+    return updated
 
 
 def _teams(payload: Any) -> List[Dict[str, str]]:
@@ -181,16 +279,38 @@ def run_if_due(db: Session, *, getter=None, heartbeat=None) -> Optional[Dict[str
     _next_run_at = now + RUN_INTERVAL_S
     getter = getter or fetch_url
     candidates = _candidates(db, now)[:MAX_LEAGUES_PER_RUN]
+    direct_team_ids = _direct_team_ids(db, now)
     stats: Dict[str, Any] = {
-        "status": "ok" if candidates else "idle",
+        "status": "ok" if (candidates or direct_team_ids) else "idle",
         "leagues": 0,
         "requests": 0,
         "rows_updated": 0,
         "participants_filled": 0,
         "competition_logos_filled": 0,
         "http_errors": 0,
+        "direct_team_requests": 0,
+        "direct_team_rows_updated": 0,
         "by_competition": {},
     }
+
+    for team_id in direct_team_ids:
+        result = getter(f"{BASE}/lookupteam.php?id={team_id}")
+        stats["requests"] += 1
+        stats["direct_team_requests"] += 1
+        if heartbeat:
+            heartbeat()
+        _TEAM_LAST_FETCH[team_id] = now
+        if not getattr(result, "ok", False):
+            stats["http_errors"] += 1
+            continue
+        asset = _team_lookup_asset(result.payload)
+        changed = _apply_direct_team_asset(db, team_id, asset)
+        if changed:
+            db.commit()
+            stats["rows_updated"] += changed
+            stats["participants_filled"] += changed
+            stats["direct_team_rows_updated"] += changed
+
     for competition_id, league_id, _missing in candidates:
         team_result = getter(f"{BASE}/lookup_all_teams.php?id={league_id}")
         stats["requests"] += 1
