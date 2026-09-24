@@ -1,5 +1,17 @@
-from collector.adapters_fotmob import parse_fotmob_table
+from collector.adapters_fotmob import FOTMOB_LEAGUES, asset_league_ids, parse_fotmob_table
 from collector.fotmob_asset_backfill import _fill_side, _roster, _unique_match
+
+
+def test_asset_only_fotmob_aliases_resolve_without_enabling_duplicate_ingestion():
+    assert asset_league_ids("football-tun-ligue-1") == ["544"]
+    assert asset_league_ids("football-alg-ligue-1") == ["516"]
+    assert asset_league_ids("football-mar-botola-pro") == ["530"]
+    assert asset_league_ids("tunisia-ligue-1") == ["544"]
+
+    assert "football-tun-ligue-1" not in FOTMOB_LEAGUES
+    assert "football-alg-ligue-1" not in FOTMOB_LEAGUES
+    assert "football-mar-botola-pro" not in FOTMOB_LEAGUES
+
 
 
 def test_fotmob_table_preserves_team_id_and_crest():
