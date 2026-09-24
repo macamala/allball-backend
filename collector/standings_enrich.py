@@ -47,9 +47,21 @@ def parse_sofa_dynamic_standings(payload: Any, *, sport_id: Optional[str] = None
                 continue
             scores_for = item.get("scoresFor")
             scores_against = item.get("scoresAgainst")
+            team_id = str(team.get("id") or "").strip() if isinstance(team, dict) else ""
+            team_country = team.get("country") if isinstance(team, dict) else None
+            if isinstance(team_country, dict):
+                team_country = (
+                    team_country.get("alpha2")
+                    or team_country.get("alpha3")
+                    or team_country.get("code")
+                    or team_country.get("name")
+                )
             row = {
                 "position": item.get("position") or item.get("rank"),
                 "team": name,
+                "team_id": team_id or None,
+                "logo": f"https://img.sofascore.com/api/v1/team/{team_id}/image" if team_id else None,
+                "country_id": team_country or None,
                 "played": item.get("matches") or item.get("played") or item.get("gamesPlayed"),
                 "wins": item.get("wins"),
                 "draws": item.get("draws"),
@@ -225,10 +237,16 @@ def parse_nhl_standings(payload: Any) -> List[Dict[str, Any]]:
                 gd = int(gf) - int(ga)
             except (TypeError, ValueError):
                 gd = None
+        abbrev = item.get("teamAbbrev") or item.get("teamAbbreviation") or {}
+        if isinstance(abbrev, dict):
+            abbrev = abbrev.get("default") or abbrev.get("name")
+        abbrev = str(abbrev or "").strip().upper()
         out.append(
             {
                 "position": item.get("leagueSequence") or item.get("wildcardSequence"),
                 "team": name,
+                "team_id": abbrev or None,
+                "logo": f"https://assets.nhle.com/logos/nhl/svg/{abbrev}_light.svg" if abbrev else None,
                 "played": item.get("gamesPlayed"),
                 "wins": item.get("wins"),
                 "losses": item.get("losses"),
@@ -251,14 +269,18 @@ def parse_mlb_standings(payload: Any) -> List[Dict[str, Any]]:
         for item in (block or {}).get("teamRecords") or []:
             if not isinstance(item, dict):
                 continue
-            team = (item.get("team") or {}).get("name")
+            team_row = item.get("team") or {}
+            team = team_row.get("name")
             if not team:
                 continue
+            team_id = str(team_row.get("id") or "").strip()
             league = item.get("leagueRecord") or {}
             out.append(
                 {
                     "position": item.get("divisionRank") or item.get("leagueRank"),
                     "team": team,
+                    "team_id": team_id or None,
+                    "logo": f"https://www.mlbstatic.com/team-logos/{team_id}.svg" if team_id else None,
                     "played": item.get("gamesPlayed"),
                     "wins": league.get("wins") or item.get("wins"),
                     "losses": league.get("losses") or item.get("losses"),
@@ -294,6 +316,8 @@ def parse_squiggle_standings(payload: Any) -> List[Dict[str, Any]]:
             {
                 "position": item.get("rank") or item.get("position"),
                 "team": name,
+                "team_id": str(item.get("id") or item.get("teamid") or item.get("teamId") or "").strip() or None,
+                "logo": item.get("logo") or item.get("image") or None,
                 "played": played,
                 "wins": wins,
                 "losses": losses,
