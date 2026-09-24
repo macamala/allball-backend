@@ -473,6 +473,9 @@ def _consume_result(
                 incoming["source_url"] = config.get("url")
                 incoming = reconcile_live_status(incoming)
                 existing = match_event(db, incoming, source_id=source.source_id)
+                from collector.keeper_revalidation import revalidate_current_keeper
+
+                revalidate_current_keeper(db, existing, incoming, source_id=source.source_id)
                 if existing is not None and event_unchanged(existing, incoming):
                     incr("unchanged_skipped")
                     totals["skipped"] = int(totals.get("skipped") or 0) + 1
