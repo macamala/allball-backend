@@ -28,6 +28,7 @@ from collector.competition_presentation import attach_competition_metadata
 from collector.list_extra import extra_for_list
 from collector.matrix_guard import frozen_competition_ids
 from collector.util import isoformat, load_json
+from collector.verified_participant_assets import verified_participant_logo
 from sports_provider import (
     PROVIDER_NOT_CONNECTED,
     NormalizedEvent,
@@ -1216,6 +1217,21 @@ class NinkoCollectedSportsDataProvider:
         list_mode: bool = False,
     ) -> NormalizedEvent:
         participants = load_json(row.participants_json, {}) or {}
+        for side_name in ("home", "away", "participant_a", "participant_b"):
+            side = participants.get(side_name)
+            if not isinstance(side, dict):
+                continue
+            has_logo = any(
+                side.get(key)
+                for key in ("logo", "image", "crest", "badge", "team_logo", "teamLogo", "logo_url", "logoUrl")
+            )
+            if has_logo:
+                continue
+            verified_logo = verified_participant_logo(str(row.sport_id or ""), side)
+            if verified_logo:
+                merged = dict(side)
+                merged["logo"] = verified_logo
+                participants[side_name] = merged
         score = load_json(row.score_json, {}) or {}
         extra = extra_for_list(row) if not include_detail else (load_json(row.extra_json, {}) or {})
         if not include_detail and (
