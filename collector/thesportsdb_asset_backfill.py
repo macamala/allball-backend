@@ -9,12 +9,14 @@ identity matching. Existing ids/logos are never overwritten.
 from __future__ import annotations
 
 import time
+from datetime import datetime, timedelta
 from collections import defaultdict
 from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy.orm import Session
 
 from collector.adapters import FetchResult
+from collector.cache import note_list_invalidation
 from collector.adapters_thesportsdb import BASE
 from collector.http import fetch_url
 from collector.list_extra import store_list_extra
@@ -135,6 +137,9 @@ def _unique_match(name: str, roster: List[Dict[str, str]]) -> Optional[Dict[str,
 
 def _candidates(db: Session, now: float) -> List[Tuple[str, str, int]]:
     counts: Dict[str, int] = defaultdict(int)
+    priority: Dict[str, int] = defaultdict(int)
+    window_start = datetime.utcnow() - timedelta(days=1)
+    window_end = datetime.utcnow() + timedelta(days=3)
     rows = (
         db.query(SportsEvent)
         .filter(SportsEvent.display_eligible.is_(True))
@@ -152,6 +157,8 @@ def _candidates(db: Session, now: float) -> List[Tuple[str, str, int]]:
             if isinstance(participants.get(key), dict) and _missing_logo(participants.get(key))
         )
         counts[competition_id] += missing
+        if missing and row.start_time and window_start <= row.start_time <= window_end:
+            priority[competition_id] += 100 * missing
     output = []
     for competition_id, missing in counts.items():
         if not missing:
@@ -162,7 +169,7 @@ def _candidates(db: Session, now: float) -> List[Tuple[str, str, int]]:
         league_id = str(TSDB_BY_COMP[competition_id].get("source_competition_id") or "")
         if league_id.isdigit():
             output.append((competition_id, league_id, missing))
-    output.sort(key=lambda item: (-item[2], item[0]))
+    output.sort(key=lambda item: (-(priority.get(item[0], 0) + item[2]), item[0]))
     return output
 
 
@@ -250,6 +257,12 @@ def run_if_due(db: Session, *, getter=None, heartbeat=None) -> Optional[Dict[str
                 row.participants_json = dump_json(participants)
                 row.extra_json = dump_json(extra)
                 store_list_extra(row, extra)
+                note_list_invalidation(
+                    db,
+                    sport=row.sport_id,
+                    competition=row.competition_id,
+                    start_time=row.start_time,
+                )
                 comp_rows_updated += 1
 
         if comp_rows_updated:
