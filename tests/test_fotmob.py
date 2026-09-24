@@ -107,3 +107,72 @@ def test_fotmob_preserves_delayed_status_from_reason():
         "france-ligue-1",
     )
     assert event["status"] == "delayed"
+
+
+
+def test_fotmob_live_board_refreshes_after_ttl(monkeypatch):
+    from collector import adapters_fotmob as mod
+
+    calls = []
+    payloads = [
+        {
+            "leagues": [{
+                "id": 212,
+                "name": "Nemzeti Bajnokság I",
+                "matches": [{
+                    "id": 99,
+                    "home": {"name": "A", "score": 0},
+                    "away": {"name": "B", "score": 0},
+                    "status": {"started": True, "finished": False, "scoreStr": "0-0"},
+                }],
+            }]
+        },
+        {
+            "leagues": [{
+                "id": 212,
+                "name": "Nemzeti Bajnokság I",
+                "matches": [{
+                    "id": 99,
+                    "home": {"name": "A", "score": 1},
+                    "away": {"name": "B", "score": 0},
+                    "status": {"started": True, "finished": False, "scoreStr": "1-0"},
+                }],
+            }]
+        },
+    ]
+
+    clock = {"value": 100.0}
+    monkeypatch.setattr(mod.time, "monotonic", lambda: clock["value"])
+
+    def getter(url):
+        calls.append(url)
+        index = 0 if len(calls) <= 2 else 1
+        return FetchResult(ok=True, http_status=200, payload=payloads[index])
+
+    mod._BOARD.clear()
+    mod._BOARD_AT.clear()
+    adapter = FotMobAdapter(getter=getter)
+
+    first = adapter.fetch(FetchRequest(capability="live_scores", competition_id="hungary-nb-i"))
+    assert first.events[0]["score"]["home"] == 0
+
+    clock["value"] += mod.LIVE_BOARD_TTL_SECONDS + 0.1
+    second = adapter.fetch(FetchRequest(capability="live_scores", competition_id="hungary-nb-i"))
+    assert second.events[0]["score"]["home"] == 1
+    assert len(calls) == 4
+
+
+def test_fotmob_live_board_uses_only_yesterday_and_today():
+    from collector import adapters_fotmob as mod
+
+    urls = []
+    def getter(url):
+        urls.append(url)
+        return FetchResult(ok=True, http_status=200, payload={"leagues": []})
+
+    mod._BOARD.clear()
+    mod._BOARD_AT.clear()
+    FotMobAdapter(getter=getter).fetch(
+        FetchRequest(capability="live_scores", competition_id="hungary-nb-i")
+    )
+    assert len(urls) == 2

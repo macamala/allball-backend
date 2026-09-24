@@ -118,6 +118,9 @@ MATCHES_URL = "https://www.fotmob.com/api/data/matches?date={date}"
 SCORE_URL = "https://www.fotmob.com/api/data/match-score?matchId={match_id}"
 
 _BOARD: Dict[str, List[Dict[str, Any]]] = {}
+_BOARD_AT: Dict[str, float] = {}
+LIVE_BOARD_TTL_SECONDS = 5
+FIXTURE_BOARD_TTL_SECONDS = 60
 
 
 def board_dates(*, past_days: int = 3, future_days: int = 1) -> List[str]:
@@ -286,14 +289,23 @@ def match_to_event(match: Dict[str, Any], competition_id: str) -> Optional[Dict[
     }
 
 
-def _load_boards(getter, dates: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+def _load_boards(
+    getter,
+    dates: Optional[List[str]] = None,
+    *,
+    ttl_seconds: int = FIXTURE_BOARD_TTL_SECONDS,
+) -> List[Dict[str, Any]]:
     days = list(dates or _dates())
     cache_key = "d:" + ",".join(days)
+    now_mono = time.monotonic()
     cached = _BOARD.get(cache_key)
-    if cached is not None:
+    cached_at = _BOARD_AT.get(cache_key, 0.0)
+    if cached is not None and now_mono - cached_at < max(0, ttl_seconds):
         return cached
     if dates is None and _BOARD.get("all") is not None:
-        return _BOARD["all"]
+        all_at = _BOARD_AT.get("all", 0.0)
+        if now_mono - all_at < max(0, ttl_seconds):
+            return _BOARD["all"]
     rows: List[Dict[str, Any]] = []
     for day in days:
         url = MATCHES_URL.format(date=day)
@@ -311,8 +323,10 @@ def _load_boards(getter, dates: Optional[List[str]] = None) -> List[Dict[str, An
                 match["_board_date"] = day
                 rows.append(match)
     _BOARD[cache_key] = rows
+    _BOARD_AT[cache_key] = time.monotonic()
     if dates is None:
         _BOARD["all"] = rows
+        _BOARD_AT["all"] = _BOARD_AT[cache_key]
     return rows
 
 
@@ -457,7 +471,18 @@ class FotMobAdapter:
                 parse_status="ok" if unique_rows else "empty",
                 request_count=len(league_ids),
             )
-        matches = _load_boards(self._get)
+        if request.capability == "live_scores":
+            live_dates = board_dates(past_days=1, future_days=0)
+            matches = _load_boards(
+                self._get,
+                dates=live_dates,
+                ttl_seconds=LIVE_BOARD_TTL_SECONDS,
+            )
+        else:
+            matches = _load_boards(
+                self._get,
+                ttl_seconds=FIXTURE_BOARD_TTL_SECONDS,
+            )
         allowed = set(league_ids)
         events: List[Dict[str, Any]] = []
         for match in matches:
