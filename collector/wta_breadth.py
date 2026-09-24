@@ -31,7 +31,7 @@ from collector.util import dump_json, load_json, parse_datetime, slugify
 
 logger = logging.getLogger(__name__)
 
-JOB_KEY = "wta-global-breadth-v6"
+JOB_KEY = "wta-global-breadth-v7"
 SOURCE_ID = "wta-global"
 PUBLIC_BREADTH_STATUS = "single-source-breadth"
 
