@@ -637,6 +637,41 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
                 logger.exception("Source-native football revalidate failed")
                 db.rollback()
 
+            # Fill exact visible team/competition artwork before expensive breadth jobs.
+            # This keeps current score cards complete even when later collectors take longer.
+            try:
+                from collector.thesportsdb_asset_backfill import run_if_due as run_tsdb_asset_backfill_if_due
+
+                def _pulse_tsdb_assets() -> None:
+                    heartbeat_scheduler_lock(db, owner=owner)
+                    db.commit()
+
+                tsdb_assets = run_tsdb_asset_backfill_if_due(
+                    db,
+                    heartbeat=_pulse_tsdb_assets,
+                )
+                if tsdb_assets:
+                    logger.info(
+                        "TheSportsDB artwork backfill %s",
+                        {
+                            "status": tsdb_assets.get("status"),
+                            "leagues": tsdb_assets.get("leagues"),
+                            "requests": tsdb_assets.get("requests"),
+                            "rows_updated": tsdb_assets.get("rows_updated"),
+                            "participants_filled": tsdb_assets.get("participants_filled"),
+                            "competition_logos_filled": tsdb_assets.get("competition_logos_filled"),
+                            "http_errors": tsdb_assets.get("http_errors"),
+                            "direct_team_requests": tsdb_assets.get("direct_team_requests"),
+                            "direct_team_rows_updated": tsdb_assets.get("direct_team_rows_updated"),
+                            "by_competition": tsdb_assets.get("by_competition"),
+                        },
+                    )
+                    if tsdb_assets.get("rows_updated"):
+                        _maybe_log_breadth(db, force=True)
+            except Exception:
+                logger.exception("TheSportsDB artwork backfill failed")
+                db.rollback()
+
             try:
                 from collector.openfootball_breadth import run_if_due as run_openfootball_breadth_if_due
 
@@ -714,37 +749,6 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
                         _maybe_log_breadth(db, force=True)
             except Exception:
                 logger.exception("FotMob identity asset backfill failed")
-                db.rollback()
-
-            try:
-                from collector.thesportsdb_asset_backfill import run_if_due as run_tsdb_asset_backfill_if_due
-
-                def _pulse_tsdb_assets() -> None:
-                    heartbeat_scheduler_lock(db, owner=owner)
-                    db.commit()
-
-                tsdb_assets = run_tsdb_asset_backfill_if_due(
-                    db,
-                    heartbeat=_pulse_tsdb_assets,
-                )
-                if tsdb_assets:
-                    logger.info(
-                        "TheSportsDB artwork backfill %s",
-                        {
-                            "status": tsdb_assets.get("status"),
-                            "leagues": tsdb_assets.get("leagues"),
-                            "requests": tsdb_assets.get("requests"),
-                            "rows_updated": tsdb_assets.get("rows_updated"),
-                            "participants_filled": tsdb_assets.get("participants_filled"),
-                            "competition_logos_filled": tsdb_assets.get("competition_logos_filled"),
-                            "http_errors": tsdb_assets.get("http_errors"),
-                            "by_competition": tsdb_assets.get("by_competition"),
-                        },
-                    )
-                    if tsdb_assets.get("rows_updated"):
-                        _maybe_log_breadth(db, force=True)
-            except Exception:
-                logger.exception("TheSportsDB artwork backfill failed")
                 db.rollback()
 
             try:
