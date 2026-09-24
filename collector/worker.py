@@ -462,9 +462,14 @@ def _maybe_log_breadth(db, *, force: bool = False) -> None:
         public_snapshot = tomorrow_public_football_snapshot()
         logger.info("TOMORROW_FOOTBALL_PUBLIC %s", public_snapshot)
         logger.info("TOMORROW_MULTISPORT_PUBLIC %s", tomorrow_public_multisport_snapshot())
-        from collector.breadth_audit import rolling_multisport_public_snapshot, unknown_sport_rows_snapshot
+        from collector.breadth_audit import (
+            public_football_asset_range_snapshot,
+            rolling_multisport_public_snapshot,
+            unknown_sport_rows_snapshot,
+        )
         windows = rolling_multisport_public_snapshot()
         logger.info("MULTISPORT_PUBLIC_WINDOWS %s", windows)
+        logger.info("FOOTBALL_ASSET_RANGE %s", public_football_asset_range_snapshot())
         today = windows.get("0") or {}
         football_gaps = ((today.get("asset_gap_competitions") or {}).get("football") or {})
         if football_gaps:
