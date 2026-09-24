@@ -196,6 +196,31 @@ def _league_logo(league: Dict[str, Any]) -> str:
     return f"https://images.fotmob.com/image_resources/logo/leaguelogo/{league_id}.png" if league_id else ""
 
 
+def _fotmob_status(status: Dict[str, Any]) -> str:
+    reason = status.get("reason") if isinstance(status.get("reason"), dict) else {}
+    raw_reason = str(reason.get("short") or reason.get("long") or "").strip().lower()
+    normalized = "".join(ch for ch in raw_reason if ch.isalnum())
+
+    # FotMob can keep started=false/finished=false for non-played terminal
+    # states. Preserve that lifecycle instead of silently calling everything
+    # scheduled.
+    if "postp" in normalized or "postpon" in normalized:
+        return "postponed"
+    if "cancel" in normalized or "cancl" in normalized:
+        return "cancelled"
+    if "aband" in normalized or "abnd" in normalized:
+        return "abandoned"
+    if "susp" in normalized:
+        return "suspended"
+    if "delay" in normalized:
+        return "delayed"
+    if bool(status.get("finished")):
+        return "finished"
+    if bool(status.get("started")):
+        return "live"
+    return "scheduled"
+
+
 def _scores(status: Dict[str, Any], match: Dict[str, Any]) -> Tuple[Optional[int], Optional[int]]:
     raw = status.get("scoreStr") or match.get("score")
     if isinstance(raw, str) and "-" in raw:
@@ -215,15 +240,9 @@ def match_to_event(match: Dict[str, Any], competition_id: str) -> Optional[Dict[
         return None
     status_obj = match.get("status") if isinstance(match.get("status"), dict) else {}
     started = bool(status_obj.get("started"))
-    finished = bool(status_obj.get("finished"))
-    if finished:
-        status = "finished"
-    elif started:
-        status = "live"
-    else:
-        status = "scheduled"
+    status = _fotmob_status(status_obj)
     home_score, away_score = _scores(status_obj, match)
-    if status == "scheduled":
+    if not started and status != "finished":
         home_score = None
         away_score = None
     live_time = status_obj.get("liveTime") if isinstance(status_obj.get("liveTime"), dict) else {}
