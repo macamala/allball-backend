@@ -89,6 +89,9 @@ def source_native_public_competition_id(
     if family == "sofascore-web":
         if suffix not in stored or not re.search(r"-t[a-z0-9]+$", stored):
             return None
+    elif family == "fiba-web":
+        if sport != "basketball" or not re.fullmatch(r"basketball-fiba-[a-z0-9-]+", stored):
+            return None
     elif family == "sportscore":
         if not re.fullmatch(rf"{re.escape(sport)}-ss-[a-f0-9]{{10}}-[a-z0-9-]+", stored):
             return None
