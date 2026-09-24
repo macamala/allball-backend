@@ -6,8 +6,11 @@ event dict used by normalize/merge.
 
 from __future__ import annotations
 
+import html as html_lib
 import json
 import re
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from typing import Any, Dict, List
 from urllib.parse import parse_qs, urlparse
 
@@ -31,6 +34,10 @@ def events_for_host(html: str, url: str) -> List[Dict[str, Any]]:
         return parse_nrl(html)
     if "wnba.com" in host:
         return parse_wnba(html)
+    if "eurohandball.com" in host:
+        parsed = parse_eurohandball(html)
+        if parsed:
+            return parsed
     if "cyclingnews.com" in host or "uci.org" in host or "letour.fr" in host:
         return parse_cycling(html)
     if any(token in host for token in ("sportinglife.com", "gbgb.org.uk", "hrnsw.com.au", "letrot.com", "equidia.fr")):
@@ -93,6 +100,80 @@ def events_for_host(html: str, url: str) -> List[Dict[str, Any]]:
     ):
         return parse_html(html, url)
     return []
+
+
+EHF_DATE_TOKEN = re.compile(r"\b\d{2}\.\d{2}\.20\d{2}\b")
+EHF_HEAD = re.compile(r"^(?P<date>\d{2}\.\d{2}\.20\d{2})\s+(?P<time>\d{1,2}:\d{2})\s+(?P<body>.+)$")
+EHF_SCORE_END = re.compile(r"(?P<home>\d{1,3})\s*:\s*(?P<away>\d{1,3})\s*$")
+EHF_EMPTY_SCORE_END = re.compile(r":\s*$")
+
+
+def _ehf_start(day: str, clock: str) -> str:
+    local = datetime.strptime(f"{day} {clock}", "%d.%m.%Y %H:%M").replace(
+        tzinfo=ZoneInfo("Europe/Vienna")
+    )
+    return local.isoformat()
+
+
+def parse_eurohandball(raw_html: str) -> List[Dict[str, Any]]:
+    """Parse EHF server-rendered round/event pages without relying on Vue."""
+    from collector.html_parse import TAG_RE, WS_RE
+
+    text = html_lib.unescape(TAG_RE.sub(" ", raw_html or ""))
+    text = WS_RE.sub(" ", text).strip()
+    starts = list(EHF_DATE_TOKEN.finditer(text))
+    events: List[Dict[str, Any]] = []
+    seen = set()
+    for index, token in enumerate(starts):
+        end = starts[index + 1].start() if index + 1 < len(starts) else min(len(text), token.start() + 260)
+        segment = text[token.start():end].strip()
+        head = EHF_HEAD.match(segment)
+        if not head:
+            continue
+        body = head.group("body").strip()
+        if " VS " not in body:
+            continue
+        home, right = body.split(" VS ", 1)
+        home = home.strip(" -–|")
+        right = right.strip()
+        if not home or len(home) > 100:
+            continue
+
+        status = "scheduled"
+        home_score = away_score = None
+        score = EHF_SCORE_END.search(right)
+        if score:
+            home_score = int(score.group("home"))
+            away_score = int(score.group("away"))
+            away = right[:score.start()].strip(" -–|")
+            status = "finished"
+        elif EHF_EMPTY_SCORE_END.search(right):
+            away = EHF_EMPTY_SCORE_END.sub("", right).strip(" -–|")
+        else:
+            continue
+        if not away or len(away) > 100:
+            continue
+
+        start = _ehf_start(head.group("date"), head.group("time"))
+        key = (start, home.casefold(), away.casefold())
+        if key in seen:
+            continue
+        seen.add(key)
+        event = _event(
+            home=home,
+            away=away,
+            start=start,
+            status=status,
+            home_score=home_score,
+            away_score=away_score,
+            source_id=f"ehf:{head.group('date')}:{head.group('time')}:{len(events)}",
+            extra={"source_family": "ehf-web"},
+        )
+        if event:
+            events.append(event)
+        if len(events) >= 240:
+            break
+    return events
 
 
 def parse_nrl(html: str) -> List[Dict[str, Any]]:
