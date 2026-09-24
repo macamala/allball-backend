@@ -1054,6 +1054,15 @@ def internal_live_health(request: Request, db: Session = Depends(get_db)):
     return live_health_payload(db)
 
 
+@app.get("/internal/collector/asset-coverage")
+def internal_asset_coverage(request: Request, db: Session = Depends(get_db)):
+    if not _internal_ok(request):
+        raise HTTPException(status_code=404, detail="Not found")
+    from collector.asset_coverage import asset_coverage_payload
+
+    return asset_coverage_payload(db)
+
+
 @app.get("/sports-data/matches/{match_id}")
 def sports_data_match(match_id: str):
     provider = get_active_provider()
