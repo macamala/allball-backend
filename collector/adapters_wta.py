@@ -30,16 +30,91 @@ WINDOW_PAST_DAYS = 14
 WINDOW_FUTURE_DAYS = 21
 
 _MATCH_CACHE: Dict[str, Dict[str, Any]] = {}
+_PLAYER_CACHE: Dict[str, Dict[str, Any]] = {}
 _CALENDAR_CACHE: Dict[str, Any] = {"at": 0.0, "rows": []}
 
 
 def reset_wta_caches() -> None:
     _MATCH_CACHE.clear()
+    _PLAYER_CACHE.clear()
     _CALENDAR_CACHE["at"] = 0.0
     _CALENDAR_CACHE["rows"] = []
 
 
-def match_to_event(row: Dict[str, Any], competition_id: str, tournament: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+def _fold_player_name(value: Any) -> str:
+    return " ".join(str(value or "").strip().casefold().split())
+
+
+def _player_country_map(payload: Any) -> Dict[str, str]:
+    """Index WTA tournament entry-list countries by stable id and full name."""
+    out: Dict[str, str] = {}
+    stack = [payload]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, dict):
+            player = node.get("player") if isinstance(node.get("player"), dict) else node
+            country = str(
+                player.get("countryCode")
+                or player.get("country_code")
+                or player.get("nationality")
+                or node.get("countryCode")
+                or ""
+            ).strip()
+            if country:
+                player_id = str(player.get("id") or node.get("playerId") or node.get("playerID") or "").strip()
+                full_name = str(
+                    player.get("fullName")
+                    or player.get("displayName")
+                    or player.get("name")
+                    or ""
+                ).strip()
+                if not full_name:
+                    full_name = " ".join(
+                        part
+                        for part in (
+                            str(player.get("firstName") or "").strip(),
+                            str(player.get("lastName") or "").strip(),
+                        )
+                        if part
+                    )
+                if player_id:
+                    out[f"id:{player_id}"] = country
+                if full_name:
+                    out[f"name:{_fold_player_name(full_name)}"] = country
+            stack.extend(node.values())
+        elif isinstance(node, list):
+            stack.extend(node)
+    return out
+
+
+def _country_for_side(row: Dict[str, Any], prefix: str, name: str, player_countries: Optional[Dict[str, str]]) -> str:
+    country = (
+        row.get(f"CountryCode{prefix}")
+        or row.get(f"Country{prefix}")
+        or row.get(f"PlayerCountryCode{prefix}")
+        or row.get(f"PlayerCountry{prefix}")
+        or row.get(f"Nationality{prefix}")
+    )
+    if country not in (None, ""):
+        return str(country)
+    lookup = player_countries or {}
+    player_id = (
+        row.get(f"PlayerID{prefix}")
+        or row.get(f"PlayerId{prefix}")
+        or row.get(f"Player{prefix}ID")
+        or row.get(f"Player{prefix}Id")
+    )
+    if player_id not in (None, "") and lookup.get(f"id:{player_id}"):
+        return lookup[f"id:{player_id}"]
+    return lookup.get(f"name:{_fold_player_name(name)}", "")
+
+
+def match_to_event(
+    row: Dict[str, Any],
+    competition_id: str,
+    tournament: Optional[Dict[str, Any]] = None,
+    player_countries: Optional[Dict[str, str]] = None,
+) -> Optional[Dict[str, Any]]:
     oriented = orient_wta_match(row, tournament)
     home = oriented["home_name"]
     away = oriented["away_name"]
@@ -72,13 +147,7 @@ def match_to_event(row: Dict[str, Any], competition_id: str, tournament: Optiona
             or row.get(f"Player{prefix}ID")
             or row.get(f"Player{prefix}Id")
         )
-        country = (
-            row.get(f"CountryCode{prefix}")
-            or row.get(f"Country{prefix}")
-            or row.get(f"PlayerCountryCode{prefix}")
-            or row.get(f"PlayerCountry{prefix}")
-            or row.get(f"Nationality{prefix}")
-        )
+        country = _country_for_side(row, prefix, side["name"], player_countries)
         if player_id not in (None, ""):
             side["id"] = str(player_id)
         if country not in (None, ""):
@@ -248,6 +317,16 @@ class WtaJsonAdapter:
             if fetches >= max_fetches:
                 break
             key = f"{group_id}:{year}"
+            player_countries: Dict[str, str] = {}
+            player_cached = _PLAYER_CACHE.get(key) or {}
+            if player_cached and (time.monotonic() - float(player_cached.get("at") or 0)) < PAST_MATCH_TTL_S:
+                player_countries = dict(player_cached.get("countries") or {})
+            else:
+                players_result = self._get(f"{BASE}/tournaments/{group_id}/{year}/players")
+                incr("wta_player_http")
+                if players_result.ok:
+                    player_countries = _player_country_map(players_result.payload)
+                    _PLAYER_CACHE[key] = {"at": time.monotonic(), "countries": player_countries}
             cached = _MATCH_CACHE.get(key) or {}
             status = str((meta or {}).get("status") or "").lower()
             ttl = LIVE_MATCH_TTL_S if status in {"live", "inprogress"} else PAST_MATCH_TTL_S
@@ -263,7 +342,12 @@ class WtaJsonAdapter:
                 rows = [row for row in (result.payload.get("matches") or []) if isinstance(row, dict)]
                 _MATCH_CACHE[key] = {"at": time.monotonic(), "rows": rows}
             for row in rows or []:
-                event = match_to_event(row, request.competition_id or "wta-tour", meta)
+                event = match_to_event(
+                    row,
+                    request.competition_id or "wta-tour",
+                    meta,
+                    player_countries=player_countries,
+                )
                 if event:
                     events.append(event)
         STATS["wta_tournaments_selected"] = min(len(tournaments), max_fetches)
