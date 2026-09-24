@@ -36,6 +36,7 @@ LIST_EXTRA_KEYS = (
     "public_competition_key",
     "coverage",
     "coverage_kind",
+    "competition_logo",
     "display_eligible",
 )
 
