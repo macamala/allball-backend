@@ -773,7 +773,9 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
             _idle(interval)
             continue
         db = SessionLocal()
-        _maybe_log_breadth(db, force=_breadth_logged_at == 0.0)
+        # Never spend the first minute of a worker cycle on asset/breadth repair
+        # before scores are refreshed. The existing post-collect audit below
+        # still runs the same maintenance after the incremental/result pass.
         held = False
         advisory = None
         try:
