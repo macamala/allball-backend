@@ -25,6 +25,53 @@ def loc(value: Any) -> str:
         return str(value.get("Description") or value.get("Name") or "")
     return str(value or "")
 
+def _asset_url(node: Any) -> str:
+    if not isinstance(node, dict):
+        return ""
+    for key in (
+        "logo", "Logo", "image", "Image", "badge", "Badge", "crest", "Crest",
+        "picture", "Picture", "pictureUrl", "PictureUrl", "imageUrl", "ImageUrl",
+        "logoUrl", "LogoUrl", "teamLogo", "TeamLogo", "darkLogo",
+    ):
+        value = node.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        if isinstance(value, dict):
+            nested = value.get("url") or value.get("href") or value.get("src") or value.get("default")
+            if isinstance(nested, str) and nested.strip():
+                return nested.strip()
+    return ""
+
+
+def _feed_team(node: Any, fallback_name: str = "") -> Dict[str, Any]:
+    row = node if isinstance(node, dict) else {}
+    country = (
+        row.get("country_id")
+        or row.get("countryCode")
+        or row.get("CountryCode")
+        or row.get("nationality")
+        or row.get("Nationality")
+        or row.get("IdAssociation")
+        or row.get("IdCountry")
+    )
+    if isinstance(country, dict):
+        country = country.get("alpha2") or country.get("alpha3") or country.get("code") or country.get("name")
+    name = (
+        row.get("name")
+        or row.get("title")
+        or row.get("abbrev")
+        or row.get("displayName")
+        or fallback_name
+        or ""
+    )
+    payload = {
+        "id": str(row.get("id") or row.get("IdTeam") or row.get("teamId") or ""),
+        "name": str(name or ""),
+        "logo": _asset_url(row),
+        "country_id": str(country or ""),
+    }
+    return {key: value for key, value in payload.items() if value not in (None, "")}
+
 
 FIFA_COMPETITION_NEEDLES: Dict[str, List[str]] = {
     "africa-cup-of-nations": ["africa cup of nations", "african cup of nations", "afcon", "caf africa cup"],
