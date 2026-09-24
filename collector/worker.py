@@ -34,13 +34,12 @@ from collector.lock import (
     release_scheduler_lock,
 )
 
-STANDBY_SLEEP_SECONDS = 10
+STANDBY_SLEEP_SECONDS = 45
 RUN_ONCE_LOCK_RETRIES = 3
 _standby_logged = False
 _creators_collected = False
 _breadth_logged_at = 0.0
 _fifa_identity_reconciled = False
-_registry_bootstrapped = False
 
 
 def _collect_official_creators(db, heartbeat=None) -> None:
@@ -774,6 +773,7 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
             _idle(interval)
             continue
         db = SessionLocal()
+        _maybe_log_breadth(db, force=_breadth_logged_at == 0.0)
         held = False
         advisory = None
         try:
@@ -812,59 +812,10 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
                         return
                 time.sleep(STANDBY_SLEEP_SECONDS)
                 continue
-            # LIVE FIRST: never make active or kickoff-window events wait behind
-            # registry bootstrap, artwork, breadth, discovery or backfill work.
-            priority_live_active = False
-            if scheduler_enabled():
-                logger.info("Priority incremental tick start")
-                priority_summary = run_incremental_tick(db, live_only=True)
-                db.commit()
-                priority_urgencies = set(priority_summary.get("urgencies_selected") or [])
-                priority_live_active = bool(
-                    int(priority_summary.get("live_jobs_due") or 0) > 0
-                    or priority_urgencies.intersection({"LIVE", "LIVE_CANDIDATE", "IMMINENT"})
-                )
-                logger.info(
-                    "Priority incremental tick %s",
-                    {k: priority_summary.get(k) for k in (
-                        "due_jobs",
-                        "selected_jobs",
-                        "urgencies_selected",
-                        "families_selected",
-                        "sports_selected",
-                        "events_changed",
-                        "live_jobs_due",
-                        "live_jobs_selected",
-                        "duration_s",
-                        "groups_processed",
-                    )},
-                )
-
-            if priority_live_active:
-                # While live-ish work exists, stay on the fast lane and defer
-                # expensive maintenance until the live window clears.
-                heartbeat_scheduler_lock(db, owner=owner)
-                db.commit()
-                if advisory:
-                    try:
-                        postgres_advisory_unlock(db)
-                    finally:
-                        advisory = None
-                time.sleep(live_idle_seconds(interval))
-                continue
-
-            # Registry bootstrap is idempotent but can still be expensive. Keep it
-            # process-global and never put it in front of the live fast path.
-            global _registry_bootstrapped
-            if not _registry_bootstrapped:
+            if not db.info.get("registry_bootstrapped"):
                 bootstrap_registry(db)
                 db.commit()
-                _registry_bootstrapped = True
-                logger.info("Registry bootstrap complete")
-
-            # Maintenance/audits run only after the priority live tick.
-            _maybe_log_breadth(db, force=_breadth_logged_at == 0.0)
-
+                db.info["registry_bootstrapped"] = True
             try:
                 from collector.source_identity_repair import repair_source_identity_leaks
 

@@ -43,8 +43,7 @@ AGE_BAND_SECONDS = 600
 MAX_AGE_BANDS = 2
 MAX_FAMILY_NONLIVE = 1
 FINISHED_LOOKBACK_HOURS = 48
-TICK_LIVE_BUDGET_S = 20
-PRIORITY_URGENCIES = frozenset({"LIVE", "LIVE_CANDIDATE", "IMMINENT", "RECENTLY_FINISHED"})
+TICK_LIVE_BUDGET_S = 35
 _family_rr = 0
 _live_registry: Dict[str, Dict[str, Any]] = {}
 
@@ -205,45 +204,19 @@ def _fallback_family(db: Session, competition_id: str, primary_family: str) -> T
     return None, None
 
 
-def build_due_jobs(
-    db: Session,
-    *,
-    now: Optional[datetime] = None,
-    limit: Optional[int] = None,
-    live_only: bool = False,
-) -> List[Dict[str, Any]]:
+def build_due_jobs(db: Session, *, now: Optional[datetime] = None, limit: Optional[int] = None) -> List[Dict[str, Any]]:
     now = now or _now()
-    if live_only:
-        # Fast path: do not rebuild the broad watch table or scan the 30-day
-        # fixture horizon before refreshing current matches. Twelve hours covers
-        # long exact-time sports while keeping the working set small.
-        horizon = now + timedelta(hours=2)
-        past = now - timedelta(hours=12)
-        events = (
-            db.query(SportsEvent)
-            .filter(SportsEvent.canonical_event_id.is_(None))
-            .filter(
-                (SportsEvent.display_eligible.is_(True))
-                | (SportsEvent.display_eligible.is_(None))
-            )
-            .filter(
-                (SportsEvent.status.in_(["live", "halftime", "break", "stale"]))
-                | ((SportsEvent.start_time >= past) & (SportsEvent.start_time <= horizon))
-            )
-            .all()
+    rebuild_watch_set(db, now=now)
+    horizon = now + timedelta(days=30)
+    past = now - timedelta(hours=FINISHED_LOOKBACK_HOURS)
+    events = (
+        db.query(SportsEvent)
+        .filter(
+            (SportsEvent.status.in_(["live", "stale"]))
+            | ((SportsEvent.start_time >= past) & (SportsEvent.start_time <= horizon))
         )
-    else:
-        rebuild_watch_set(db, now=now)
-        horizon = now + timedelta(days=30)
-        past = now - timedelta(hours=FINISHED_LOOKBACK_HOURS)
-        events = (
-            db.query(SportsEvent)
-            .filter(
-                (SportsEvent.status.in_(["live", "stale"]))
-                | ((SportsEvent.start_time >= past) & (SportsEvent.start_time <= horizon))
-            )
-            .all()
-        )
+        .all()
+    )
     jobs: List[Dict[str, Any]] = []
     seen_comp_family: set = set()
     live_jobs = 0
@@ -321,23 +294,6 @@ def build_due_jobs(
                     last_status=slot.last_status if slot else None,
                 )
             )
-    if live_only:
-        jobs.sort(key=lambda row: (row["priority"], row["competition_id"]))
-        deduped: List[Dict[str, Any]] = []
-        seen_keys: set = set()
-        for job in jobs:
-            key = job["job_key"]
-            if key in seen_keys:
-                continue
-            seen_keys.add(key)
-            deduped.append(job)
-        jobs = deduped
-        set_metric("due_jobs", len(jobs))
-        set_metric("live_jobs", live_jobs)
-        if limit is not None:
-            return jobs[:limit]
-        return jobs
-
     health_rows = {row.competition_id: row for row in db.query(SportsCompetitionHealth).all()}
     mapped = (
         db.query(SportsSourceCompetition)
@@ -398,12 +354,6 @@ def build_due_jobs(
     if limit is not None:
         return jobs[:limit]
     return jobs
-
-
-def filter_due_jobs(jobs: List[Dict[str, Any]], *, live_only: bool = False) -> List[Dict[str, Any]]:
-    if not live_only:
-        return jobs
-    return [job for job in jobs if str(job.get("urgency") or "") in PRIORITY_URGENCIES]
 
 
 def coalesce_jobs(jobs: List[Dict[str, Any]]) -> List[List[Dict[str, Any]]]:
@@ -693,13 +643,7 @@ def mark_slot(db: Session, job: Dict[str, Any], *, status: str, http_calls: int 
     row.priority = int(job.get("priority") or 50)
 
 
-def run_incremental_tick(
-    db: Session,
-    *,
-    sleeper=None,
-    now: Optional[datetime] = None,
-    live_only: bool = False,
-) -> Dict[str, Any]:
+def run_incremental_tick(db: Session, *, sleeper=None, now: Optional[datetime] = None) -> Dict[str, Any]:
     """Execute due incremental jobs. Kill switch: scheduler off returns immediately."""
     import time
 
@@ -722,7 +666,7 @@ def run_incremental_tick(
     from collector.recompute_status import recompute_display_eligible_live
 
     recompute_display_eligible_live(db, commit=False, only_blocked_families=True)
-    due = filter_due_jobs(build_due_jobs(db, now=now, live_only=live_only), live_only=live_only)
+    due = build_due_jobs(db, now=now)
     groups, schedule = select_fair_groups(due, now)
     groups = sorted(
         groups,
@@ -765,15 +709,10 @@ def run_incremental_tick(
     changed = 0
     fail_classes = FAIL_STATUSES
     live_groups_this_tick = sum(1 for group in groups if group and job_lane(group[0]) == 0)
-    groups_processed = 0
     for group in groups:
         elapsed = time.perf_counter() - started
         lane = job_lane(group[0]) if group else 3
-        # A slow live-capable family must never hold every other sport behind it.
-        # Always allow at least one group, then yield once this tick consumed its
-        # short wall-clock budget. Unprocessed jobs stay due and rotate into the
-        # next tick because only executed groups advance their scheduler slots.
-        if groups_processed > 0 and elapsed >= TICK_LIVE_BUDGET_S:
+        if lane > 0 and elapsed >= TICK_LIVE_BUDGET_S:
             break
         coalesced += max(0, len(group) - 1)
         before_req = int(STATS.get("requests") or 0)
@@ -875,7 +814,6 @@ def run_incremental_tick(
             row = _slot(db, group[0]["job_key"])
             row.http_calls = used
         changed += group_written
-        groups_processed += 1
     incr("coalesced", coalesced)
     incr("events_changed", changed)
     from collector.http import note_physical_requests, rolling_http_hour
@@ -897,7 +835,6 @@ def run_incremental_tick(
     tick = {
         "due_jobs": schedule["due_jobs"],
         "selected_jobs": schedule["selected_jobs"],
-        "live_only": live_only,
         "oldest_due_age_s": schedule["oldest_due_age_s"],
         "families_selected": schedule["families_selected"],
         "sports_selected": schedule["sports_selected"],
@@ -945,7 +882,6 @@ def run_incremental_tick(
         "metrics": metrics,
         "logical_jobs": schedule["selected_jobs"],
         "groups": len(groups),
-        "groups_processed": groups_processed,
         "coalesced": coalesced,
     }
     if held_write:
