@@ -272,6 +272,38 @@ def public_event(payload: Dict[str, Any]) -> Dict[str, Any]:
     return cleaned
 
 
+def _apply_source_competition_display(
+    payload: Dict[str, Any],
+    *,
+    sport_id: str,
+    corrected: str,
+    source_family: str,
+    source_name: str,
+) -> Dict[str, Any]:
+    """Apply trusted display-only source labels without changing canonical keys."""
+    name = str(source_name or "").strip()
+    if (
+        sport_id == "dota-2"
+        and corrected == "professional"
+        and source_family == "opendota"
+        and name
+        and name.lower() != "dota 2 professional"
+    ):
+        payload["competition"] = name
+        payload["competition_name"] = name
+    elif corrected == "fifa-connected-competitions" and "world cup" in name.lower():
+        payload["competition"] = name
+        payload["competition_name"] = name
+    elif (
+        corrected not in frozen_competition_ids()
+        and corrected not in OFFICIAL_PUBLIC_COMPETITIONS
+        and name
+    ):
+        payload["competition"] = name
+        payload["competition_name"] = name
+    return payload
+
+
 LIST_PUBLIC_KEYS = (
     "id",
     "sport",
@@ -1388,27 +1420,13 @@ class NinkoCollectedSportsDataProvider:
         if source_country and not payload.get("country_id"):
             payload["country_id"] = source_country
         source_name = str(extra.get("source_competition_name") or extra.get("competition") or "").strip()
-        if (
-            row.sport_id == "dota-2"
-            and corrected == "professional"
-            and str(extra.get("source_family") or "") == "opendota"
-            and source_name
-            and source_name.lower() != "dota 2 professional"
-        ):
-            # Keep the stable frozen competition key so fixture identity never
-            # changes, but show the real OpenDota league/tournament name.
-            payload["competition"] = source_name
-            payload["competition_name"] = source_name
-        elif corrected == "fifa-connected-competitions" and "world cup" in source_name.lower():
-            payload["competition"] = source_name
-            payload["competition_name"] = source_name
-        elif (
-            corrected not in frozen_competition_ids()
-            and corrected not in OFFICIAL_PUBLIC_COMPETITIONS
-            and source_name
-        ):
-            payload["competition"] = source_name
-            payload["competition_name"] = source_name
+        payload = _apply_source_competition_display(
+            payload,
+            sport_id=str(row.sport_id or ""),
+            corrected=corrected,
+            source_family=str(extra.get("source_family") or ""),
+            source_name=source_name,
+        )
         country = payload.get("country_id")
         payload["home"] = sanitize_side(raw_sides["home"], sport=row.sport_id, competition_country=country)
         payload["away"] = sanitize_side(raw_sides["away"], sport=row.sport_id, competition_country=country)
