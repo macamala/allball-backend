@@ -23,7 +23,7 @@ from collector.util import dump_json, load_json, parse_datetime, slugify
 
 logger = logging.getLogger(__name__)
 
-JOB_KEY = "wta-global-breadth-v4"
+JOB_KEY = "wta-global-breadth-v5"
 SOURCE_ID = "wta-global"
 PUBLIC_BREADTH_STATUS = "single-source-breadth"
 
@@ -136,26 +136,35 @@ def _ensure_mapping(
 
 
 def _repair_legacy_wta_rows(db: Session) -> int:
-    """Repair rows written before WTA breadth stamped sport=tennis."""
+    """Repair WTA breadth rows written with stale sport/family identity."""
     rows = (
         db.query(SportsEvent)
-        .filter(
-            SportsEvent.primary_source_id == SOURCE_ID,
-            SportsEvent.sport_id.in_(["", "unknown"]),
-            SportsEvent.canonical_event_id.is_(None),
-        )
+        .filter(SportsEvent.primary_source_id == SOURCE_ID)
         .all()
     )
     repaired = 0
     for row in rows:
-        row.sport_id = "tennis"
-        row.event_family = row.event_family or "individual_match"
         extra = load_json(row.extra_json, {}) or {}
-        extra["source_family"] = extra.get("source_family") or "wta-json"
-        extra["public_competition_key"] = extra.get("public_competition_key") or row.competition_id
-        extra["display_eligible"] = True
+        changed = False
+        if row.sport_id != "tennis":
+            row.sport_id = "tennis"
+            changed = True
+        if row.event_family != "individual_match":
+            row.event_family = "individual_match"
+            changed = True
+        if extra.get("source_family") != "wta-json":
+            extra["source_family"] = "wta-json"
+            changed = True
+        if not extra.get("public_competition_key"):
+            extra["public_competition_key"] = row.competition_id
+            changed = True
+        if extra.get("display_eligible") is not True or row.display_eligible is not True:
+            extra["display_eligible"] = True
+            row.display_eligible = True
+            changed = True
+        if not changed:
+            continue
         row.extra_json = dump_json(extra)
-        row.display_eligible = True
         from collector.list_extra import store_list_extra
         store_list_extra(row, extra)
         repaired += 1
