@@ -60,3 +60,42 @@ def test_fotmob_roster_does_not_choose_ambiguous_alias():
         {"id": "2", "name": "United SC", "folded": "united", "logo": "b"},
     ]
     assert _unique_match("United", roster) is None
+
+
+
+def test_dynamic_fotmob_source_competition_id_becomes_roster_candidate():
+    from collector.fotmob_asset_backfill import _candidate_competitions
+    from collector.models import SportsEvent
+    from collector.util import dump_json
+    import time
+
+    db = _session()
+    event_id = "ninko-evt-dynamic-fotmob-roster"
+    try:
+        db.query(SportsEvent).filter(SportsEvent.event_id == event_id).delete(synchronize_session=False)
+        db.add(
+            SportsEvent(
+                event_id=event_id,
+                sport_id="football",
+                competition_id="football-test-dynamic-league",
+                event_family="team_match",
+                status="scheduled",
+                fingerprint="fp-dynamic-fotmob-roster",
+                participants_json=dump_json({
+                    "home": {"name": "Alpha FC"},
+                    "away": {"name": "Beta FC"},
+                }),
+                extra_json=dump_json({
+                    "source_family": "fotmob",
+                    "source_competition_id": "123456",
+                    "display_eligible": True,
+                }),
+                display_eligible=True,
+            )
+        )
+        db.flush()
+        rows = dict(_candidate_competitions(db, time.monotonic()))
+        assert rows["football-test-dynamic-league"] == ["123456"]
+    finally:
+        db.rollback()
+        db.close()
