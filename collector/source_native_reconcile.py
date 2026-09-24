@@ -12,6 +12,7 @@ from collector.competition_presentation import SOURCE_ALPHA3_TO_GEO, metadata_fo
 from collector.event_quality import reject_reason
 from collector.list_extra import extra_for_list, store_list_extra
 from collector.models import SportsCollectorJob, SportsEvent
+from collector.maintenance_policy import automatic_promotion_blocked, sync_public_visibility
 from collector.util import dump_json, isoformat, load_json, slugify
 
 JOB_KEY = "source-native-football-revalidate-v4"
@@ -132,6 +133,10 @@ def revalidate_current_source_native(
     scanned = promoted = blocked = 0
     for row in rows:
         extra = _merged_source_extra(row)
+        if automatic_promotion_blocked(row, extra):
+            blocked += 1
+            sync_public_visibility(row, extra, False)
+            continue
         family = str(extra.get("source_family") or "").strip()
         if family not in SAFE_FAMILIES:
             continue
@@ -155,9 +160,7 @@ def revalidate_current_source_native(
         extra["resolution_method"] = "source_native_revalidated"
         extra["resolution_confidence"] = 95
         extra["source_native_revalidated_at"] = isoformat(datetime.utcnow())
-        row.extra_json = dump_json(extra)
-        row.display_eligible = True
-        store_list_extra(row, extra)
+        sync_public_visibility(row, extra, True)
         promoted += 1
 
     db.flush()

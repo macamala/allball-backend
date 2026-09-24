@@ -18,6 +18,7 @@ from database import SessionLocal, engine, ensure_schema
 from models import Article, ArticleMedia, ArticleTaxonomyResolution, ArticleTranslation, Base
 import collector.models  # noqa: F401 — register collector tables on Base.metadata
 from collector.attribution import attribution_payload
+from collector.maintenance_policy import startup_integrity_enabled
 from collector.diagnostics import (
     competition_health_payload,
     coverage_payload,
@@ -136,7 +137,6 @@ def _startup_integrity():
         db.close()
 
 
-@asynccontextmanager
 def _startup_list_indexes():
     try:
         from collector.schema_tune import ensure_event_list_indexes
@@ -146,6 +146,7 @@ def _startup_list_indexes():
         pass
 
 
+@asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
     try:
@@ -155,7 +156,7 @@ async def lifespan(app: FastAPI):
     threading.Thread(target=_startup_list_indexes, daemon=True).start()
     if os.getenv("NINKO_SKIP_STARTUP_INDEX") != "1":
         threading.Thread(target=_startup_index, daemon=True).start()
-    if os.getenv("NINKO_SKIP_INTEGRITY_BACKFILL") != "1":
+    if startup_integrity_enabled():
         threading.Thread(target=_startup_integrity, daemon=True).start()
     yield
 

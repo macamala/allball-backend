@@ -16,6 +16,7 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from collector.cache import cache_clear
+from collector.maintenance_policy import automatic_promotion_blocked, sync_public_visibility
 from collector.competition_identity import (
     COMPETITION_LABELS,
     MAPPING_OWNED_FAMILIES,
@@ -151,6 +152,8 @@ def plan_backfill(db: Session) -> Dict[str, Any]:
     events = []
     query = db.query(SportsEvent).execution_options(stream_results=True).yield_per(300)
     for row in query:
+        if automatic_promotion_blocked(row):
+            continue
         event = _sides(row)
         extra = load_json(row.extra_json, {}) or {}
         event["extra"] = extra
@@ -309,7 +312,8 @@ def _mutate_row(row: SportsEvent, quarantine: set, repair: set) -> bool:
             row.participants_json = dump_json(parts)
     event = _sides(row)
     flags = quality_flags_for_event(event)
-    eligible = is_display_eligible(event) and row.event_id not in quarantine
+    eligible = (is_display_eligible(event) and row.event_id not in quarantine
+                and not automatic_promotion_blocked(row, extra))
     if extra.get("quality_flags") != flags:
         extra["quality_flags"] = flags
         dirty = True
@@ -323,9 +327,8 @@ def _mutate_row(row: SportsEvent, quarantine: set, repair: set) -> bool:
     if getattr(row, "display_eligible", None) is not extra.get("display_eligible"):
         row.display_eligible = extra.get("display_eligible")
         dirty = True
-    if dirty:
-        row.extra_json = dump_json(extra)
-    return dirty
+    synced = sync_public_visibility(row, extra, extra.get("display_eligible", False))
+    return dirty or synced
 
 
 def _public_football_competition_ids(db: Session) -> set[str]:
@@ -384,7 +387,8 @@ def restore_orphaned_duplicate_football(
         public = [
             row
             for row in cluster_rows
-            if row.display_eligible is not False
+            if not automatic_promotion_blocked(row)
+            and row.display_eligible is not False
             and _extra(row).get("display_eligible") is not False
             and not row.canonical_event_id
             and not _extra(row).get("canonical_event_id")
@@ -399,6 +403,8 @@ def restore_orphaned_duplicate_football(
         candidates = []
         for row in cluster_rows:
             extra = _extra(row)
+            if automatic_promotion_blocked(row, extra):
+                continue
             flags = {str(flag) for flag in (extra.get("quality_flags") or [])}
             family = str(extra.get("source_family") or "").strip().lower()
             method = str(extra.get("resolution_method") or "").strip().lower()
@@ -436,10 +442,7 @@ def restore_orphaned_duplicate_football(
         extra["display_eligible"] = True
         extra["quarantine_disposition"] = "RESTORED_ORPHAN_DUPLICATE"
         extra["orphan_duplicate_restored_at"] = datetime.utcnow().isoformat() + "Z"
-        extra.pop("canonical_event_id", None)
-        row.display_eligible = True
-        row.canonical_event_id = None
-        row.extra_json = dump_json(extra)
+        sync_public_visibility(row, extra, True)
         restored.append(row.event_id)
 
     if restored:
@@ -564,6 +567,9 @@ def apply_competition_attribution(
     kept = []
     for row in public:
         extra = load_json(row.extra_json, {}) or {}
+        if automatic_promotion_blocked(row, extra):
+            sync_public_visibility(row, extra, False)
+            continue
         eligible = row.display_eligible is not False and extra.get("display_eligible") is not False
         recover = extra.get("competition_attribution") == "quarantined_unproven"
         family = str(extra.get("source_family") or "")
@@ -614,7 +620,7 @@ def apply_competition_attribution(
                 extra["resolution_method"] = resolved.get("resolution_method")
                 extra["resolution_confidence"] = resolved.get("resolution_confidence")
                 row.display_eligible = True
-                row.extra_json = dump_json(extra)
+                sync_public_visibility(row, extra, extra.get("display_eligible", row.display_eligible is not False))
                 recovered += 1
             continue
         affected += 1
@@ -632,7 +638,7 @@ def apply_competition_attribution(
                 from collector.canonical_collapse import _collapse_pair
 
                 extra["display_eligible"] = False
-                row.extra_json = dump_json(extra)
+                sync_public_visibility(row, extra, extra.get("display_eligible", row.display_eligible is not False))
                 db.flush()
                 if _collapse_pair(db, existing.event_id, row.event_id):
                     corrected += 1
@@ -644,7 +650,7 @@ def apply_competition_attribution(
             row.fingerprint = new_fp
             extra["display_eligible"] = True
             row.display_eligible = True
-            row.extra_json = dump_json(extra)
+            sync_public_visibility(row, extra, extra.get("display_eligible", row.display_eligible is not False))
             corrected += 1
             continue
         if _protected_source_native_football(row, extra):
@@ -659,7 +665,7 @@ def apply_competition_attribution(
             extra["quality_flags"] = flags
             extra["display_eligible"] = True
             extra["competition_attribution"] = "source_native_preserved"
-            row.extra_json = dump_json(extra)
+            sync_public_visibility(row, extra, extra.get("display_eligible", row.display_eligible is not False))
             row.display_eligible = True
             recovered += 1
             continue
@@ -669,7 +675,7 @@ def apply_competition_attribution(
         if "competition_attribution_mismatch" not in flags:
             flags.append("competition_attribution_mismatch")
         extra["quality_flags"] = flags
-        row.extra_json = dump_json(extra)
+        sync_public_visibility(row, extra, extra.get("display_eligible", row.display_eligible is not False))
         row.display_eligible = False
         quarantined += 1
     try:

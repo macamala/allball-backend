@@ -25,6 +25,7 @@ from collector.enrichment import (
 from collector.identity_events import identity_confidence
 from collector.merge import _filled, merge_event_fields
 from collector.models import SportsEvent, SportsEventDetail, SportsEventObservation
+from collector.maintenance_policy import automatic_promotion_blocked, sync_public_visibility
 from collector.participant_alias import (
     canonical_display_name,
     contextual_pair_match,
@@ -162,9 +163,7 @@ def _repair_participants(row: SportsEvent) -> bool:
 
 
 def _sync_public_flags(row: SportsEvent, extra: Dict[str, Any], eligible: bool) -> None:
-    extra["display_eligible"] = eligible
-    row.display_eligible = eligible
-    row.extra_json = dump_json(extra)
+    sync_public_visibility(row, extra, eligible)
 
 
 def collapse_canonical_events(db: Session, *, competition_ids: Optional[List[str]] = None) -> Dict[str, Any]:
@@ -176,9 +175,13 @@ def collapse_canonical_events(db: Session, *, competition_ids: Optional[List[str
     by_id = {}
     repaired = 0
     for row in rows:
+        if automatic_promotion_blocked(row):
+            continue
         if _repair_participants(row):
             repaired += 1
         event = _event_dict(row)
+        if row.display_eligible is False:
+            event["extra"]["display_eligible"] = False
         events.append(event)
         by_id[row.event_id] = event
     db.flush()
@@ -321,7 +324,7 @@ def _collapse_pair(db: Session, keeper_id: str, loser_id: str) -> bool:
     loser = db.query(SportsEvent).filter_by(event_id=loser_id).first()
     if not keeper or not loser or keeper_id == loser_id:
         return False
-    if loser.canonical_event_id:
+    if automatic_promotion_blocked(keeper) or automatic_promotion_blocked(loser):
         return False
     k_extra = load_json(keeper.extra_json, {}) or {}
     l_extra = load_json(loser.extra_json, {}) or {}
@@ -378,14 +381,14 @@ def _collapse_pair(db: Session, keeper_id: str, loser_id: str) -> bool:
     k_extra["display_eligible"] = True
     keeper.display_eligible = True
     keeper.canonical_event_id = None
-    keeper.extra_json = dump_json(k_extra)
+    _sync_public_flags(keeper, k_extra, True)
     _merge_event_details(db, keeper_id, loser_id)
     l_extra["display_eligible"] = False
     l_extra["canonical_event_id"] = keeper_id
     l_extra["collapse_role"] = "observation_only"
     loser.display_eligible = False
     loser.canonical_event_id = keeper_id
-    loser.extra_json = dump_json(l_extra)
+    _sync_public_flags(loser, l_extra, False)
     db.query(SportsEventObservation).filter_by(event_id=loser_id).update(
         {SportsEventObservation.event_id: keeper_id}, synchronize_session=False
     )
@@ -467,14 +470,18 @@ def classify_quarantine(db: Session) -> Dict[str, Any]:
         "RECOVERABLE_BY_LABELLED_RECRAWL": 0,
         "AMBIGUOUS — KEEP QUARANTINED": 0,
         "COLLAPSED_OBSERVATION": 0,
+        "POLICY_BLOCKED": 0,
         "RECOVERABLE_FROM_STORED_RAW": 0,
     }
     recrawl: List[Dict[str, Any]] = []
     for row in db.query(SportsEvent).all():
         extra = load_json(row.extra_json, {}) or {}
-        if extra.get("canonical_event_id") or row.canonical_event_id:
-            still["COLLAPSED_OBSERVATION"] += 1
-            row.display_eligible = False
+        if automatic_promotion_blocked(row, extra):
+            bucket = ("COLLAPSED_OBSERVATION" if extra.get("canonical_event_id")
+                      or row.canonical_event_id or extra.get("collapse_role") == "observation_only"
+                      else "POLICY_BLOCKED")
+            still[bucket] += 1
+            _sync_public_flags(row, extra, False)
             continue
         flags = extra.get("quality_flags") or quality_flags_for_event(_event_dict(row))
         kinds = {str(flag).split(":")[-1] for flag in flags}
@@ -522,10 +529,9 @@ def classify_quarantine(db: Session) -> Dict[str, Any]:
             else:
                 still["AMBIGUOUS — KEEP QUARANTINED"] += 1
                 extra["quarantine_disposition"] = "AMBIGUOUS"
-            row.extra_json = dump_json(extra)
-            row.display_eligible = False
+            _sync_public_flags(row, extra, False)
         else:
-            row.display_eligible = True if extra.get("display_eligible") is not False else False
+            _sync_public_flags(row, extra, extra.get("display_eligible") is not False)
     db.commit()
     flush_list_invalidations(db)
     db.commit()
