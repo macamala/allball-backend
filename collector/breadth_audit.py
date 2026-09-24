@@ -281,6 +281,25 @@ def public_football_asset_range_snapshot(*, days_back: int = 7, days_forward: in
     }
 
 
+TEAM_IDENTITY_FAMILIES = {"team_match", "esports_match"}
+INDIVIDUAL_IDENTITY_FAMILIES = {"individual_match", "combat"}
+
+
+def _visible_identity_requirement(event: Dict[str, Any]) -> str:
+    """Return the side identity asset a public score row genuinely requires.
+
+    Team/esports matches need team logos. Person/fighter head-to-head events
+    need country identity. Race/meet/tournament/meta rows do not have two
+    teams, even when legacy normalization exposes home/away display fields.
+    """
+    family = str(event.get("event_family") or "").strip().lower()
+    if family in TEAM_IDENTITY_FAMILIES:
+        return "logo"
+    if family in INDIVIDUAL_IDENTITY_FAMILIES:
+        return "country"
+    return "none"
+
+
 def public_multisport_day_snapshot(day_offset: int = 1, *, include_samples: bool = True) -> Dict[str, Any]:
     """Sydney-local public canary for any nearby day. Diagnostics only."""
     from collector.provider import NinkoCollectedSportsDataProvider
@@ -361,49 +380,72 @@ def public_multisport_day_snapshot(day_offset: int = 1, *, include_samples: bool
         home = row.get("home") if isinstance(row.get("home"), dict) else {}
         away = row.get("away") if isinstance(row.get("away"), dict) else {}
         sides = [side for side in (home, away) if side and (side.get("name") or side.get("display_name"))]
+        identity_requirement = _visible_identity_requirement(row)
+        missing_competition_logo = not bool(row.get("competition_logo"))
+        missing_side_logos: List[str] = []
+        missing_side_countries: List[str] = []
+
         if len(sides) == 2:
-            bucket["side_slots"] += 2
             logos = sum(1 for side in sides if _side_logo(side))
             countries = sum(1 for side in sides if _side_country(side))
-            bucket["side_logos"] += logos
-            bucket["side_countries"] += countries
             bucket["events_with_both_side_logos"] += int(logos == 2)
             bucket["events_with_both_side_countries"] += int(countries == 2)
-            missing_competition_logo = not bool(row.get("competition_logo"))
-            missing_side_logos = [side_name for side_name, side in (("home", home), ("away", away)) if not _side_logo(side)]
-            if missing_competition_logo or missing_side_logos:
-                competition_key = str(row.get("competition_key") or row.get("competition") or "unknown")
-                by_comp = asset_gap_competitions.setdefault(sport, {})
-                comp_gap = by_comp.setdefault(
-                    competition_key,
+            # Raw counters remain useful diagnostics, but only identity assets
+            # appropriate to the event family can create a completion gap.
+            bucket["side_slots"] += 2
+            bucket["side_logos"] += logos
+            bucket["side_countries"] += countries
+            if identity_requirement == "logo":
+                missing_side_logos = [
+                    side_name
+                    for side_name, side in (("home", home), ("away", away))
+                    if not _side_logo(side)
+                ]
+            elif identity_requirement == "country":
+                missing_side_countries = [
+                    side_name
+                    for side_name, side in (("home", home), ("away", away))
+                    if not _side_country(side)
+                ]
+
+        if missing_competition_logo or missing_side_logos or missing_side_countries:
+            competition_key = str(row.get("competition_key") or row.get("competition") or "unknown")
+            by_comp = asset_gap_competitions.setdefault(sport, {})
+            comp_gap = by_comp.setdefault(
+                competition_key,
+                {
+                    "events": 0,
+                    "missing_competition_logo": 0,
+                    "missing_team_logo_slots": 0,
+                    "missing_participant_country_slots": 0,
+                },
+            )
+            comp_gap["events"] += 1
+            comp_gap["missing_competition_logo"] += int(missing_competition_logo)
+            comp_gap["missing_team_logo_slots"] += len(missing_side_logos)
+            comp_gap["missing_participant_country_slots"] += len(missing_side_countries)
+            gaps = asset_gaps.setdefault(sport, [])
+            gap_limit = 128 if sport == "football" else 16
+            if len(gaps) < gap_limit:
+                gaps.append(
                     {
-                        "events": 0,
-                        "missing_competition_logo": 0,
-                        "missing_team_logo_slots": 0,
-                    },
+                        "id": row.get("id"),
+                        "competition": row.get("competition_name") or row.get("competition"),
+                        "competition_key": row.get("competition_key"),
+                        "event_family": row.get("event_family"),
+                        "identity_requirement": identity_requirement,
+                        "home": home.get("name"),
+                        "home_id": home.get("id"),
+                        "away": away.get("name"),
+                        "away_id": away.get("id"),
+                        "missing_competition_logo": missing_competition_logo,
+                        "missing_side_logos": missing_side_logos,
+                        "missing_side_countries": missing_side_countries,
+                        "source_family": row.get("source_family"),
+                        "source_competition_id": row.get("source_competition_id"),
+                        "utc": row.get("start_time"),
+                    }
                 )
-                comp_gap["events"] += 1
-                comp_gap["missing_competition_logo"] += int(missing_competition_logo)
-                comp_gap["missing_team_logo_slots"] += len(missing_side_logos)
-                gaps = asset_gaps.setdefault(sport, [])
-                gap_limit = 128 if sport == "football" else 16
-                if len(gaps) < gap_limit:
-                    gaps.append(
-                        {
-                            "id": row.get("id"),
-                            "competition": row.get("competition_name") or row.get("competition"),
-                            "competition_key": row.get("competition_key"),
-                            "home": home.get("name"),
-                            "home_id": home.get("id"),
-                            "away": away.get("name"),
-                            "away_id": away.get("id"),
-                            "missing_competition_logo": missing_competition_logo,
-                            "missing_side_logos": missing_side_logos,
-                            "source_family": row.get("source_family"),
-                            "source_competition_id": row.get("source_competition_id"),
-                            "utc": row.get("start_time"),
-                        }
-                    )
 
     distinct_competitions: Dict[str, int] = {}
     for sport in sport_counts:
