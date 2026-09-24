@@ -44,6 +44,33 @@ TSDB_BY_COMP = {
     if row.get("event_model") == "team_match"
 }
 
+# Competition artwork is useful for every event model, not only team sports.
+# Keep this catalogue asset-only: these ids are never used as fixture/result
+# authority. Formula 1/2 ids are verified TheSportsDB league identities.
+TSDB_LOGO_BY_COMP = {
+    row["competition_id"]: row
+    for row in THESPORTSDB_LEAGUES
+    if row.get("source_competition_id")
+}
+TSDB_LOGO_BY_COMP.update(
+    {
+        "formula-1": {
+            "competition_id": "formula-1",
+            "sport_id": "motorsport",
+            "event_model": "motorsport_race",
+            "source_competition_id": "4370",
+            "name": "Formula 1",
+        },
+        "formula-2": {
+            "competition_id": "formula-2",
+            "sport_id": "motorsport",
+            "event_model": "motorsport_race",
+            "source_competition_id": "4486",
+            "name": "Formula 2",
+        },
+    }
+)
+
 
 def _missing_logo(side: Any) -> bool:
     if not isinstance(side, dict):
@@ -389,15 +416,17 @@ def _candidates(db: Session, now: float) -> List[Tuple[str, str, int]]:
     )
     for row in rows:
         competition_id = str(row.competition_id or "")
-        spec = TSDB_BY_COMP.get(competition_id)
-        if not spec:
+        logo_spec = TSDB_LOGO_BY_COMP.get(competition_id)
+        if not logo_spec:
             continue
         participants = load_json(row.participants_json, {}) or {}
-        missing = sum(
-            1
-            for key in ("home", "away")
-            if isinstance(participants.get(key), dict) and _missing_logo(participants.get(key))
-        )
+        missing = 0
+        if competition_id in TSDB_BY_COMP:
+            missing = sum(
+                1
+                for key in ("home", "away")
+                if isinstance(participants.get(key), dict) and _missing_logo(participants.get(key))
+            )
         extra = load_json(row.extra_json, {}) or {}
         missing_competition_logo = not bool(extra.get("competition_logo"))
         gap_weight = missing + (1 if missing_competition_logo else 0)
@@ -411,7 +440,7 @@ def _candidates(db: Session, now: float) -> List[Tuple[str, str, int]]:
         last = float(_last_fetch.get(competition_id) or 0.0)
         if now - last < LEAGUE_TTL_S:
             continue
-        league_id = str(TSDB_BY_COMP[competition_id].get("source_competition_id") or "")
+        league_id = str(TSDB_LOGO_BY_COMP[competition_id].get("source_competition_id") or "")
         if league_id.isdigit():
             output.append((competition_id, league_id, missing))
     output.sort(key=lambda item: (-(priority.get(item[0], 0) + item[2]), item[0]))
@@ -494,20 +523,24 @@ def run_if_due(db: Session, *, getter=None, heartbeat=None) -> Optional[Dict[str
             stats["direct_name_participants_filled"] += filled
 
     for competition_id, league_id, _missing in candidates:
-        team_result = getter(f"{BASE}/lookup_all_teams.php?id={league_id}")
-        stats["requests"] += 1
-        if heartbeat:
-            heartbeat()
+        roster: List[Dict[str, str]] = []
+        if competition_id in TSDB_BY_COMP:
+            team_result = getter(f"{BASE}/lookup_all_teams.php?id={league_id}")
+            stats["requests"] += 1
+            if heartbeat:
+                heartbeat()
+            if getattr(team_result, "ok", False):
+                roster = _teams(team_result.payload)
+            else:
+                stats["http_errors"] += 1
+
         league_result = getter(f"{BASE}/lookupleague.php?id={league_id}")
         stats["requests"] += 1
         if heartbeat:
             heartbeat()
         _last_fetch[competition_id] = now
 
-        roster = _teams(team_result.payload) if getattr(team_result, "ok", False) else []
         logo = _league_logo(league_result.payload) if getattr(league_result, "ok", False) else ""
-        if not getattr(team_result, "ok", False):
-            stats["http_errors"] += 1
         if not getattr(league_result, "ok", False):
             stats["http_errors"] += 1
 
