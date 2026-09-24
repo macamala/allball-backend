@@ -7,6 +7,9 @@ or anti-bot bypasses.
 
 from __future__ import annotations
 
+import html as html_lib
+import json
+import re
 import time
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
@@ -112,6 +115,49 @@ def extract_bbc_events(payload: Any, competition_id: str = "") -> List[Dict[str,
     walk(payload)
     return matched if grouped else []
 
+SCRIPT_JSON_RE = re.compile(
+    r'<script[^>]*type=["\']application/json["\'][^>]*>(.*?)</script>',
+    re.I | re.S,
+)
+
+
+def _decode_json_blob(blob: str) -> Any:
+    raw = html_lib.unescape(str(blob or "").strip())
+    if not raw:
+        return None
+    try:
+        value = json.loads(raw)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return value
+    return value
+
+
+def bbc_hydration_payloads(html: str) -> List[Any]:
+    """Return BBC page-state payloads across old and current frontend shells."""
+    payloads: List[Any] = []
+    for marker in ("__INITIAL_DATA__", "__PRELOADED_STATE__"):
+        value = _quoted_window_json(html or "", marker)
+        if value is not None:
+            payloads.append(value)
+    for blob in SCRIPT_JSON_RE.findall(html or ""):
+        value = _decode_json_blob(blob)
+        if value is not None:
+            payloads.append(value)
+    return payloads
+
+
+def extract_bbc_events_from_html(html: str, competition_id: str = "") -> List[Dict[str, Any]]:
+    for payload in bbc_hydration_payloads(html or ""):
+        events = extract_bbc_events(payload, competition_id)
+        if events:
+            return events
+    return []
+
 
 class BbcSportAdapter:
     adapter_key = "bbc-sport"
@@ -160,11 +206,10 @@ class BbcSportAdapter:
         )
 
     def _events_from_html(self, html: str, competition_id: str) -> List[Dict[str, Any]]:
-        data = _quoted_window_json(html, "__INITIAL_DATA__")
-        if data is not None:
-            extracted = extract_bbc_events(data, competition_id)
-            if extracted:
-                return extracted
+        extracted = extract_bbc_events_from_html(html, competition_id)
+        if extracted:
+            return extracted
+        data = next(iter(bbc_hydration_payloads(html)), None)
         if competition_id == "wa-calendar":
             from collector.adapters_mass import parse_diamond_league_pdf
 
