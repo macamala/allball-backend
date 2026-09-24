@@ -200,8 +200,9 @@ class VolleyballWorldAdapter:
         started = time.perf_counter()
         competition_id = request.competition_id or ""
         spec = SLUGS.get(competition_id) or {}
-        slug = spec.get("slug") or ""
-        tokens = tuple(spec.get("tokens") or (slug,))
+        configured = request.source_config or {}
+        slug = spec.get("slug") or str(configured.get("slug") or "").strip()
+        tokens = tuple(spec.get("tokens") or configured.get("tokens") or (slug,))
         events: List[Dict[str, Any]] = []
         last: Optional[FetchResult] = None
         if not slug:
@@ -226,9 +227,9 @@ class VolleyballWorldAdapter:
         ]
         if slug == "superlega":
             pages.insert(0, f"{BASE}/volleyball/competitions/superlega/schedule/27232/")
-        configured = ((request.source_config or {}).get("url") or "").strip()
-        if configured:
-            pages.insert(0, configured)
+        configured_url = (configured.get("url") or "").strip()
+        if configured_url:
+            pages.insert(0, configured_url)
         match_pages: List[str] = []
         seen: Set[str] = set()
         for url in pages:
