@@ -42,7 +42,12 @@ def _participant_name(side: Any) -> str:
 def _has_country(side: Any) -> bool:
     if not isinstance(side, dict):
         return False
-    return bool(side.get("country_id") or side.get("country") or side.get("nationality"))
+    return bool(
+        side.get("country_id")
+        or side.get("country")
+        or side.get("nationality")
+        or [value for value in (side.get("country_ids") or []) if value]
+    )
 
 
 def _has_logo(side: Any) -> bool:
