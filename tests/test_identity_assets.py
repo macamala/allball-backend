@@ -198,3 +198,14 @@ def test_opendota_event_preserves_real_league_name_on_stable_professional_key():
     assert event["source_competition_name"] == "BetBoom Streamers Battle 15"
     assert event["source_competition_id"] == "999"
     assert event["extra"]["source_competition_name"] == "BetBoom Streamers Battle 15"
+
+
+def test_verified_active_wta_tournament_artwork():
+    singapore = verified_competition_logo("tennis", "tennis-wta-1152-singapore", {})
+    ankara = verified_competition_logo("tennis", "tennis-wta-1178-ankara-125", {})
+    tolentino = verified_competition_logo("tennis", "tennis-wta-1133-tolentino-125", {})
+    seoul = verified_competition_logo("tennis", "tennis-wta-1024-seoul", {})
+    assert singapore and "thekallang.com.sg" in singapore
+    assert ankara and "passo.com.tr" in ankara
+    assert tolentino and "wtatennis.com" in tolentino
+    assert seoul and "wtakoreaopen.com" in seoul
