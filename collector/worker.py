@@ -671,6 +671,7 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
                         "WTA global tennis breadth %s",
                         {
                             "status": wta_breadth.get("status"),
+                            "legacy_rows_repaired": wta_breadth.get("legacy_rows_repaired"),
                             "calendar_rows": wta_breadth.get("calendar_rows"),
                             "tournaments": wta_breadth.get("tournaments"),
                             "requests": wta_breadth.get("requests"),
