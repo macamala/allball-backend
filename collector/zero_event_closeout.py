@@ -1135,7 +1135,6 @@ def zero_event_collectors(
         ("cdl-majors", lambda: collect_cdl(getter)),
         ("pll", lambda: collect_pll(getter)),
         ("atp-tour", lambda: collect_atp(getter)),
-        ("ehf-competitions", lambda: collect_ehf(getter)),
         ("fivb-competitions", lambda: collect_vnl(getter)),
         (
             "nascar-truck",
