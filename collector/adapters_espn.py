@@ -480,6 +480,63 @@ class EspnScoreboardAdapter:
         return []
 
 
+def _espn_html_team_catalog(html_text: str) -> List[Dict[str, str]]:
+    import html as html_lib
+    import re
+
+    out: List[Dict[str, str]] = []
+    seen = set()
+    pattern = re.compile(
+        r'''href=["'][^"']*/team/_/id/(\d+)/([^"'/?#]+)[^"']*["'][^>]*>(.*?)</a>''',
+        re.I | re.S,
+    )
+    for match in pattern.finditer(html_text or ""):
+        team_id = str(match.group(1) or "").strip()
+        slug = str(match.group(2) or "").strip()
+        label = re.sub(r"<[^>]+>", " ", match.group(3) or "")
+        label = html_lib.unescape(re.sub(r"\s+", " ", label)).strip()
+        if not team_id:
+            continue
+        key = (team_id, slug)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append({
+            "id": team_id,
+            "slug": slug,
+            "label": label,
+            "slug_name": slug.replace("-", " "),
+        })
+    return out
+
+
+def _attach_espn_html_team_ids(events: List[Dict[str, Any]], html_text: str) -> List[Dict[str, Any]]:
+    from collector.participant_alias import names_equivalent
+
+    catalog = _espn_html_team_catalog(html_text)
+    if not catalog:
+        return events
+    for event in events:
+        for side_name in ("home", "away"):
+            side = event.get(side_name)
+            if not isinstance(side, dict) or str(side.get("id") or "").strip():
+                continue
+            name = str(side.get("name") or "").strip()
+            if not name:
+                continue
+            matches = [
+                row for row in catalog
+                if names_equivalent(name, row.get("label") or "")
+                or names_equivalent(name, row.get("slug_name") or "")
+            ]
+            unique_ids = {row["id"] for row in matches if row.get("id")}
+            if len(unique_ids) != 1:
+                continue
+            team_id = next(iter(unique_ids))
+            side["id"] = team_id
+    return events
+
+
 def _parse_espnfitt_scoreboard(html: str, sport: str = "") -> List[Dict[str, Any]]:
     import json
     import re
@@ -493,7 +550,8 @@ def _parse_espnfitt_scoreboard(html: str, sport: str = "") -> List[Dict[str, Any
         return []
     if not isinstance(payload, dict):
         return []
-    return parse_espn_scoreboard(payload, sport=sport)
+    events = parse_espn_scoreboard(payload, sport=sport)
+    return _attach_espn_html_team_ids(events, html)
 
 
 def _parse_request_day(value: Optional[str]) -> Optional[date]:
