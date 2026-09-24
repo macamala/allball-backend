@@ -54,6 +54,21 @@ TSDB_BY_COMP = {
     if row.get("event_model") == "team_match"
 }
 
+# Extra team catalogues used ONLY by this artwork backfill. These entries are
+# deliberately not added to verified_coverage.py, so they can never promote
+# TheSportsDB into fixture/result/status authority for these competitions.
+_ASSET_ONLY_TEAM_BY_COMP = {
+    "cfl": {
+        "competition_id": "cfl",
+        "sport_id": "american-football",
+        "event_model": "team_match",
+        "source_competition_id": "4405",
+        "name": "CFL",
+        "asset_only": True,
+    },
+}
+TSDB_BY_COMP.update(_ASSET_ONLY_TEAM_BY_COMP)
+
 # Competition artwork is useful for every event model, not only team sports.
 # Keep this catalogue asset-only: these ids are never used as fixture/result
 # authority. Formula 1/2 ids are verified TheSportsDB league identities.
