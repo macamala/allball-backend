@@ -285,14 +285,33 @@ TEAM_IDENTITY_FAMILIES = {"team_match", "esports_match"}
 INDIVIDUAL_IDENTITY_FAMILIES = {"individual_match", "combat"}
 
 
+NATIONAL_TEAM_COMPETITIONS = {
+    # CEV EuroVolley score rows are national selections. A country flag is the
+    # correct fallback identity when a federation crest is not licensed or
+    # unavailable; treating those sides as missing club crests is misleading.
+    "cev-eurovolley-men",
+}
+
+
+def _side_is_composite_pair(side: Any) -> bool:
+    if not isinstance(side, dict):
+        return False
+    name = str(side.get("display_name") or side.get("name") or "").strip()
+    return " / " in name or "/" in name
+
+
 def _visible_identity_requirement(event: Dict[str, Any]) -> str:
     """Return the side identity asset a public score row genuinely requires.
 
-    Team/esports matches need team logos. Person/fighter head-to-head events
-    need country identity. Race/meet/tournament/meta rows do not have two
-    teams, even when legacy normalization exposes home/away display fields.
+    Team/esports matches need team logos unless the competition is explicitly
+    national-team based, where country identity is valid. Person/fighter
+    head-to-head events need country identity. Race/meet/tournament/meta rows
+    do not have two teams, even when legacy normalization exposes display sides.
     """
     family = str(event.get("event_family") or "").strip().lower()
+    competition = str(event.get("competition_key") or event.get("competition") or "").strip()
+    if competition in NATIONAL_TEAM_COMPETITIONS:
+        return "country"
     if family in TEAM_IDENTITY_FAMILIES:
         return "logo"
     if family in INDIVIDUAL_IDENTITY_FAMILIES:
@@ -405,7 +424,9 @@ def public_multisport_day_snapshot(day_offset: int = 1, *, include_samples: bool
                 missing_side_countries = [
                     side_name
                     for side_name, side in (("home", home), ("away", away))
-                    if not _side_country(side)
+                    # Mixed doubles pairs can represent two different countries,
+                    # so one synthetic side flag would be factually wrong.
+                    if not _side_country(side) and not _side_is_composite_pair(side)
                 ]
 
         if missing_competition_logo or missing_side_logos or missing_side_countries:
