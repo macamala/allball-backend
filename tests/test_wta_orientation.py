@@ -72,6 +72,36 @@ def test_doubles_uses_a_and_b_pairs():
     assert event["periods"][0]["winner"] == "home"
     assert event["periods"][0]["complete"] is True
 
+def test_doubles_preserve_both_member_countries():
+    row = {
+        "MatchID": "MD2",
+        "MatchState": "F",
+        "PlayerNameFirstA": "Gabriela",
+        "PlayerNameLastA": "Dabrowski",
+        "PlayerNameFirstA2": "Luisa",
+        "PlayerNameLastA2": "Stefani",
+        "CountryCodeA": "CA",
+        "CountryCodeA2": "BR",
+        "PlayerNameFirstB": "Erin",
+        "PlayerNameLastB": "Routliffe",
+        "PlayerNameFirstB2": "Aldila",
+        "PlayerNameLastB2": "Sutjiadi",
+        "PlayerIDB": "11",
+        "PlayerIDB2": "12",
+        "ScoreSet1A": "6",
+        "ScoreSet1B": "4",
+        "ScoreSet2A": "6",
+        "ScoreSet2B": "4",
+    }
+    event = match_to_event(
+        row,
+        "wta-tour",
+        player_countries={"id:11": "NZ", "id:12": "ID"},
+    )
+    assert event["home"]["country_ids"] == ["CA", "BR"]
+    assert event["away"]["country_ids"] == ["NZ", "ID"]
+
+
 
 def test_zero_values_are_stored_not_inferred():
     event = match_to_event(_singles(a_sets=(0, 0), b_sets=(0, 0), state="P"), "wta-tour")
