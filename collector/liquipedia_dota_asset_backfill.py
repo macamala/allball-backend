@@ -37,8 +37,8 @@ _HEADERS = {
     "Referer": "https://liquipedia.net/dota2/",
 }
 
-_IMG_RE = re.compile(r"<img\\b[^>]*>", re.I)
-_ATTR_RE = re.compile(r"""([a-zA-Z_:][-a-zA-Z0-9_:.]*)\\s*=\\s*(["'])(.*?)\\2""", re.S)
+_IMG_RE = re.compile(r"<img\b[^>]*>", re.I)
+_ATTR_RE = re.compile(r"""([a-zA-Z_:][-a-zA-Z0-9_:.]*)\s*=\s*(["'])(.*?)\2""", re.S)
 
 
 def _key(value: Any) -> str:
