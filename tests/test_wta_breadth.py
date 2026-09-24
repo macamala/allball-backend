@@ -1,4 +1,5 @@
 from datetime import datetime
+from types import SimpleNamespace
 
 from collector.wta_breadth import (
     _competition_identity,
@@ -40,3 +41,8 @@ def test_wta_tournament_overlap_and_match_window():
         low=datetime(2026, 9, 23),
         high=datetime(2026, 9, 29),
     )
+
+
+
+def test_wta_mapping_uses_public_breadth_status():
+    source = SimpleNamespace(source_id="wta-global")
