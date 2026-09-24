@@ -17,13 +17,13 @@ from collector.adapters_wta import BASE, discover_current_tournaments, match_to_
 from collector.competition_identity import unique_label_competition
 from collector.http import fetch_url
 from collector.lock import lock_status
-from collector.models import SportsCollectorJob, SportsCompetition, SportsSource, SportsSourceCompetition
+from collector.models import SportsCollectorJob, SportsCompetition, SportsEvent, SportsSource, SportsSourceCompetition
 from collector.sources import source_collectable
 from collector.util import dump_json, load_json, parse_datetime, slugify
 
 logger = logging.getLogger(__name__)
 
-JOB_KEY = "wta-global-breadth-v2"
+JOB_KEY = "wta-global-breadth-v3"
 SOURCE_ID = "wta-global"
 PUBLIC_BREADTH_STATUS = "single-source-breadth"
 
@@ -135,6 +135,35 @@ def _ensure_mapping(
     return mapping
 
 
+def _repair_legacy_wta_rows(db: Session) -> int:
+    """Repair rows written before WTA breadth stamped sport=tennis."""
+    rows = (
+        db.query(SportsEvent)
+        .filter(
+            SportsEvent.primary_source_id == SOURCE_ID,
+            SportsEvent.sport_id.in_(["", "unknown"]),
+            SportsEvent.canonical_event_id.is_(None),
+        )
+        .all()
+    )
+    repaired = 0
+    for row in rows:
+        row.sport_id = "tennis"
+        row.event_family = row.event_family or "individual_match"
+        extra = load_json(row.extra_json, {}) or {}
+        extra["source_family"] = extra.get("source_family") or "wta-json"
+        extra["public_competition_key"] = extra.get("public_competition_key") or row.competition_id
+        extra["display_eligible"] = True
+        row.extra_json = dump_json(extra)
+        row.display_eligible = True
+        from collector.list_extra import store_list_extra
+        store_list_extra(row, extra)
+        repaired += 1
+    if repaired:
+        db.flush()
+    return repaired
+
+
 def _event_in_window(event: Dict[str, Any], *, low: datetime, high: datetime) -> bool:
     stamp = parse_datetime(event.get("start_time"))
     if stamp is None:
@@ -161,6 +190,11 @@ def run_breadth_ingest(
     if source is None:
         return {"status": "missing_source", "tournaments": 0, "events": 0, "ingested": 0}
 
+    repaired = _repair_legacy_wta_rows(db)
+    db.commit()
+    if heartbeat:
+        heartbeat()
+
     fetch = getter or fetch_url
     now = datetime.utcnow()
     low = now - timedelta(days=days_back + 1)
@@ -175,6 +209,7 @@ def run_breadth_ingest(
 
     stats: Dict[str, Any] = {
         "status": "ok",
+        "legacy_rows_repaired": repaired,
         "calendar_rows": len(discovered),
         "tournaments": len(active),
         "requests": 0,
@@ -219,6 +254,7 @@ def run_breadth_ingest(
                 continue
             if not _event_in_window(event, low=low, high=high):
                 continue
+            event["sport"] = "tennis"
             event["competition"] = competition_name
             event["competition_key"] = competition_id
             event["source_competition_id"] = native_id
