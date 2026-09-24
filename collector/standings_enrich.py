@@ -725,7 +725,20 @@ def fetch_competition_standings(competition_id: str, getter=None) -> Dict[str, A
             if rows:
                 return wrap_standings(rows, competition=competition_id, sport="baseball", source="mlb-statsapi")
     if competition_id == "australia-afl":
-        from collector.adapters_squiggle import SQUIGGLE_HEADERS, parse_squiggle_payload
+        from collector.adapters_squiggle import (
+            SQUIGGLE_HEADERS,
+            TEAMS_URL,
+            _team_assets,
+            parse_squiggle_payload,
+        )
+
+        team_assets = {}
+        try:
+            teams_result = getter(TEAMS_URL, headers=SQUIGGLE_HEADERS)
+        except TypeError:
+            teams_result = getter(TEAMS_URL)
+        if teams_result is not None and getattr(teams_result, "ok", False):
+            team_assets = _team_assets(teams_result.payload)
 
         year = datetime.utcnow().year
         urls = []
@@ -740,6 +753,22 @@ def fetch_competition_standings(competition_id: str, getter=None) -> Dict[str, A
             payload = result.payload if result is not None else None
             rows_raw, _meta = parse_squiggle_payload(payload, "standings")
             rows = parse_squiggle_standings({"standings": rows_raw} if rows_raw else payload)
+            if rows and team_assets:
+                for row in rows:
+                    team_id = str(row.get("team_id") or "").strip()
+                    asset = team_assets.get(team_id) if team_id else None
+                    if not asset:
+                        folded_name = str(row.get("team") or "").strip().casefold()
+                        asset = next(
+                            (
+                                value
+                                for value in team_assets.values()
+                                if str(value.get("name") or "").strip().casefold() == folded_name
+                            ),
+                            None,
+                        )
+                    if asset and asset.get("logo") and not row.get("logo"):
+                        row["logo"] = asset["logo"]
             if rows:
                 season = str(year)
                 if "year=" in url:
