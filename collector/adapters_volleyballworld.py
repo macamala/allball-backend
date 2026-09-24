@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import re
 import time
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 from urllib.parse import urljoin, urlparse
 
 from collector.adapters import FetchRequest, FetchResult
@@ -49,7 +49,7 @@ MONTHS = {
     "dec": 12,
 }
 
-_PAGE_CACHE: Dict[str, FetchResult] = {}
+_PAGE_CACHE: Dict[str, Tuple[float, FetchResult]] = {}
 
 
 def _iso_from_text(text: str) -> Optional[str]:
@@ -187,21 +187,25 @@ class VolleyballWorldAdapter:
 
     def _get(self, url: str, timeout: int = 20) -> FetchResult:
         cached = _PAGE_CACHE.get(url)
+        ttl = 300 if any(token in url for token in ("/schedule", "/matches", "/results")) else 1800
         if cached is not None:
-            return cached
+            cached_at, cached_result = cached
+            if time.monotonic() - cached_at < ttl:
+                return cached_result
         try:
             result = self._get_text(url, timeout=timeout)
         except TypeError:
             result = self._get_text(url)
-        _PAGE_CACHE[url] = result
+        _PAGE_CACHE[url] = (time.monotonic(), result)
         return result
 
     def fetch(self, request: FetchRequest) -> FetchResult:
         started = time.perf_counter()
         competition_id = request.competition_id or ""
         spec = SLUGS.get(competition_id) or {}
-        slug = spec.get("slug") or ""
-        tokens = tuple(spec.get("tokens") or (slug,))
+        configured = request.source_config or {}
+        slug = spec.get("slug") or str(configured.get("slug") or "").strip()
+        tokens = tuple(spec.get("tokens") or configured.get("tokens") or (slug,))
         events: List[Dict[str, Any]] = []
         last: Optional[FetchResult] = None
         if not slug:
@@ -226,9 +230,9 @@ class VolleyballWorldAdapter:
         ]
         if slug == "superlega":
             pages.insert(0, f"{BASE}/volleyball/competitions/superlega/schedule/27232/")
-        configured = ((request.source_config or {}).get("url") or "").strip()
-        if configured:
-            pages.insert(0, configured)
+        configured_url = (configured.get("url") or "").strip()
+        if configured_url:
+            pages.insert(0, configured_url)
         match_pages: List[str] = []
         seen: Set[str] = set()
         for url in pages:

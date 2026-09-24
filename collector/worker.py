@@ -687,6 +687,38 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
                 db.rollback()
 
             try:
+                from collector.volleyballworld_breadth import run_if_due as run_volleyballworld_breadth_if_due
+
+                def _pulse_volleyballworld() -> None:
+                    heartbeat_scheduler_lock(db, owner=owner)
+                    db.commit()
+
+                volleyball_breadth = run_volleyballworld_breadth_if_due(
+                    db,
+                    owner=owner,
+                    heartbeat=_pulse_volleyballworld,
+                )
+                if volleyball_breadth:
+                    logger.info(
+                        "Volleyball World global breadth %s",
+                        {
+                            "status": volleyball_breadth.get("status"),
+                            "slugs": volleyball_breadth.get("slugs"),
+                            "active_slugs": volleyball_breadth.get("active_slugs"),
+                            "competitions": volleyball_breadth.get("competitions"),
+                            "events": volleyball_breadth.get("events"),
+                            "eligible": volleyball_breadth.get("eligible"),
+                            "ingested": volleyball_breadth.get("ingested"),
+                            "http_errors": volleyball_breadth.get("http_errors"),
+                            "by_competition": volleyball_breadth.get("by_competition"),
+                        },
+                    )
+                    _maybe_log_breadth(db, force=True)
+            except Exception:
+                logger.exception("Volleyball World global breadth failed")
+                db.rollback()
+
+            try:
                 from collector.ehf_breadth import run_if_due as run_ehf_breadth_if_due
 
                 def _pulse_ehf() -> None:
