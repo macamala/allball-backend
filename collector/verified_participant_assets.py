@@ -11,6 +11,17 @@ from typing import Any, Dict, Optional
 from collector.participant_text import fold_for_identity
 
 
+_VERIFIED_FOOTBALL_COMPETITIONS: Dict[str, str] = {
+    "football-ang-girabola": "https://img.sofascore.com/api/v1/unique-tournament/2308/image",
+    "football-dom-liga-mayor": "https://img.sofascore.com/api/v1/unique-tournament/20209/image",
+    "football-mar-botola-pro": "https://images.fotmob.com/image_resources/logo/leaguelogo/530.png",
+    "football-tun-ligue-1": "https://images.fotmob.com/image_resources/logo/leaguelogo/544.png",
+    "football-alg-ligue-1": "https://images.fotmob.com/image_resources/logo/leaguelogo/516.png",
+    "football-col-liga-femenina": "https://img.sofascore.com/api/v1/unique-tournament/18555/image",
+    "colombia-primera-a": "https://images.fotmob.com/image_resources/logo/leaguelogo/274.png",
+}
+
+
 _VERIFIED_FOOTBALL: Dict[str, str] = {
     # FotMob team IDs.
     "js omrane": "https://images.fotmob.com/image_resources/logo/teamlogo/1669235.png",
@@ -34,3 +45,13 @@ def verified_participant_logo(sport_id: str, side: Any) -> Optional[str]:
     raw = side.get("display_name") or side.get("name") or ""
     folded = fold_for_identity(raw)
     return _VERIFIED_FOOTBALL.get(folded)
+
+
+def verified_competition_logo(sport_id: str, competition_id: str, extra: Dict[str, Any]) -> Optional[str]:
+    if sport_id != "football":
+        return None
+    public_key = str((extra or {}).get("public_competition_key") or "").strip()
+    return (
+        _VERIFIED_FOOTBALL_COMPETITIONS.get(public_key)
+        or _VERIFIED_FOOTBALL_COMPETITIONS.get(str(competition_id or "").strip())
+    )
