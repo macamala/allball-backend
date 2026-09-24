@@ -34,7 +34,7 @@ from collector.lock import (
     release_scheduler_lock,
 )
 
-STANDBY_SLEEP_SECONDS = 45
+STANDBY_SLEEP_SECONDS = 10
 RUN_ONCE_LOCK_RETRIES = 3
 _standby_logged = False
 _creators_collected = False
@@ -839,6 +839,7 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
                         "live_jobs_due",
                         "live_jobs_selected",
                         "duration_s",
+                        "groups_processed",
                     )},
                 )
 
