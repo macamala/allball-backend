@@ -60,6 +60,28 @@ def _is_obvious_source_junk(source_family: str, name: str) -> bool:
     return bool(pattern.search(name))
 
 
+def incoming_source_identity_reject(event: Dict[str, Any]) -> str:
+    """Return a source-scoped rejection reason for a raw incoming event."""
+    extra = event.get("extra") if isinstance(event.get("extra"), dict) else {}
+    source_family = str(
+        event.get("source_family")
+        or extra.get("source_family")
+        or ""
+    ).strip().lower()
+    sport = str(event.get("sport") or "").strip().lower()
+    home = _side_name(event.get("home"))
+    away = _side_name(event.get("away"))
+
+    if source_family == "ufc-web" and sport and sport != "mma":
+        return "ufc_source_wrong_sport"
+    if source_family in _SOURCE_JUNK and (
+        _is_obvious_source_junk(source_family, home)
+        or _is_obvious_source_junk(source_family, away)
+    ):
+        return f"{source_family}_text_contamination"
+    return ""
+
+
 def repair_source_identity_leaks(db: Session) -> Dict[str, Any]:
     global _ran
     if _ran:
