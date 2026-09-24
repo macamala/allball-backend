@@ -1299,6 +1299,15 @@ class NinkoCollectedSportsDataProvider:
             sport_id=row.sport_id or "",
             source_family=str(extra.get("source_family") or ""),
         )
+        if row.sport_id == "football" and str(extra.get("source_family") or "") == "fotmob":
+            from collector.fotmob_crosswalk import _canonical_fotmob_competition
+
+            country_corrected = _canonical_fotmob_competition(
+                str(extra.get("source_competition_name") or extra.get("competition") or ""),
+                str(row.country_id or payload.get("country_id") or ""),
+            )
+            if country_corrected:
+                corrected = country_corrected
         if corrected is None:
             return None
         payload["competition_key"] = corrected
