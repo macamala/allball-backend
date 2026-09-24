@@ -21,7 +21,7 @@ from collector.util import dump_json, load_json, parse_datetime, slugify
 
 logger = logging.getLogger(__name__)
 
-JOB_KEY = "ehf-global-breadth-v2"
+JOB_KEY = "ehf-global-breadth-v3"
 SOURCE_ID = "ehf-global"
 INDEX_URL = "https://old.eurohandball.com/events/competitions"
 BASE = "https://old.eurohandball.com"
@@ -510,63 +510,66 @@ def run_breadth_ingest(
     if heartbeat:
         heartbeat()
 
-    index_result = getter(INDEX_URL)
-    stats["requests"] += 1
-    index_html = (
-        index_result.payload
-        if getattr(index_result, "ok", False) and isinstance(getattr(index_result, "payload", None), str)
-        else ""
-    )
-    if not index_html:
-        stats["http_errors"] += 1
-    urls = discover_round_urls(index_html, max_urls=max_pages)
-
-    for url in urls:
-        if stats["ingested"] >= max_ingest:
-            stats["status"] = "bounded"
-            break
-        result = getter(url)
+    # The current JSON livescore model is authoritative. The legacy site is
+    # only a fallback when that API returns no events at all.
+    if not api_rows:
+        index_result = getter(INDEX_URL)
         stats["requests"] += 1
-        if not getattr(result, "ok", False) or not isinstance(getattr(result, "payload", None), str):
+        index_html = (
+            index_result.payload
+            if getattr(index_result, "ok", False) and isinstance(getattr(index_result, "payload", None), str)
+            else ""
+        )
+        if not index_html:
             stats["http_errors"] += 1
-            continue
-        stats["pages"] += 1
-        rows = parse_round_page(result.payload, url)
-        stats["events"] += len(rows)
-        if not rows:
-            continue
+        urls = discover_round_urls(index_html, max_urls=max_pages)
 
-        competition_id = str(rows[0].get("competition_key") or "")
-        competition_name = str(rows[0].get("competition") or competition_id)
-        gender = str(rows[0].get("gender") or "mixed")
-        _ensure_mapping(
-            db,
-            source=source,
-            competition_id=competition_id,
-            competition_name=competition_name,
-            gender=gender,
-            source_url=url,
-        )
-        seen_competitions.add(competition_id)
-        bucket = stats["by_competition"].setdefault(
-            competition_id,
-            {"events": 0, "eligible": 0, "ingested": 0},
-        )
-        bucket["events"] += len(rows)
-
-        for event in rows:
-            if not _in_window(event, now=now):
-                continue
-            stats["eligible"] += 1
-            bucket["eligible"] += 1
-            if _ingest(db, event, source.source_id):
-                stats["ingested"] += 1
-                bucket["ingested"] += 1
+        for url in urls:
             if stats["ingested"] >= max_ingest:
+                stats["status"] = "bounded"
                 break
-        db.commit()
-        if heartbeat:
-            heartbeat()
+            result = getter(url)
+            stats["requests"] += 1
+            if not getattr(result, "ok", False) or not isinstance(getattr(result, "payload", None), str):
+                stats["http_errors"] += 1
+                continue
+            stats["pages"] += 1
+            rows = parse_round_page(result.payload, url)
+            stats["events"] += len(rows)
+            if not rows:
+                continue
+
+            competition_id = str(rows[0].get("competition_key") or "")
+            competition_name = str(rows[0].get("competition") or competition_id)
+            gender = str(rows[0].get("gender") or "mixed")
+            _ensure_mapping(
+                db,
+                source=source,
+                competition_id=competition_id,
+                competition_name=competition_name,
+                gender=gender,
+                source_url=url,
+            )
+            seen_competitions.add(competition_id)
+            bucket = stats["by_competition"].setdefault(
+                competition_id,
+                {"events": 0, "eligible": 0, "ingested": 0},
+            )
+            bucket["events"] += len(rows)
+
+            for event in rows:
+                if not _in_window(event, now=now):
+                    continue
+                stats["eligible"] += 1
+                bucket["eligible"] += 1
+                if _ingest(db, event, source.source_id):
+                    stats["ingested"] += 1
+                    bucket["ingested"] += 1
+                if stats["ingested"] >= max_ingest:
+                    break
+            db.commit()
+            if heartbeat:
+                heartbeat()
 
     stats["competitions"] = len(seen_competitions)
     cache_clear(db, prefix="events:")
