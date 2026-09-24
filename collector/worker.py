@@ -445,6 +445,25 @@ def _maybe_log_breadth(db, *, force: bool = False) -> None:
         unknown_rows = unknown_sport_rows_snapshot(db)
         if unknown_rows:
             logger.warning("UNKNOWN_SPORT_ROWS %s", unknown_rows)
+        from collector.asset_coverage import asset_coverage_payload
+        asset_coverage = asset_coverage_payload(db)
+        logger.info("IDENTITY_ASSET_COVERAGE %s", asset_coverage.get("summary") or {})
+        asset_gaps = [
+            {
+                "sport": row.get("sport"),
+                "competition": row.get("competition"),
+                "country_flag": row.get("country_flag_present"),
+                "competition_logo": row.get("competition_logo_present"),
+                "team_logos": f"{row.get('team_participants_with_logo', 0)}/{row.get('observed_team_participants', 0)}",
+                "participant_flags": f"{row.get('individual_participants_with_country', 0)}/{row.get('observed_individual_participants', 0)}",
+                "missing": (row.get("missing_participants") or [])[:8],
+                "missing_countries": (row.get("missing_country_participants") or [])[:8],
+            }
+            for row in (asset_coverage.get("competitions") or [])
+            if not row.get("asset_complete")
+        ][:30]
+        if asset_gaps:
+            logger.info("IDENTITY_ASSET_GAPS %s", asset_gaps)
         _breadth_logged_at = now_audit
     except Exception:
         logger.exception("Tomorrow football breadth audit failed")
