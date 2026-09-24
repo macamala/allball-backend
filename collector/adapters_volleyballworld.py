@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import re
 import time
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 from urllib.parse import urljoin, urlparse
 
 from collector.adapters import FetchRequest, FetchResult
@@ -49,7 +49,7 @@ MONTHS = {
     "dec": 12,
 }
 
-_PAGE_CACHE: Dict[str, FetchResult] = {}
+_PAGE_CACHE: Dict[str, Tuple[float, FetchResult]] = {}
 
 
 def _iso_from_text(text: str) -> Optional[str]:
@@ -187,13 +187,16 @@ class VolleyballWorldAdapter:
 
     def _get(self, url: str, timeout: int = 20) -> FetchResult:
         cached = _PAGE_CACHE.get(url)
+        ttl = 300 if any(token in url for token in ("/schedule", "/matches", "/results")) else 1800
         if cached is not None:
-            return cached
+            cached_at, cached_result = cached
+            if time.monotonic() - cached_at < ttl:
+                return cached_result
         try:
             result = self._get_text(url, timeout=timeout)
         except TypeError:
             result = self._get_text(url)
-        _PAGE_CACHE[url] = result
+        _PAGE_CACHE[url] = (time.monotonic(), result)
         return result
 
     def fetch(self, request: FetchRequest) -> FetchResult:
