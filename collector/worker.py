@@ -560,6 +560,37 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
                 logger.exception("FotMob date-board backfill failed")
 
             try:
+                from collector.espn_tennis_breadth import run_if_due as run_espn_tennis_breadth_if_due
+
+                def _pulse_espn_tennis() -> None:
+                    heartbeat_scheduler_lock(db, owner=owner)
+                    db.commit()
+
+                espn_tennis = run_espn_tennis_breadth_if_due(
+                    db,
+                    owner=owner,
+                    heartbeat=_pulse_espn_tennis,
+                )
+                if espn_tennis:
+                    logger.info(
+                        "ESPN global tennis breadth %s",
+                        {
+                            "status": espn_tennis.get("status"),
+                            "requests": espn_tennis.get("requests"),
+                            "competitions": espn_tennis.get("competitions"),
+                            "events": espn_tennis.get("events"),
+                            "eligible": espn_tennis.get("eligible"),
+                            "ingested": espn_tennis.get("ingested"),
+                            "http_errors": espn_tennis.get("http_errors"),
+                            "by_date": espn_tennis.get("by_date"),
+                        },
+                    )
+                    _maybe_log_breadth(db, force=True)
+            except Exception:
+                logger.exception("ESPN global tennis breadth failed")
+                db.rollback()
+
+            try:
                 from collector.bbc_tennis_breadth import run_if_due as run_bbc_tennis_breadth_if_due
 
                 def _pulse_bbc_tennis() -> None:
