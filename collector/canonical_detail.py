@@ -120,6 +120,55 @@ def canonicalize_statistics(raw: Any) -> List[Dict[str, Any]]:
 def canonicalize_lineups(raw: Any) -> Optional[Dict[str, Any]]:
     if not raw:
         return None
+
+    def pack_player(value: Any) -> Optional[Dict[str, Any]]:
+        if isinstance(value, str):
+            name = _text(value)
+            return {"name": name} if name else None
+        if not isinstance(value, dict):
+            return None
+        name = _text(
+            value.get("name")
+            or value.get("display_name")
+            or value.get("displayName")
+            or value.get("fullName")
+        )
+        if not name:
+            return None
+        country = (
+            value.get("country_id")
+            or value.get("countryCode")
+            or value.get("country")
+            or value.get("nationality")
+            or value.get("nation")
+        )
+        if isinstance(country, dict):
+            country = (
+                country.get("alpha2")
+                or country.get("alpha3")
+                or country.get("code")
+                or country.get("abbreviation")
+                or country.get("name")
+            )
+        player = {
+            "id": value.get("id") or value.get("player_id") or value.get("playerId") or value.get("personId"),
+            "name": name,
+            "number": value.get("number") or value.get("shirtNumber") or value.get("jerseyNumber"),
+            "position": value.get("position") or value.get("role"),
+            "captain": bool(value.get("captain") or value.get("isCaptain")),
+            "rating": value.get("rating"),
+            "image": (
+                value.get("image")
+                or value.get("photo")
+                or value.get("avatar")
+                or value.get("image_url")
+                or value.get("imageUrl")
+                or value.get("headshot")
+            ),
+            "country_id": _text(country),
+        }
+        return {key: val for key, val in player.items() if val not in (None, "", False)}
+
     if isinstance(raw, dict) and (raw.get("home") or raw.get("away")):
         def pack(side: Any) -> Dict[str, Any]:
             blob = side if isinstance(side, dict) else {}
@@ -127,29 +176,31 @@ def canonicalize_lineups(raw: Any) -> Optional[Dict[str, Any]]:
             bench = blob.get("bench") or blob.get("substitutes") or []
             if isinstance(side, list):
                 players = side
+            packed_start = [pack_player(p) for p in (players or [])]
+            packed_bench = [pack_player(p) for p in (bench or [])]
             return {
                 "formation": _text(blob.get("formation")),
                 "coach": _text(blob.get("coach") or blob.get("manager")),
-                "start": [
-                    {"name": _text(p.get("name") if isinstance(p, dict) else p), "number": (p.get("number") if isinstance(p, dict) else None), "position": (p.get("position") if isinstance(p, dict) else None)}
-                    for p in (players or [])
-                    if (p.get("name") if isinstance(p, dict) else p)
-                ],
-                "bench": [
-                    {"name": _text(p.get("name") if isinstance(p, dict) else p), "number": (p.get("number") if isinstance(p, dict) else None)}
-                    for p in (bench or [])
-                    if (p.get("name") if isinstance(p, dict) else p)
-                ],
+                "start": [p for p in packed_start if p],
+                "bench": [p for p in packed_bench if p],
             }
 
         home = pack(raw.get("home"))
         away = pack(raw.get("away"))
         if not home["start"] and not away["start"] and not home["bench"] and not away["bench"]:
             return None
-        return {"home": home, "away": away}
+        result = {"home": home, "away": away}
+        if raw.get("confirmed") is not None:
+            result["confirmed"] = bool(raw.get("confirmed"))
+        return result
     if isinstance(raw, list) and raw:
-        names = [{"name": _text(item.get("name") if isinstance(item, dict) else item), "side": _side_name(item) if isinstance(item, dict) else ""} for item in raw]
-        names = [row for row in names if row.get("name")]
+        names = []
+        for item in raw:
+            packed = pack_player(item)
+            if not packed:
+                continue
+            packed["side"] = _side_name(item) if isinstance(item, dict) else ""
+            names.append(packed)
         if not names:
             return None
         return {
