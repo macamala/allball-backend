@@ -453,6 +453,50 @@ def _maybe_log_breadth(db, *, force: bool = False) -> None:
         football_gaps = ((today.get("asset_gap_competitions") or {}).get("football") or {})
         if football_gaps:
             logger.info("TODAY_FOOTBALL_ASSET_GAPS %s", football_gaps)
+            try:
+                from collections import Counter
+                from datetime import datetime
+                from collector.models import SportsEvent
+                from collector.util import load_json
+
+                start = datetime.fromisoformat(str(today.get("utc_from") or "").replace("Z", "+00:00")).replace(tzinfo=None)
+                end = datetime.fromisoformat(str(today.get("utc_to") or "").replace("Z", "+00:00")).replace(tzinfo=None)
+                source_rows = (
+                    db.query(SportsEvent)
+                    .filter(
+                        SportsEvent.sport_id == "football",
+                        SportsEvent.competition_id.in_(list(football_gaps)),
+                        SportsEvent.start_time >= start,
+                        SportsEvent.start_time < end,
+                        SportsEvent.canonical_event_id.is_(None),
+                    )
+                    .all()
+                )
+                by_comp = {}
+                for row in source_rows:
+                    extra = load_json(row.extra_json, {}) or {}
+                    comp = str(row.competition_id or "")
+                    item = by_comp.setdefault(comp, {"primary_sources": Counter(), "families": Counter(), "examples": []})
+                    item["primary_sources"][str(row.primary_source_id or "unknown")] += 1
+                    item["families"][str(extra.get("source_family") or "unknown")] += 1
+                    if len(item["examples"]) < 4:
+                        parts = load_json(row.participants_json, {}) or {}
+                        item["examples"].append({
+                            "event_id": row.event_id,
+                            "home": (parts.get("home") or {}).get("name"),
+                            "away": (parts.get("away") or {}).get("name"),
+                        })
+                compact_sources = {
+                    comp: {
+                        "primary_sources": dict(data["primary_sources"]),
+                        "families": dict(data["families"]),
+                        "examples": data["examples"],
+                    }
+                    for comp, data in by_comp.items()
+                }
+                logger.info("TODAY_FOOTBALL_GAP_SOURCES %s", compact_sources)
+            except Exception:
+                logger.exception("TODAY_FOOTBALL_GAP_SOURCES failed")
         unknown_rows = unknown_sport_rows_snapshot(db)
         if unknown_rows:
             logger.warning("UNKNOWN_SPORT_ROWS %s", unknown_rows)
