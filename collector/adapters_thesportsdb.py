@@ -59,8 +59,16 @@ def _event(raw: Any, competition_id: str) -> Optional[Dict[str, Any]]:
     inferred = str(raw.get("strStatus") or "").upper() in {"", "NS"} and raw.get("intHomeScore") not in (None, "")
     return {
         "id": str(raw.get("idEvent") or ""),
-        "home": {"id": str(raw.get("idHomeTeam") or ""), "name": home_name},
-        "away": {"id": str(raw.get("idAwayTeam") or ""), "name": away_name},
+        "home": {
+            "id": str(raw.get("idHomeTeam") or ""),
+            "name": home_name,
+            "logo": raw.get("strHomeTeamBadge") or raw.get("strHomeTeamLogo"),
+        },
+        "away": {
+            "id": str(raw.get("idAwayTeam") or ""),
+            "name": away_name,
+            "logo": raw.get("strAwayTeamBadge") or raw.get("strAwayTeamLogo"),
+        },
         "status": _status(raw, start),
         "status_inferred": inferred,
         "score": {"home": _num(raw.get("intHomeScore")), "away": _num(raw.get("intAwayScore"))},
@@ -73,6 +81,7 @@ def _event(raw: Any, competition_id: str) -> Optional[Dict[str, Any]]:
         "competition": raw.get("strLeague") or competition_id,
         "source_competition_name": raw.get("strLeague") or "",
         "source_competition_id": str(raw.get("idLeague") or "") or None,
+        "competition_logo": raw.get("strLeagueBadge") or raw.get("strLeagueLogo"),
         "country_id": raw.get("strCountry"),
     }
 
