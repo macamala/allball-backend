@@ -257,6 +257,12 @@ def test_wta_discovery_uses_current_window_not_ao_archive():
                 }
             ]
         },
+        "https://api.wtatennis.com/tennis/tournaments/2075/2026/players": {
+            "players": [
+                {"player": {"id": 101, "fullName": "Player One", "countryCode": "SRB"}},
+                {"player": {"id": 202, "fullName": "Player Two", "countryCode": "ESP"}},
+            ]
+        },
         "https://api.wtatennis.com/tennis/tournaments/2075/2026/matches": {
             "matches": [
                 {
@@ -265,8 +271,10 @@ def test_wta_discovery_uses_current_window_not_ao_archive():
                     "MatchTimeStamp": "2026-09-18T18:00:00Z",
                     "PlayerNameFirstA": "Player",
                     "PlayerNameLastA": "One",
+                    "PlayerIDA": 101,
                     "PlayerNameFirstB": "Player",
                     "PlayerNameLastB": "Two",
+                    "PlayerIDB": 202,
                     "ScoreSet1A": "6",
                     "ScoreSet1B": "3",
                     "ScoreSet2A": "6",
@@ -294,6 +302,8 @@ def test_wta_discovery_uses_current_window_not_ao_archive():
     assert result.events[0]["periods"][0]["home"] == 6
     assert result.events[0]["tournament_id"] == 2075
     assert result.events[0]["score"]["home"] == 2
+    assert result.events[0]["home"]["country_id"] == "SRB"
+    assert result.events[0]["away"]["country_id"] == "ESP"
 
 
 
