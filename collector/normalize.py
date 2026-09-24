@@ -17,8 +17,22 @@ def _participant(raw: Any, side: str, sport_id: str = "") -> Dict[str, Any]:
     payload = participant_payload(raw, side, sport=sport_id)
     name = payload.get("name") or ""
     payload["slug"] = payload.get("slug") or slugify(fold_for_identity(name) or name)
-    if isinstance(raw, dict) and raw.get("logo"):
-        payload["logo"] = raw.get("logo") or raw.get("image")
+    if isinstance(raw, dict):
+        payload["logo"] = (
+            payload.get("logo")
+            or raw.get("logo")
+            or raw.get("image")
+            or raw.get("crest")
+            or raw.get("badge")
+            or raw.get("team_logo")
+            or raw.get("teamLogo")
+            or raw.get("logo_url")
+            or raw.get("logoUrl")
+            or raw.get("image_url")
+            or raw.get("imageUrl")
+            or raw.get("emblem")
+            or raw.get("icon")
+        )
     return payload
 
 
@@ -95,6 +109,18 @@ def normalize_event(raw: Dict[str, Any], *, sport_id: str, competition_id: str) 
         "session_type": raw.get("session_type"),
         "game_id": raw.get("game_id") or (sport_id if sport.get("parent_id") == "esports" else None),
         "country_id": raw.get("country_id"),
+        "competition_logo": (
+            raw.get("competition_logo")
+            or raw.get("competitionLogo")
+            or raw.get("competition_image")
+            or raw.get("competitionImage")
+            or raw.get("league_logo")
+            or raw.get("leagueLogo")
+            or raw.get("league_image")
+            or raw.get("leagueImage")
+            or raw.get("tournament_logo")
+            or raw.get("tournamentLogo")
+        ),
         "meeting_id": raw.get("meeting_id"),
         "race_number": raw.get("race_number"),
         "tournament": raw.get("tournament"),
