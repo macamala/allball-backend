@@ -777,64 +777,6 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
                 logger.exception("SofaScore multi-sport breadth failed")
 
             try:
-                from collector.sportscore_crosswalk import run_if_due as run_sportscore_breadth_if_due
-
-                def _pulse_sportscore() -> None:
-                    heartbeat_scheduler_lock(db, owner=owner)
-                    db.commit()
-
-                sportscore_breadth = run_sportscore_breadth_if_due(
-                    db,
-                    owner=owner,
-                    heartbeat=_pulse_sportscore,
-                )
-                if sportscore_breadth:
-                    logger.info(
-                        "SportScore multi-sport breadth %s",
-                        {
-                            "status": sportscore_breadth.get("status"),
-                            "upstream_total": sportscore_breadth.get("upstream_total"),
-                            "eligible": sportscore_breadth.get("eligible"),
-                            "ingested": sportscore_breadth.get("ingested"),
-                            "skipped_ambiguous": sportscore_breadth.get("skipped_ambiguous"),
-                            "sports": sportscore_breadth.get("sports"),
-                        },
-                    )
-                    _maybe_log_breadth(db, force=True)
-            except Exception:
-                logger.exception("SportScore multi-sport breadth failed")
-                db.rollback()
-
-            try:
-                from collector.sportscore_crosswalk import run_team_schedule_if_due
-
-                def _pulse_sportscore_schedule() -> None:
-                    heartbeat_scheduler_lock(db, owner=owner)
-                    db.commit()
-
-                sportscore_schedule = run_team_schedule_if_due(
-                    db,
-                    owner=owner,
-                    heartbeat=_pulse_sportscore_schedule,
-                )
-                if sportscore_schedule:
-                    logger.info(
-                        "SportScore team schedule backfill %s",
-                        {
-                            "status": sportscore_schedule.get("status"),
-                            "requests": sportscore_schedule.get("requests"),
-                            "upstream_total": sportscore_schedule.get("upstream_total"),
-                            "eligible": sportscore_schedule.get("eligible"),
-                            "ingested": sportscore_schedule.get("ingested"),
-                            "sports": sportscore_schedule.get("sports"),
-                        },
-                    )
-                    _maybe_log_breadth(db, force=True)
-            except Exception:
-                logger.exception("SportScore team schedule backfill failed")
-                db.rollback()
-
-            try:
                 from collector.thesportsdb_schedule import run_if_due as run_tsdb_schedule_if_due
 
                 def _pulse_tsdb_schedule() -> None:
