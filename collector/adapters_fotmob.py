@@ -258,9 +258,17 @@ def parse_fotmob_table(payload: Any) -> List[Dict[str, Any]]:
         for item in rows:
             if not isinstance(item, dict):
                 continue
-            team = item.get("name") or item.get("shortName") or ((item.get("team") or {}) if isinstance(item.get("team"), dict) else {})
+            team_node = item.get("team") if isinstance(item.get("team"), dict) else {}
+            team = item.get("name") or item.get("shortName") or team_node
             if isinstance(team, dict):
                 team = team.get("name") or team.get("shortName")
+            team_id = str(
+                item.get("id")
+                or item.get("teamId")
+                or team_node.get("id")
+                or team_node.get("teamId")
+                or ""
+            ).strip()
             pts = item.get("pts") if item.get("pts") is not None else item.get("points")
             played = item.get("played") or item.get("matchesPlayed")
             if not team or (pts is None and played is None):
@@ -274,6 +282,8 @@ def parse_fotmob_table(payload: Any) -> List[Dict[str, Any]]:
                 {
                     "position": item.get("idx") or item.get("position"),
                     "team": team,
+                    "team_id": team_id or None,
+                    "logo": f"https://images.fotmob.com/image_resources/logo/teamlogo/{team_id}.png" if team_id else None,
                     "played": played,
                     "wins": item.get("wins"),
                     "draws": item.get("draws"),
