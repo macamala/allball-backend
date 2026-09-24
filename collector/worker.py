@@ -593,6 +593,25 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
                 logger.exception("FotMob date-board backfill failed")
 
             try:
+                from collector.atp_official_probe import run_if_due as run_atp_official_probe_if_due
+
+                atp_probe = run_atp_official_probe_if_due(db, owner=owner)
+                if atp_probe:
+                    logger.info(
+                        "ATP official scores probe %s",
+                        {
+                            "status": atp_probe.get("status"),
+                            "http": atp_probe.get("http"),
+                            "tournaments": atp_probe.get("tournaments"),
+                            "matches": atp_probe.get("matches"),
+                            "attempts": atp_probe.get("attempts"),
+                        },
+                    )
+            except Exception:
+                logger.exception("ATP official scores probe failed")
+                db.rollback()
+
+            try:
                 from collector.espn_tennis_breadth import run_if_due as run_espn_tennis_breadth_if_due
 
                 def _pulse_espn_tennis() -> None:
