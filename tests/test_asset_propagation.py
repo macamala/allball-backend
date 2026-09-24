@@ -243,3 +243,38 @@ def test_sofascore_native_ids_backfill_artwork_only_in_sofascore_context():
     finally:
         db.rollback()
         db.close()
+
+
+
+def test_international_national_team_uses_country_identity_not_fake_club_logo():
+    db = _session()
+    event_id = "ninko-evt-national-team-flags"
+    try:
+        db.query(SportsEvent).filter(SportsEvent.event_id == event_id).delete(synchronize_session=False)
+        db.add(
+            SportsEvent(
+                event_id=event_id,
+                sport_id="football",
+                competition_id="football-friendlies",
+                event_family="team_match",
+                status="scheduled",
+                fingerprint="fp-national-team-flags",
+                participants_json=dump_json({
+                    "home": {"name": "Serbia"},
+                    "away": {"name": "China"},
+                }),
+                extra_json=dump_json({}),
+                display_eligible=True,
+            )
+        )
+        db.flush()
+        stats = propagate_identity_assets(db)
+        row = db.get(SportsEvent, event_id)
+        participants = load_json(row.participants_json, {}) or {}
+        assert participants["home"]["country_id"] == "RS"
+        assert participants["away"]["country_id"] == "CN"
+        assert not participants["home"].get("logo")
+        assert stats["national_team_countries_filled"] >= 2
+    finally:
+        db.rollback()
+        db.close()
