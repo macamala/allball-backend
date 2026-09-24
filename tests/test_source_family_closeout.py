@@ -410,8 +410,8 @@ def test_wst_tournament_uuid_is_not_a_guessed_match_uuid():
                         "fixtureNumber": 5,
                         "status": "Completed",
                         "startDateTime": "2026-05-20 09:00:00",
-                        "homePlayer": {"firstName": "Robert", "surname": "Pope"},
-                        "awayPlayer": {"firstName": "Mark", "surname": "Vincent"},
+                        "homePlayer": {"id": "p1", "firstName": "Robert", "surname": "Pope", "countryCode": "ENG"},
+                        "awayPlayer": {"id": "p2", "firstName": "Mark", "surname": "Vincent", "nationality": {"code": "WAL"}},
                     },
                     {
                         "matchID": "not-a-uuid",
@@ -450,6 +450,9 @@ def test_wst_tournament_uuid_is_not_a_guessed_match_uuid():
     assert events[0]["match_uuid"] != events[0]["tournament_uuid"]
     assert events[0]["score"]["home"] == 0 and events[0]["score"]["away"] == 4
     assert len(events[0]["classification"]) == 2
+    assert events[0]["home"]["id"] == "p1"
+    assert events[0]["home"]["country_id"] == "ENG"
+    assert events[0]["away"]["country_id"] == "WAL"
     assert events[0]["source_event_id"] == again[0]["source_event_id"]
     assert collect_wst_tournament(lambda url: None, tournament_id="not-a-real-uuid") == []
 
