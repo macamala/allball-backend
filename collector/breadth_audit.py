@@ -295,6 +295,8 @@ def public_multisport_day_snapshot(day_offset: int = 1, *, include_samples: bool
                             "away_id": away.get("id"),
                             "missing_competition_logo": missing_competition_logo,
                             "missing_side_logos": missing_side_logos,
+                            "source_family": row.get("source_family"),
+                            "source_competition_id": row.get("source_competition_id"),
                             "utc": row.get("start_time"),
                         }
                     )
