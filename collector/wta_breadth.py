@@ -35,6 +35,9 @@ JOB_KEY = "wta-global-breadth-v7"
 SOURCE_ID = "wta-global"
 PUBLIC_BREADTH_STATUS = "single-source-breadth"
 
+_COUNTRY_ASSET_INTERVAL_S = 300
+_country_asset_next_run_at = 0.0
+
 
 def _job(db: Session) -> SportsCollectorJob:
     row = db.get(SportsCollectorJob, JOB_KEY)
@@ -303,6 +306,90 @@ def _repair_visible_wta_countries(
     if stats["rows_updated"]:
         db.flush()
     return stats
+
+
+def run_country_asset_repair(
+    db: Session,
+    *,
+    getter=None,
+    heartbeat: Optional[Callable[[], None]] = None,
+    max_tournaments: int = 24,
+) -> Dict[str, Any]:
+    """Repair visible WTA participant country identity without touching fixtures."""
+    fetch = getter or fetch_url
+    now = datetime.utcnow()
+    low = now - timedelta(days=2)
+    high = now + timedelta(days=4)
+    discovered = discover_current_tournaments(fetch, now=now)
+    active = [
+        row
+        for row in discovered
+        if _tournament_overlaps(
+            row,
+            low=(now - timedelta(days=2)).date(),
+            high=(now + timedelta(days=4)).date(),
+        )
+    ][:max_tournaments]
+
+    countries: Dict[str, str] = {}
+    ambiguous: Set[str] = set()
+    stats: Dict[str, Any] = {
+        "status": "ok",
+        "calendar_rows": len(discovered),
+        "tournaments": len(active),
+        "requests": 0,
+        "http_errors": 0,
+        "country_keys": 0,
+        "rows_scanned": 0,
+        "rows_updated": 0,
+        "participant_sides_filled": 0,
+    }
+
+    for meta in active:
+        group = meta.get("tournamentGroup") if isinstance(meta.get("tournamentGroup"), dict) else {}
+        try:
+            group_id = int(group.get("id"))
+            year = int(meta.get("year"))
+        except (TypeError, ValueError):
+            continue
+        result = fetch(f"{BASE}/tournaments/{group_id}/{year}/players")
+        stats["requests"] += 1
+        if not getattr(result, "ok", False):
+            stats["http_errors"] += 1
+            continue
+        _merge_country_index(
+            countries,
+            _player_country_map(getattr(result, "payload", None)),
+            ambiguous,
+        )
+        if heartbeat:
+            heartbeat()
+
+    stats["country_keys"] = len(countries)
+    repaired = _repair_visible_wta_countries(
+        db,
+        player_countries=countries,
+        low=low,
+        high=high,
+    )
+    stats.update(repaired)
+    if stats["rows_updated"]:
+        db.commit()
+    return stats
+
+
+def run_country_assets_if_due(
+    db: Session,
+    *,
+    getter=None,
+    heartbeat: Optional[Callable[[], None]] = None,
+) -> Optional[Dict[str, Any]]:
+    global _country_asset_next_run_at
+    now_mono = time.monotonic()
+    if now_mono < _country_asset_next_run_at:
+        return None
+    _country_asset_next_run_at = now_mono + _COUNTRY_ASSET_INTERVAL_S
+    return run_country_asset_repair(db, getter=getter, heartbeat=heartbeat)
 
 
 def run_breadth_ingest(
