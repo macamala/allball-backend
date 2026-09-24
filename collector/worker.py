@@ -40,6 +40,7 @@ _standby_logged = False
 _creators_collected = False
 _breadth_logged_at = 0.0
 _fifa_identity_reconciled = False
+_registry_bootstrapped = False
 
 
 def _collect_official_creators(db, heartbeat=None) -> None:
@@ -814,11 +815,6 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
                         return
                 time.sleep(STANDBY_SLEEP_SECONDS)
                 continue
-            if not db.info.get("registry_bootstrapped"):
-                bootstrap_registry(db)
-                db.commit()
-                db.info["registry_bootstrapped"] = True
-
             # Football score/status gets the first, tiny request budget.
             # This lane is FotMob-only and live-ish-only so a slow unrelated
             # football provider can never block current scores.
@@ -866,6 +862,15 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
                         "duration_s",
                     )},
                 )
+
+            # Registry bootstrap can be expensive. It is process-global and must
+            # never sit in front of live score/status refresh.
+            global _registry_bootstrapped
+            if not _registry_bootstrapped:
+                bootstrap_registry(db)
+                db.commit()
+                _registry_bootstrapped = True
+                logger.info("Registry bootstrap complete")
 
             try:
                 from collector.source_identity_repair import repair_source_identity_leaks
