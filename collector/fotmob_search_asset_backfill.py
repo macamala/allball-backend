@@ -157,7 +157,6 @@ def _candidate_names(db: Session, now: float) -> List[Tuple[str, str, int]]:
         db.query(SportsEvent)
         .filter(
             SportsEvent.sport_id == "football",
-            SportsEvent.competition_id == competition_id,
             SportsEvent.canonical_event_id.is_(None),
             SportsEvent.display_eligible.is_(True),
             SportsEvent.start_time >= start,
@@ -208,6 +207,7 @@ def _apply_asset(
         db.query(SportsEvent)
         .filter(
             SportsEvent.sport_id == "football",
+            SportsEvent.competition_id == competition_id,
             SportsEvent.canonical_event_id.is_(None),
             SportsEvent.display_eligible.is_(True),
             SportsEvent.start_time >= start,
