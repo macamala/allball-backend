@@ -1157,6 +1157,9 @@ class NinkoCollectedSportsDataProvider:
                 keeper = db.query(SportsEvent).filter_by(event_id=row.canonical_event_id).first()
                 if keeper:
                     row = keeper
+            from collector.public_keeper import public_keeper_for_alias
+
+            row = public_keeper_for_alias(db, row)
             if not str(row.sport_id or "").strip() or str(row.sport_id or "").strip().lower() == "unknown":
                 return None
             blocked_ids, blocked_families = _blocked_public_sources(db)
