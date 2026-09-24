@@ -643,7 +643,16 @@ def mark_slot(db: Session, job: Dict[str, Any], *, status: str, http_calls: int 
     row.priority = int(job.get("priority") or 50)
 
 
-def run_incremental_tick(\n    db: Session,\n    *,\n    sleeper=None,\n    now: Optional[datetime] = None,\n    sport_id: Optional[str] = None,\n    source_family: Optional[str] = None,\n    liveish_only: bool = False,\n    max_physical: Optional[int] = None,\n) -> Dict[str, Any]:
+def run_incremental_tick(
+    db: Session,
+    *,
+    sleeper=None,
+    now: Optional[datetime] = None,
+    sport_id: Optional[str] = None,
+    source_family: Optional[str] = None,
+    liveish_only: bool = False,
+    max_physical: Optional[int] = None,
+) -> Dict[str, Any]:
     """Execute due incremental jobs. Kill switch: scheduler off returns immediately."""
     import time
 
