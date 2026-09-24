@@ -66,6 +66,23 @@ def match_to_event(row: Dict[str, Any], competition_id: str, tournament: Optiona
     for side, prefix in ((home_side, "A"), (away_side, "B")):
         seed = row.get(f"Seed{prefix}") or row.get(f"PlayerSeed{prefix}") or row.get(f"SeedPlayer{prefix}")
         rank = row.get(f"Rank{prefix}") or row.get(f"PlayerRank{prefix}") or row.get(f"Ranking{prefix}")
+        player_id = (
+            row.get(f"PlayerID{prefix}")
+            or row.get(f"PlayerId{prefix}")
+            or row.get(f"Player{prefix}ID")
+            or row.get(f"Player{prefix}Id")
+        )
+        country = (
+            row.get(f"CountryCode{prefix}")
+            or row.get(f"Country{prefix}")
+            or row.get(f"PlayerCountryCode{prefix}")
+            or row.get(f"PlayerCountry{prefix}")
+            or row.get(f"Nationality{prefix}")
+        )
+        if player_id not in (None, ""):
+            side["id"] = str(player_id)
+        if country not in (None, ""):
+            side["country_id"] = str(country)
         if seed not in (None, ""):
             side["seed"] = seed
         if rank not in (None, ""):
@@ -74,8 +91,8 @@ def match_to_event(row: Dict[str, Any], competition_id: str, tournament: Optiona
         "id": oriented["source_event_id"] or f"wta:{row.get('EventID')}:{home}:{away}",
         "home": home_side,
         "away": away_side,
-        "participant_a": {"name": home, "side": "a"},
-        "participant_b": {"name": away, "side": "b"},
+        "participant_a": {**home_side, "side": "a"},
+        "participant_b": {**away_side, "side": "b"},
         "status": oriented["status"],
         "score": oriented["score"],
         "start_time": row.get("MatchTimeStamp"),
