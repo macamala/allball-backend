@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy.orm import Session
 
 from collector.adapters import FetchResult
-from collector.http import fetch_url
+from collector.http import fetch_text, fetch_url
 from collector.models import SportsEvent, SportsEventDetail
 from collector.source_ids import families_with_ids, id_for_family, merge_family_ids
 from collector.util import dump_json, load_json
@@ -1274,7 +1274,7 @@ def fetch_family_detail(family: str, source_event_id: str, getter=None, sport: s
         url = str((context or {}).get("fiba_game_url") or "").strip()
         if not url:
             return out
-        result = _get(getter, url)
+        result = fetch_text(url)
         if result.ok and isinstance(result.payload, str):
             out.update(parse_fiba_game_detail(result.payload))
         return out
