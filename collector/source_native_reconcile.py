@@ -10,11 +10,11 @@ from sqlalchemy.orm import Session
 from collector.competition_identity import correct_public_competition_id, unique_label_competition
 from collector.competition_presentation import SOURCE_ALPHA3_TO_GEO, metadata_for
 from collector.event_quality import reject_reason
-from collector.list_extra import store_list_extra
+from collector.list_extra import extra_for_list, store_list_extra
 from collector.models import SportsCollectorJob, SportsEvent
 from collector.util import dump_json, isoformat, load_json, slugify
 
-JOB_KEY = "source-native-football-revalidate-v1"
+JOB_KEY = "source-native-football-revalidate-v2"
 SAFE_FAMILIES = {"fotmob", "fifa", "fifa-digital", "fifa-json"}
 NON_BLOCKING_FLAGS = {
     "competition_attribution_mismatch",
@@ -58,6 +58,21 @@ def _canonical_known_for_country(name: str, country_id: Any) -> Optional[str]:
     meta = metadata_for(candidate, "football")
     candidate_geo = str(meta.get("country_code") or "").strip()
     return candidate if candidate_geo and candidate_geo == source_geo else None
+
+
+def _merged_source_extra(row: SportsEvent) -> Dict[str, Any]:
+    """Merge rich event metadata with the slim list metadata.
+
+    Some migrations/backfills update list_extra_json without rewriting the
+    larger extra_json blob. Source identity fields from list-extra are
+    therefore authoritative when present.
+    """
+    extra = load_json(row.extra_json, {}) or {}
+    slim = extra_for_list(row) or {}
+    for key, value in slim.items():
+        if value not in (None, "", [], {}):
+            extra[key] = value
+    return extra
 
 
 def _safe_public_key(row: SportsEvent, extra: Dict[str, Any]) -> Optional[str]:
@@ -117,7 +132,7 @@ def revalidate_current_source_native(
     )
     scanned = promoted = blocked = 0
     for row in rows:
-        extra = load_json(row.extra_json, {}) or {}
+        extra = _merged_source_extra(row)
         family = str(extra.get("source_family") or "").strip()
         if family not in SAFE_FAMILIES:
             continue
