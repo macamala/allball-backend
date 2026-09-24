@@ -818,6 +818,63 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
                 bootstrap_registry(db)
                 db.commit()
                 db.info["registry_bootstrapped"] = True
+
+            # FOOTBALL SCORE LANE: score/status freshness must never wait behind
+            # artwork, breadth, standings, creator or enrichment maintenance.
+            # Use the proven incremental scheduler unchanged, then keep looping
+            # on the score lane while any public football event is in its
+            # kickoff/live window.
+            if scheduler_enabled():
+                score_summary = run_incremental_tick(db)
+                db.commit()
+                logger.info(
+                    "FOOTBALL_SCORE_LANE %s",
+                    {k: score_summary.get(k) for k in (
+                        "due_jobs",
+                        "selected_jobs",
+                        "families_selected",
+                        "sports_selected",
+                        "events_changed",
+                        "live_jobs_due",
+                        "live_jobs_selected",
+                        "live_families_served",
+                        "oldest_live_fetch_age_seconds",
+                        "duration_s",
+                    )},
+                )
+                from datetime import datetime, timedelta
+                from collector.models import SportsEvent
+
+                score_now = datetime.utcnow()
+                hot_football = (
+                    db.query(SportsEvent)
+                    .filter(
+                        SportsEvent.canonical_event_id.is_(None),
+                        SportsEvent.sport_id == "football",
+                        SportsEvent.display_eligible.isnot(False),
+                        SportsEvent.start_time >= score_now - timedelta(hours=5),
+                        SportsEvent.start_time <= score_now + timedelta(minutes=20),
+                        SportsEvent.status.in_((
+                            "scheduled",
+                            "delayed",
+                            "live",
+                            "halftime",
+                            "break",
+                            "stale",
+                        )),
+                    )
+                    .count()
+                )
+                logger.info("FOOTBALL_SCORE_WINDOW hot=%s", hot_football)
+                if hot_football:
+                    heartbeat_scheduler_lock(db, owner=owner)
+                    db.commit()
+                    if advisory:
+                        postgres_advisory_unlock(db)
+                        advisory = None
+                    time.sleep(max(5, min(15, live_idle_seconds(interval))))
+                    continue
+
             try:
                 from collector.source_identity_repair import repair_source_identity_leaks
 
