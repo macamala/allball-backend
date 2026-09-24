@@ -16,7 +16,8 @@ from urllib.parse import quote
 
 from sqlalchemy.orm import Session
 
-from collector.adapters_fotmob import FOTMOB_LEAGUES, LEAGUE_URL, _league_ids, parse_fotmob_table
+from collector.adapters_fotmob import FOTMOB_LEAGUES, LEAGUE_URL, _league_ids
+from collector.fotmob_asset_backfill import _roster
 from collector.cache import note_list_invalidation
 from collector.http import fetch_url
 from collector.models import SportsEvent
@@ -310,8 +311,8 @@ def _roster_ids(getter, competition_id: str) -> Tuple[set[str], int, int]:
         if not getattr(result, "ok", False):
             errors += 1
             continue
-        for row in parse_fotmob_table(result.payload):
-            team_id = str(row.get("team_id") or "").strip()
+        for row in _roster(result.payload):
+            team_id = str(row.get("id") or "").strip()
             if team_id.isdigit():
                 ids.add(team_id)
     return ids, requests, errors
