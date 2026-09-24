@@ -60,3 +60,28 @@ def test_bbc_tennis_breadth_uses_dedicated_global_source():
     db = FakeDb()
     assert _source(db) is source
     assert db.requested == ["bbc-tennis-global"]
+
+
+
+def test_bbc_tennis_board_parses_application_json_hydration():
+    payload = {
+        "eventGroups": [{
+            "displayLabel": "Seoul Open",
+            "secondaryGroups": [{
+                "events": [{
+                    "id": "match-json-1",
+                    "home": {"name": "Player C"},
+                    "away": {"name": "Player D"},
+                    "startTime": "2026-09-25T08:00:00Z",
+                    "status": "scheduled",
+                }]
+            }],
+        }]
+    }
+    html = '<script type="application/json">' + json.dumps(payload) + '</script>'
+    events = parse_bbc_tennis_html(html)
+    assert len(events) == 1
+    assert events[0]["competition"] == "Seoul Open"
+    assert events[0]["home"]["name"] == "Player C"
+    assert events[0]["away"]["name"] == "Player D"
+    assert events[0]["source_event_ids"]["bbc-sport"] == "match-json-1"
