@@ -13,7 +13,7 @@ from urllib.parse import unquote, urljoin, urlparse
 from sqlalchemy.orm import Session
 
 from collector.adapters_sites import parse_eurohandball
-from collector.http import fetch_text
+from collector.http import fetch_text, fetch_url
 from collector.lock import lock_status
 from collector.models import SportsCollectorJob, SportsCompetition, SportsSource, SportsSourceCompetition
 from collector.sources import source_collectable
@@ -21,10 +21,11 @@ from collector.util import dump_json, load_json, parse_datetime, slugify
 
 logger = logging.getLogger(__name__)
 
-JOB_KEY = "ehf-global-breadth-v1"
+JOB_KEY = "ehf-global-breadth-v2"
 SOURCE_ID = "ehf-global"
 INDEX_URL = "https://old.eurohandball.com/events/competitions"
 BASE = "https://old.eurohandball.com"
+CURRENT_API = "https://www.eurohandball.com/umbraco/api/livescoreapi/GetLiveScoreMatches/100358"
 
 # Guaranteed current-season round pages. Index discovery adds any other
 # 2026/27 EHF round pages that are active.
@@ -195,6 +196,173 @@ def parse_round_page(html: str, url: str) -> List[Dict[str, Any]]:
     return out
 
 
+
+def _api_day_date(day: Dict[str, Any]) -> str:
+    for key in ("date", "dateFormatted", "fullDate", "calendarUrl"):
+        value = str(day.get(key) or "")
+        match = re.search(r"(20\d{2})[-/.](\d{1,2})[-/.](\d{1,2})", value)
+        if match:
+            year, month, daynum = (int(match.group(1)), int(match.group(2)), int(match.group(3)))
+            return f"{year:04d}-{month:02d}-{daynum:02d}"
+    return ""
+
+
+def _api_start(match: Dict[str, Any], stats: Dict[str, Any], day_date: str) -> Optional[str]:
+    for key in ("date", "matchDate", "startDate", "dateTime", "startDateTime"):
+        value = str(match.get(key) or "").strip()
+        if not value:
+            continue
+        parsed = parse_datetime(value)
+        if parsed is not None:
+            return value
+    clock = str(stats.get("startTime") or match.get("startTime") or "").strip()
+    time_match = re.search(r"\b(\d{1,2}):(\d{2})\b", clock)
+    if day_date and time_match:
+        return f"{day_date}T{int(time_match.group(1)):02d}:{int(time_match.group(2)):02d}:00+02:00"
+    return None
+
+
+def _api_score(stats: Dict[str, Any]) -> Optional[int]:
+    value = stats.get("totalGoals")
+    if value in (None, "", "-"):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _api_competition_id(name: str, match: Dict[str, Any]) -> str:
+    slug = slugify(name)
+    gender_text = " ".join(
+        str(match.get(key) or "")
+        for key in ("competitionType", "competitionName", "competitionShortName")
+    ).lower()
+    gender = "women" if any(token in gender_text for token in ("women", "female", "wcl")) else "men" if any(
+        token in gender_text for token in ("men", "male", "mcl")
+    ) else "mixed"
+    if slug:
+        return f"handball-ehf-{slug}-{gender}"[:120].rstrip("-")
+    digest = hashlib.sha1(repr(sorted(match.items())).encode("utf-8")).hexdigest()[:10]
+    return f"handball-ehf-current-{digest}-{gender}"
+
+
+def parse_current_api(payload: Any) -> List[Dict[str, Any]]:
+    """Flatten the current EHF Vue livescore model without depending on root names."""
+    out: List[Dict[str, Any]] = []
+    seen = set()
+
+    def walk(value: Any, day_date: str = "") -> None:
+        if isinstance(value, list):
+            for item in value:
+                walk(item, day_date)
+            return
+        if not isinstance(value, dict):
+            return
+
+        local_day = _api_day_date(value) or day_date
+        match = value.get("match") if isinstance(value.get("match"), dict) else None
+        if match is not None:
+            home = match.get("homeTeam") if isinstance(match.get("homeTeam"), dict) else {}
+            away = match.get("guestTeam") if isinstance(match.get("guestTeam"), dict) else {}
+            home_name = str(home.get("name") or "").strip()
+            away_name = str(away.get("name") or "").strip()
+            if home_name and away_name:
+                match_stats = value.get("matchStats") if isinstance(value.get("matchStats"), dict) else {}
+                home_stats = value.get("homeStats") if isinstance(value.get("homeStats"), dict) else {}
+                away_stats = value.get("guestStats") if isinstance(value.get("guestStats"), dict) else {}
+                competition_name = str(
+                    match.get("competitionName")
+                    or match.get("competitionShortName")
+                    or match.get("competitionType")
+                    or "EHF Competition"
+                ).strip()
+                competition_id = _api_competition_id(competition_name, match)
+                start = _api_start(match, match_stats, local_day)
+                source_url = str(match.get("url") or CURRENT_API)
+                source_event_id = str(
+                    match.get("id")
+                    or match.get("matchId")
+                    or match.get("externalId")
+                    or ""
+                ).strip()
+                if not source_event_id:
+                    material = f"{competition_id}|{start}|{home_name.casefold()}|{away_name.casefold()}"
+                    source_event_id = hashlib.sha1(material.encode("utf-8")).hexdigest()[:24]
+                if source_event_id not in seen:
+                    seen.add(source_event_id)
+                    home_score = _api_score(home_stats)
+                    away_score = _api_score(away_stats)
+                    is_live = bool(match_stats.get("isLive"))
+                    status_text = " ".join(
+                        str(match_stats.get(key) or match.get(key) or "")
+                        for key in ("status", "state", "cssClass")
+                    ).lower()
+                    if is_live:
+                        status = "live"
+                    elif any(token in status_text for token in ("finished", "final", "ended", "played")):
+                        status = "finished"
+                    elif home_score is not None and away_score is not None:
+                        stamp = parse_datetime(start)
+                        now = datetime.utcnow()
+                        if stamp is not None and getattr(stamp, "tzinfo", None) is not None:
+                            stamp = stamp.replace(tzinfo=None)
+                        status = "finished" if stamp is not None and stamp < now - timedelta(hours=2) else "scheduled"
+                    else:
+                        status = "scheduled"
+                    if status == "scheduled":
+                        home_score = away_score = None
+
+                    gender = "women" if competition_id.endswith("-women") else "men" if competition_id.endswith("-men") else "mixed"
+                    extra = {
+                        "source_family": "ehf-web",
+                        "source_event_id": source_event_id,
+                        "source_event_ids": {"ehf-web": source_event_id},
+                        "source_competition_id": competition_id,
+                        "source_competition_name": competition_name,
+                        "public_competition_key": competition_id,
+                        "source_url": source_url,
+                        "gender": gender,
+                    }
+                    out.append(
+                        {
+                            "id": f"ehf:{source_event_id}",
+                            "source_event_id": source_event_id,
+                            "source_event_ids": {"ehf-web": source_event_id},
+                            "sport": "handball",
+                            "event_family": "team_match",
+                            "competition": competition_name,
+                            "competition_key": competition_id,
+                            "source_family": "ehf-web",
+                            "source_competition_id": competition_id,
+                            "source_competition_name": competition_name,
+                            "home": {
+                                "id": str(home.get("id") or home.get("teamId") or "").strip(),
+                                "name": home_name,
+                            },
+                            "away": {
+                                "id": str(away.get("id") or away.get("teamId") or "").strip(),
+                                "name": away_name,
+                            },
+                            "status": status,
+                            "score": {"home": home_score, "away": away_score},
+                            "start_time": start,
+                            "gender": gender,
+                            "venue": match.get("venue") or match.get("location"),
+                            "extra": extra,
+                        }
+                    )
+
+        for child in value.values():
+            if child is match:
+                continue
+            if isinstance(child, (dict, list)):
+                walk(child, local_day)
+
+    walk(payload)
+    return out
+
+
 def _ensure_mapping(
     db: Session,
     *,
@@ -289,6 +457,8 @@ def run_breadth_ingest(
     stats: Dict[str, Any] = {
         "status": "ok",
         "requests": 0,
+        "api_http_status": 0,
+        "api_events": 0,
         "pages": 0,
         "events": 0,
         "eligible": 0,
@@ -298,6 +468,45 @@ def run_breadth_ingest(
         "by_competition": {},
     }
     seen_competitions: Set[str] = set()
+
+    # Prefer the current EHF JSON origin. It is a separate host from the
+    # legacy schedule site and powers the public livescore widget.
+    api_result = fetch_url(CURRENT_API)
+    stats["requests"] += 1
+    stats["api_http_status"] = int(getattr(api_result, "http_status", 0) or 0)
+    api_rows = parse_current_api(api_result.payload) if getattr(api_result, "ok", False) else []
+    stats["api_events"] = len(api_rows)
+    for event in api_rows:
+        competition_id = str(event.get("competition_key") or "")
+        competition_name = str(event.get("competition") or competition_id)
+        gender = str(event.get("gender") or "mixed")
+        if not competition_id:
+            continue
+        _ensure_mapping(
+            db,
+            source=source,
+            competition_id=competition_id,
+            competition_name=competition_name,
+            gender=gender,
+            source_url=CURRENT_API,
+        )
+        seen_competitions.add(competition_id)
+        bucket = stats["by_competition"].setdefault(
+            competition_id,
+            {"events": 0, "eligible": 0, "ingested": 0},
+        )
+        bucket["events"] += 1
+        if not _in_window(event, now=now):
+            continue
+        stats["events"] += 1
+        stats["eligible"] += 1
+        bucket["eligible"] += 1
+        if _ingest(db, event, source.source_id):
+            stats["ingested"] += 1
+            bucket["ingested"] += 1
+    db.commit()
+    if heartbeat:
+        heartbeat()
 
     index_result = getter(INDEX_URL)
     stats["requests"] += 1
