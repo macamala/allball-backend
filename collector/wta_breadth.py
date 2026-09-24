@@ -23,7 +23,7 @@ from collector.util import dump_json, load_json, parse_datetime, slugify
 
 logger = logging.getLogger(__name__)
 
-JOB_KEY = "wta-global-breadth-v5"
+JOB_KEY = "wta-global-breadth-v6"
 SOURCE_ID = "wta-global"
 PUBLIC_BREADTH_STATUS = "single-source-breadth"
 
@@ -263,6 +263,8 @@ def run_breadth_ingest(
         rows = [row for row in (result.payload.get("matches") or []) if isinstance(row, dict)]
         stats["events"] += len(rows)
         written = eligible = 0
+        participant_country_hits = 0
+        unresolved_players: List[str] = []
         for row in rows:
             event = match_to_event(
                 row,
@@ -274,6 +276,15 @@ def run_breadth_ingest(
                 continue
             if not _event_in_window(event, low=low, high=high):
                 continue
+            for side_name in ("home", "away"):
+                side = event.get(side_name) if isinstance(event.get(side_name), dict) else {}
+                country_values = [side.get("country_id")]
+                if isinstance(side.get("country_ids"), list):
+                    country_values.extend(side.get("country_ids") or [])
+                if any(value for value in country_values):
+                    participant_country_hits += 1
+                elif side.get("name") and len(unresolved_players) < 12:
+                    unresolved_players.append(str(side.get("name")))
             event["sport"] = "tennis"
             event["competition"] = competition_name
             event["competition_key"] = competition_id
@@ -304,6 +315,8 @@ def run_breadth_ingest(
             "eligible": eligible,
             "ingested": written,
             "player_country_keys": len(player_countries),
+            "participant_country_hits": participant_country_hits,
+            "unresolved_players": unresolved_players,
         }
         db.commit()
         if heartbeat:
