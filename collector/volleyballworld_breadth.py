@@ -22,7 +22,7 @@ from collector.util import dump_json, load_json, parse_datetime, slugify
 
 logger = logging.getLogger(__name__)
 
-JOB_KEY = "volleyballworld-global-breadth-v1"
+JOB_KEY = "volleyballworld-global-breadth-v2"
 SOURCE_ID = "volleyballworld-global"
 SITEMAP_URL = f"{BASE}/sitemap.xml"
 COMP_RE = re.compile(
@@ -212,7 +212,7 @@ def run_breadth_ingest(
     *,
     text_getter=None,
     heartbeat: Optional[Callable[[], None]] = None,
-    max_slugs: int = 24,
+    max_slugs: int = 40,
     max_ingest: int = 1800,
 ) -> Dict[str, Any]:
     from collector.cache import cache_clear
@@ -262,11 +262,6 @@ def run_breadth_ingest(
         if not landing.ok or not isinstance(landing.payload, str):
             stats["http_errors"] += 1
             continue
-        # Ignore stale archive-only competition pages. Current official pages
-        # normally expose the season year in title/body/schedule metadata.
-        if "2026" not in landing.payload:
-            continue
-
         competition_name = _title(landing.payload, slug)
         competition_id = _competition_id(slug)
         result = adapter.fetch(
