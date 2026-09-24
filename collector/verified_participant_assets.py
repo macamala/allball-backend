@@ -45,6 +45,8 @@ _VERIFIED_COMPETITIONS: Dict[tuple[str, str], str] = {
     ("tennis", "wta-tour"): "https://photoresources.wtatennis.com/photo-resources/2025/02/27/bf3c987a-350a-4b59-864b-a5312fd7bcbb/Frame-1-1-2.png?height=500&width=500",
     # Official Harness Racing NSW-hosted long-form identity mark.
     ("harness-racing", "nsw-hrnsw-meetings"): "https://www.hrnsw.com.au/Uploads/Logos%202/HRNSW%202009%20Colour%20Long%20Form.jpg",
+    # Current official GBGB site header mark (white-on-transparent for dark headers).
+    ("greyhound-racing", "gbgb-meetings"): "https://www.gbgb.org.uk/wp-content/themes/base-camp/resources/assets/images/logo.png",
 }
 
 
