@@ -16,6 +16,7 @@ from urllib.parse import quote
 
 from sqlalchemy.orm import Session
 
+from collector.adapters_fotmob import FOTMOB_LEAGUES, LEAGUE_URL, _league_ids, parse_fotmob_table
 from collector.cache import note_list_invalidation
 from collector.http import fetch_url
 from collector.models import SportsEvent
@@ -106,7 +107,12 @@ def _walk_team_candidates(node: Any, inherited_type: str = "") -> Iterable[Dict[
         yield from _walk_team_candidates(value, child_type)
 
 
-def _unique_team(query_name: str, payload: Any) -> Optional[Dict[str, str]]:
+def _unique_team(
+    query_name: str,
+    payload: Any,
+    *,
+    allowed_team_ids: set[str],
+) -> Optional[Dict[str, str]]:
     candidates: List[Dict[str, str]] = []
     seen = set()
     for item in _walk_team_candidates(payload):
@@ -114,7 +120,7 @@ def _unique_team(query_name: str, payload: Any) -> Optional[Dict[str, str]]:
         if key in seen:
             continue
         seen.add(key)
-        if names_equivalent(query_name, item["name"]):
+        if item["id"] in allowed_team_ids and names_equivalent(query_name, item["name"]):
             candidates.append(item)
 
     if not candidates:
@@ -141,15 +147,16 @@ def _unique_team(query_name: str, payload: Any) -> Optional[Dict[str, str]]:
     return sorted(pool, key=lambda row: (len(row["name"]), row["name"]))[0]
 
 
-def _candidate_names(db: Session, now: float) -> List[Tuple[str, int]]:
+def _candidate_names(db: Session, now: float) -> List[Tuple[str, str, int]]:
     start = datetime.utcnow() - timedelta(days=PAST_DAYS)
     end = datetime.utcnow() + timedelta(days=FUTURE_DAYS)
-    counts: Dict[str, int] = defaultdict(int)
-    display: Dict[str, str] = {}
+    counts: Dict[Tuple[str, str], int] = defaultdict(int)
+    display: Dict[Tuple[str, str], str] = {}
     rows = (
         db.query(SportsEvent)
         .filter(
             SportsEvent.sport_id == "football",
+            SportsEvent.competition_id == competition_id,
             SportsEvent.canonical_event_id.is_(None),
             SportsEvent.display_eligible.is_(True),
             SportsEvent.start_time >= start,
@@ -158,6 +165,9 @@ def _candidate_names(db: Session, now: float) -> List[Tuple[str, int]]:
         .all()
     )
     for row in rows:
+        competition_id = str(row.competition_id or "").strip()
+        if competition_id not in FOTMOB_LEAGUES:
+            continue
         participants = load_json(row.participants_json, {}) or {}
         for side_name in ("home", "away"):
             side = participants.get(side_name)
@@ -169,18 +179,28 @@ def _candidate_names(db: Session, now: float) -> List[Tuple[str, int]]:
             folded = fold_for_identity(name)
             if not folded:
                 continue
-            if now - float(_last_search.get(folded) or 0.0) < RUN_INTERVAL_S:
+            cache_key = f"{competition_id}:{folded}"
+            if now - float(_last_search.get(cache_key) or 0.0) < RUN_INTERVAL_S:
                 continue
-            counts[folded] += 1
-            display.setdefault(folded, name)
+            key = (competition_id, folded)
+            counts[key] += 1
+            display.setdefault(key, name)
 
     return [
-        (display[folded], count)
-        for folded, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+        (competition_id, display[(competition_id, folded)], count)
+        for (competition_id, folded), count in sorted(
+            counts.items(),
+            key=lambda item: (-item[1], item[0][0], item[0][1]),
+        )
     ][:MAX_SEARCH_LOOKUPS]
 
 
-def _apply_asset(db: Session, query_name: str, team: Dict[str, str]) -> Tuple[int, int]:
+def _apply_asset(
+    db: Session,
+    competition_id: str,
+    query_name: str,
+    team: Dict[str, str],
+) -> Tuple[int, int]:
     start = datetime.utcnow() - timedelta(days=PAST_DAYS)
     end = datetime.utcnow() + timedelta(days=FUTURE_DAYS)
     rows = (
@@ -239,7 +259,7 @@ def _apply_asset(db: Session, query_name: str, team: Dict[str, str]) -> Tuple[in
 
 
 def cleanup_unsafe_prior_search_assets(db: Session) -> Dict[str, int]:
-    """Remove only prior FotMob-search logos that violate today's stricter rule."""
+    """Remove all old search-derived crests before league-roster revalidation."""
     rows = (
         db.query(SportsEvent)
         .filter(
@@ -258,21 +278,6 @@ def cleanup_unsafe_prior_search_assets(db: Session) -> Dict[str, int]:
             if not isinstance(side, dict):
                 continue
             if str(side.get("logo_source") or "") != "fotmob-search":
-                continue
-            local_name = str(side.get("display_name") or side.get("name") or "").strip()
-            remote_name = str(side.get("fotmob_team_name") or "").strip()
-            # Legacy rows from the first run did not persist remote_name.
-            # Known unsafe short-name matches from that run are explicitly removed.
-            unsafe_legacy = (
-                str(side.get("fotmob_team_id") or "") in {"6081", "687444"}
-                and len(fold_for_identity(local_name).split()) == 1
-            )
-            unsafe_named = bool(
-                remote_name
-                and len(fold_for_identity(local_name).split()) == 1
-                and fold_for_identity(local_name) != fold_for_identity(remote_name)
-            )
-            if not unsafe_legacy and not unsafe_named:
                 continue
             merged = dict(side)
             for key in ("logo", "logo_source", "fotmob_team_id", "fotmob_team_name"):
@@ -294,6 +299,24 @@ def cleanup_unsafe_prior_search_assets(db: Session) -> Dict[str, int]:
     return {"rows_updated": rows_updated, "logos_removed": logos_removed}
 
 
+def _roster_ids(getter, competition_id: str) -> Tuple[set[str], int, int]:
+    spec = FOTMOB_LEAGUES.get(competition_id) or {}
+    ids: set[str] = set()
+    requests = 0
+    errors = 0
+    for league_id in _league_ids(spec):
+        result = getter(LEAGUE_URL.format(league_id=league_id))
+        requests += 1
+        if not getattr(result, "ok", False):
+            errors += 1
+            continue
+        for row in parse_fotmob_table(result.payload):
+            team_id = str(row.get("team_id") or "").strip()
+            if team_id.isdigit():
+                ids.add(team_id)
+    return ids, requests, errors
+
+
 def run_if_due(db: Session, *, getter=None) -> Optional[Dict[str, Any]]:
     global _next_run_at
     now = time.monotonic()
@@ -307,33 +330,63 @@ def run_if_due(db: Session, *, getter=None) -> Optional[Dict[str, Any]]:
         "status": "ok" if candidates else "idle",
         "candidate_names": len(candidates),
         "requests": 0,
+        "roster_requests": 0,
         "matched_names": 0,
         "rows_updated": 0,
         "participant_logos_filled": 0,
         "http_errors": 0,
         "ambiguous_or_unmatched": 0,
+        "no_roster": 0,
         "matches": {},
     }
 
-    for name, occurrences in candidates:
+    roster_cache: Dict[str, set[str]] = {}
+    for competition_id, _name, _occurrences in candidates:
+        if competition_id in roster_cache:
+            continue
+        allowed, requests, errors = _roster_ids(getter, competition_id)
+        roster_cache[competition_id] = allowed
+        stats["requests"] += requests
+        stats["roster_requests"] += requests
+        stats["http_errors"] += errors
+
+    for competition_id, name, occurrences in candidates:
         folded = fold_for_identity(name)
+        cache_key = f"{competition_id}:{folded}"
+        allowed_team_ids = roster_cache.get(competition_id) or set()
+        if not allowed_team_ids:
+            stats["no_roster"] += 1
+            _last_search[cache_key] = now
+            continue
+
         result = getter(SEARCH_URL.format(term=quote(name)))
         stats["requests"] += 1
-        _last_search[folded] = now
+        _last_search[cache_key] = now
         if not getattr(result, "ok", False):
             stats["http_errors"] += 1
             continue
-        team = _unique_team(name, result.payload)
+
+        team = _unique_team(
+            name,
+            result.payload,
+            allowed_team_ids=allowed_team_ids,
+        )
         if not team:
             stats["ambiguous_or_unmatched"] += 1
             continue
-        changed_rows, slots = _apply_asset(db, name, team)
+
+        changed_rows, slots = _apply_asset(
+            db,
+            competition_id,
+            name,
+            team,
+        )
         if changed_rows:
             db.commit()
         stats["matched_names"] += 1
         stats["rows_updated"] += changed_rows
         stats["participant_logos_filled"] += slots
-        stats["matches"][name] = {
+        stats["matches"][f"{competition_id}:{name}"] = {
             "fotmob_id": team["id"],
             "fotmob_name": team["name"],
             "occurrences": occurrences,
@@ -342,3 +395,4 @@ def run_if_due(db: Session, *, getter=None) -> Optional[Dict[str, Any]]:
         }
 
     return stats
+
