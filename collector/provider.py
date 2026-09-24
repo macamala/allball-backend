@@ -1247,6 +1247,30 @@ class NinkoCollectedSportsDataProvider:
                 "https://images.fotmob.com/image_resources/logo/leaguelogo/"
                 f"{extra.get('source_competition_id')}.png"
             )
+        # FotMob date boards already give source-native numeric team IDs.  When a
+        # canonical row preserved that exact FotMob identity but lost artwork
+        # during merge/dedupe, restore the real crest deterministically from
+        # the FotMob team ID instead of waiting for a later roster backfill.
+        if row.sport_id == "football" and str(extra.get("source_family") or "").lower() == "fotmob":
+            enriched_participants = dict(participants)
+            for side_key in ("home", "away", "participant_a", "participant_b"):
+                side = enriched_participants.get(side_key)
+                if not isinstance(side, dict):
+                    continue
+                side_id = str(side.get("id") or "").strip()
+                has_logo = any(
+                    side.get(key)
+                    for key in ("logo", "image", "crest", "badge", "team_logo", "teamLogo", "logo_url", "logoUrl")
+                )
+                if side_id.isdigit() and not has_logo:
+                    enriched = dict(side)
+                    enriched["logo"] = (
+                        "https://images.fotmob.com/image_resources/logo/teamlogo/"
+                        f"{side_id}.png"
+                    )
+                    enriched_participants[side_key] = enriched
+            participants = enriched_participants
+
         extra_for_payload = extra if include_detail else extra
         raw_sides = {
             "home": participants.get("home") or {},
