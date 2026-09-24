@@ -284,16 +284,22 @@ def public_football_asset_range_snapshot(*, days_back: int = 7, days_forward: in
 TEAM_IDENTITY_FAMILIES = {"team_match", "esports_match"}
 INDIVIDUAL_IDENTITY_FAMILIES = {"individual_match", "combat"}
 
+# In national-team-only competitions a federation crest is optional artwork;
+# the country's flag is already a truthful, complete participant identity.
+# Keep this allow-list narrow so international club competitions still require
+# real club crests.
+NATIONAL_TEAM_IDENTITY_COMPETITIONS = {
+    "cev-eurovolley-men",
+}
+
 
 def _visible_identity_requirement(event: Dict[str, Any]) -> str:
-    """Return the side identity asset a public score row genuinely requires.
-
-    Team/esports matches need team logos. Person/fighter head-to-head events
-    need country identity. Race/meet/tournament/meta rows do not have two
-    teams, even when legacy normalization exposes home/away display fields.
-    """
+    """Return the side identity asset a public score row genuinely requires."""
     family = str(event.get("event_family") or "").strip().lower()
+    competition = str(event.get("competition_key") or event.get("competition") or "").strip()
     if family in TEAM_IDENTITY_FAMILIES:
+        if competition in NATIONAL_TEAM_IDENTITY_COMPETITIONS:
+            return "country_or_logo"
         return "logo"
     if family in INDIVIDUAL_IDENTITY_FAMILIES:
         return "country"
@@ -400,6 +406,12 @@ def public_multisport_day_snapshot(day_offset: int = 1, *, include_samples: bool
                     side_name
                     for side_name, side in (("home", home), ("away", away))
                     if not _side_logo(side)
+                ]
+            elif identity_requirement == "country_or_logo":
+                missing_side_logos = [
+                    side_name
+                    for side_name, side in (("home", home), ("away", away))
+                    if not _side_logo(side) and not _side_country(side)
                 ]
             elif identity_requirement == "country":
                 missing_side_countries = [
