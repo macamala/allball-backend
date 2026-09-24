@@ -13,6 +13,11 @@ from collector.util import load_json
 SYDNEY = ZoneInfo("Australia/Sydney")
 
 
+def _inclusive_provider_end(exclusive_end: datetime) -> str:
+    """Convert an exclusive UTC window end to provider's inclusive date_to."""
+    return (exclusive_end - timedelta(milliseconds=1)).isoformat().replace("+00:00", "Z")
+
+
 def tomorrow_football_snapshot(db) -> Dict[str, Any]:
     now_local = datetime.now(timezone.utc).astimezone(SYDNEY)
     day = now_local.date() + timedelta(days=1)
@@ -87,7 +92,7 @@ def tomorrow_public_football_snapshot() -> Dict[str, Any]:
     events = provider.get_events(
         sport="football",
         date_from=utc_start.isoformat().replace("+00:00", "Z"),
-        date_to=utc_end.isoformat().replace("+00:00", "Z"),
+        date_to=_inclusive_provider_end(utc_end),
         allow_unfiltered=True,
     )
     competitions = Counter(str(row.get("competition_name") or row.get("competition") or row.get("competition_key") or "") for row in events)
@@ -207,7 +212,7 @@ def public_football_asset_range_snapshot(*, days_back: int = 7, days_forward: in
     events = NinkoCollectedSportsDataProvider().get_events(
         sport="football",
         date_from=utc_start.isoformat().replace("+00:00", "Z"),
-        date_to=utc_end.isoformat().replace("+00:00", "Z"),
+        date_to=_inclusive_provider_end(utc_end),
         allow_unfiltered=True,
     )
 
@@ -320,7 +325,7 @@ def public_multisport_day_snapshot(day_offset: int = 1, *, include_samples: bool
     provider = NinkoCollectedSportsDataProvider()
     events = provider.get_events(
         date_from=utc_start.isoformat().replace("+00:00", "Z"),
-        date_to=utc_end.isoformat().replace("+00:00", "Z"),
+        date_to=_inclusive_provider_end(utc_end),
         allow_unfiltered=True,
     )
     sport_counts = Counter(str(row.get("sport") or "unknown") for row in events)
