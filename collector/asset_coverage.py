@@ -18,6 +18,7 @@ from collector.models import SportsEvent
 from collector.util import load_json
 
 TEAM_FAMILIES = {"team_match", "esports_match"}
+INDIVIDUAL_FAMILIES = {"individual_match", "combat"}
 
 
 def _participant_key(side: Any) -> str:
@@ -36,6 +37,12 @@ def _participant_name(side: Any) -> str:
     if not isinstance(side, dict):
         return ""
     return str(side.get("display_name") or side.get("name") or "").strip()
+
+
+def _has_country(side: Any) -> bool:
+    if not isinstance(side, dict):
+        return False
+    return bool(side.get("country_id") or side.get("country") or side.get("nationality"))
 
 
 def _has_logo(side: Any) -> bool:
@@ -73,6 +80,7 @@ def asset_coverage_payload(db) -> Dict[str, Any]:
 
     comps: Dict[str, Dict[str, Any]] = {}
     participant_seen = defaultdict(dict)
+    individual_seen = defaultdict(dict)
 
     for row in rows:
         sport_id = str(row.sport_id or "")
@@ -94,25 +102,38 @@ def asset_coverage_payload(db) -> Dict[str, Any]:
                 "observed_team_participants": 0,
                 "team_participants_with_logo": 0,
                 "missing_participants": [],
+                "observed_individual_participants": 0,
+                "individual_participants_with_country": 0,
+                "missing_country_participants": [],
             },
         )
 
         if meta.get("logo") or extra.get("competition_logo"):
             item["competition_logo_present"] = True
 
-        if str(row.event_family or "") not in TEAM_FAMILIES:
-            continue
-
-        for side_name in ("home", "away", "participant_a", "participant_b"):
-            side = participants.get(side_name)
-            participant_key = _participant_key(side)
-            name = _participant_name(side)
-            if not participant_key or not name or name.upper() == "TBD":
-                continue
-            bucket = participant_seen[key]
-            current = bucket.get(participant_key) or {"name": name, "logo": False}
-            current["logo"] = current["logo"] or _has_logo(side)
-            bucket[participant_key] = current
+        family = str(row.event_family or "")
+        if family in TEAM_FAMILIES:
+            for side_name in ("home", "away", "participant_a", "participant_b"):
+                side = participants.get(side_name)
+                participant_key = _participant_key(side)
+                name = _participant_name(side)
+                if not participant_key or not name or name.upper() == "TBD":
+                    continue
+                bucket = participant_seen[key]
+                current = bucket.get(participant_key) or {"name": name, "logo": False}
+                current["logo"] = current["logo"] or _has_logo(side)
+                bucket[participant_key] = current
+        elif family in INDIVIDUAL_FAMILIES:
+            for side_name in ("home", "away", "participant_a", "participant_b"):
+                side = participants.get(side_name)
+                participant_key = _participant_key(side)
+                name = _participant_name(side)
+                if not participant_key or not name or name.upper() == "TBD":
+                    continue
+                bucket = individual_seen[key]
+                current = bucket.get(participant_key) or {"name": name, "country": False}
+                current["country"] = current["country"] or _has_country(side)
+                bucket[participant_key] = current
 
     output = []
     for key, item in comps.items():
@@ -126,10 +147,22 @@ def asset_coverage_payload(db) -> Dict[str, Any]:
         item["participant_logos_complete"] = (
             item["observed_team_participants"] == item["team_participants_with_logo"]
         )
+        individuals = individual_seen.get(key, {})
+        item["observed_individual_participants"] = len(individuals)
+        item["individual_participants_with_country"] = sum(
+            1 for row in individuals.values() if row["country"]
+        )
+        item["missing_country_participants"] = [
+            row["name"] for row in individuals.values() if not row["country"]
+        ][:200]
+        item["participant_flags_complete"] = (
+            item["observed_individual_participants"] == item["individual_participants_with_country"]
+        )
         item["asset_complete"] = bool(
             item["country_flag_present"]
             and item["competition_logo_present"]
             and item["participant_logos_complete"]
+            and item["participant_flags_complete"]
         )
         output.append(item)
 
@@ -145,6 +178,11 @@ def asset_coverage_payload(db) -> Dict[str, Any]:
         "team_participants_with_logo": sum(row["team_participants_with_logo"] for row in output),
         "competitions_with_participant_logo_gaps": sum(
             1 for row in output if not row["participant_logos_complete"]
+        ),
+        "observed_individual_participants": sum(row["observed_individual_participants"] for row in output),
+        "individual_participants_with_country": sum(row["individual_participants_with_country"] for row in output),
+        "competitions_with_participant_flag_gaps": sum(
+            1 for row in output if not row["participant_flags_complete"]
         ),
     }
     return {"summary": summary, "competitions": output}
