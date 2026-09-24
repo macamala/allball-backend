@@ -429,6 +429,12 @@ def _maybe_log_breadth(db, *, force: bool = False) -> None:
     if not force and now_audit - _breadth_logged_at < 300:
         return
     try:
+        from collector.asset_propagation import propagate_identity_assets
+
+        propagation = propagate_identity_assets(db)
+        if propagation.get("rows_updated"):
+            logger.info("IDENTITY_ASSET_PROPAGATION %s", propagation)
+
         from collector.breadth_audit import (
             tomorrow_football_snapshot,
             tomorrow_public_football_snapshot,
