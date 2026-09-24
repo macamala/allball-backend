@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from collector.adapters_fotmob import FOTMOB_LEAGUES, parse_fotmob_table
 from collector.canonical_standings import unwrap_standings
 from collector.http import fetch_url
-from collector.models import SportsCompetition, SportsEvent, SportsStandingSnapshot
+from collector.models import SportsCompetition, SportsEvent, SportsSourceCompetition, SportsStandingSnapshot
 from collector.util import dump_json, load_json
 from collector.verified_coverage import OPENLIGADB_LEAGUES
 
@@ -72,6 +72,33 @@ def parse_sofa_dynamic_standings(payload: Any, *, sport_id: Optional[str] = None
     return out
 
 
+def fotmob_standings_context(db: Session, competition_key: Optional[str]) -> Optional[Dict[str, str]]:
+    if not competition_key:
+        return None
+    competition = db.get(SportsCompetition, competition_key)
+    if competition is None or competition.sport_id != "football" or str(competition.event_model or "") != "team_match":
+        return None
+    mappings = (
+        db.query(SportsSourceCompetition)
+        .filter_by(competition_id=competition_key, enabled=True)
+        .order_by(SportsSourceCompetition.priority.asc())
+        .all()
+    )
+    for mapping in mappings:
+        if str(mapping.upstream_family or "") != "fotmob":
+            continue
+        config = load_json(mapping.source_config_json, {}) or {}
+        league_id = str(config.get("fotmob_league_id") or mapping.source_competition_id or "").strip()
+        if not league_id:
+            continue
+        return {
+            "league_id": league_id,
+            "league_name": str(config.get("fotmob_league_name") or competition.name or "").strip(),
+            "sport_id": "football",
+        }
+    return None
+
+
 def sofa_standings_context(db: Session, competition_key: Optional[str]) -> Optional[Dict[str, str]]:
     if not competition_key:
         return None
@@ -101,7 +128,29 @@ def sofa_standings_context(db: Session, competition_key: Optional[str]) -> Optio
 
 
 def dynamic_standings_supported(db: Session, competition_key: Optional[str]) -> bool:
-    return sofa_standings_context(db, competition_key) is not None
+    return (
+        fotmob_standings_context(db, competition_key) is not None
+        or sofa_standings_context(db, competition_key) is not None
+    )
+
+
+def _fetch_fotmob_dynamic_standings(db: Session, competition_key: str, *, getter=None) -> Dict[str, Any]:
+    context = fotmob_standings_context(db, competition_key)
+    if not context:
+        return {}
+    fetch = getter or fetch_url
+    result = fetch(FOTMOB_LEAGUE.format(league_id=context["league_id"]))
+    if not getattr(result, "ok", False) or not isinstance(getattr(result, "payload", None), dict):
+        return {}
+    rows = parse_fotmob_table(result.payload)
+    if not rows:
+        return {}
+    return wrap_standings(
+        rows,
+        competition=competition_key,
+        sport="football",
+        source="fotmob",
+    )
 
 
 def _fetch_sofa_dynamic_standings(db: Session, competition_key: str, *, getter=None) -> Dict[str, Any]:
@@ -746,6 +795,8 @@ def load_standings(db: Session, competition_key: Optional[str], getter=None) -> 
     )
     if has_events:
         fetched = fetch_competition_standings(competition_key, getter=getter) or {}
+        if not fetched:
+            fetched = _fetch_fotmob_dynamic_standings(db, competition_key, getter=getter) or {}
         if not fetched:
             fetched = _fetch_sofa_dynamic_standings(db, competition_key, getter=getter) or {}
     rows = unwrap_standings(fetched) if fetched else []
