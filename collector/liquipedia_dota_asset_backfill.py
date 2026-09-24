@@ -89,15 +89,23 @@ def _diagnostic_image_candidates(raw_html: str, base_url: str) -> List[Dict[str,
             continue
         alt = str(attrs.get("alt") or attrs.get("title") or "").strip()
         combined = f"{alt} {source}".casefold()
-        if not any(needle in combined for needle in needles):
-            continue
+        keyword_match = any(needle in combined for needle in needles)
         url = urljoin(base_url, source)
+        if not keyword_match and "/commons/images/" not in url:
+            continue
         key = (alt, url)
         if key in seen:
             continue
         seen.add(key)
-        found.append({"alt": alt[:120], "url": url[:500]})
-        if len(found) >= 20:
+        found.append(
+            {
+                "alt": alt[:120],
+                "class": str(attrs.get("class") or "")[:160],
+                "url": url[:500],
+                "keyword_match": "1" if keyword_match else "0",
+            }
+        )
+        if len(found) >= 18:
             break
     return found
 
