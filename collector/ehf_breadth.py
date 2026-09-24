@@ -242,7 +242,9 @@ def _api_competition_id(name: str, match: Dict[str, Any]) -> str:
         token in gender_text for token in ("men", "male", "mcl")
     ) else "mixed"
     if slug:
-        return f"handball-ehf-{slug}-{gender}"[:120].rstrip("-")
+        suffix = f"-{gender}"
+        identity = slug if gender == "mixed" or slug.endswith(suffix) else f"{slug}{suffix}"
+        return f"handball-ehf-{identity}"[:120].rstrip("-")
     digest = hashlib.sha1(repr(sorted(match.items())).encode("utf-8")).hexdigest()[:10]
     return f"handball-ehf-current-{digest}-{gender}"
 
