@@ -820,7 +820,7 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
             # artwork, breadth, discovery or backfill work.
             priority_live_active = False
             if scheduler_enabled():
-                priority_summary = run_incremental_tick(db)
+                priority_summary = run_incremental_tick(db, live_only=True)
                 db.commit()
                 priority_urgencies = set(priority_summary.get("urgencies_selected") or [])
                 priority_live_active = bool(

@@ -15,6 +15,7 @@ from collector.incremental import (
     MAX_BACKGROUND_PHYSICAL,
     build_due_jobs,
     coalesce_jobs,
+    filter_due_jobs,
     job_lane,
     request_identity,
     run_incremental_tick,
@@ -46,6 +47,25 @@ def test_static_family_not_live_interval():
     assert interval_for("wikipedia", "LIVE") >= 86400
     assert interval_for("thesportsdb", "LIVE") >= 90
     assert interval_for("openligadb", "LIVE") <= 90
+
+
+def test_live_only_filter_excludes_background_jobs():
+    jobs = [
+        {"job_key": "live", "urgency": "LIVE"},
+        {"job_key": "candidate", "urgency": "LIVE_CANDIDATE"},
+        {"job_key": "imminent", "urgency": "IMMINENT"},
+        {"job_key": "recent", "urgency": "RECENTLY_FINISHED"},
+        {"job_key": "today", "urgency": "TODAY"},
+        {"job_key": "discovery", "urgency": "DISCOVERY_ACTIVE"},
+        {"job_key": "future", "urgency": "FUTURE"},
+    ]
+    assert [row["job_key"] for row in filter_due_jobs(jobs, live_only=True)] == [
+        "live",
+        "candidate",
+        "imminent",
+        "recent",
+    ]
+    assert filter_due_jobs(jobs, live_only=False) == jobs
 
 
 def test_coalesce_shared_request_one_group():

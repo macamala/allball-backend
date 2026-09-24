@@ -44,6 +44,7 @@ MAX_AGE_BANDS = 2
 MAX_FAMILY_NONLIVE = 1
 FINISHED_LOOKBACK_HOURS = 48
 TICK_LIVE_BUDGET_S = 20
+PRIORITY_URGENCIES = frozenset({"LIVE", "LIVE_CANDIDATE", "IMMINENT", "RECENTLY_FINISHED"})
 _family_rr = 0
 _live_registry: Dict[str, Dict[str, Any]] = {}
 
@@ -356,6 +357,12 @@ def build_due_jobs(db: Session, *, now: Optional[datetime] = None, limit: Option
     return jobs
 
 
+def filter_due_jobs(jobs: List[Dict[str, Any]], *, live_only: bool = False) -> List[Dict[str, Any]]:
+    if not live_only:
+        return jobs
+    return [job for job in jobs if str(job.get("urgency") or "") in PRIORITY_URGENCIES]
+
+
 def coalesce_jobs(jobs: List[Dict[str, Any]]) -> List[List[Dict[str, Any]]]:
     groups: Dict[str, List[Dict[str, Any]]] = {}
     order: List[str] = []
@@ -643,7 +650,13 @@ def mark_slot(db: Session, job: Dict[str, Any], *, status: str, http_calls: int 
     row.priority = int(job.get("priority") or 50)
 
 
-def run_incremental_tick(db: Session, *, sleeper=None, now: Optional[datetime] = None) -> Dict[str, Any]:
+def run_incremental_tick(
+    db: Session,
+    *,
+    sleeper=None,
+    now: Optional[datetime] = None,
+    live_only: bool = False,
+) -> Dict[str, Any]:
     """Execute due incremental jobs. Kill switch: scheduler off returns immediately."""
     import time
 
@@ -666,7 +679,7 @@ def run_incremental_tick(db: Session, *, sleeper=None, now: Optional[datetime] =
     from collector.recompute_status import recompute_display_eligible_live
 
     recompute_display_eligible_live(db, commit=False, only_blocked_families=True)
-    due = build_due_jobs(db, now=now)
+    due = filter_due_jobs(build_due_jobs(db, now=now), live_only=live_only)
     groups, schedule = select_fair_groups(due, now)
     groups = sorted(
         groups,
@@ -841,6 +854,7 @@ def run_incremental_tick(db: Session, *, sleeper=None, now: Optional[datetime] =
     tick = {
         "due_jobs": schedule["due_jobs"],
         "selected_jobs": schedule["selected_jobs"],
+        "live_only": live_only,
         "oldest_due_age_s": schedule["oldest_due_age_s"],
         "families_selected": schedule["families_selected"],
         "sports_selected": schedule["sports_selected"],
