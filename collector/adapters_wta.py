@@ -43,7 +43,14 @@ def reset_wta_caches() -> None:
 
 def _fold_player_name(value: Any) -> str:
     import re
+    import unicodedata
+
     text = str(value or "").strip().casefold()
+    # WTA match payloads often omit diacritics while entry lists keep them
+    # (for example Chwalinska/Chwalińska, Krejcikova/Krejčíková). Normalize
+    # both sides to the same ASCII-folded identity key before country lookup.
+    text = unicodedata.normalize("NFKD", text)
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
     text = re.sub(r"[,.;:_-]+", " ", text)
     return " ".join(text.split())
 
