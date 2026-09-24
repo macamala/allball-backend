@@ -40,6 +40,12 @@ _VERIFIED_FOOTBALL_COMPETITIONS: Dict[str, str] = {
 }
 
 
+_VERIFIED_COMPETITIONS: Dict[tuple[str, str], str] = {
+    # Official WTA-hosted artwork from the current WTA brand rollout.
+    ("tennis", "wta-tour"): "https://photoresources.wtatennis.com/photo-resources/2025/02/27/bf3c987a-350a-4b59-864b-a5312fd7bcbb/Frame-1-1-2.png?height=500&width=500",
+}
+
+
 _VERIFIED_FOOTBALL: Dict[str, str] = {
     # FotMob team IDs.
     "js omrane": "https://images.fotmob.com/image_resources/logo/teamlogo/1669235.png",
@@ -69,10 +75,15 @@ def verified_participant_logo(sport_id: str, side: Any) -> Optional[str]:
 
 
 def verified_competition_logo(sport_id: str, competition_id: str, extra: Dict[str, Any]) -> Optional[str]:
-    if sport_id != "football":
-        return None
+    sport = str(sport_id or "").strip()
+    competition = str(competition_id or "").strip()
     public_key = str((extra or {}).get("public_competition_key") or "").strip()
+    if sport == "football":
+        return (
+            _VERIFIED_FOOTBALL_COMPETITIONS.get(public_key)
+            or _VERIFIED_FOOTBALL_COMPETITIONS.get(competition)
+        )
     return (
-        _VERIFIED_FOOTBALL_COMPETITIONS.get(public_key)
-        or _VERIFIED_FOOTBALL_COMPETITIONS.get(str(competition_id or "").strip())
+        _VERIFIED_COMPETITIONS.get((sport, public_key))
+        or _VERIFIED_COMPETITIONS.get((sport, competition))
     )
