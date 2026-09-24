@@ -169,6 +169,37 @@ def test_espn_tennis_groupings_use_athlete_names():
     assert events[0]["periods"][0]["home"] == 6
 
 
+def test_espn_preserves_competitor_country_identity():
+    payload = {
+        "leagues": [{"name": "UFC"}],
+        "events": [
+            {
+                "id": "fight-1",
+                "date": "2026-09-24T10:00:00Z",
+                "competitions": [
+                    {
+                        "id": "fight-1",
+                        "status": {"type": {"state": "pre"}},
+                        "competitors": [
+                            {
+                                "homeAway": "home",
+                                "athlete": {"id": "101", "displayName": "Fighter One", "countryCode": "SRB"},
+                            },
+                            {
+                                "homeAway": "away",
+                                "athlete": {"id": "202", "displayName": "Fighter Two", "flag": {"alt": "BRA"}},
+                            },
+                        ],
+                    }
+                ],
+            }
+        ],
+    }
+    events = parse_espn_scoreboard(payload, sport="mma")
+    assert events[0]["home"]["country_id"] == "SRB"
+    assert events[0]["away"]["country_id"] == "BRA"
+
+
 def test_espn_fitt_lnescrs_become_basketball_quarters():
     payload = {
         "page": {
