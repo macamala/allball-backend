@@ -1,4 +1,10 @@
-from collector.thesportsdb_asset_backfill import _league_logo, _teams, _unique_match
+from collector.thesportsdb_asset_backfill import (
+    TSDB_BY_COMP,
+    TSDB_LOGO_BY_COMP,
+    _league_logo,
+    _teams,
+    _unique_match,
+)
 
 
 def test_tsdb_team_catalog_extracts_badges_and_country():
@@ -33,3 +39,15 @@ def test_tsdb_league_logo_extracts_badge():
     assert _league_logo(
         {"leagues": [{"strLeague": "NHL", "strBadge": "https://cdn.example/nhl.png"}]}
     ).endswith("nhl.png")
+
+
+def test_tsdb_non_team_competition_artwork_catalogue_is_asset_only():
+    assert TSDB_LOGO_BY_COMP["formula-1"]["source_competition_id"] == "4370"
+    assert TSDB_LOGO_BY_COMP["formula-2"]["source_competition_id"] == "4486"
+    assert TSDB_LOGO_BY_COMP["european-challenge-tour"]["source_competition_id"] == "4758"
+
+    # These competition identities are allowed to fetch league artwork, but
+    # they must never enter the team-roster badge path.
+    assert "formula-1" not in TSDB_BY_COMP
+    assert "formula-2" not in TSDB_BY_COMP
+    assert "european-challenge-tour" not in TSDB_BY_COMP
