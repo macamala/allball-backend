@@ -488,6 +488,16 @@ def _maybe_log_breadth(db, *, force: bool = False) -> None:
                 db.rollback()
 
             try:
+                from collector.fotmob_search_asset_backfill import run_if_due as run_fotmob_search_assets_prelock
+
+                search_assets = run_fotmob_search_assets_prelock(db)
+                if search_assets:
+                    logger.info("PRELOCK_FOTMOB_SEARCH_ASSETS %s", search_assets)
+            except Exception:
+                logger.exception("Pre-lock FotMob search artwork repair failed")
+                db.rollback()
+
+            try:
                 from collector.thesportsdb_asset_backfill import run_if_due as run_tsdb_assets_prelock
 
                 tsdb_assets = run_tsdb_assets_prelock(db)
