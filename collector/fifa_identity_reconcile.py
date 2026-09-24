@@ -46,7 +46,6 @@ def reconcile_current_fifa_identity(db, *, days_back: int = 2, days_forward: int
     rows = (
         db.query(SportsEvent)
         .filter(SportsEvent.primary_source_id == "fifa")
-        .filter(SportsEvent.canonical_event_id.is_(None))
         .filter(SportsEvent.start_time >= now - timedelta(days=days_back))
         .filter(SportsEvent.start_time <= now + timedelta(days=days_forward))
         .all()
