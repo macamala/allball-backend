@@ -650,3 +650,133 @@ def test_owned_family_hidden_cricket_is_recovered():
         db.query(SportsEvent).filter_by(event_id="ninko-evt-cricsheet-hidden").delete()
         db.commit()
         db.close()
+
+
+
+def test_orphan_duplicate_guard_restores_one_trusted_source_native_fixture():
+    from datetime import datetime
+
+    from collector.integrity import restore_orphaned_duplicate_football
+    from collector.models import SportsEvent
+    from collector.util import dump_json, load_json
+    from database import SessionLocal
+
+    db = SessionLocal()
+    ids = ["ninko-evt-orphan-guard-fotmob", "ninko-evt-orphan-guard-noise"]
+    try:
+        db.query(SportsEvent).filter(SportsEvent.event_id.in_(ids)).delete(synchronize_session=False)
+        participants = dump_json({
+            "home": {"name": "Guard FAR Rabat"},
+            "away": {"name": "Guard Raja Casablanca"},
+        })
+        db.add(SportsEvent(
+            event_id=ids[0],
+            sport_id="football",
+            competition_id="morocco-botola",
+            event_family="team_match",
+            fingerprint="fp-orphan-guard-fotmob",
+            start_time=datetime(2026, 9, 25, 1, 0, 0),
+            display_eligible=False,
+            participants_json=participants,
+            extra_json=dump_json({
+                "display_eligible": False,
+                "source_family": "fotmob",
+                "source_event_id": "guard-530-1",
+                "source_competition_id": "530",
+                "resolution_method": "mapping_request_trusted",
+                "quality_flags": ["duplicate_or_contaminated"],
+            }),
+        ))
+        db.add(SportsEvent(
+            event_id=ids[1],
+            sport_id="football",
+            competition_id="wrong-clone",
+            event_family="team_match",
+            fingerprint="fp-orphan-guard-noise",
+            start_time=datetime(2026, 9, 25, 1, 0, 0),
+            display_eligible=False,
+            participants_json=participants,
+            extra_json=dump_json({
+                "display_eligible": False,
+                "source_family": "unknown",
+                "quality_flags": ["duplicate_or_contaminated"],
+            }),
+        ))
+        db.commit()
+
+        result = restore_orphaned_duplicate_football(db)
+        restored = db.query(SportsEvent).filter_by(event_id=ids[0]).one()
+        extra = load_json(restored.extra_json, {}) or {}
+
+        assert result["restored"] >= 1
+        assert restored.display_eligible is True
+        assert restored.canonical_event_id is None
+        assert extra["display_eligible"] is True
+        assert "duplicate_or_contaminated" not in (extra.get("quality_flags") or [])
+        assert extra["quarantine_disposition"] == "RESTORED_ORPHAN_DUPLICATE"
+    finally:
+        db.query(SportsEvent).filter(SportsEvent.event_id.in_(ids)).delete(synchronize_session=False)
+        db.commit()
+        db.close()
+
+
+def test_orphan_duplicate_guard_keeps_real_canonical_loser_hidden():
+    from datetime import datetime
+
+    from collector.integrity import restore_orphaned_duplicate_football
+    from collector.models import SportsEvent
+    from collector.util import dump_json
+    from database import SessionLocal
+
+    db = SessionLocal()
+    keeper_id = "ninko-evt-orphan-guard-keeper"
+    loser_id = "ninko-evt-orphan-guard-loser"
+    try:
+        db.query(SportsEvent).filter(SportsEvent.event_id.in_([keeper_id, loser_id])).delete(synchronize_session=False)
+        participants = dump_json({
+            "home": {"name": "Guard Public Home"},
+            "away": {"name": "Guard Public Away"},
+        })
+        db.add(SportsEvent(
+            event_id=keeper_id,
+            sport_id="football",
+            competition_id="morocco-botola",
+            event_family="team_match",
+            fingerprint="fp-orphan-guard-keeper",
+            start_time=datetime(2026, 9, 25, 2, 0, 0),
+            display_eligible=True,
+            participants_json=participants,
+            extra_json=dump_json({"display_eligible": True, "source_family": "fotmob"}),
+        ))
+        db.add(SportsEvent(
+            event_id=loser_id,
+            sport_id="football",
+            competition_id="morocco-botola",
+            event_family="team_match",
+            fingerprint="fp-orphan-guard-loser",
+            start_time=datetime(2026, 9, 25, 2, 0, 0),
+            display_eligible=False,
+            canonical_event_id=keeper_id,
+            participants_json=participants,
+            extra_json=dump_json({
+                "display_eligible": False,
+                "canonical_event_id": keeper_id,
+                "source_family": "fotmob",
+                "source_event_id": "guard-loser",
+                "source_competition_id": "530",
+                "resolution_method": "mapping_request_trusted",
+                "quality_flags": ["duplicate_or_contaminated"],
+            }),
+        ))
+        db.commit()
+
+        result = restore_orphaned_duplicate_football(db)
+        loser = db.query(SportsEvent).filter_by(event_id=loser_id).one()
+
+        assert result["restored"] == 0
+        assert loser.display_eligible is False
+        assert loser.canonical_event_id == keeper_id
+    finally:
+        db.query(SportsEvent).filter(SportsEvent.event_id.in_([keeper_id, loser_id])).delete(synchronize_session=False)
+        db.commit()
+        db.close()
