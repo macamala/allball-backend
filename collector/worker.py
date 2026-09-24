@@ -673,6 +673,36 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
                 db.rollback()
 
             try:
+                from collector.openligadb_asset_backfill import run_if_due as run_openligadb_asset_backfill_if_due
+
+                def _pulse_openligadb_assets() -> None:
+                    heartbeat_scheduler_lock(db, owner=owner)
+                    db.commit()
+
+                openligadb_assets = run_openligadb_asset_backfill_if_due(
+                    db,
+                    heartbeat=_pulse_openligadb_assets,
+                )
+                if openligadb_assets:
+                    logger.info(
+                        "OpenLigaDB artwork backfill %s",
+                        {
+                            "status": openligadb_assets.get("status"),
+                            "shortcuts": openligadb_assets.get("shortcuts"),
+                            "requests": openligadb_assets.get("requests"),
+                            "rows_updated": openligadb_assets.get("rows_updated"),
+                            "participants_filled": openligadb_assets.get("participants_filled"),
+                            "http_errors": openligadb_assets.get("http_errors"),
+                            "by_shortcut": openligadb_assets.get("by_shortcut"),
+                        },
+                    )
+                    if openligadb_assets.get("rows_updated"):
+                        _maybe_log_breadth(db, force=True)
+            except Exception:
+                logger.exception("OpenLigaDB artwork backfill failed")
+                db.rollback()
+
+            try:
                 from collector.openfootball_breadth import run_if_due as run_openfootball_breadth_if_due
 
                 def _pulse_openfootball() -> None:
