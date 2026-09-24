@@ -753,11 +753,22 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
     matrix = assert_frozen_matrix()
     logger.info("Frozen matrix ok checksum=%s count=%s", matrix["checksum"], matrix["competition_count"])
     register_production_adapters()
-    Base.metadata.create_all(bind=engine)
-    ensure_schema(engine)
-    from collector.schema_tune import ensure_event_list_indexes
 
-    ensure_event_list_indexes(engine)
+    # Production API already owns additive schema/index bootstrap. Do not put
+    # DDL in front of score collection on every worker rolling deploy.
+    # Fresh databases still get the full bootstrap when sports_events is absent.
+    from sqlalchemy import inspect
+
+    existing_tables = set(inspect(engine).get_table_names())
+    if "sports_events" not in existing_tables:
+        Base.metadata.create_all(bind=engine)
+        ensure_schema(engine)
+        from collector.schema_tune import ensure_event_list_indexes
+
+        ensure_event_list_indexes(engine)
+        logger.info("Results worker schema bootstrap complete")
+    else:
+        logger.info("Results worker schema present; startup DDL skipped")
     interval = interval_seconds
     if interval is None:
         if scheduler_enabled():
