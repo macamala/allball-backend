@@ -617,16 +617,26 @@ def parse_initial_data(html: str) -> List[Dict[str, Any]]:
 
 
 def _quoted_window_json(html: str, marker: str) -> Any:
-    token = f"{marker}=\""
-    start = (html or "").find(token)
-    if start < 0:
+    """Decode BBC-style window hydration with optional whitespace.
+
+    BBC has emitted both:
+      window.__INITIAL_DATA__="<escaped json>"
+      window.__INITIAL_DATA__ = "<escaped json>";
+    Keep this parser tolerant while still decoding only the requested marker.
+    """
+    source = html or ""
+    match = re.search(
+        rf"(?:window\.)?{re.escape(marker)}\s*=\s*\"",
+        source,
+    )
+    if not match:
         return None
-    index = start + len(token)
+    index = match.end()
     buf = []
-    while index < len(html):
-        char = html[index]
-        if char == "\\" and index + 1 < len(html):
-            buf.append(html[index : index + 2])
+    while index < len(source):
+        char = source[index]
+        if char == "\\" and index + 1 < len(source):
+            buf.append(source[index : index + 2])
             index += 2
             continue
         if char == '"':
@@ -635,14 +645,16 @@ def _quoted_window_json(html: str, marker: str) -> Any:
         index += 1
     encoded = "".join(buf)
     try:
-        decoded = encoded.encode("utf-8").decode("unicode_escape")
-        return json.loads(decoded)
-    except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
+        decoded = json.loads('"' + encoded + '"')
+        if isinstance(decoded, str):
+            return json.loads(decoded)
+        return decoded
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError, TypeError):
         try:
-            return json.loads('"' + encoded + '"')
-        except (TypeError, ValueError):
+            decoded = encoded.encode("utf-8").decode("unicode_escape")
+            return json.loads(decoded)
+        except (UnicodeDecodeError, json.JSONDecodeError, ValueError, TypeError):
             return None
-
 
 def _decode_js_object(html: str, match: re.Match) -> Any:
     try:
