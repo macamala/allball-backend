@@ -451,7 +451,9 @@ def _maybe_log_breadth(db, *, force: bool = False) -> None:
         unknown_rows = unknown_sport_rows_snapshot(db)
         if unknown_rows:
             logger.warning("UNKNOWN_SPORT_ROWS %s", unknown_rows)
-        from collector.asset_coverage import asset_coverage_payload
+        from collector.asset_coverage import asset_coverage_payload, visible_asset_gap_snapshot
+        visible_assets = visible_asset_gap_snapshot(db)
+        logger.info("VISIBLE_ASSET_GAPS %s", visible_assets)
         asset_coverage = asset_coverage_payload(db)
         logger.info("IDENTITY_ASSET_COVERAGE %s", asset_coverage.get("summary") or {})
         asset_rows = [
