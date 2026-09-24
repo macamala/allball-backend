@@ -10,9 +10,11 @@ from __future__ import annotations
 
 from typing import Any, Dict, Tuple
 
+from collector.competition_presentation import metadata_for
 from collector.list_extra import store_list_extra
 from collector.models import SportsEvent, SportsStandingSnapshot
 from collector.participant_text import fold_for_identity
+from sports_registry.geography import get_geo
 from collector.util import dump_json, load_json
 
 
@@ -88,6 +90,43 @@ def _asset(side: Any) -> Dict[str, str]:
     if countries:
         out["country_ids"] = list(dict.fromkeys(countries))
     return out
+
+
+def _country_identity_from_name(name: Any) -> str:
+    raw = str(name or "").strip()
+    if not raw:
+        return ""
+    candidates = [
+        raw,
+        raw.lower().replace(" ", "-"),
+        raw.lower().replace(" ", "-").replace(".", ""),
+    ]
+    aliases = {
+        "uae": "ae",
+        "usa": "us",
+        "dr-congo": "cd",
+        "czechia": "cz",
+        "south-korea": "kr",
+        "north-korea": "kp",
+        "ivory-coast": "ci",
+        "cape-verde": "cv",
+        "curacao": "cw",
+    }
+    for value in candidates:
+        key = aliases.get(value, value)
+        geo = get_geo(key)
+        if not geo or geo.get("kind") == "region":
+            continue
+        canonical_name = str(geo.get("name") or "").casefold()
+        if raw.casefold() not in {
+            canonical_name,
+            str(geo.get("id") or "").casefold(),
+            str(geo.get("slug") or "").replace("-", " ").casefold(),
+            str(geo.get("iso_code") or "").casefold(),
+        } and value not in aliases:
+            continue
+        return str(geo.get("iso_code") or geo.get("id") or "").strip()
+    return ""
 
 
 def _standing_rows(payload: Any):
@@ -357,6 +396,7 @@ def propagate_identity_assets(db) -> Dict[str, int]:
         "competition_native_participant_logos_filled": 0,
         "standing_participant_logos_filled": 0,
         "standing_participant_countries_filled": 0,
+        "national_team_countries_filled": 0,
     }
 
     # Pass 2: fill blanks only. Never overwrite a non-empty value.
@@ -368,6 +408,29 @@ def propagate_identity_assets(db) -> Dict[str, int]:
         extra = load_json(row.extra_json, {}) or {}
         row_changed = False
         extra_changed = False
+
+        meta = metadata_for(competition, sport)
+        non_domestic_team_scope = (
+            _bucket(family) == "team"
+            and str(meta.get("scope_type") or "").upper() in {
+                "WORLD", "INTERNATIONAL", "CONTINENTAL", "REGIONAL"
+            }
+        )
+        if non_domestic_team_scope:
+            for side_name in ("home", "away", "participant_a", "participant_b"):
+                side = participants.get(side_name)
+                if not isinstance(side, dict) or _asset(side).get("country_id"):
+                    continue
+                country_id = _country_identity_from_name(
+                    side.get("display_name") or side.get("name")
+                )
+                if not country_id:
+                    continue
+                merged = dict(side)
+                merged["country_id"] = country_id
+                participants[side_name] = merged
+                stats["national_team_countries_filled"] += 1
+                row_changed = True
 
         direct_changed, direct_extra_changed, direct_participants = _derive_fotmob_assets(
             row, extra, participants
