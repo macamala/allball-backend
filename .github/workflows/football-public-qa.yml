@@ -13,104 +13,19 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - uses: actions/checkout@v4
-        with:
-          repository: macamala/allball-frontend
-          ref: 92a9c9dbfe168cffe246a85b403b0f0fdf74473b
-          path: frontend-reference
-          persist-credentials: false
-      - name: Preserve actual frontend source for regression checks
-        run: tar -czf /tmp/frontend-reference.tgz --exclude=.git frontend-reference
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - name: Read current public scores and league tables
-        run: |
-          python audit/recovery_probe.py
-          python - <<'PY'
-          import json
-          from pathlib import Path
-          from concurrent.futures import ThreadPoolExecutor
-          from urllib.request import Request, urlopen
-          from datetime import datetime, timezone
-          out = Path('/tmp/score-public-audit')
-          def read(league):
-              url = 'https://www.fotmob.com/api/data/leagues?id=' + str(league)
-              try:
-                  with urlopen(Request(url, headers={'User-Agent':'NinkoSports-Recovery-QA/1.0','Accept':'application/json'}),timeout=25) as r:
-                      data = {'url':url,'http_status':r.status,'fetched_at':datetime.now(timezone.utc).isoformat(),'payload':json.loads(r.read())}
-              except Exception as e:
-                  data = {'url':url,'error':type(e).__name__,'message':str(e)[:200]}
-              (out / ('league-' + str(league) + '.json')).write_text(json.dumps(data,ensure_ascii=False))
-          with ThreadPoolExecutor(max_workers=2) as pool:
-              list(pool.map(read,[9806,9807,9808,9809]))
-          PY
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: football-production-evidence
-          path: |
-            /tmp/score-public-audit
-            /tmp/frontend-reference.tgz
-          retention-days: 7
-      - name: Prepare clean browser
+      - name: Prepare independent desktop and mobile browser
         run: |
           python -m pip install playwright
           python -m playwright install --with-deps chromium
-      - name: Inspect desktop and mobile boards and a match detail
-        run: |
-          python - <<'PY'
-          import json
-          from pathlib import Path
-          from datetime import datetime
-          from zoneinfo import ZoneInfo
-          from playwright.sync_api import sync_playwright
-          out = Path('/tmp/football-browser-qa')
-          out.mkdir(exist_ok=True)
-          day = str(datetime.now(ZoneInfo('Australia/Sydney')).date())
-          evidence = []
-          with sync_playwright() as p:
-              browser = p.chromium.launch()
-              for name, width, height in [('desktop',1440,1050),('mobile',390,844)]:
-                  context = browser.new_context(viewport={'width':width,'height':height},timezone_id='Australia/Sydney')
-                  page = context.new_page()
-                  errors = []
-                  page.on('pageerror', lambda e: errors.append(str(e)))
-                  url = 'https://ninkosports.com/live-scores?sport=football&date='+day
-                  record = {'viewport':name,'url':url}
-                  try:
-                      page.goto(url,wait_until='domcontentloaded',timeout=30000)
-                      page.wait_for_selector('.score-row',timeout=30000)
-                      page.wait_for_timeout(2500)
-                      record['rows'] = page.locator('.score-row').count()
-                      record['body'] = page.locator('body').inner_text()
-                      record['overflow'] = page.evaluate('document.documentElement.scrollWidth > innerWidth')
-                      record['missing_assets'] = page.locator('[data-asset-missing]').count()
-                      record['broken_images'] = page.locator('img').evaluate_all('(xs)=>xs.filter(x=>x.complete && !x.naturalWidth).map(x=>x.src)')
-                      page.screenshot(path=str(out/(name+'-board.png')),full_page=True)
-                      link = page.locator('.score-row-link').filter(has_text='Serbia').first
-                      if not link.count():
-                          link = page.locator('.score-row-link').first
-                      record['match_path'] = link.get_attribute('href')
-                      link.click()
-                      page.wait_for_timeout(6000)
-                      record['match_body'] = page.locator('body').inner_text()
-                      record['match_overflow'] = page.evaluate('document.documentElement.scrollWidth > innerWidth')
-                      page.screenshot(path=str(out/(name+'-match.png')),full_page=True)
-                  except Exception as e:
-                      record['error'] = str(e)
-                      page.screenshot(path=str(out/(name+'-error.png')),full_page=True)
-                  record['page_errors'] = errors
-                  evidence.append(record)
-                  context.close()
-              browser.close()
-          (out/'browser.json').write_text(json.dumps(evidence,ensure_ascii=False,indent=2))
-          print(json.dumps([{k:v for k,v in x.items() if k not in ('body','match_body')} for x in evidence],ensure_ascii=False))
-          PY
+      - name: Check scores, full-board consistency and group tables on production
+        run: python audit/football_release_check.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: football-browser-evidence
-          path: /tmp/football-browser-qa
-          if-no-files-found: ignore
+          name: football-release-evidence
+          path: /tmp/football-release-check
+          if-no-files-found: error
           retention-days: 7
