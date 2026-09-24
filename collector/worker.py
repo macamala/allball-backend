@@ -488,7 +488,14 @@ def _maybe_log_breadth(db, *, force: bool = False) -> None:
                 db.rollback()
 
             try:
-                from collector.fotmob_search_asset_backfill import run_if_due as run_fotmob_search_assets_prelock
+                from collector.fotmob_search_asset_backfill import (
+                    cleanup_unsafe_prior_search_assets,
+                    run_if_due as run_fotmob_search_assets_prelock,
+                )
+
+                cleanup_stats = cleanup_unsafe_prior_search_assets(db)
+                if cleanup_stats.get("rows_updated"):
+                    logger.info("FOTMOB_SEARCH_ASSET_CLEANUP %s", cleanup_stats)
 
                 search_assets = run_fotmob_search_assets_prelock(db)
                 if search_assets:
