@@ -145,6 +145,43 @@ def _team_name(value: Any) -> str:
     return ""
 
 
+def _identity_payload(value: Any, fallback_name: str = "") -> Dict[str, Any]:
+    node = value if isinstance(value, dict) else {}
+    nested = None
+    for key in ("team", "competitor", "athlete", "participant"):
+        candidate = node.get(key) if isinstance(node, dict) else None
+        if isinstance(candidate, dict):
+            nested = candidate
+            break
+    sources = [node] + ([nested] if nested is not None else [])
+
+    def pick(*keys: str) -> Any:
+        for source in sources:
+            for key in keys:
+                found = source.get(key)
+                if found not in (None, "", [], {}):
+                    return found
+        return None
+
+    logo = pick(
+        "logo", "image", "crest", "badge", "emblem", "icon",
+        "teamIconUrl", "teamIconURL", "team_logo", "teamLogo",
+        "logo_url", "logoUrl", "image_url", "imageUrl",
+    )
+    if isinstance(logo, dict):
+        logo = logo.get("url") or logo.get("href") or logo.get("src")
+    name = _team_name(value) or fallback_name
+    country = pick("country_id", "countryCode", "country_code", "nationality", "country")
+    if isinstance(country, dict):
+        country = country.get("alpha2") or country.get("alpha3") or country.get("code") or country.get("name")
+    return {
+        "id": str(pick("id", "teamId", "team_id", "competitorId", "participantId") or ""),
+        "name": name,
+        "logo": str(logo or ""),
+        "country_id": str(country or "") if country not in (None, "") else "",
+    }
+
+
 def _first_defined(*values: Any) -> Any:
     for value in values:
         if value is not None and value != "":
