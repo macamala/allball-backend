@@ -1,4 +1,4 @@
-from collector.canonical_detail import attach_canonical_detail, canonicalize_statistics, canonicalize_timeline
+from collector.canonical_detail import attach_canonical_detail, canonicalize_lineups, canonicalize_statistics, canonicalize_timeline
 from collector.detail_capabilities import capability_inventory
 from collector.rich_capability import build_rows
 
@@ -60,3 +60,44 @@ def test_volleyball_set_pairs_and_match_score():
     assert event["score"]["away"] == 0
     assert event["periods"][0]["home"] == 25
     assert event["periods"][0]["away"] == 19
+
+
+
+def test_canonical_lineups_preserve_player_identity():
+    lineups = canonicalize_lineups(
+        {
+            "confirmed": True,
+            "home": {
+                "formation": "4-3-3",
+                "start": [
+                    {
+                        "id": 101,
+                        "name": "Player One",
+                        "number": 9,
+                        "position": "FW",
+                        "captain": True,
+                        "rating": 8.4,
+                        "image": "https://cdn.example/player-101.png",
+                        "countryCode": "SRB",
+                    }
+                ],
+                "bench": [
+                    {
+                        "playerId": 202,
+                        "name": "Player Two",
+                        "shirtNumber": 18,
+                        "photo": "https://cdn.example/player-202.png",
+                    }
+                ],
+            },
+            "away": {"start": [{"name": "Opponent"}], "bench": []},
+        }
+    )
+    player = lineups["home"]["start"][0]
+    assert lineups["confirmed"] is True
+    assert player["id"] == 101
+    assert player["captain"] is True
+    assert player["rating"] == 8.4
+    assert player["image"].endswith("player-101.png")
+    assert player["country_id"] == "SRB"
+    assert lineups["home"]["bench"][0]["id"] == 202
