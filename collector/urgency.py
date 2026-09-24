@@ -11,6 +11,7 @@ URGENCY_SECONDS = {
     "LIVE_CANDIDATE": 90,
     "IMMINENT": 120,
     "RECENTLY_FINISHED": 180,
+    "RESULT_CATCHUP": 180,
     "TODAY": 600,
     "NEAR_FUTURE": 3600,
     "FUTURE": 21600,
@@ -25,6 +26,7 @@ URGENCY_PRIORITY = {
     "LIVE_CANDIDATE": 2,
     "IMMINENT": 3,
     "RECENTLY_FINISHED": 4,
+    "RESULT_CATCHUP": 4,
     "TODAY": 5,
     "NEAR_FUTURE": 6,
     "FUTURE": 7,
@@ -84,7 +86,7 @@ def workload_for_urgency(urgency: str) -> str:
         return WORKLOAD_CONFIRMED_LIVE
     if urgency in {"LIVE_CANDIDATE", "IMMINENT"}:
         return WORKLOAD_LIVE_CANDIDATE
-    if urgency == "RECENTLY_FINISHED":
+    if urgency in {"RECENTLY_FINISHED", "RESULT_CATCHUP"}:
         return WORKLOAD_RECENTLY_FINISHED
     if urgency.startswith("DISCOVERY"):
         return WORKLOAD_DISCOVERY
@@ -96,7 +98,7 @@ def workload_for_urgency(urgency: str) -> str:
 def capability_for_urgency(urgency: str) -> str:
     if urgency in {"LIVE", "LIVE_CANDIDATE"}:
         return "live_scores"
-    if urgency == "RECENTLY_FINISHED":
+    if urgency in {"RECENTLY_FINISHED", "RESULT_CATCHUP"}:
         return "results"
     if urgency == "HISTORICAL":
         return "results"

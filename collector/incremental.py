@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 
 from collector.cadence import interval_for
 from collector.family_caps import family_caps, is_static_family, min_safe_interval, supports_live
@@ -44,6 +45,8 @@ MAX_AGE_BANDS = 2
 MAX_FAMILY_NONLIVE = 1
 FINISHED_LOOKBACK_HOURS = 48
 TICK_LIVE_BUDGET_S = 35
+logger = logging.getLogger(__name__)
+PRIORITY_URGENCIES = frozenset({"LIVE", "LIVE_CANDIDATE", "IMMINENT", "RECENTLY_FINISHED", "RESULT_CATCHUP"})
 _family_rr = 0
 _live_registry: Dict[str, Dict[str, Any]] = {}
 
@@ -210,16 +213,27 @@ def build_due_jobs(
     now: Optional[datetime] = None,
     limit: Optional[int] = None,
     live_only: bool = False,
+    sport_id: Optional[str] = None,
+    source_family: Optional[str] = None,
+    discovery_only: bool = False,
 ) -> List[Dict[str, Any]]:
     now = now or _now()
-    if live_only:
+    if discovery_only:
+        events = []
+    elif live_only:
         # Score fast path: skip broad watch-set rebuild and the 30-day fixture scan.
         # Current/near-current events only; discovery/maintenance is handled later.
         horizon = now + timedelta(hours=2)
-        past = now - timedelta(hours=12)
+        past = now - timedelta(hours=48 if sport_id == "football" else 12)
+        query = db.query(SportsEvent).options(load_only(
+            SportsEvent.event_id, SportsEvent.competition_id, SportsEvent.sport_id,
+            SportsEvent.status, SportsEvent.start_time, SportsEvent.extra_json,
+            SportsEvent.canonical_event_id, SportsEvent.display_eligible,
+        ))
+        if sport_id:
+            query = query.filter(SportsEvent.sport_id == sport_id)
         events = (
-            db.query(SportsEvent)
-            .filter(SportsEvent.canonical_event_id.is_(None))
+            query.filter(SportsEvent.canonical_event_id.is_(None))
             .filter(
                 (SportsEvent.display_eligible.is_(True))
                 | (SportsEvent.display_eligible.is_(None))
@@ -249,13 +263,16 @@ def build_due_jobs(
     for mapping in db.query(SportsSourceCompetition).filter_by(enabled=True).all():
         maps_by_comp.setdefault(mapping.competition_id, []).append(mapping)
     source_cache = db.info.setdefault("sources", {})
+    source_cache.update({row.source_id: row for row in db.query(SportsSource).all()})
+    slots = {row.job_key: row for row in db.query(SportsSchedulerSlot).all()}
+    fallback_cache = {}
     for row in events:
         mappings = maps_by_comp.get(row.competition_id) or []
         if not mappings:
             mapping, source = _primary_family(db, row.competition_id)
             mappings = [mapping] if mapping is not None else []
         urgency = classify_event(row.status, row.start_time, now=now)
-        if urgency != "LIVE" and in_kickoff_watch_window(row, now=now):
+        if str(row.status or "") in {"scheduled", "delayed", "stale", "unknown"} and in_kickoff_watch_window(row, now=now):
             urgency = "LIVE_CANDIDATE"
         if urgency == "LIVE":
             live_jobs += 1
@@ -270,7 +287,15 @@ def build_due_jobs(
             if source is None or not source.enabled:
                 continue
             family = _mapping_family(mapping, source)
+            if source_family and family != source_family:
+                continue
             family_urgency = urgency
+            if (live_only and row.sport_id == "football" and family == "fotmob"
+                    and row.status in {"scheduled", "delayed", "stale", "unknown"}
+                    and row.start_time and now - timedelta(hours=48) <= row.start_time < now
+                    and urgency not in {"LIVE", "LIVE_CANDIDATE", "IMMINENT"}):
+                # Recovery polling only. Never infer LIVE or FT from elapsed time.
+                family_urgency = "RESULT_CATCHUP"
             if family_urgency == "LIVE":
                 if is_static_family(family) or not supports_live(family):
                     family_urgency = "TODAY"
@@ -278,7 +303,10 @@ def build_due_jobs(
                 if is_static_family(family) or not supports_live(family):
                     family_urgency = "TODAY"
             if family_urgency in {"LIVE", "LIVE_CANDIDATE"} and family_needs_failover(family):
-                fb_map, fb_src = _fallback_family(db, row.competition_id, family)
+                fallback_key = (row.competition_id, family)
+                if fallback_key not in fallback_cache:
+                    fallback_cache[fallback_key] = _fallback_family(db, row.competition_id, family)
+                fb_map, fb_src = fallback_cache[fallback_key]
                 fb_family = _mapping_family(fb_map, fb_src) if fb_map and fb_src else ""
                 if (
                     fb_map
@@ -294,11 +322,11 @@ def build_due_jobs(
                     continue
             interval = interval_for(family, family_urgency)
             job_key = f"refresh:{row.competition_id}:{family}:{capability_for_urgency(family_urgency)}"
-            slot = db.get(SportsSchedulerSlot, job_key)
+            slot = slots.get(job_key)
             if not _due(slot, interval, now, family):
                 continue
             seen_key = (row.competition_id, family)
-            if seen_key in seen_comp_family and family_urgency not in {"LIVE", "LIVE_CANDIDATE", "IMMINENT", "RECENTLY_FINISHED"}:
+            if seen_key in seen_comp_family and family_urgency not in {"LIVE", "LIVE_CANDIDATE", "IMMINENT", "RECENTLY_FINISHED", "RESULT_CATCHUP"}:
                 continue
             seen_comp_family.add(seen_key)
             jobs.append(
@@ -343,12 +371,18 @@ def build_due_jobs(
         .all()
     )
     comps_seen = {(job["competition_id"], job["family"]) for job in jobs}
+    competition_sports = {row.competition_id: row.sport_id for row in db.query(SportsCompetition).all()}
     for mapping in mapped:
         cid = mapping.competition_id
+        mapped_sport = competition_sports.get(cid, "")
+        if sport_id and mapped_sport != sport_id:
+            continue
         source = db.info.setdefault("sources", {}).get(mapping.source_id) or db.query(SportsSource).filter_by(source_id=mapping.source_id).first()
         if source is None or not source.enabled:
             continue
         family = _mapping_family(mapping, source)
+        if source_family and family != source_family:
+            continue
         if (cid, family) in comps_seen:
             continue
         health = health_rows.get(cid)
@@ -358,7 +392,7 @@ def build_due_jobs(
         urgency = "DISCOVERY_QUIET" if empty_streak else "DISCOVERY_ACTIVE"
         interval = interval_for(family, urgency)
         job_key = f"discover:{cid}:{family}"
-        slot = db.get(SportsSchedulerSlot, job_key)
+        slot = slots.get(job_key)
         if not _due(slot, interval, now, family):
             continue
         jobs.append(
@@ -367,6 +401,7 @@ def build_due_jobs(
                 family=family,
                 urgency=urgency,
                 reason="competition_discovery",
+                sport=mapped_sport,
                 source_id=source.source_id,
                 request_key=request_identity(mapping, source),
                 job_key=job_key,
@@ -398,6 +433,10 @@ def build_due_jobs(
     return jobs
 
 
+def filter_due_jobs(jobs: List[Dict[str, Any]], *, live_only: bool = False) -> List[Dict[str, Any]]:
+    return [job for job in jobs if job.get("urgency") in PRIORITY_URGENCIES] if live_only else jobs
+
+
 def coalesce_jobs(jobs: List[Dict[str, Any]]) -> List[List[Dict[str, Any]]]:
     groups: Dict[str, List[Dict[str, Any]]] = {}
     order: List[str] = []
@@ -424,7 +463,7 @@ def job_lane(job: Dict[str, Any]) -> int:
         return 0
     if urgency in {"LIVE_CANDIDATE", "IMMINENT"}:
         return 1
-    if urgency == "RECENTLY_FINISHED":
+    if urgency in {"RECENTLY_FINISHED", "RESULT_CATCHUP"}:
         return 2
     return 3
 
@@ -685,7 +724,7 @@ def mark_slot(db: Session, job: Dict[str, Any], *, status: str, http_calls: int 
     row.priority = int(job.get("priority") or 50)
 
 
-def run_incremental_tick(
+def _run_incremental_tick(
     db: Session,
     *,
     sleeper=None,
@@ -694,6 +733,8 @@ def run_incremental_tick(
     source_family: Optional[str] = None,
     liveish_only: bool = False,
     max_physical: Optional[int] = None,
+    run_maintenance: bool = True,
+    discovery_only: bool = False,
 ) -> Dict[str, Any]:
     """Execute due incremental jobs. Kill switch: scheduler off returns immediately."""
     import time
@@ -710,6 +751,7 @@ def run_incremental_tick(
     held_write = False
     if writes_enabled():
         held_write = acquire_write_lock(db, owner=write_owner)
+        db.info["incremental_held_write"] = held_write
         if not held_write:
             return {"stopped": True, "reason": "write_lock_held", "write_lock": 0}
     now = now or _now()
@@ -717,31 +759,21 @@ def run_incremental_tick(
     from collector.recompute_status import recompute_display_eligible_live
 
     recompute_display_eligible_live(db, commit=False, only_blocked_families=True)
-    due = build_due_jobs(db, now=now, live_only=liveish_only)
+    logger.info("SCORE_TICK_BUILD start sport=%s family=%s live_only=%s", sport_id, source_family, liveish_only)
+    due = build_due_jobs(db, now=now, live_only=liveish_only, sport_id=sport_id,
+                         source_family=source_family, discovery_only=discovery_only)
+    logger.info("SCORE_TICK_BUILD done jobs=%s", len(due))
     if sport_id:
         due = [job for job in due if str(job.get("sport") or "") == str(sport_id)]
     if source_family:
         due = [job for job in due if str(job.get("family") or "") == str(source_family)]
-    if liveish_only:
-        due = [
-            job for job in due
-            if str(job.get("urgency") or "") in {
-                "LIVE", "LIVE_CANDIDATE", "IMMINENT", "RECENTLY_FINISHED"
-            }
-        ]
+    due = filter_due_jobs(due, live_only=liveish_only)
     groups, schedule = select_fair_groups(
         due,
         now,
         max_physical=max_physical if max_physical is not None else MAX_PHYSICAL,
     )
-    groups = sorted(
-        groups,
-        key=lambda group: (
-            job_lane(group[0]) if group else 3,
-            min_safe_interval(str(group[0].get("family") or "")),
-            str(group[0].get("family") or ""),
-        ),
-    )
+    groups = sorted(groups, key=lambda group: min((job_lane(job) for job in group), default=3))
     live_counts: Dict[str, int] = {}
     for job in due:
         if job_lane(job) != 0:
@@ -775,10 +807,11 @@ def run_incremental_tick(
     changed = 0
     fail_classes = FAIL_STATUSES
     live_groups_this_tick = sum(1 for group in groups if group and job_lane(group[0]) == 0)
+    jobs_processed = 0
     for group in groups:
         elapsed = time.perf_counter() - started
         lane = job_lane(group[0]) if group else 3
-        if lane > 0 and elapsed >= TICK_LIVE_BUDGET_S:
+        if jobs_processed and elapsed >= TICK_LIVE_BUDGET_S:
             break
         coalesced += max(0, len(group) - 1)
         before_req = int(STATS.get("requests") or 0)
@@ -789,9 +822,15 @@ def run_incremental_tick(
         blocked_live = bool(family and family_blocks_live_path(family))
         if family and lane == 0:
             note_live_family(family, last_fetch_started_at=fetch_started.isoformat() + "Z")
-        run_jobs = group[:1] if lane == 0 or blocked_live else group
+        # Shared HTTP payloads do not mean shared persistence. Each competition
+        # must consume its slice; unexecuted jobs retain their due slot.
+        run_jobs = group
         for job in run_jobs:
+            if jobs_processed and time.perf_counter() - started >= TICK_LIVE_BUDGET_S:
+                break
             job = dict(job)
+            jobs_processed += 1
+            logger.info("SCORE_JOB start competition=%s family=%s", job["competition_id"], job["family"])
             family = job["family"]
             retry_ok = (
                 family_retry_eligible(family)
@@ -856,10 +895,9 @@ def run_incremental_tick(
             last_classif = classif
             written = int(stats.get("written") or 0)
             group_written += written
-            mark_slot(db, job, status=classif, http_calls=0, events_changed=written, now=now)
-        if len(run_jobs) < len(group):
-            for job in group[1:]:
-                mark_slot(db, job, status=last_classif, events_changed=0, now=now)
+            mark_slot(db, job, status=classif, http_calls=0, events_changed=written, now=_now())
+            logger.info("SCORE_JOB done competition=%s family=%s written=%s status=%s",
+                        job["competition_id"], job["family"], written, classif)
         used = int(STATS.get("requests") or 0) - before_req
         completed = _now()
         if family and job_lane(group[0]) == 0:
@@ -888,8 +926,14 @@ def run_incremental_tick(
     rolling = rolling_http_hour()
     from collector.canonical_collapse import collapse_canonical_events, promote_observation_enrichment
 
-    collapse = collapse_canonical_events(db)
-    enrichment = promote_observation_enrichment(db)
+    # Ingest already matches individual events. The all-history O(n^2)
+    # collapse belongs to maintenance, never a live score transaction.
+    if run_maintenance and not liveish_only:
+        collapse = collapse_canonical_events(db)
+        enrichment = promote_observation_enrichment(db)
+    else:
+        collapse = {"skipped": "live_priority"}
+        enrichment = {"copied": 0, "skipped": "live_priority"}
     from collector.cache import flush_list_invalidations
 
     flush_list_invalidations(db)
@@ -901,6 +945,7 @@ def run_incremental_tick(
     tick = {
         "due_jobs": schedule["due_jobs"],
         "selected_jobs": schedule["selected_jobs"],
+        "jobs_processed": jobs_processed,
         "sport_filter": sport_id,
         "source_family_filter": source_family,
         "liveish_only": liveish_only,
@@ -953,12 +998,24 @@ def run_incremental_tick(
         "groups": len(groups),
         "coalesced": coalesced,
     }
-    if held_write:
-        try:
-            release_write_lock(db, owner=write_owner)
-        except Exception:
-            pass
     return tick
+
+
+def run_incremental_tick(db: Session, **kwargs: Any) -> Dict[str, Any]:
+    """One tick with per-tick shared boards and exception-safe lease release."""
+    from collector.adapters_fotmob import shared_board_batch
+    from collector.lock import owner_identity, release_write_lock
+
+    db.info["incremental_held_write"] = False
+    try:
+        with shared_board_batch():
+            return _run_incremental_tick(db, **kwargs)
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        if db.info.pop("incremental_held_write", False):
+            release_write_lock(db, owner=owner_identity())
 
 
 def scheduler_snapshot(db: Session) -> Dict[str, Any]:

@@ -263,6 +263,8 @@ def merge_event_fields(
         if incoming_source_id:
             provenance["lineups"] = incoming_source_id
     for key in (
+        "group", "group_name", "source_group_id", "source_parent_competition_id",
+        "stage",
         "venue",
         "season",
         "series_id",

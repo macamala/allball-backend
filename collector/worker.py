@@ -750,6 +750,8 @@ def _idle(interval: int) -> None:
 
 def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
     logging.basicConfig(level=logging.INFO)
+    import faulthandler
+    faulthandler.dump_traceback_later(60)  # One bounded startup-stall diagnostic.
     matrix = assert_frozen_matrix()
     logger.info("Frozen matrix ok checksum=%s count=%s", matrix["checksum"], matrix["competition_count"])
     register_production_adapters()
@@ -781,6 +783,7 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
         advisory = None
         try:
             global _standby_logged
+            logger.info("RESULTS_SCHEDULER acquire start flags=%s", flags_payload())
             held = acquire_scheduler_lock(db, owner=owner)
             if not held:
                 if not _standby_logged:
@@ -796,6 +799,8 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
                 continue
             _standby_logged = False
             standby_attempts = 0
+            db.commit()
+            logger.info("RESULTS_SCHEDULER acquired")
 
             # Legacy football_visibility_repair was intentionally retired here.
             # It recomputed name-quality only and could re-enable real duplicate
@@ -815,53 +820,16 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
                         return
                 time.sleep(STANDBY_SLEEP_SECONDS)
                 continue
-            # Football score/status gets the first, tiny request budget.
-            # This lane is FotMob-only and live-ish-only so a slow unrelated
-            # football provider can never block current scores.
             if scheduler_enabled():
-                score_summary = run_incremental_tick(
-                    db,
-                    sport_id="football",
-                    source_family="fotmob",
-                    liveish_only=True,
-                    max_physical=2,
-                )
-                db.commit()
-                logger.info(
-                    "FOOTBALL_SCORE_LANE %s",
-                    {k: score_summary.get(k) for k in (
-                        "due_jobs",
-                        "selected_jobs",
-                        "families_selected",
-                        "sports_selected",
-                        "events_changed",
-                        "live_jobs_due",
-                        "live_jobs_selected",
-                        "live_families_served",
-                        "oldest_live_fetch_age_seconds",
-                        "duration_s",
-                    )},
-                )
+                from collector.priority_cycle import run_priority_cycle
 
-                # Give every sport a bounded live-ish pass before any expensive
-                # asset/breadth maintenance. Background/discovery stays out.
-                live_summary = run_incremental_tick(
-                    db,
-                    liveish_only=True,
-                    max_physical=6,
-                )
-                db.commit()
-                logger.info(
-                    "ALLSPORT_LIVE_LANE %s",
-                    {k: live_summary.get(k) for k in (
-                        "due_jobs",
-                        "selected_jobs",
-                        "families_selected",
-                        "sports_selected",
-                        "events_changed",
-                        "duration_s",
-                    )},
-                )
+                priority_active = run_priority_cycle(db, owner=owner)
+                faulthandler.cancel_dump_traceback_later()
+                if priority_active:
+                    if once:
+                        return
+                    time.sleep(live_idle_seconds(interval))
+                    continue
 
             # Registry bootstrap can be expensive. It is process-global and must
             # never sit in front of live score/status refresh.

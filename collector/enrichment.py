@@ -55,6 +55,10 @@ OBSERVATION_ENRICH_KEYS = (
 )
 
 EXTRA_PERSIST_KEYS = (
+    "group",
+    "group_name",
+    "source_group_id",
+    "source_parent_competition_id",
     "race_number",
     "tournament",
     "round",

@@ -55,6 +55,8 @@ LIST_EXTRA_KEYS = (
     "stage",
 )
 HEADER_KEYS = (
+    "group",
+    "group_name",
     "id",
     "sport",
     "competition",
@@ -131,6 +133,8 @@ _STATUS_CACHE: Dict[str, Any] = {"at": 0.0, "payload": None}
 _STATUS_TTL_S = 20.0
 
 INTERNAL_EVENT_KEYS = {
+    "source_group_id",
+    "source_parent_competition_id",
     "field_sources",
     "source_event_ids",
     "source_kickoffs",
@@ -305,6 +309,8 @@ def _apply_source_competition_display(
 
 
 LIST_PUBLIC_KEYS = (
+    "group",
+    "group_name",
     "id",
     "sport",
     "competition",

@@ -69,6 +69,7 @@ def test_live_only_filter_excludes_background_jobs():
 
 
 def test_run_incremental_tick_sport_filter_excludes_other_sports(monkeypatch):
+    monkeypatch.setenv("RESULTS_SCHEDULER_ENABLED", "true")
     db = _session()
     try:
         _source(db, "football-src", "inc-echo")
@@ -77,8 +78,9 @@ def test_run_incremental_tick_sport_filter_excludes_other_sports(monkeypatch):
         _competition(db, "basketball-comp", "basketball")
         _map(db, "football-comp", "football-src", 10, upstream_family="inc-echo")
         _map(db, "basketball-comp", "basketball-src", 10, upstream_family="inc-echo")
-        _event(db, "f1", "football-comp", "football", "scheduled", datetime.utcnow())
-        _event(db, "b1", "basketball-comp", "basketball", "scheduled", datetime.utcnow())
+        for eid, cid, sport in (("f1", "football-comp", "football"), ("b1", "basketball-comp", "basketball")):
+            db.add(SportsEvent(event_id=eid, competition_id=cid, sport_id=sport,
+                              status="scheduled", event_family="team_match", start_time=datetime.utcnow()))
         db.commit()
 
         seen = []

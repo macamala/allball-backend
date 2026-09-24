@@ -281,8 +281,9 @@ def _candidate_competitions(db: Session, now: float) -> List[Tuple[str, List[str
 
     candidates: List[Tuple[str, List[str]]] = []
     for competition_id, missing in counts.items():
-        last = float(_last_league_fetch.get(competition_id) or 0.0)
-        if now - last < LEAGUE_TTL_S:
+        last = _last_league_fetch.get(competition_id)
+        # No previous fetch means immediately due, even on a freshly booted host.
+        if last is not None and now - float(last) < LEAGUE_TTL_S:
             continue
         ids = sorted(source_ids.get(competition_id) or [], key=lambda value: int(value))
         if ids:

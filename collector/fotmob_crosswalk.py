@@ -81,6 +81,12 @@ def _canonical_fotmob_competition(league_name: str, ccode: str) -> Optional[str]
     name = str(league_name or "").strip()
     if not name:
         return None
+    code = str(ccode or "").strip().lower()
+    exact = [cid for cid, spec in FOTMOB_LEAGUES.items()
+             if str(spec.get("ccode") or "").lower() == code
+             and str(spec.get("name") or "").casefold() == name.casefold()]
+    if len(exact) == 1:
+        return exact[0]
     direct = unique_label_competition(name, sport_id="football")
     if direct:
         return direct
@@ -99,7 +105,13 @@ def _fotmob_competition_identity(match: Dict[str, Any]) -> Tuple[Optional[str], 
     league_id = str(league.get("id") or "").strip()
     league_name = str(league.get("name") or "").strip()
     ccode = str(league.get("ccode") or league.get("countryCode") or "").strip().upper()
-    known = _league_to_competition().get(league_id)
+    known_ids = _league_to_competition()
+    known = known_ids.get(league_id)
+    if not known:
+        for parent_id in (league.get("primaryId"), league.get("parentLeagueId")):
+            if parent_id is not None and str(parent_id) in known_ids:
+                known = known_ids[str(parent_id)]
+                break
     if known:
         return known, league_id, league_name, ccode
     canonical = _canonical_fotmob_competition(league_name, ccode)

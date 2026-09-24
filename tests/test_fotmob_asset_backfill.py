@@ -1,3 +1,4 @@
+from database import SessionLocal as _session
 from collector.adapters_fotmob import FOTMOB_LEAGUES, asset_league_ids, parse_fotmob_table
 from collector.fotmob_asset_backfill import _fill_side, _roster, _unique_match
 

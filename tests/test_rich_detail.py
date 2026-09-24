@@ -131,10 +131,14 @@ def test_fotmob_parser_maps_infobox_player_stats_and_xg():
     assert out["venue"] == "Artemio Franchi"
     assert out["referee"] == "Daniele Doveri"
     assert out["attendance"] == 38000
-    assert out["statistics"][0]["label"] == "Expected goals (xG)"\n    assert out["sport_detail"]["statistics_periods"]["first_half"][0]["home"] == "0.80"\n    assert out["sport_detail"]["statistics_periods"]["second_half"][0]["away"] == "0.92"
+    assert out["statistics"][0]["label"] == "Expected goals (xG)"
+    assert out["sport_detail"]["statistics_periods"]["first_half"][0]["home"] == "0.80"
+    assert out["sport_detail"]["statistics_periods"]["second_half"][0]["away"] == "0.92"
     assert out["lineups"]["home"]["formation"] == "4-3-3"
-    assert out["lineups"]["home"]["coach"] == "Vanoli"\n    assert out["lineups"]["home"]["start"][0]["image"].endswith("/playerimages/174543.png")
-    assert out["player_statistics"][0]["goals"] == 1\n    assert out["player_statistics"][0]["image"].endswith("/playerimages/174543.png")
+    assert out["lineups"]["home"]["coach"] == "Vanoli"
+    assert out["lineups"]["home"]["start"][0]["image"].endswith("/playerimages/174543.png")
+    assert out["player_statistics"][0]["goals"] == 1
+    assert out["player_statistics"][0]["image"].endswith("/playerimages/174543.png")
     assert out["sport_detail"]["shots"] == 2
 
 

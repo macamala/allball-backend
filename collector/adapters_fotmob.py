@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import time
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -117,6 +119,18 @@ def asset_league_ids(
 MATCHES_URL = "https://www.fotmob.com/api/data/matches?date={date}"
 SCORE_URL = "https://www.fotmob.com/api/data/match-score?matchId={match_id}"
 
+_BATCH_BOARDS: ContextVar = ContextVar("fotmob_batch_boards", default=None)
+
+
+@contextmanager
+def shared_board_batch():
+    token = _BATCH_BOARDS.set({})
+    try:
+        yield
+    finally:
+        _BATCH_BOARDS.reset(token)
+
+
 _BOARD: Dict[str, List[Dict[str, Any]]] = {}
 _BOARD_AT: Dict[str, float] = {}
 LIVE_BOARD_TTL_SECONDS = 5
@@ -139,6 +153,29 @@ def _dates() -> List[str]:
     return board_dates(past_days=3, future_days=1)
 
 
+def _board_league(node: Dict[str, Any]) -> Dict[str, Any]:
+    """Retain both the competition ID and its season-specific group ID."""
+    return {
+        "id": node.get("id") or node.get("primaryId"),
+        "primaryId": node.get("primaryId"),
+        "parentLeagueId": node.get("parentLeagueId"),
+        "parentLeagueName": node.get("parentLeagueName"),
+        "name": node.get("name") or node.get("ccode"),
+        "ccode": node.get("ccode"),
+        "isGroup": bool(node.get("isGroup")),
+        "groupName": node.get("groupName"),
+    }
+
+
+def _matching_league_id(league: Dict[str, Any], allowed: set[str]) -> str:
+    # A group cannot match by name, number, or another league's group. Only
+    # explicit IDs from the same upstream node authorize this competition.
+    for value in (league.get("id"), league.get("primaryId"), league.get("parentLeagueId")):
+        if value is not None and str(value) in allowed:
+            return str(value)
+    return ""
+
+
 def _extract_matches(payload: Any) -> List[Dict[str, Any]]:
     matches: List[Dict[str, Any]] = []
 
@@ -152,11 +189,7 @@ def _extract_matches(payload: Any) -> List[Dict[str, Any]]:
         if not isinstance(node, dict):
             return
         if node.get("matches") or node.get("Matches"):
-            lg = {
-                "id": node.get("id") or node.get("primaryId"),
-                "name": node.get("name") or node.get("ccode"),
-                "ccode": node.get("ccode"),
-            }
+            lg = _board_league(node)
             for row in node.get("matches") or node.get("Matches") or []:
                 if isinstance(row, dict):
                     row = dict(row)
@@ -170,7 +203,7 @@ def _extract_matches(payload: Any) -> List[Dict[str, Any]]:
             return
         next_league = league
         if node.get("name") and node.get("id"):
-            next_league = {"id": node.get("id"), "name": node.get("name"), "ccode": node.get("ccode")}
+            next_league = _board_league(node)
         for key, value in node.items():
             if key in {"home", "away", "status", "homeTeam", "awayTeam"}:
                 continue
@@ -195,7 +228,7 @@ def _team_logo(team: Dict[str, Any]) -> str:
 
 
 def _league_logo(league: Dict[str, Any]) -> str:
-    league_id = str((league or {}).get("id") or "").strip()
+    league_id = str((league or {}).get("parentLeagueId") or (league or {}).get("primaryId") or (league or {}).get("id") or "").strip()
     return f"https://images.fotmob.com/image_resources/logo/leaguelogo/{league_id}.png" if league_id else ""
 
 
@@ -234,7 +267,7 @@ def _scores(status: Dict[str, Any], match: Dict[str, Any]) -> Tuple[Optional[int
     return _int_or_none(home.get("score")), _int_or_none(away.get("score"))
 
 
-def match_to_event(match: Dict[str, Any], competition_id: str) -> Optional[Dict[str, Any]]:
+def match_to_event(match: Dict[str, Any], competition_id: str, *, source_league_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
     home = match.get("home") if isinstance(match.get("home"), dict) else {}
     away = match.get("away") if isinstance(match.get("away"), dict) else {}
     home_name = (home.get("name") or home.get("shortName") or "").strip()
@@ -254,6 +287,16 @@ def match_to_event(match: Dict[str, Any], competition_id: str) -> Optional[Dict[
     if minute not in (None, ""):
         score["minute"] = minute
     league = match.get("_league") or {}
+    source_league_id = source_league_id or str(league.get("id") or "")
+    group_identity = {}
+    if league.get("isGroup") and league.get("id"):
+        group_identity = {
+            "source_group_id": str(league["id"]),
+            "source_parent_competition_id": str(league.get("parentLeagueId") or league.get("primaryId") or ""),
+            "group": str(league.get("name") or league.get("groupName") or ""),
+            "group_name": str(league.get("groupName") or ""),
+            "stage": str(league.get("parentLeagueName") or ""),
+        }
     start = None
     ts = match.get("status", {}).get("utcTime") if isinstance(match.get("status"), dict) else None
     start = ts or match.get("time") or match.get("utcTime")
@@ -274,16 +317,18 @@ def match_to_event(match: Dict[str, Any], competition_id: str) -> Optional[Dict[
         "start_time": start,
         "source_family": "fotmob",
         "source_event_id": str(match.get("id") or ""),
-        "source_competition_id": str(league.get("id") or ""),
+        "source_competition_id": source_league_id,
         "source_competition_name": str(league.get("name") or ""),
         "competition_logo": _league_logo(league),
+        **group_identity,
         "extra": {
+            **group_identity,
             "source_family": "fotmob",
             "source_status": status_obj.get("reason", {}).get("short") if isinstance(status_obj.get("reason"), dict) else status,
             "status_inferred": False,
             "source_event_ids": {"fotmob": str(match.get("id") or "")},
             "source_event_id": str(match.get("id") or ""),
-            "source_competition_id": str(league.get("id") or ""),
+            "source_competition_id": source_league_id,
             "source_competition_name": str(league.get("name") or ""),
         },
     }
@@ -297,10 +342,16 @@ def _load_boards(
 ) -> List[Dict[str, Any]]:
     days = list(dates or _dates())
     cache_key = "d:" + ",".join(days)
+    batch = _BATCH_BOARDS.get()
+    batch_key = (cache_key, ttl_seconds)
+    if batch is not None and batch_key in batch:
+        return batch[batch_key]
     now_mono = time.monotonic()
     cached = _BOARD.get(cache_key)
     cached_at = _BOARD_AT.get(cache_key, 0.0)
     if cached is not None and now_mono - cached_at < max(0, ttl_seconds):
+        if batch is not None:
+            batch[batch_key] = cached
         return cached
     if dates is None and _BOARD.get("all") is not None:
         all_at = _BOARD_AT.get("all", 0.0)
@@ -322,6 +373,8 @@ def _load_boards(
             for match in _extract_matches(payload):
                 match["_board_date"] = day
                 rows.append(match)
+    if batch is not None:
+        batch[batch_key] = rows
     _BOARD[cache_key] = rows
     _BOARD_AT[cache_key] = time.monotonic()
     if dates is None:
@@ -486,10 +539,10 @@ class FotMobAdapter:
         allowed = set(league_ids)
         events: List[Dict[str, Any]] = []
         for match in matches:
-            lid = (match.get("_league") or {}).get("id")
-            if str(lid) not in allowed:
+            lid = _matching_league_id(match.get("_league") or {}, allowed)
+            if not lid:
                 continue
-            event = match_to_event(match, competition_id)
+            event = match_to_event(match, competition_id, source_league_id=lid)
             if event:
                 events.append(event)
         return FetchResult(

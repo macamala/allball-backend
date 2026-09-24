@@ -7,6 +7,10 @@ from typing import Any, Dict
 from collector.util import dump_json, load_json
 
 LIST_EXTRA_KEYS = (
+    "group",
+    "group_name",
+    "source_group_id",
+    "source_parent_competition_id",
     "periods",
     "winner",
     "runners",
