@@ -11,7 +11,8 @@ from __future__ import annotations
 from typing import Any, Dict, Tuple
 
 from collector.list_extra import store_list_extra
-from collector.models import SportsEvent
+from collector.models import SportsEvent, SportsStandingSnapshot
+from collector.participant_text import fold_for_identity
 from collector.util import dump_json, load_json
 
 
@@ -83,6 +84,59 @@ def _asset(side: Any) -> Dict[str, str]:
     return out
 
 
+def _standing_rows(payload: Any):
+    if isinstance(payload, list):
+        return payload
+    if not isinstance(payload, dict):
+        return []
+    rows = payload.get("rows") or payload.get("standings") or payload.get("table") or []
+    return rows if isinstance(rows, list) else []
+
+
+def _standing_asset(item: Any) -> Dict[str, Any]:
+    if not isinstance(item, dict):
+        return {}
+    team = item.get("team")
+    team_meta = team if isinstance(team, dict) else {}
+    name = (
+        team_meta.get("name")
+        or team_meta.get("display_name")
+        or (team if isinstance(team, str) else "")
+        or item.get("name")
+        or ""
+    )
+    team_id = (
+        item.get("team_id")
+        or item.get("teamId")
+        or team_meta.get("id")
+        or ""
+    )
+    logo = (
+        item.get("logo")
+        or item.get("crest")
+        or item.get("badge")
+        or item.get("team_logo")
+        or item.get("teamLogo")
+        or team_meta.get("logo")
+        or team_meta.get("crest")
+        or team_meta.get("badge")
+        or ""
+    )
+    country = (
+        item.get("country_id")
+        or item.get("country")
+        or team_meta.get("country_id")
+        or team_meta.get("country")
+        or ""
+    )
+    return {
+        "name": str(name or "").strip(),
+        "team_id": str(team_id or "").strip(),
+        "logo": str(logo or "").strip(),
+        "country_id": str(country or "").strip(),
+    }
+
+
 def _fotmob_identity_context(row: SportsEvent, extra: Dict[str, Any]) -> bool:
     family = str(extra.get("source_family") or "").strip().lower()
     primary = str(getattr(row, "primary_source_id", "") or "").strip().lower()
@@ -134,6 +188,23 @@ def propagate_identity_assets(db) -> Dict[str, int]:
 
     competition_assets: Dict[Tuple[str, str], str] = {}
     participant_assets: Dict[Tuple[str, str, str, str], Dict[str, str]] = {}
+    standing_assets: Dict[Tuple[str, str, str, str], Dict[str, str]] = {}
+
+    # Standings are a trusted competition-scoped source of club identity.
+    standing_snapshots = db.query(SportsStandingSnapshot).all()
+    for snapshot in standing_snapshots:
+        sport = str(snapshot.sport_id or "")
+        competition = str(snapshot.competition_id or "")
+        payload = load_json(snapshot.rows_json, {}) or {}
+        for item in _standing_rows(payload):
+            observed = _standing_asset(item)
+            if not observed.get("logo") and not observed.get("country_id"):
+                continue
+            if observed.get("team_id"):
+                standing_assets[(sport, competition, "id", observed["team_id"])] = observed
+            folded = fold_for_identity(observed.get("name") or "")
+            if folded:
+                standing_assets[(sport, competition, "name", folded)] = observed
 
     # Pass 1: build a conservative canonical asset index from already-observed data.
     for row in rows:
@@ -168,6 +239,8 @@ def propagate_identity_assets(db) -> Dict[str, int]:
         "participant_countries_filled": 0,
         "source_native_competition_logos_filled": 0,
         "source_native_participant_logos_filled": 0,
+        "standing_participant_logos_filled": 0,
+        "standing_participant_countries_filled": 0,
     }
 
     # Pass 2: fill blanks only. Never overwrite a non-empty value.
@@ -203,7 +276,24 @@ def propagate_identity_assets(db) -> Dict[str, int]:
             side = participants.get(side_name)
             if not isinstance(side, dict):
                 continue
-            known: Dict[str, str] = {}
+            known: Dict[str, Any] = {}
+            if _bucket(family) == "team":
+                participant_id = str(side.get("id") or "").strip()
+                if participant_id:
+                    scoped = standing_assets.get((sport, competition, "id", participant_id)) or {}
+                    if scoped.get("logo"):
+                        known["logo"] = scoped["logo"]
+                    if scoped.get("country_id"):
+                        known["country_id"] = scoped["country_id"]
+                folded_name = fold_for_identity(side.get("display_name") or side.get("name") or "")
+                if folded_name:
+                    scoped = standing_assets.get((sport, competition, "name", folded_name)) or {}
+                    if scoped.get("logo") and not known.get("logo"):
+                        known["logo"] = scoped["logo"]
+                        known["_standing_logo"] = True
+                    if scoped.get("country_id") and not known.get("country_id"):
+                        known["country_id"] = scoped["country_id"]
+                        known["_standing_country"] = True
             for key in _identity_keys(sport, family, side):
                 candidate = participant_assets.get(key) or {}
                 if candidate.get("logo") and not known.get("logo"):
@@ -218,10 +308,14 @@ def propagate_identity_assets(db) -> Dict[str, int]:
             if known.get("logo") and not _asset(merged).get("logo"):
                 merged["logo"] = known["logo"]
                 stats["participant_logos_filled"] += 1
+                if known.get("_standing_logo"):
+                    stats["standing_participant_logos_filled"] += 1
                 row_changed = True
             if known.get("country_id") and not _asset(merged).get("country_id"):
                 merged["country_id"] = known["country_id"]
                 stats["participant_countries_filled"] += 1
+                if known.get("_standing_country"):
+                    stats["standing_participant_countries_filled"] += 1
                 row_changed = True
             if known.get("country_ids") and not _asset(merged).get("country_ids"):
                 merged["country_ids"] = known["country_ids"]
