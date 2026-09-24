@@ -26,7 +26,7 @@ from collector.util import dump_json, load_json
 
 RUN_INTERVAL_S = 120
 LEAGUE_TTL_S = 12 * 3600
-MAX_LEAGUES_PER_RUN = 10
+MAX_LEAGUES_PER_RUN = 40
 
 _next_run_at = 0.0
 _last_league_fetch: Dict[str, float] = {}
@@ -125,27 +125,30 @@ def _candidate_competitions(db: Session, now: float) -> List[Tuple[str, List[str
             for key in ("home", "away")
             if isinstance(participants.get(key), dict) and _missing_logo(participants.get(key))
         )
-        if not missing:
-            continue
 
         competition_id = str(row.competition_id or "")
-        known_ids = _league_ids(FOTMOB_LEAGUES.get(competition_id) or {})
-        for value in known_ids:
-            if str(value).isdigit():
-                source_ids[competition_id].add(str(value))
-
         extra = load_json(row.extra_json, {}) or {}
         slim = extra_for_list(row) or {}
         for key, value in slim.items():
             if value not in (None, "", [], {}):
                 extra[key] = value
+        missing_competition_logo = not bool(extra.get("competition_logo"))
+        if not missing and not missing_competition_logo:
+            continue
+
+        known_ids = _league_ids(FOTMOB_LEAGUES.get(competition_id) or {})
+        for value in known_ids:
+            if str(value).isdigit():
+                source_ids[competition_id].add(str(value))
+
+
         family = str(extra.get("source_family") or "").strip().lower()
         source_competition_id = str(extra.get("source_competition_id") or "").strip()
         if family == "fotmob" and source_competition_id.isdigit():
             source_ids[competition_id].add(source_competition_id)
 
         if source_ids.get(competition_id):
-            counts[competition_id] += missing
+            counts[competition_id] += missing + (1 if missing_competition_logo else 0)
 
     candidates: List[Tuple[str, List[str]]] = []
     for competition_id, missing in counts.items():
