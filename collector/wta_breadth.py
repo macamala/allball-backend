@@ -23,7 +23,7 @@ from collector.util import dump_json, load_json, parse_datetime, slugify
 
 logger = logging.getLogger(__name__)
 
-JOB_KEY = "wta-global-breadth-v1"
+JOB_KEY = "wta-global-breadth-v2"
 SOURCE_ID = "wta-global"
 
 
@@ -121,11 +121,16 @@ def _ensure_mapping(
                 "year": meta.get("year"),
                 "source_competition_name": competition_name,
             }),
-            independence_status="established",
+            independence_status="single-source-breadth",
             upstream_family="wta-json",
         )
         db.add(mapping)
         db.flush()
+    mapping.independence_status = "single-source-breadth"
+    mapping.upstream_family = "wta-json"
+    mapping.enabled = True
+    mapping.coverage_scope = "full"
+    mapping.verification = "api.wtatennis.com tournament matches"
     return mapping
 
 
