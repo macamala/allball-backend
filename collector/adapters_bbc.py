@@ -56,8 +56,8 @@ COMPETITION_PATH = {
     "super-rugby": "/sport/rugby-union/super-rugby/scores-fixtures",
     "super-league": "/sport/rugby-league/super-league/scores-fixtures",
     "nrl": "/sport/rugby-league/nrl/scores-fixtures",
-    "atp-tour": "/sport/tennis",
-    "wta-tour": "/sport/tennis",
+    "atp-tour": "/sport/tennis/scores-and-schedule",
+    "wta-tour": "/sport/tennis/scores-and-schedule",
     "bha-meetings": "/sport/horse-racing/results",
     "gbgb-meetings": "/sport/horse-racing",
     "wst-events": "/sport/snooker",
@@ -198,13 +198,16 @@ class BbcSportAdapter:
         if path:
             found.append(urljoin(origin, path))
             today = datetime.utcnow().date()
-            for delta in (1, 2, 3, 7, 14):
-                day = (today - timedelta(days=delta)).isoformat()
+            # Prefer future dated boards first. Live-score breadth is most
+            # valuable for today/tomorrow; older pages remain as fallback.
+            for offset in (1, 2, 3, 0, -1, -2, -3, 7, 14):
+                day = (today + timedelta(days=offset)).isoformat()
                 found.append(urljoin(origin, path.rstrip("/") + "/" + day))
         for href in fixture_urls(html, base):
             if "scores-fixtures" in href or "/results" in href or "/fixtures" in href:
                 found.append(href)
         slug = SPORT_PATH.get(sport_id or "")
         if slug:
-            found.append(urljoin(origin, f"/sport/{slug}/scores-fixtures"))
+            suffix = "scores-and-schedule" if slug == "tennis" else "scores-fixtures"
+            found.append(urljoin(origin, f"/sport/{slug}/{suffix}"))
         return list(dict.fromkeys(found))
