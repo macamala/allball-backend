@@ -16,7 +16,7 @@ from urllib.parse import quote
 
 from sqlalchemy.orm import Session
 
-from collector.adapters_fotmob import FOTMOB_LEAGUES, LEAGUE_URL, _league_ids
+from collector.adapters_fotmob import LEAGUE_URL, asset_league_ids
 from collector.fotmob_asset_backfill import _roster
 from collector.cache import note_list_invalidation
 from collector.http import fetch_url
@@ -167,7 +167,7 @@ def _candidate_names(db: Session, now: float) -> List[Tuple[str, str, int]]:
     )
     for row in rows:
         competition_id = str(row.competition_id or "").strip()
-        if competition_id not in FOTMOB_LEAGUES:
+        if not asset_league_ids(competition_id):
             continue
         participants = load_json(row.participants_json, {}) or {}
         for side_name in ("home", "away"):
@@ -307,11 +307,10 @@ def cleanup_unsafe_prior_search_assets(db: Session) -> Dict[str, int]:
 
 
 def _roster_ids(getter, competition_id: str) -> Tuple[set[str], int, int]:
-    spec = FOTMOB_LEAGUES.get(competition_id) or {}
     ids: set[str] = set()
     requests = 0
     errors = 0
-    for league_id in _league_ids(spec):
+    for league_id in asset_league_ids(competition_id):
         result = getter(LEAGUE_URL.format(league_id=league_id))
         requests += 1
         if not getattr(result, "ok", False):
