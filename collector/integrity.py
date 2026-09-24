@@ -199,15 +199,38 @@ def plan_backfill(db: Session) -> Dict[str, Any]:
                 keep_id = chosen["event_id"]
             elif len(items) == 2:
                 unique_leaks = {leak_score[cid] for cid in comps}
-                if len(unique_leaks) == 1:
-                    keep_id = None
-                else:
+                if len(unique_leaks) != 1:
                     keep_comp = min(comps, key=lambda cid: (leak_score[cid], str(cid)))
                     keep_id = next(
                         item["event_id"] for item in items if item.get("competition_key") == keep_comp
                     )
+
+            if keep_id is None:
+                # Never quarantine every representation of a fixture. The old
+                # equal-leak fallback could make a real match disappear until a
+                # later repair pass happened to restore it. Prefer source-native
+                # football evidence, otherwise keep the newest deterministic row.
+                source_native = [
+                    item
+                    for item in items
+                    if str((item.get("extra") or {}).get("source_family") or "").strip().lower()
+                    in PROTECTED_SOURCE_NATIVE_FOOTBALL_FAMILIES
+                ]
+                pool = source_native or items
+                chosen = sorted(
+                    pool,
+                    key=lambda item: (
+                        1 if (item.get("extra") or {}).get("source_event_id") else 0,
+                        1 if (item.get("extra") or {}).get("source_competition_id") else 0,
+                        item.get("updated_at") or datetime.min,
+                        str(item.get("event_id") or ""),
+                    ),
+                    reverse=True,
+                )[0]
+                keep_id = chosen["event_id"]
+
             for item in items:
-                if keep_id is None or item["event_id"] != keep_id:
+                if item["event_id"] != keep_id:
                     quarantine.append(item["event_id"])
             scores = []
             for left in items:
