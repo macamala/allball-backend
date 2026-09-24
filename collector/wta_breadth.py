@@ -8,6 +8,7 @@ date window and persists all matching fixtures/results.
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, List, Optional, Set
 
