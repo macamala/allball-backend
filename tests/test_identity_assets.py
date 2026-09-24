@@ -167,6 +167,11 @@ def test_verified_wta_competition_artwork_is_available_without_affecting_footbal
     assert verified_competition_logo("tennis", "unknown-tour", {}) is None
 
 
+def test_verified_hrnsw_competition_artwork_uses_official_host():
+    logo = verified_competition_logo("harness-racing", "nsw-hrnsw-meetings", {})
+    assert logo and "hrnsw.com.au" in logo
+
+
 def test_opendota_event_preserves_real_league_name_on_stable_professional_key():
     event = opendota_event(
         {
