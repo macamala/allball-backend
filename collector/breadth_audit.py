@@ -228,6 +228,57 @@ def public_multisport_day_snapshot(day_offset: int = 1, *, include_samples: bool
                     }
                 )
 
+    def _side_logo(side: Any) -> bool:
+        if not isinstance(side, dict):
+            return False
+        return bool(
+            side.get("logo")
+            or side.get("image")
+            or side.get("crest")
+            or side.get("badge")
+            or side.get("team_logo")
+            or side.get("teamLogo")
+        )
+
+    def _side_country(side: Any) -> bool:
+        if not isinstance(side, dict):
+            return False
+        return bool(
+            side.get("country_id")
+            or side.get("country")
+            or side.get("nationality")
+            or [value for value in (side.get("country_ids") or []) if value]
+        )
+
+    assets_by_sport: Dict[str, Dict[str, int]] = {}
+    for row in events:
+        sport = str(row.get("sport") or "unknown")
+        bucket = assets_by_sport.setdefault(
+            sport,
+            {
+                "events": 0,
+                "events_with_competition_logo": 0,
+                "events_with_both_side_logos": 0,
+                "events_with_both_side_countries": 0,
+                "side_slots": 0,
+                "side_logos": 0,
+                "side_countries": 0,
+            },
+        )
+        bucket["events"] += 1
+        bucket["events_with_competition_logo"] += int(bool(row.get("competition_logo")))
+        home = row.get("home") if isinstance(row.get("home"), dict) else {}
+        away = row.get("away") if isinstance(row.get("away"), dict) else {}
+        sides = [side for side in (home, away) if side and (side.get("name") or side.get("display_name"))]
+        if len(sides) == 2:
+            bucket["side_slots"] += 2
+            logos = sum(1 for side in sides if _side_logo(side))
+            countries = sum(1 for side in sides if _side_country(side))
+            bucket["side_logos"] += logos
+            bucket["side_countries"] += countries
+            bucket["events_with_both_side_logos"] += int(logos == 2)
+            bucket["events_with_both_side_countries"] += int(countries == 2)
+
     distinct_competitions: Dict[str, int] = {}
     for sport in sport_counts:
         distinct_competitions[sport] = len(
@@ -246,6 +297,7 @@ def public_multisport_day_snapshot(day_offset: int = 1, *, include_samples: bool
         "total": len(events),
         "sports": dict(sport_counts.most_common()),
         "competitions_by_sport": distinct_competitions,
+        "assets_by_sport": assets_by_sport,
         "samples": samples,
     }
 
