@@ -277,6 +277,7 @@ LIST_PUBLIC_KEYS = (
     "competition",
     "competition_key",
     "competition_name",
+    "competition_logo",
     "event_family",
     "home",
     "away",
