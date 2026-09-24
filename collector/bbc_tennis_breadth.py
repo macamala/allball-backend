@@ -26,7 +26,7 @@ from collector.util import dump_json, load_json, parse_datetime, slugify
 
 logger = logging.getLogger(__name__)
 
-JOB_KEY = "bbc-tennis-breadth-v2"
+JOB_KEY = "bbc-tennis-breadth-v3"
 BASE = "https://www.bbc.com/sport/tennis/scores-and-schedule"
 
 
@@ -40,12 +40,8 @@ def _job(db: Session) -> SportsCollectorJob:
 
 
 def _source(db: Session) -> Optional[SportsSource]:
-    rows = (
-        db.query(SportsSource)
-        .filter(SportsSource.adapter_key == "bbc-sport", SportsSource.enabled.is_(True))
-        .all()
-    )
-    return next((row for row in rows if source_collectable(row)), None)
+    row = db.get(SportsSource, "bbc-tennis-global")
+    return row if row is not None and row.enabled and source_collectable(row) else None
 
 
 def _competition_id(name: str) -> str:
@@ -194,6 +190,7 @@ def run_breadth_ingest(
         "ingested": 0,
         "competitions": 0,
         "http_errors": 0,
+        "by_date": {},
     }
     competitions = set()
 
@@ -202,10 +199,18 @@ def run_breadth_ingest(
         url = f"{BASE}/{day.isoformat()}"
         result = getter(url)
         stats["requests"] += 1
+        day_stats = {
+            "http": int(getattr(result, "http_status", 0) or 0),
+            "events": 0,
+            "eligible": 0,
+            "ingested": 0,
+        }
+        stats["by_date"][day.isoformat()] = day_stats
         if not getattr(result, "ok", False) or not isinstance(getattr(result, "payload", None), str):
             stats["http_errors"] += 1
             continue
         events = parse_bbc_tennis_html(result.payload)
+        day_stats["events"] = len(events)
         stats["events"] += len(events)
         for event in events:
             if not _in_window(event, now=now, back=days_back + 1, forward=days_forward + 1):
@@ -222,8 +227,10 @@ def run_breadth_ingest(
             )
             competitions.add(competition_id)
             stats["eligible"] += 1
+            day_stats["eligible"] += 1
             if _ingest(db, event, source.source_id):
                 stats["ingested"] += 1
+                day_stats["ingested"] += 1
             if stats["ingested"] >= max_ingest:
                 stats["status"] = "bounded"
                 break
