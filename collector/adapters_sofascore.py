@@ -291,6 +291,25 @@ def _source_season(row: Dict[str, Any]) -> Dict[str, Any]:
     return row.get("season") if isinstance(row.get("season"), dict) else {}
 
 
+def _team_logo_url(team: Dict[str, Any], event_family: str) -> str:
+    team_id = str((team or {}).get("id") or "").strip()
+    if not team_id or event_family not in {"team_match", "esports_match"}:
+        return ""
+    return f"https://img.sofascore.com/api/v1/team/{team_id}/image"
+
+
+def _competition_logo_url(row: Dict[str, Any]) -> str:
+    tour = row.get("tournament") if isinstance(row.get("tournament"), dict) else {}
+    unique = tour.get("uniqueTournament") if isinstance(tour.get("uniqueTournament"), dict) else {}
+    unique_id = str(unique.get("id") or "").strip()
+    if unique_id:
+        return f"https://img.sofascore.com/api/v1/unique-tournament/{unique_id}/image"
+    tournament_id = str(tour.get("id") or "").strip()
+    if tournament_id:
+        return f"https://img.sofascore.com/api/v1/tournament/{tournament_id}/image"
+    return ""
+
+
 def _source_country(row: Dict[str, Any]) -> str:
     tour = row.get("tournament") if isinstance(row.get("tournament"), dict) else {}
     category = tour.get("category") if isinstance(tour.get("category"), dict) else {}
@@ -387,10 +406,19 @@ def sofa_event(row: Dict[str, Any], competition_id: str, sport_id: str) -> Optio
     source_season = _source_season(row)
     source_season_id = str(source_season.get("id") or "").strip()
     source_season_name = str(source_season.get("name") or source_season.get("year") or "").strip()
+    event_family = event_family_for_sport(sport_id)
     payload = {
         "id": f"sofascore:{row.get('id')}",
-        "home": {"id": str(home.get("id") or ""), "name": home_name},
-        "away": {"id": str(away.get("id") or ""), "name": away_name},
+        "home": {
+            "id": str(home.get("id") or ""),
+            "name": home_name,
+            "logo": _team_logo_url(home, event_family),
+        },
+        "away": {
+            "id": str(away.get("id") or ""),
+            "name": away_name,
+            "logo": _team_logo_url(away, event_family),
+        },
         "status": status,
         "score": score,
         "start_time": start_time,
@@ -398,7 +426,8 @@ def sofa_event(row: Dict[str, Any], competition_id: str, sport_id: str) -> Optio
         "competition": source_competition_name,
         "competition_key": competition_id,
         "country_id": source_country or None,
-        "event_family": event_family_for_sport(sport_id),
+        "event_family": event_family,
+        "competition_logo": _competition_logo_url(row),
         "source_family": "sofascore-web",
         "source_event_id": str(row.get("id") or ""),
         "source_competition_id": source_competition_id or None,
@@ -470,6 +499,7 @@ def sofa_field_event(row: Dict[str, Any], competition_id: str, sport_id: str) ->
         "status": status,
         "start_time": start_time,
         "country_id": source_country or None,
+        "competition_logo": _competition_logo_url(row),
         "source_family": "sofascore-web",
         "source_competition_id": source_competition_id or None,
         "source_competition_name": tournament_name,
