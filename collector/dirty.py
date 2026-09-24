@@ -8,6 +8,41 @@ from collector.enrichment import OBSERVATION_ENRICH_KEYS, _section_filled
 from collector.util import dump_json, load_json
 
 
+def _logo_value(side: Any) -> Any:
+    if not isinstance(side, dict):
+        return None
+    return (
+        side.get("logo")
+        or side.get("image")
+        or side.get("crest")
+        or side.get("badge")
+        or side.get("team_logo")
+        or side.get("teamLogo")
+        or side.get("logo_url")
+        or side.get("logoUrl")
+        or side.get("image_url")
+        or side.get("imageUrl")
+        or side.get("emblem")
+        or side.get("icon")
+    )
+
+
+def _identity_asset_missing(existing, incoming: Dict[str, Any], extra: Dict[str, Any]) -> bool:
+    if incoming.get("competition_logo") and not extra.get("competition_logo"):
+        return True
+    stored_participants = load_json(getattr(existing, "participants_json", None), {}) or {}
+    for key in ("home", "away", "participant_a", "participant_b"):
+        inc = incoming.get(key) if isinstance(incoming.get(key), dict) else {}
+        stored = stored_participants.get(key) if isinstance(stored_participants.get(key), dict) else {}
+        if _logo_value(inc) and not _logo_value(stored):
+            return True
+        inc_country = inc.get("country_id") or inc.get("country") or inc.get("nationality")
+        stored_country = stored.get("country_id") or stored.get("country") or stored.get("nationality")
+        if inc_country and not stored_country:
+            return True
+    return False
+
+
 def observation_signature(incoming: Dict[str, Any]) -> str:
     home = incoming.get("home") if isinstance(incoming.get("home"), dict) else {}
     away = incoming.get("away") if isinstance(incoming.get("away"), dict) else {}
@@ -55,6 +90,8 @@ def event_unchanged(existing, incoming: Dict[str, Any]) -> bool:
     if incoming.get("coverage") and extra.get("coverage") != incoming.get("coverage"):
         return False
     if incoming.get("source_competition_name") and not extra.get("source_competition_name"):
+        return False
+    if _identity_asset_missing(existing, incoming, extra):
         return False
     if incoming.get("start_time") and existing.start_time is None:
         return False
