@@ -1388,7 +1388,18 @@ class NinkoCollectedSportsDataProvider:
         if source_country and not payload.get("country_id"):
             payload["country_id"] = source_country
         source_name = str(extra.get("source_competition_name") or extra.get("competition") or "").strip()
-        if corrected == "fifa-connected-competitions" and "world cup" in source_name.lower():
+        if (
+            row.sport_id == "dota-2"
+            and corrected == "professional"
+            and str(extra.get("source_family") or "") == "opendota"
+            and source_name
+            and source_name.lower() != "dota 2 professional"
+        ):
+            # Keep the stable frozen competition key so fixture identity never
+            # changes, but show the real OpenDota league/tournament name.
+            payload["competition"] = source_name
+            payload["competition_name"] = source_name
+        elif corrected == "fifa-connected-competitions" and "world cup" in source_name.lower():
             payload["competition"] = source_name
             payload["competition_name"] = source_name
         elif (
