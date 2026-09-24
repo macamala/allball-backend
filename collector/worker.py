@@ -435,6 +435,22 @@ def _maybe_log_breadth(db, *, force: bool = False) -> None:
         if propagation.get("rows_updated"):
             logger.info("IDENTITY_ASSET_PROPAGATION %s", propagation)
 
+        # Asset-only current FIFA/FotMob repair must not depend on owning the
+        # scheduler lease. New deployments can therefore repair visible crests
+        # even while the previous worker is finishing its lease.
+        global _fifa_identity_reconciled
+        if not _fifa_identity_reconciled and writes_enabled():
+            try:
+                from collector.fifa_identity_reconcile import reconcile_current_fifa_identity
+
+                identity_stats = reconcile_current_fifa_identity(db)
+                db.commit()
+                _fifa_identity_reconciled = True
+                logger.info("FIFA identity reconcile %s", identity_stats)
+            except Exception:
+                logger.exception("FIFA identity reconcile failed")
+                db.rollback()
+
         from collector.breadth_audit import (
             tomorrow_football_snapshot,
             tomorrow_public_football_snapshot,
@@ -645,18 +661,6 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
                 bootstrap_registry(db)
                 db.commit()
                 db.info["registry_bootstrapped"] = True
-            global _fifa_identity_reconciled
-            if not _fifa_identity_reconciled and writes_enabled():
-                try:
-                    from collector.fifa_identity_reconcile import reconcile_current_fifa_identity
-
-                    identity_stats = reconcile_current_fifa_identity(db)
-                    db.commit()
-                    _fifa_identity_reconciled = True
-                    logger.info("FIFA identity reconcile %s", identity_stats)
-                except Exception:
-                    logger.exception("FIFA identity reconcile failed")
-                    db.rollback()
             try:
                 from collector.source_identity_repair import repair_source_identity_leaks
 
