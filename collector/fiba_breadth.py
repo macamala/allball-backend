@@ -408,7 +408,9 @@ def run_breadth_ingest(
     else:
         stats["http_errors"] += 1
 
-    if stats["ingested"] < max_ingest:
+    # Prefer one global request. Only fan out across event pages when the
+    # global board exposes no usable in-window games.
+    if stats["eligible"] == 0 and stats["ingested"] < max_ingest:
         index_result = getter(EVENTS_URL)
         stats["requests"] += 1
         if getattr(index_result, "ok", False) and isinstance(getattr(index_result, "payload", None), str):
