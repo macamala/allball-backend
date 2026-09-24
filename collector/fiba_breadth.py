@@ -19,7 +19,7 @@ from collector.util import dump_json, load_json, parse_datetime, slugify
 
 logger = logging.getLogger(__name__)
 
-JOB_KEY = "fiba-global-breadth-v1"
+JOB_KEY = "fiba-global-breadth-v2"
 SOURCE_ID = "fiba-global"
 BASE = "https://www.fiba.basketball"
 GLOBAL_GAMES_URL = f"{BASE}/en/games"
@@ -225,6 +225,15 @@ def game_to_event(game: Dict[str, Any], event_meta: Optional[Dict[str, Any]] = N
         or ""
     ).strip()
 
+    home_code = str(_clean(team_a.get("code")) or _clean(team_a.get("shortName")) or "").strip()
+    away_code = str(_clean(team_b.get("code")) or _clean(team_b.get("shortName")) or "").strip()
+    event_slug = str((event_meta or {}).get("slug") or _clean(game.get("eventSlug")) or "").strip()
+    game_url = (
+        f"{BASE}/en/events/{event_slug}/games/{gid}-{home_code}-{away_code}"
+        if event_slug and home_code and away_code
+        else None
+    )
+
     extra = {
         "source_family": "fiba-web",
         "source_event_id": gid,
@@ -237,6 +246,9 @@ def game_to_event(game: Dict[str, Any], event_meta: Optional[Dict[str, Any]] = N
         "round": round_name,
         "group": _clean(game.get("groupPairingCode")),
         "game_statistic_status": _clean(game.get("gameStatisticStatusCode")),
+        "fiba_home_code": home_code or None,
+        "fiba_away_code": away_code or None,
+        "fiba_game_url": game_url,
     }
     return {
         "id": f"fiba:{gid}",
