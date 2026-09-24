@@ -122,7 +122,19 @@ def _unique_team(query_name: str, payload: Any) -> Optional[Dict[str, str]]:
 
     exact_fold = fold_for_identity(query_name)
     exact = [row for row in candidates if fold_for_identity(row["name"]) == exact_fold]
-    pool = exact or candidates
+    if exact:
+        pool = exact
+    else:
+        query_tokens = exact_fold.split()
+        safe_expanded = [
+            row
+            for row in candidates
+            if len(query_tokens) >= 2
+            and len(fold_for_identity(row["name"]).split()) >= 2
+        ]
+        pool = safe_expanded
+    if not pool:
+        return None
     ids = {row["id"] for row in pool}
     if len(ids) != 1:
         return None
@@ -199,6 +211,7 @@ def _apply_asset(db: Session, query_name: str, team: Dict[str, str]) -> Tuple[in
             merged["logo"] = logo
             merged.setdefault("logo_source", "fotmob-search")
             merged.setdefault("fotmob_team_id", team["id"])
+            merged.setdefault("fotmob_team_name", team["name"])
             participants[side_name] = merged
 
             mirror = participants.get(mirror_name)
@@ -207,6 +220,7 @@ def _apply_asset(db: Session, query_name: str, team: Dict[str, str]) -> Tuple[in
                 mirror_merged["logo"] = logo
                 mirror_merged.setdefault("logo_source", "fotmob-search")
                 mirror_merged.setdefault("fotmob_team_id", team["id"])
+                mirror_merged.setdefault("fotmob_team_name", team["name"])
                 participants[mirror_name] = mirror_merged
 
             changed = True
@@ -222,6 +236,62 @@ def _apply_asset(db: Session, query_name: str, team: Dict[str, str]) -> Tuple[in
             )
             rows_updated += 1
     return rows_updated, slots_filled
+
+
+def cleanup_unsafe_prior_search_assets(db: Session) -> Dict[str, int]:
+    """Remove only prior FotMob-search logos that violate today's stricter rule."""
+    rows = (
+        db.query(SportsEvent)
+        .filter(
+            SportsEvent.sport_id == "football",
+            SportsEvent.display_eligible.is_(True),
+        )
+        .all()
+    )
+    rows_updated = 0
+    logos_removed = 0
+    for row in rows:
+        participants = load_json(row.participants_json, {}) or {}
+        changed = False
+        for side_name in ("home", "away", "participant_a", "participant_b"):
+            side = participants.get(side_name)
+            if not isinstance(side, dict):
+                continue
+            if str(side.get("logo_source") or "") != "fotmob-search":
+                continue
+            local_name = str(side.get("display_name") or side.get("name") or "").strip()
+            remote_name = str(side.get("fotmob_team_name") or "").strip()
+            # Legacy rows from the first run did not persist remote_name.
+            # Known unsafe short-name matches from that run are explicitly removed.
+            unsafe_legacy = (
+                str(side.get("fotmob_team_id") or "") in {"6081", "687444"}
+                and len(fold_for_identity(local_name).split()) == 1
+            )
+            unsafe_named = bool(
+                remote_name
+                and len(fold_for_identity(local_name).split()) == 1
+                and fold_for_identity(local_name) != fold_for_identity(remote_name)
+            )
+            if not unsafe_legacy and not unsafe_named:
+                continue
+            merged = dict(side)
+            for key in ("logo", "logo_source", "fotmob_team_id", "fotmob_team_name"):
+                merged.pop(key, None)
+            participants[side_name] = merged
+            changed = True
+            logos_removed += 1
+        if changed:
+            row.participants_json = dump_json(participants)
+            note_list_invalidation(
+                db,
+                sport=row.sport_id,
+                competition=row.competition_id,
+                start_time=row.start_time,
+            )
+            rows_updated += 1
+    if rows_updated:
+        db.commit()
+    return {"rows_updated": rows_updated, "logos_removed": logos_removed}
 
 
 def run_if_due(db: Session, *, getter=None) -> Optional[Dict[str, Any]]:
