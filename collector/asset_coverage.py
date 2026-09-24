@@ -106,6 +106,7 @@ def asset_coverage_payload(db) -> Dict[str, Any]:
                 "competition_logo_present": False,
                 "observed_team_participants": 0,
                 "team_participants_with_logo": 0,
+                "team_participants_with_identity": 0,
                 "missing_participants": [],
                 "observed_individual_participants": 0,
                 "individual_participants_with_country": 0,
@@ -125,8 +126,14 @@ def asset_coverage_payload(db) -> Dict[str, Any]:
                 if not participant_key or not name or name.upper() == "TBD":
                     continue
                 bucket = participant_seen[key]
-                current = bucket.get(participant_key) or {"name": name, "logo": False, "sources": set()}
+                current = bucket.get(participant_key) or {
+                    "name": name,
+                    "logo": False,
+                    "country": False,
+                    "sources": set(),
+                }
                 current["logo"] = current["logo"] or _has_logo(side)
+                current["country"] = current["country"] or _has_country(side)
                 source_family = str(extra.get("source_family") or "unknown")
                 if source_family:
                     current.setdefault("sources", set()).add(source_family)
@@ -151,7 +158,19 @@ def asset_coverage_payload(db) -> Dict[str, Any]:
         participants = participant_seen.get(key, {})
         item["observed_team_participants"] = len(participants)
         item["team_participants_with_logo"] = sum(1 for row in participants.values() if row["logo"])
-        missing_team_rows = [row for row in participants.values() if not row["logo"]]
+        non_domestic = str(item.get("scope_type") or "").upper() in {
+            "WORLD", "INTERNATIONAL", "CONTINENTAL", "REGIONAL"
+        }
+        item["team_participants_with_identity"] = sum(
+            1
+            for row in participants.values()
+            if row["logo"] or (non_domestic and row.get("country"))
+        )
+        missing_team_rows = [
+            row
+            for row in participants.values()
+            if not row["logo"] and not (non_domestic and row.get("country"))
+        ]
         item["missing_participants"] = [row["name"] for row in missing_team_rows][:200]
         team_source_counts: Dict[str, int] = {}
         for row in missing_team_rows:
@@ -162,7 +181,7 @@ def asset_coverage_payload(db) -> Dict[str, Any]:
         )
         item["country_flag_present"] = bool(item["country_id"]) if item["country_flag_required"] else True
         item["participant_logos_complete"] = (
-            item["observed_team_participants"] == item["team_participants_with_logo"]
+            item["observed_team_participants"] == item["team_participants_with_identity"]
         )
         individuals = individual_seen.get(key, {})
         item["observed_individual_participants"] = len(individuals)
@@ -213,7 +232,7 @@ def asset_coverage_payload(db) -> Dict[str, Any]:
         bucket["team_participants_missing_logo"] += max(
             0,
             int(row.get("observed_team_participants") or 0)
-            - int(row.get("team_participants_with_logo") or 0),
+            - int(row.get("team_participants_with_identity") or row.get("team_participants_with_logo") or 0),
         )
         bucket["individual_participants_missing_country"] += max(
             0,
@@ -230,6 +249,7 @@ def asset_coverage_payload(db) -> Dict[str, Any]:
         ),
         "observed_team_participants": sum(row["observed_team_participants"] for row in output),
         "team_participants_with_logo": sum(row["team_participants_with_logo"] for row in output),
+        "team_participants_with_identity": sum(row["team_participants_with_identity"] for row in output),
         "competitions_with_participant_logo_gaps": sum(
             1 for row in output if not row["participant_logos_complete"]
         ),
