@@ -459,22 +459,24 @@ def _maybe_log_breadth(db, *, force: bool = False) -> None:
                 from collector.models import SportsEvent
                 from collector.util import load_json
 
-                start = datetime.fromisoformat(str(today.get("utc_from") or "").replace("Z", "+00:00")).replace(tzinfo=None)
-                end = datetime.fromisoformat(str(today.get("utc_to") or "").replace("Z", "+00:00")).replace(tzinfo=None)
+                public_gap_rows = ((today.get("asset_gaps") or {}).get("football") or [])
+                event_competitions = {
+                    str(item.get("id") or ""): str(item.get("competition_key") or item.get("competition") or "")
+                    for item in public_gap_rows
+                    if item.get("id")
+                }
+                event_ids = list(event_competitions)
                 source_rows = (
                     db.query(SportsEvent)
-                    .filter(
-                        SportsEvent.sport_id == "football",
-                        SportsEvent.competition_id.in_(list(football_gaps)),
-                        SportsEvent.start_time >= start,
-                        SportsEvent.start_time < end,
-                    )
+                    .filter(SportsEvent.event_id.in_(event_ids))
                     .all()
+                    if event_ids
+                    else []
                 )
                 by_comp = {}
                 for row in source_rows:
                     extra = load_json(row.extra_json, {}) or {}
-                    comp = str(row.competition_id or "")
+                    comp = event_competitions.get(str(row.event_id or "")) or str(row.competition_id or "")
                     item = by_comp.setdefault(comp, {"primary_sources": Counter(), "families": Counter(), "examples": []})
                     item["primary_sources"][str(row.primary_source_id or "unknown")] += 1
                     item["families"][str(extra.get("source_family") or "unknown")] += 1
@@ -482,6 +484,7 @@ def _maybe_log_breadth(db, *, force: bool = False) -> None:
                         parts = load_json(row.participants_json, {}) or {}
                         item["examples"].append({
                             "event_id": row.event_id,
+                            "db_competition": row.competition_id,
                             "home": (parts.get("home") or {}).get("name"),
                             "away": (parts.get("away") or {}).get("name"),
                         })
