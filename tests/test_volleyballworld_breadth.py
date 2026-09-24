@@ -4,6 +4,7 @@ from collector.volleyballworld_breadth import (
     _competition_id,
     _stable_event,
     discover_competition_slugs,
+    run_breadth_ingest,
 )
 
 
