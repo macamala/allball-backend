@@ -703,6 +703,34 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
                 db.rollback()
 
             try:
+                from collector.cfl_asset_backfill import run_if_due as run_cfl_asset_backfill_if_due
+
+                def _pulse_cfl_assets() -> None:
+                    heartbeat_scheduler_lock(db, owner=owner)
+                    db.commit()
+
+                cfl_assets = run_cfl_asset_backfill_if_due(
+                    db,
+                    heartbeat=_pulse_cfl_assets,
+                )
+                if cfl_assets:
+                    logger.info(
+                        "CFL artwork backfill %s",
+                        {
+                            "status": cfl_assets.get("status"),
+                            "requests": cfl_assets.get("requests"),
+                            "catalog": cfl_assets.get("catalog"),
+                            "rows_updated": cfl_assets.get("rows_updated"),
+                            "participants_filled": cfl_assets.get("participants_filled"),
+                        },
+                    )
+                    if cfl_assets.get("rows_updated"):
+                        _maybe_log_breadth(db, force=True)
+            except Exception:
+                logger.exception("CFL artwork backfill failed")
+                db.rollback()
+
+            try:
                 from collector.openfootball_breadth import run_if_due as run_openfootball_breadth_if_due
 
                 def _pulse_openfootball() -> None:
