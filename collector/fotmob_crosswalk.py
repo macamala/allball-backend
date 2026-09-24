@@ -31,7 +31,7 @@ from sports_registry.geography import label_for
 
 logger = logging.getLogger(__name__)
 
-DATE_BOARD_JOB = "fotmob-date-boards-v5"
+DATE_BOARD_JOB = "fotmob-date-boards-v6"
 _YOUTH = ("u17", "u18", "u19", "u20", "u21", "u23", "youth", "junior")
 _WOMEN = ("women", "womens", "woms")
 _RESERVE = ("reserve", " ii", "2nd", "b team")
@@ -185,6 +185,60 @@ def _ensure_dynamic_fotmob_mapping(
         db.flush()
     return mapping
 
+
+
+def repair_legacy_dynamic_source_bindings(db: Session) -> Dict[str, int]:
+    """Repair only v4/v5 dynamic mappings that were bound to a specific FotMob source."""
+    global_source = db.get(SportsSource, "fotmob-global")
+    if global_source is None or not global_source.enabled:
+        return {"mappings": 0, "events": 0}
+
+    legacy_rows = (
+        db.query(SportsSourceCompetition)
+        .filter(
+            SportsSourceCompetition.upstream_family == "fotmob",
+            SportsSourceCompetition.coverage_notes == "FotMob source-native daily-board breadth",
+            SportsSourceCompetition.source_id != "fotmob-global",
+        )
+        .all()
+    )
+    repaired_mappings = 0
+    repaired_events = 0
+    for legacy in legacy_rows:
+        competition = db.get(SportsCompetition, legacy.competition_id)
+        if competition is None:
+            continue
+        cfg = load_json(legacy.source_config_json, {}) or {}
+        league_id = str(cfg.get("fotmob_league_id") or legacy.source_competition_id or "").strip()
+        league_name = str(cfg.get("fotmob_league_name") or competition.official_name or competition.name or legacy.competition_id).strip()
+        ccode = str(competition.country_id or "").strip().upper()
+        mapping = _ensure_dynamic_fotmob_mapping(
+            db,
+            competition_id=legacy.competition_id,
+            league_id=league_id,
+            league_name=league_name,
+            ccode=ccode,
+        )
+        if mapping is None:
+            continue
+        if legacy.enabled:
+            legacy.enabled = False
+        changed = (
+            db.query(SportsEvent)
+            .filter(
+                SportsEvent.competition_id == legacy.competition_id,
+                SportsEvent.primary_source_id == legacy.source_id,
+            )
+            .update(
+                {SportsEvent.primary_source_id: "fotmob-global"},
+                synchronize_session=False,
+            )
+        )
+        repaired_events += int(changed or 0)
+        repaired_mappings += 1
+
+    db.flush()
+    return {"mappings": repaired_mappings, "events": repaired_events}
 
 def _persist_missing_fotmob(
     db: Session,
@@ -486,7 +540,10 @@ def run_date_board_backfill(
         payload = {}
     dates = list(payload.get("dates") or board_dates(past_days=past_days, future_days=future_days))
     next_index = int(payload.get("next_index") or 0)
+    repair = repair_legacy_dynamic_source_bindings(db)
     totals = {
+        "source_rebound_mappings": int(repair.get("mappings") or 0),
+        "source_rebound_events": int(repair.get("events") or 0),
         "upstream_total": int(payload.get("upstream_total") or 0),
         "upstream_eligible": int(payload.get("upstream_eligible") or 0),
         "attached": int(payload.get("attached") or 0),
@@ -525,13 +582,38 @@ def run_date_board_backfill(
         )
         db.commit()
     coverage = eligible_coverage(db, getter=fetch, dates=dates)
-    _checkpoint(job, state="done", dates=dates, next_index=len(dates), coverage=coverage, **totals)
+    try:
+        from collector.source_native_reconcile import revalidate_current_source_native
+
+        source_native_revalidation = revalidate_current_source_native(db)
+    except Exception:
+        logger.exception("FotMob source-native revalidation failed")
+        source_native_revalidation = {"scanned": 0, "promoted": 0, "blocked": 0}
+    _checkpoint(
+        job,
+        state="done",
+        dates=dates,
+        next_index=len(dates),
+        coverage=coverage,
+        source_native_revalidation=source_native_revalidation,
+        **totals,
+    )
     job.last_run_at = datetime.utcnow()
     job.last_status = "ok"
     job.items_written = int(totals.get("attached") or 0) + int(totals.get("ingested") or 0)
     db.commit()
-    logger.info("fotmob_date_boards_complete %s coverage=%s", totals, coverage)
-    return {**totals, "coverage": coverage, "dates": dates}
+    logger.info(
+        "fotmob_date_boards_complete %s coverage=%s revalidation=%s",
+        totals,
+        coverage,
+        source_native_revalidation,
+    )
+    return {
+        **totals,
+        "coverage": coverage,
+        "dates": dates,
+        "source_native_revalidation": source_native_revalidation,
+    }
 
 
 def run_date_boards_if_due(
