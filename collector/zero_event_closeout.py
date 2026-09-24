@@ -1121,16 +1121,46 @@ def collect_caf(getter: Getter) -> Dict[str, Any]:
     return {"events": events, "standings": [], "note": page if events else "CAF semifinal article did not expose both results"}
 
 
-def zero_event_collectors(getter: Getter) -> Dict[str, Dict[str, Any]]:
-    return {
-        "cdl-majors": collect_cdl(getter),
-        "pll": collect_pll(getter),
-        "atp-tour": collect_atp(getter),
-        "ehf-competitions": collect_ehf(getter),
-        "fivb-competitions": collect_vnl(getter),
-        "nascar-truck": collect_nascar(getter, competition_id="nascar-truck", page=NASCAR_TRUCK, series="NASCAR Craftsman Truck Series"),
-        "nascar-arca": collect_nascar(getter, competition_id="nascar-arca", page=NASCAR_ARCA, series="ARCA Menards Series"),
-        "nz-national-league": collect_nz(getter),
-        "africa-cup-of-nations": collect_caf(getter),
-    }
+def zero_event_collectors(
+    getter: Getter,
+    heartbeat: Optional[Callable[[], None]] = None,
+) -> Dict[str, Dict[str, Any]]:
+    """Run bounded proof collectors without letting the scheduler lease go stale."""
 
+    def pulse() -> None:
+        if heartbeat is not None:
+            heartbeat()
+
+    collectors = (
+        ("cdl-majors", lambda: collect_cdl(getter)),
+        ("pll", lambda: collect_pll(getter)),
+        ("atp-tour", lambda: collect_atp(getter)),
+        ("ehf-competitions", lambda: collect_ehf(getter)),
+        ("fivb-competitions", lambda: collect_vnl(getter)),
+        (
+            "nascar-truck",
+            lambda: collect_nascar(
+                getter,
+                competition_id="nascar-truck",
+                page=NASCAR_TRUCK,
+                series="NASCAR Craftsman Truck Series",
+            ),
+        ),
+        (
+            "nascar-arca",
+            lambda: collect_nascar(
+                getter,
+                competition_id="nascar-arca",
+                page=NASCAR_ARCA,
+                series="ARCA Menards Series",
+            ),
+        ),
+        ("nz-national-league", lambda: collect_nz(getter)),
+        ("africa-cup-of-nations", lambda: collect_caf(getter)),
+    )
+    out: Dict[str, Dict[str, Any]] = {}
+    for key, collector in collectors:
+        pulse()
+        out[key] = collector()
+        pulse()
+    return out
