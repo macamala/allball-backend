@@ -465,7 +465,11 @@ def _maybe_log_breadth(db, *, force: bool = False) -> None:
                     max(
                         0,
                         int(row.get("observed_team_participants") or 0)
-                        - int(row.get("team_participants_with_logo") or 0),
+                        - int(
+                            row.get("team_participants_with_identity")
+                            or row.get("team_participants_with_logo")
+                            or 0
+                        ),
                     )
                     + max(
                         0,
@@ -490,6 +494,7 @@ def _maybe_log_breadth(db, *, force: bool = False) -> None:
                 "country_flag": row.get("country_flag_present"),
                 "competition_logo": row.get("competition_logo_present"),
                 "team_logos": f"{row.get('team_participants_with_logo', 0)}/{row.get('observed_team_participants', 0)}",
+                "team_identity": f"{row.get('team_participants_with_identity', row.get('team_participants_with_logo', 0))}/{row.get('observed_team_participants', 0)}",
                 "participant_flags": f"{row.get('individual_participants_with_country', 0)}/{row.get('observed_individual_participants', 0)}",
                 "missing": (row.get("missing_participants") or [])[:8],
                 "missing_sources": row.get("missing_participant_sources") or {},
