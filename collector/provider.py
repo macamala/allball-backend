@@ -1217,11 +1217,35 @@ class NinkoCollectedSportsDataProvider:
         participants = load_json(row.participants_json, {}) or {}
         score = load_json(row.score_json, {}) or {}
         extra = extra_for_list(row) if not include_detail else (load_json(row.extra_json, {}) or {})
-        if not include_detail and (not extra.get("source_competition_name") or not extra.get("source_family")):
+        if not include_detail and (
+            not extra.get("source_competition_name")
+            or not extra.get("source_family")
+            or not extra.get("source_competition_id")
+            or not extra.get("competition_logo")
+        ):
             full_extra = load_json(row.extra_json, {}) or {}
-            for identity_key in ("source_competition_name", "source_family", "resolution_method", "resolution_confidence", "quality_flags", "display_eligible"):
-                if extra.get(identity_key) in (None, "", [], {} ) and full_extra.get(identity_key) not in (None, "", [], {}):
+            for identity_key in (
+                "source_competition_name",
+                "source_competition_id",
+                "source_competition_entity_kind",
+                "source_family",
+                "competition_logo",
+                "resolution_method",
+                "resolution_confidence",
+                "quality_flags",
+                "display_eligible",
+            ):
+                if extra.get(identity_key) in (None, "", [], {}) and full_extra.get(identity_key) not in (None, "", [], {}):
                     extra[identity_key] = full_extra.get(identity_key)
+        if (
+            not extra.get("competition_logo")
+            and str(extra.get("source_family") or "").lower() == "fotmob"
+            and str(extra.get("source_competition_id") or "").isdigit()
+        ):
+            extra["competition_logo"] = (
+                "https://images.fotmob.com/image_resources/logo/leaguelogo/"
+                f"{extra.get('source_competition_id')}.png"
+            )
         extra_for_payload = extra if include_detail else extra
         raw_sides = {
             "home": participants.get("home") or {},
