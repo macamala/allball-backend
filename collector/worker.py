@@ -468,7 +468,6 @@ def _maybe_log_breadth(db, *, force: bool = False) -> None:
                         SportsEvent.competition_id.in_(list(football_gaps)),
                         SportsEvent.start_time >= start,
                         SportsEvent.start_time < end,
-                        SportsEvent.canonical_event_id.is_(None),
                     )
                     .all()
                 )
