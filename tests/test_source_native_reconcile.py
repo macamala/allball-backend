@@ -1,7 +1,8 @@
 from types import SimpleNamespace
 
 from collector.enrichment import quality_flags_for_event
-from collector.source_native_reconcile import _safe_public_key
+from collector.source_native_reconcile import _merged_source_extra, _safe_public_key
+from collector.util import dump_json
 
 
 def test_team_match_does_not_flag_absent_optional_aliases():
@@ -29,3 +30,25 @@ def test_ghana_premier_league_does_not_collapse_to_england():
         row,
         {"source_family": "fifa-digital", "source_competition_name": "Premier League"},
     ) == "football-gha-premier-league"
+
+
+
+def test_source_identity_can_come_from_list_extra():
+    row = SimpleNamespace(
+        extra_json=dump_json({
+            "quality_flags": ["competition_attribution_mismatch"],
+            "display_eligible": False,
+        }),
+        list_extra_json=dump_json({
+            "source_family": "fotmob",
+            "source_competition_name": "NPFL",
+            "public_competition_key": "football-nga-npfl",
+            "display_eligible": False,
+        }),
+        competition_id="football-nga-npfl",
+        country_id="NGA",
+    )
+    extra = _merged_source_extra(row)
+    assert extra["source_family"] == "fotmob"
+    assert extra["source_competition_name"] == "NPFL"
+    assert _safe_public_key(row, extra) == "football-nga-npfl"
