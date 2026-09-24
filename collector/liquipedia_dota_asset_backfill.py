@@ -7,9 +7,12 @@ always wins; only blank participant logos are filled.
 
 from __future__ import annotations
 
+import html as html_lib
+import re
 import time
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
+from urllib.parse import urljoin
 
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
@@ -34,6 +37,9 @@ _HEADERS = {
     "Referer": "https://liquipedia.net/dota2/",
 }
 
+_IMG_RE = re.compile(r"<img\\b[^>]*>", re.I)
+_ATTR_RE = re.compile(r"""([a-zA-Z_:][-a-zA-Z0-9_:.]*)\\s*=\\s*(["'])(.*?)\\2""", re.S)
+
 
 def _key(value: Any) -> str:
     tokens = [
@@ -56,6 +62,44 @@ def _logo(side: Any) -> str:
         or side.get("teamLogo")
         or ""
     ).strip()
+
+
+def _diagnostic_image_candidates(raw_html: str, base_url: str) -> List[Dict[str, str]]:
+    """Return a bounded list of relevant image candidates from Railway-visible HTML.
+
+    Diagnostic only: this never writes an image into an event. It lets production
+    logs prove the exact tournament/team artwork exposed by Liquipedia before we
+    add any conservative write path.
+    """
+    found: List[Dict[str, str]] = []
+    seen = set()
+    needles = ("pgl", "wallachia", "betboom", "streamers", "battle", "ybn")
+    for tag in _IMG_RE.findall(raw_html or ""):
+        attrs = {
+            name.lower(): html_lib.unescape(value.strip())
+            for name, _quote, value in _ATTR_RE.findall(tag)
+        }
+        source = str(
+            attrs.get("src")
+            or attrs.get("data-src")
+            or attrs.get("data-lazy-src")
+            or ""
+        ).strip()
+        if not source:
+            continue
+        alt = str(attrs.get("alt") or attrs.get("title") or "").strip()
+        combined = f"{alt} {source}".casefold()
+        if not any(needle in combined for needle in needles):
+            continue
+        url = urljoin(base_url, source)
+        key = (alt, url)
+        if key in seen:
+            continue
+        seen.add(key)
+        found.append({"alt": alt[:120], "url": url[:500]})
+        if len(found) >= 20:
+            break
+    return found
 
 
 def _catalog_from_html(html: str) -> Dict[str, Dict[str, str]]:
@@ -108,8 +152,10 @@ def run_if_due(db: Session, *, getter=None, heartbeat=None) -> Optional[Dict[str
             stats["by_page"][url] = page_stats
             continue
         html = getattr(result, "payload", None)
-        page_catalog = _catalog_from_html(html if isinstance(html, str) else "")
+        raw_html = html if isinstance(html, str) else ""
+        page_catalog = _catalog_from_html(raw_html)
         page_stats["assets"] = len(page_catalog)
+        page_stats["image_candidates"] = _diagnostic_image_candidates(raw_html, url)
         stats["pages_ok"] += 1
         stats["by_page"][url] = page_stats
         for key, asset in page_catalog.items():
