@@ -14,8 +14,14 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from collector.models import SportsEvent, SportsEventDetail, SportsStandingSnapshot
-from collector.participant_text import names_equivalent
+from collector.participant_text import fold_for_identity
 from collector.util import load_json
+
+
+def __names_equivalent(left: str, right: str) -> bool:
+    a = fold_for_identity(left)
+    b = fold_for_identity(right)
+    return bool(a and b and a == b)
 
 
 def _side_name(side: Any) -> str:
@@ -66,7 +72,7 @@ def _matches_side(side: Any, *, entity_key: str, name: str) -> bool:
     if entity_key and side_id and side_id == entity_key:
         return True
     side_name = _side_name(side)
-    return bool(name and side_name and names_equivalent(name, side_name))
+    return bool(name and side_name and _names_equivalent(name, side_name))
 
 
 def _merge_identity(current: Dict[str, Any], side: Dict[str, Any]) -> Dict[str, Any]:
@@ -284,7 +290,7 @@ def _matches_player(player: Dict[str, Any], *, player_key: str, name: str) -> bo
     if player_key and pid and pid == player_key:
         return True
     pname = str(player.get("display_name") or player.get("name") or "").strip()
-    return bool(name and pname and names_equivalent(name, pname))
+    return bool(name and pname and _names_equivalent(name, pname))
 
 
 def _merge_player(current: Dict[str, Any], player: Dict[str, Any]) -> Dict[str, Any]:
