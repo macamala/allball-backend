@@ -1,10 +1,10 @@
 from datetime import datetime
-from types import SimpleNamespace
 
 from collector.wta_breadth import (
     _competition_identity,
     _event_in_window,
     _tournament_overlaps,
+    PUBLIC_BREADTH_STATUS,
 )
 
 
@@ -45,4 +45,4 @@ def test_wta_tournament_overlap_and_match_window():
 
 
 def test_wta_mapping_uses_public_breadth_status():
-    source = SimpleNamespace(source_id="wta-global")
+    assert PUBLIC_BREADTH_STATUS == "single-source-breadth"
