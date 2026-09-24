@@ -27,6 +27,7 @@ _VERIFIED_FOOTBALL_COMPETITIONS: Dict[str, str] = {
 _VERIFIED_FOOTBALL: Dict[str, str] = {
     # FotMob team IDs.
     "js omrane": "https://images.fotmob.com/image_resources/logo/teamlogo/1669235.png",
+    "omrane": "https://images.fotmob.com/image_resources/logo/teamlogo/1669235.png",
     "progres sakiet eddaier": "https://images.fotmob.com/image_resources/logo/teamlogo/2147000.png",
     "ps sakiet eddaier": "https://images.fotmob.com/image_resources/logo/teamlogo/2147000.png",
     "marsa": "https://images.fotmob.com/image_resources/logo/teamlogo/102105.png",
@@ -35,6 +36,8 @@ _VERIFIED_FOOTBALL: Dict[str, str] = {
     "usm khenchela": "https://images.fotmob.com/image_resources/logo/teamlogo/1387869.png",
     "mb rouisset": "https://images.fotmob.com/image_resources/logo/teamlogo/1792386.png",
     "mb rouissat": "https://images.fotmob.com/image_resources/logo/teamlogo/1792386.png",
+    "rouisset": "https://images.fotmob.com/image_resources/logo/teamlogo/1792386.png",
+    "rouissat": "https://images.fotmob.com/image_resources/logo/teamlogo/1792386.png",
     # Sofascore team ID.
     "salcedo": "https://img.sofascore.com/api/v1/team/511055/image",
     "salcedo fc": "https://img.sofascore.com/api/v1/team/511055/image",
