@@ -68,6 +68,17 @@ FOTMOB_LEAGUES: Dict[str, Dict[str, Any]] = {
     "uefa-nations-league": {"ids": [9806, 9807, 9808, 9809], "name": "UEFA Nations League", "ccode": "int"},
 }
 
+# Public/canonical competition keys that are intentionally NOT enabled as
+# FotMob ingestion sources. They may still reuse a verified FotMob league
+# roster for identity artwork backfill. Keeping this separate from
+# FOTMOB_LEAGUES prevents duplicate fixture ingestion under alias keys.
+FOTMOB_ASSET_LEAGUE_ALIASES: Dict[str, List[str]] = {
+    "football-tun-ligue-1": ["544"],
+    "football-alg-ligue-1": ["516"],
+    "football-mar-botola-pro": ["530"],
+}
+
+
 def _league_ids(spec: Dict[str, Any], source_config: Optional[Dict[str, Any]] = None) -> List[str]:
     source_config = source_config or {}
     raw = spec.get("ids")
@@ -80,6 +91,27 @@ def _league_ids(spec: Dict[str, Any], source_config: Optional[Dict[str, Any]] = 
     if value in (None, ""):
         value = source_config.get("fotmob_league_id")
     return [str(value)] if value not in (None, "") else []
+
+
+def asset_league_ids(
+    competition_id: str,
+    source_config: Optional[Dict[str, Any]] = None,
+) -> List[str]:
+    """Verified FotMob league ids usable for artwork/identity repair only."""
+    key = str(competition_id or "").strip()
+    values = [
+        *_league_ids(FOTMOB_LEAGUES.get(key) or {}, source_config),
+        *(FOTMOB_ASSET_LEAGUE_ALIASES.get(key) or []),
+    ]
+    out: List[str] = []
+    seen = set()
+    for value in values:
+        item = str(value or "").strip()
+        if not item or item in seen:
+            continue
+        seen.add(item)
+        out.append(item)
+    return out
 
 
 MATCHES_URL = "https://www.fotmob.com/api/data/matches?date={date}"
