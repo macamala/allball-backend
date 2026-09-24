@@ -1,3 +1,4 @@
+import inspect
 from collector.competition_identity import source_native_public_competition_id
 from collector.volleyballworld_breadth import (
     _competition_id,
@@ -60,3 +61,10 @@ def test_volleyballworld_source_native_prefix_is_validated():
     )
     assert accepted == "volleyball-vw-avc-men-nations-cup"
     assert rejected is None
+
+
+
+def test_breadth_does_not_require_year_token_on_landing_page():
+    source = inspect.getsource(run_breadth_ingest)
+    assert 'if "2026" not in landing.payload' not in source
+    assert "eligible_rows = [event for event in rows if _in_window(event, now=now)]" in source
