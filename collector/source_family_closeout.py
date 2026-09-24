@@ -985,6 +985,37 @@ def _wst_player_name(player: Dict[str, Any]) -> str:
     return " ".join(part for part in (first, last) if part)
 
 
+def _wst_player_identity(player: Dict[str, Any], name: str) -> Dict[str, Any]:
+    out: Dict[str, Any] = {"name": name}
+    player_id = str(
+        player.get("id")
+        or player.get("playerID")
+        or player.get("playerId")
+        or player.get("uuid")
+        or ""
+    ).strip()
+    country = player.get("countryCode") or player.get("nationality") or player.get("nation") or player.get("NAT") or player.get("country")
+    if isinstance(country, dict):
+        country = (
+            country.get("code")
+            or country.get("alpha2")
+            or country.get("alpha3")
+            or country.get("shortName")
+            or country.get("name")
+        )
+    country = str(country or "").strip()
+    if player_id:
+        out["id"] = player_id
+    if country:
+        out["country_id"] = country
+    image = player.get("image") or player.get("photo") or player.get("headshot") or player.get("avatar")
+    if isinstance(image, dict):
+        image = image.get("url") or image.get("href") or image.get("src")
+    if isinstance(image, str) and image.strip():
+        out["logo"] = image.strip()
+    return out
+
+
 def wst_frames(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
     data = payload.get("data") if isinstance(payload, dict) else None
     attrs = (data or payload or {}).get("attributes") if isinstance(data or payload, dict) else {}
@@ -1016,8 +1047,10 @@ def wst_events_from_tournament(payload: Dict[str, Any], *, frame_payloads: Optio
         if not isinstance(match, dict):
             continue
         match_id = wst_match_centre_id(match, tournament_id)
-        home = _wst_player_name(match.get("homePlayer") or {})
-        away = _wst_player_name(match.get("awayPlayer") or {})
+        home_player = match.get("homePlayer") or {}
+        away_player = match.get("awayPlayer") or {}
+        home = _wst_player_name(home_player)
+        away = _wst_player_name(away_player)
         if not match_id or not home or not away:
             continue
         start_raw = str(match.get("startDateTime") or "").replace(" ", "T")
@@ -1038,6 +1071,10 @@ def wst_events_from_tournament(payload: Dict[str, Any], *, frame_payloads: Optio
             "match_number": match.get("fixtureNumber"),
             "venue": attrs.get("venue") or "",
             "source_competition_id": "wst-events",
+            "home": _wst_player_identity(home_player, home),
+            "away": _wst_player_identity(away_player, away),
+            "participant_a": {**_wst_player_identity(home_player, home), "side": "a"},
+            "participant_b": {**_wst_player_identity(away_player, away), "side": "b"},
         }
         if frames:
             extra["classification"] = frames
