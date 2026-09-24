@@ -147,7 +147,7 @@ def test_ehf_history_mirror_rewrites_legacy_family_paths():
     ) == "https://history.eurohandball.com/ec/ct/men/2026-27/round/1/Round+1"
     assert history_mirror_url(
         "https://old.eurohandball.com/ec/00-03/el/men/2026-27/round/1/Group+Phase"
-    ) == "https://history.eurohandball.com/ec/el/el/men/2026-27/round/1/Group+Phase"
+    ) == "https://history.eurohandball.com/ec/el/men/2026-27/round/1/Group+Phase"
 
 
 def test_ehf_history_competition_meta_recognises_current_families():
