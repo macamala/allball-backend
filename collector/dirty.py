@@ -38,7 +38,11 @@ def _identity_asset_missing(existing, incoming: Dict[str, Any], extra: Dict[str,
             return True
         inc_country = inc.get("country_id") or inc.get("country") or inc.get("nationality")
         stored_country = stored.get("country_id") or stored.get("country") or stored.get("nationality")
+        inc_countries = [str(value) for value in (inc.get("country_ids") or []) if value]
+        stored_countries = [str(value) for value in (stored.get("country_ids") or []) if value]
         if inc_country and not stored_country:
+            return True
+        if inc_countries and not stored_countries:
             return True
     return False
 
