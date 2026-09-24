@@ -801,6 +801,37 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
                 db.rollback()
 
             try:
+                from collector.asobal_breadth import run_if_due as run_asobal_breadth_if_due
+
+                def _pulse_asobal() -> None:
+                    heartbeat_scheduler_lock(db, owner=owner)
+                    db.commit()
+
+                asobal_breadth = run_asobal_breadth_if_due(
+                    db,
+                    owner=owner,
+                    heartbeat=_pulse_asobal,
+                )
+                if asobal_breadth:
+                    logger.info(
+                        "ASOBAL season breadth %s",
+                        {
+                            "status": asobal_breadth.get("status"),
+                            "requests": asobal_breadth.get("requests"),
+                            "root_http_status": asobal_breadth.get("root_http_status"),
+                            "current_round": asobal_breadth.get("current_round"),
+                            "events": asobal_breadth.get("events"),
+                            "ingested": asobal_breadth.get("ingested"),
+                            "http_errors": asobal_breadth.get("http_errors"),
+                            "rounds": asobal_breadth.get("rounds"),
+                        },
+                    )
+                    _maybe_log_breadth(db, force=True)
+            except Exception:
+                logger.exception("ASOBAL season breadth failed")
+                db.rollback()
+
+            try:
                 from collector.ehf_breadth import run_if_due as run_ehf_breadth_if_due
 
                 def _pulse_ehf() -> None:
