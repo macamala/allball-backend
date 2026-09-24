@@ -754,15 +754,11 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
             _standby_logged = False
             standby_attempts = 0
 
-            try:
-                from collector.football_visibility_repair import repair_recent_football_visibility
-
-                visibility_repair = repair_recent_football_visibility(db)
-                if visibility_repair.get("scanned"):
-                    logger.info("FOOTBALL_VISIBILITY_REPAIR %s", visibility_repair)
-            except Exception:
-                logger.exception("Football visibility repair failed")
-                db.rollback()
+            # Legacy football_visibility_repair was intentionally retired here.
+            # It recomputed name-quality only and could re-enable real duplicate
+            # rows that canonical integrity had correctly quarantined. The
+            # source-native orphan keeper guard now handles the narrow recovery
+            # case without making every clean-looking hidden row public.
             advisory = postgres_try_advisory(db)
             if advisory is False:
                 logger.info("Results worker is standby; postgres advisory lock is held by another owner")
