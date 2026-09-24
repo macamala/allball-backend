@@ -43,7 +43,7 @@ AGE_BAND_SECONDS = 600
 MAX_AGE_BANDS = 2
 MAX_FAMILY_NONLIVE = 1
 FINISHED_LOOKBACK_HOURS = 48
-TICK_LIVE_BUDGET_S = 35
+TICK_LIVE_BUDGET_S = 20
 _family_rr = 0
 _live_registry: Dict[str, Dict[str, Any]] = {}
 
@@ -709,10 +709,15 @@ def run_incremental_tick(db: Session, *, sleeper=None, now: Optional[datetime] =
     changed = 0
     fail_classes = FAIL_STATUSES
     live_groups_this_tick = sum(1 for group in groups if group and job_lane(group[0]) == 0)
+    groups_processed = 0
     for group in groups:
         elapsed = time.perf_counter() - started
         lane = job_lane(group[0]) if group else 3
-        if lane > 0 and elapsed >= TICK_LIVE_BUDGET_S:
+        # A slow live-capable family must never hold every other sport behind it.
+        # Always allow at least one group, then yield once this tick consumed its
+        # short wall-clock budget. Unprocessed jobs stay due and rotate into the
+        # next tick because only executed groups advance their scheduler slots.
+        if groups_processed > 0 and elapsed >= TICK_LIVE_BUDGET_S:
             break
         coalesced += max(0, len(group) - 1)
         before_req = int(STATS.get("requests") or 0)
@@ -814,6 +819,7 @@ def run_incremental_tick(db: Session, *, sleeper=None, now: Optional[datetime] =
             row = _slot(db, group[0]["job_key"])
             row.http_calls = used
         changed += group_written
+        groups_processed += 1
     incr("coalesced", coalesced)
     incr("events_changed", changed)
     from collector.http import note_physical_requests, rolling_http_hour
@@ -882,6 +888,7 @@ def run_incremental_tick(db: Session, *, sleeper=None, now: Optional[datetime] =
         "metrics": metrics,
         "logical_jobs": schedule["selected_jobs"],
         "groups": len(groups),
+        "groups_processed": groups_processed,
         "coalesced": coalesced,
     }
     if held_write:
