@@ -40,6 +40,7 @@ _standby_logged = False
 _creators_collected = False
 _breadth_logged_at = 0.0
 _fifa_identity_reconciled = False
+_registry_bootstrapped = False
 
 
 def _collect_official_creators(db, heartbeat=None) -> None:
@@ -811,15 +812,11 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
                         return
                 time.sleep(STANDBY_SLEEP_SECONDS)
                 continue
-            if not db.info.get("registry_bootstrapped"):
-                bootstrap_registry(db)
-                db.commit()
-                db.info["registry_bootstrapped"] = True
-
             # LIVE FIRST: never make active or kickoff-window events wait behind
-            # artwork, breadth, discovery or backfill work.
+            # registry bootstrap, artwork, breadth, discovery or backfill work.
             priority_live_active = False
             if scheduler_enabled():
+                logger.info("Priority incremental tick start")
                 priority_summary = run_incremental_tick(db, live_only=True)
                 db.commit()
                 priority_urgencies = set(priority_summary.get("urgencies_selected") or [])
@@ -855,6 +852,15 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
                         advisory = None
                 time.sleep(live_idle_seconds(interval))
                 continue
+
+            # Registry bootstrap is idempotent but can still be expensive. Keep it
+            # process-global and never put it in front of the live fast path.
+            global _registry_bootstrapped
+            if not _registry_bootstrapped:
+                bootstrap_registry(db)
+                db.commit()
+                _registry_bootstrapped = True
+                logger.info("Registry bootstrap complete")
 
             # Maintenance/audits run only after the priority live tick.
             _maybe_log_breadth(db, force=_breadth_logged_at == 0.0)
