@@ -1,6 +1,7 @@
 """Bounded FotMob league-roster identity backfill.
 
-Uses only the verified FOTMOB_LEAGUES catalogue. One league response supplies
+Uses the verified FOTMOB_LEAGUES catalogue plus source-native numeric FotMob
+competition IDs already persisted on public rows. One league response supplies
 canonical team ids/crests for all existing rows in that competition. Matching is
 strict: exact folded identity or one unique deterministic alias equivalence.
 Existing ids/logos are never overwritten.
@@ -16,7 +17,7 @@ from sqlalchemy.orm import Session
 
 from collector.adapters_fotmob import FOTMOB_LEAGUES, LEAGUE_URL, _league_ids, parse_fotmob_table
 from collector.http import fetch_url
-from collector.list_extra import store_list_extra
+from collector.list_extra import extra_for_list, store_list_extra
 from collector.models import SportsEvent
 from collector.participant_alias import names_equivalent
 from collector.participant_text import fold_for_identity
@@ -107,6 +108,7 @@ def _fill_side(side: Any, roster: List[Dict[str, str]]) -> Tuple[Any, bool]:
 
 def _candidate_competitions(db: Session, now: float) -> List[Tuple[str, List[str]]]:
     counts: Dict[str, int] = defaultdict(int)
+    source_ids: Dict[str, set] = defaultdict(set)
     rows = (
         db.query(SportsEvent)
         .filter(
@@ -116,23 +118,40 @@ def _candidate_competitions(db: Session, now: float) -> List[Tuple[str, List[str
         .all()
     )
     for row in rows:
-        if row.competition_id not in FOTMOB_LEAGUES:
-            continue
         participants = load_json(row.participants_json, {}) or {}
         missing = sum(
             1
             for key in ("home", "away")
             if isinstance(participants.get(key), dict) and _missing_logo(participants.get(key))
         )
-        if missing:
-            counts[row.competition_id] += missing
+        if not missing:
+            continue
+
+        competition_id = str(row.competition_id or "")
+        known_ids = _league_ids(FOTMOB_LEAGUES.get(competition_id) or {})
+        for value in known_ids:
+            if str(value).isdigit():
+                source_ids[competition_id].add(str(value))
+
+        extra = load_json(row.extra_json, {}) or {}
+        slim = extra_for_list(row) or {}
+        for key, value in slim.items():
+            if value not in (None, "", [], {}):
+                extra[key] = value
+        family = str(extra.get("source_family") or "").strip().lower()
+        source_competition_id = str(extra.get("source_competition_id") or "").strip()
+        if family == "fotmob" and source_competition_id.isdigit():
+            source_ids[competition_id].add(source_competition_id)
+
+        if source_ids.get(competition_id):
+            counts[competition_id] += missing
 
     candidates: List[Tuple[str, List[str]]] = []
     for competition_id, missing in counts.items():
         last = float(_last_league_fetch.get(competition_id) or 0.0)
         if now - last < LEAGUE_TTL_S:
             continue
-        ids = _league_ids(FOTMOB_LEAGUES.get(competition_id) or {})
+        ids = sorted(source_ids.get(competition_id) or [], key=lambda value: int(value))
         if ids:
             candidates.append((competition_id, ids))
     candidates.sort(key=lambda item: (-counts[item[0]], item[0]))
