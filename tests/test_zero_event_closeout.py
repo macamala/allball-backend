@@ -463,3 +463,31 @@ def test_fifa_detail_keeps_registry_key_and_world_cup_name():
         is None
     )
 
+
+
+
+def test_zero_event_collectors_heartbeats_between_families(monkeypatch):
+    import collector.zero_event_closeout as closeout
+
+    calls = []
+
+    def heartbeat():
+        calls.append("pulse")
+
+    empty = lambda *_args, **_kwargs: {"events": [], "standings": [], "note": "empty"}
+    for name in (
+        "collect_cdl",
+        "collect_pll",
+        "collect_atp",
+        "collect_ehf",
+        "collect_vnl",
+        "collect_nascar",
+        "collect_nz",
+        "collect_caf",
+    ):
+        monkeypatch.setattr(closeout, name, empty)
+
+    rows = zero_event_collectors(lambda _url: "", heartbeat=heartbeat)
+
+    assert len(rows) == 9
+    assert len(calls) == 18
