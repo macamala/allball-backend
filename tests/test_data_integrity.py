@@ -840,3 +840,67 @@ def test_backfill_duplicate_cluster_always_keeps_one_public_candidate():
         db.query(SportsEvent).filter(SportsEvent.event_id.in_(ids)).delete(synchronize_session=False)
         db.commit()
         db.close()
+
+
+
+def test_orphan_guard_ignores_nonpublic_internal_sibling():
+    from datetime import datetime
+
+    from collector.integrity import restore_orphaned_duplicate_football
+    from collector.models import SportsEvent
+    from collector.util import dump_json
+    from database import SessionLocal
+
+    db = SessionLocal()
+    candidate_id = "ninko-evt-public-keeper-candidate"
+    internal_id = "ninko-evt-nonpublic-internal-sibling"
+    ids = [candidate_id, internal_id]
+    try:
+        db.query(SportsEvent).filter(SportsEvent.event_id.in_(ids)).delete(synchronize_session=False)
+        participants = dump_json({
+            "home": {"name": "Public Keeper Home"},
+            "away": {"name": "Public Keeper Away"},
+        })
+        db.add(SportsEvent(
+            event_id=candidate_id,
+            sport_id="football",
+            competition_id="morocco-botola",
+            event_family="team_match",
+            fingerprint="fp-public-keeper-candidate",
+            start_time=datetime(2026, 9, 25, 4, 0, 0),
+            display_eligible=False,
+            participants_json=participants,
+            extra_json=dump_json({
+                "display_eligible": False,
+                "source_family": "fotmob",
+                "source_event_id": "keeper-candidate-1",
+                "source_competition_id": "530",
+                "resolution_method": "mapping_request_trusted",
+                "quality_flags": ["duplicate_or_contaminated"],
+            }),
+        ))
+        db.add(SportsEvent(
+            event_id=internal_id,
+            sport_id="football",
+            competition_id="internal-shadow-competition",
+            event_family="team_match",
+            fingerprint="fp-nonpublic-internal-sibling",
+            start_time=datetime(2026, 9, 25, 4, 0, 0),
+            display_eligible=True,
+            participants_json=participants,
+            extra_json=dump_json({
+                "display_eligible": True,
+                "source_family": "unknown",
+            }),
+        ))
+        db.commit()
+
+        result = restore_orphaned_duplicate_football(db)
+        candidate = db.query(SportsEvent).filter_by(event_id=candidate_id).one()
+
+        assert result["restored"] >= 1
+        assert candidate.display_eligible is True
+    finally:
+        db.query(SportsEvent).filter(SportsEvent.event_id.in_(ids)).delete(synchronize_session=False)
+        db.commit()
+        db.close()
