@@ -224,6 +224,47 @@ def _derive_fotmob_assets(row: SportsEvent, extra: Dict[str, Any], participants:
     return row_changed, extra_changed, participant_filled
 
 
+_ESPN_LOGO_FOLDERS = {
+    "ncaa-football": "ncaa",
+    "nfl": "nfl",
+    "nba": "nba",
+    "wnba": "wnba",
+    "mlb": "mlb",
+    "nhl": "nhl",
+}
+
+
+def _derive_espn_assets(
+    row: SportsEvent,
+    extra: Dict[str, Any],
+    participants: Dict[str, Any],
+) -> Tuple[bool, bool, int]:
+    """Derive ESPN CDN crests only from ESPN-owned numeric team IDs."""
+    family = str(extra.get("source_family") or "").strip().lower()
+    primary = str(getattr(row, "primary_source_id", "") or "").strip().lower()
+    if family != "espn-html" and "espn" not in primary:
+        return False, False, 0
+    folder = _ESPN_LOGO_FOLDERS.get(str(row.competition_id or ""))
+    if not folder:
+        return False, False, 0
+
+    changed = False
+    participant_filled = 0
+    for side_name in ("home", "away", "participant_a", "participant_b"):
+        side = participants.get(side_name)
+        if not isinstance(side, dict) or _asset(side).get("logo"):
+            continue
+        team_id = str(side.get("id") or "").strip()
+        if not team_id.isdigit():
+            continue
+        merged = dict(side)
+        merged["logo"] = f"https://a.espncdn.com/i/teamlogos/{folder}/500/{team_id}.png"
+        participants[side_name] = merged
+        changed = True
+        participant_filled += 1
+    return changed, False, participant_filled
+
+
 def _derive_competition_native_assets(
     row: SportsEvent,
     extra: Dict[str, Any],
@@ -394,6 +435,7 @@ def propagate_identity_assets(db) -> Dict[str, int]:
         "sofascore_participant_logos_filled": 0,
         "competition_native_logos_filled": 0,
         "competition_native_participant_logos_filled": 0,
+        "espn_participant_logos_filled": 0,
         "standing_participant_logos_filled": 0,
         "standing_participant_countries_filled": 0,
         "national_team_countries_filled": 0,
@@ -464,6 +506,14 @@ def propagate_identity_assets(db) -> Dict[str, int]:
             stats["competition_native_logos_filled"] += 1
         if native_participants:
             stats["competition_native_participant_logos_filled"] += native_participants
+
+        espn_changed, _espn_extra_changed, espn_participants = _derive_espn_assets(
+            row, extra, participants
+        )
+        if espn_changed:
+            row_changed = True
+        if espn_participants:
+            stats["espn_participant_logos_filled"] += espn_participants
 
         if not extra.get("competition_logo"):
             logo = competition_assets.get((sport, competition))
