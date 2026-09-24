@@ -1,4 +1,4 @@
-from collector.detail_enrich import DETAIL_FAMILIES, parse_sofa_core
+from collector.detail_enrich import DETAIL_FAMILIES, parse_sofa_core, parse_sofa_lineups
 
 
 def test_sofa_core_exposes_match_metadata_and_periods():
@@ -28,3 +28,35 @@ def test_sofa_core_exposes_match_metadata_and_periods():
 
 def test_branding_required_sportscore_is_not_a_rich_detail_fallback():
     assert "sportscore" not in DETAIL_FAMILIES
+
+
+
+def test_sofa_lineups_preserve_player_identity_assets():
+    out = parse_sofa_lineups(
+        {
+            "confirmed": True,
+            "home": {
+                "formation": "4-2-3-1",
+                "players": [
+                    {
+                        "player": {
+                            "id": 123,
+                            "name": "Player One",
+                            "country": {"alpha3": "SRB"},
+                        },
+                        "jerseyNumber": "9",
+                        "position": "F",
+                        "rating": 8.1,
+                        "captain": True,
+                    }
+                ],
+            },
+            "away": {"players": [{"player": {"id": 456, "name": "Player Two"}, "substitute": True}]},
+        }
+    )
+    player = out["home"]["start"][0]
+    assert out["confirmed"] is True
+    assert player["id"] == 123
+    assert player["country_id"] == "SRB"
+    assert player["captain"] is True
+    assert player["image"].endswith("/player/123/image")
