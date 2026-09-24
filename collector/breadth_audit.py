@@ -91,12 +91,41 @@ def tomorrow_public_football_snapshot() -> Dict[str, Any]:
         allow_unfiltered=True,
     )
     competitions = Counter(str(row.get("competition_name") or row.get("competition") or row.get("competition_key") or "") for row in events)
+
+    def has_logo(side: Any) -> bool:
+        if not isinstance(side, dict):
+            return False
+        return bool(
+            side.get("logo")
+            or side.get("image")
+            or side.get("crest")
+            or side.get("badge")
+            or side.get("team_logo")
+            or side.get("teamLogo")
+        )
+
+    both_team_assets = sum(
+        1 for row in events if has_logo(row.get("home")) and has_logo(row.get("away"))
+    )
+    competition_assets = sum(1 for row in events if row.get("competition_logo"))
+    country_assets = sum(
+        1
+        for row in events
+        if row.get("country_id")
+        or str(row.get("scope_type") or "").upper() in {"WORLD", "INTERNATIONAL", "CONTINENTAL", "REGIONAL"}
+    )
     sample = [
         {
             "competition": row.get("competition_name") or row.get("competition"),
             "competition_key": row.get("competition_key"),
+            "competition_logo": bool(row.get("competition_logo")),
+            "country_id": row.get("country_id"),
             "home": (row.get("home") or {}).get("name"),
+            "home_id": (row.get("home") or {}).get("id"),
+            "home_logo": bool((row.get("home") or {}).get("logo")),
             "away": (row.get("away") or {}).get("name"),
+            "away_id": (row.get("away") or {}).get("id"),
+            "away_logo": bool((row.get("away") or {}).get("logo")),
             "utc": row.get("start_time"),
         }
         for row in events[:160]
@@ -104,6 +133,9 @@ def tomorrow_public_football_snapshot() -> Dict[str, Any]:
     return {
         "local_date": day.isoformat(),
         "total": len(events),
+        "events_with_both_team_assets": both_team_assets,
+        "events_with_competition_logo": competition_assets,
+        "events_with_country_or_international_identity": country_assets,
         "competitions": dict(competitions.most_common()),
         "events": sample,
     }
