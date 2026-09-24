@@ -15,7 +15,8 @@ API = "https://api.opendota.com/api/proMatches"
 
 
 def _event(row: Dict[str, Any], competition_id: str = "professional") -> Dict[str, Any]:
-    league = row.get("league_name") or "Dota 2 professional"
+    league = str(row.get("league_name") or "Dota 2 Professional").strip()
+    league_id = str(row.get("leagueid") or row.get("league_id") or "").strip()
     start = row.get("start_time")
     iso = None
     if start:
@@ -33,7 +34,8 @@ def _event(row: Dict[str, Any], competition_id: str = "professional") -> Dict[st
         "sport": "dota-2",
         "competition": "Dota 2 Professional",
         "competition_key": competition_id or "professional",
-        "source_competition_name": "Dota 2 Professional",
+        "source_competition_name": league,
+        "source_competition_id": league_id or None,
         "event_family": "esports_match",
         "series_id": str(row.get("series_id") or "") or None,
         "best_of": {0: 1, 1: 3, 2: 5}.get(row.get("series_type")),
@@ -53,7 +55,9 @@ def _event(row: Dict[str, Any], competition_id: str = "professional") -> Dict[st
             "source_event_id": str(row.get("match_id") or ""),
             "source_event_ids": {"opendota": str(row.get("match_id") or "")},
             "league_name": league,
-            "source_competition_name": "Dota 2 Professional",
+            "league_id": league_id or None,
+            "source_competition_name": league,
+            "source_competition_id": league_id or None,
             "sport_detail": {
                 "duration": row.get("duration"),
                 "radiant_win": row.get("radiant_win"),
