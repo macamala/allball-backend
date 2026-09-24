@@ -1,8 +1,8 @@
 """Liquipedia identity-only artwork repair for visible Dota 2 events.
 
-This reads only two current tournament pages and extracts participant artwork.
-It never creates fixtures or changes score/status/start time. Existing artwork
-always wins; only blank participant logos are filled.
+This reads only two current tournament pages and extracts participant and
+competition artwork. It never creates fixtures or changes score/status/start
+time. Existing artwork always wins; only blank identity assets are filled.
 """
 
 from __future__ import annotations
@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 from collector.cache import note_list_invalidation
 from collector.html_parse import parse_liquipedia_html
 from collector.http import fetch_text
+from collector.list_extra import store_list_extra
 from collector.models import SportsEvent
 from collector.participant_text import fold_for_identity
 from collector.util import dump_json, load_json
@@ -31,6 +32,15 @@ PAGES = (
     "https://liquipedia.net/dota2/BetBoom_Streamers_Battle/15",
     "https://liquipedia.net/dota2/PGL/Wallachia/9",
 )
+
+# Exact artwork files exposed by the current tournament infoboxes in Railway.
+# The BetBoom season-15 page currently reuses the season-13 series artwork.
+# We only trust these files when BOTH canonical participants belong to that
+# exact current tournament page.
+_PAGE_ARTWORK = {
+    PAGES[0]: "BetBoom_Streamers_Battle_13_allmode.png",
+    PAGES[1]: "PGL_Wallachia_allmode.png",
+}
 
 _HEADERS = {
     "Accept-Language": "en-GB,en;q=0.9",
@@ -110,6 +120,50 @@ def _diagnostic_image_candidates(raw_html: str, base_url: str) -> List[Dict[str,
     return found
 
 
+def _team_keys_from_html(raw_html: str) -> set[str]:
+    keys: set[str] = set()
+    for event in parse_liquipedia_html(raw_html or ""):
+        for side_name in ("home", "away"):
+            side = event.get(side_name) if isinstance(event.get(side_name), dict) else {}
+            key = _key(side.get("name"))
+            if key:
+                keys.add(key)
+    return keys
+
+
+def _primary_competition_logo(raw_html: str, page_url: str) -> str:
+    """Return only the exact current infobox artwork expected on this page."""
+    fragment = _PAGE_ARTWORK.get(page_url)
+    if not fragment:
+        return ""
+
+    best_url = ""
+    best_score = -1
+    for tag in _IMG_RE.findall(raw_html or ""):
+        attrs = {
+            name.lower(): html_lib.unescape(value.strip())
+            for name, _quote, value in _ATTR_RE.findall(tag)
+        }
+        source = str(
+            attrs.get("src")
+            or attrs.get("data-src")
+            or attrs.get("data-lazy-src")
+            or ""
+        ).strip()
+        if not source or fragment.casefold() not in source.casefold():
+            continue
+        absolute = urljoin(page_url, source)
+        # Prefer the original file; otherwise take the largest rendered thumb.
+        score = 10_000 if "/thumb/" not in absolute else 0
+        width = re.search(r"/(\d+)px-[^/]+$", absolute)
+        if width:
+            score = max(score, int(width.group(1)))
+        if score > best_score:
+            best_url = absolute
+            best_score = score
+    return best_url
+
+
 def _catalog_from_html(html: str) -> Dict[str, Dict[str, str]]:
     catalog: Dict[str, Dict[str, str]] = {}
     for event in parse_liquipedia_html(html or ""):
@@ -145,11 +199,14 @@ def run_if_due(db: Session, *, getter=None, heartbeat=None) -> Optional[Dict[str
         "pages_ok": 0,
         "catalog": 0,
         "candidate_rows": 0,
+        "matched_rows": 0,
         "rows_updated": 0,
         "participant_logos_filled": 0,
+        "competition_logos_filled": 0,
         "by_page": {},
     }
     catalog: Dict[str, Dict[str, str]] = {}
+    page_assets: List[Dict[str, Any]] = []
 
     for url in PAGES:
         result = fetch(url)
@@ -162,8 +219,20 @@ def run_if_due(db: Session, *, getter=None, heartbeat=None) -> Optional[Dict[str
         html = getattr(result, "payload", None)
         raw_html = html if isinstance(html, str) else ""
         page_catalog = _catalog_from_html(raw_html)
+        page_team_keys = _team_keys_from_html(raw_html)
+        competition_logo = _primary_competition_logo(raw_html, url)
         page_stats["assets"] = len(page_catalog)
+        page_stats["teams"] = len(page_team_keys)
+        page_stats["competition_logo"] = competition_logo
         page_stats["image_candidates"] = _diagnostic_image_candidates(raw_html, url)
+        page_assets.append(
+            {
+                "url": url,
+                "team_keys": page_team_keys,
+                "team_assets": page_catalog,
+                "competition_logo": competition_logo,
+            }
+        )
         stats["pages_ok"] += 1
         stats["by_page"][url] = page_stats
         for key, asset in page_catalog.items():
@@ -196,18 +265,30 @@ def run_if_due(db: Session, *, getter=None, heartbeat=None) -> Optional[Dict[str
 
     for row in rows:
         participants = load_json(row.participants_json, {}) or {}
-        missing = [
-            side_name
-            for side_name in ("home", "away")
-            if isinstance(participants.get(side_name), dict)
-            and str((participants.get(side_name) or {}).get("name") or "").strip()
-            and not _logo(participants.get(side_name))
-        ]
-        if not missing:
+        extra = load_json(row.extra_json, {}) or {}
+        home = participants.get("home") if isinstance(participants.get("home"), dict) else {}
+        away = participants.get("away") if isinstance(participants.get("away"), dict) else {}
+        home_key = _key(home.get("name"))
+        away_key = _key(away.get("name"))
+        if not home_key or not away_key:
             continue
-        stats["candidate_rows"] += 1
-        changed = False
 
+        needs_side = (not _logo(home)) or (not _logo(away))
+        needs_comp = not str(extra.get("competition_logo") or "").strip()
+        if not (needs_side or needs_comp):
+            continue
+
+        stats["candidate_rows"] += 1
+        matching_pages = [
+            page
+            for page in page_assets
+            if home_key in page["team_keys"] and away_key in page["team_keys"]
+        ]
+        if len(matching_pages) == 1:
+            stats["matched_rows"] += 1
+
+        changed = False
+        extra_changed = False
         for side_name, mirror_name in (("home", "participant_a"), ("away", "participant_b")):
             side = participants.get(side_name)
             if not isinstance(side, dict) or _logo(side):
@@ -226,9 +307,25 @@ def run_if_due(db: Session, *, getter=None, heartbeat=None) -> Optional[Dict[str
             stats["participant_logos_filled"] += 1
             changed = True
 
+        if needs_comp and len(matching_pages) == 1:
+            comp_logo = str(matching_pages[0].get("competition_logo") or "").strip()
+            if comp_logo:
+                extra["competition_logo"] = comp_logo
+                sources = extra.get("identity_asset_sources")
+                if not isinstance(sources, dict):
+                    sources = {}
+                sources["competition_logo"] = "liquipedia-current-tournament-page"
+                extra["identity_asset_sources"] = sources
+                stats["competition_logos_filled"] += 1
+                extra_changed = True
+                changed = True
+
         if not changed:
             continue
         row.participants_json = dump_json(participants)
+        if extra_changed:
+            row.extra_json = dump_json(extra)
+            store_list_extra(row, extra)
         note_list_invalidation(
             db,
             sport=row.sport_id,
