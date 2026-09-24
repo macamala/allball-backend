@@ -31,7 +31,7 @@ from sports_registry.geography import label_for
 
 logger = logging.getLogger(__name__)
 
-DATE_BOARD_JOB = "fotmob-date-boards-v6"
+DATE_BOARD_JOB = "fotmob-date-boards-v7"
 _YOUTH = ("u17", "u18", "u19", "u20", "u21", "u23", "youth", "junior")
 _WOMEN = ("women", "womens", "woms")
 _RESERVE = ("reserve", " ii", "2nd", "b team")
@@ -399,7 +399,6 @@ def crosswalk_fotmob_ids(
     bound = datetime.utcnow() - timedelta(hours=hours)
     keepers = (
         db.query(SportsEvent)
-        .filter(SportsEvent.canonical_event_id.is_(None))
         .filter(SportsEvent.sport_id == "football")
         .filter(SportsEvent.start_time >= bound)
         .all()
@@ -501,7 +500,6 @@ def eligible_coverage(
     comps = set(FOTMOB_LEAGUES)
     rows = (
         db.query(SportsEvent)
-        .filter(SportsEvent.canonical_event_id.is_(None))
         .filter(SportsEvent.sport_id == "football")
         .filter(SportsEvent.start_time >= bound)
         .filter(SportsEvent.competition_id.in_(comps))
@@ -519,7 +517,6 @@ def eligible_coverage(
     pct = round((len(matched_ids) / eligible) * 100, 1) if eligible else 0.0
     payload = {
         "recent_football_total": db.query(SportsEvent)
-        .filter(SportsEvent.canonical_event_id.is_(None))
         .filter(SportsEvent.sport_id == "football")
         .filter(SportsEvent.start_time >= bound)
         .count(),
