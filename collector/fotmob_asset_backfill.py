@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from sqlalchemy.orm import Session
 
 from collector.adapters_fotmob import FOTMOB_LEAGUES, LEAGUE_URL, _league_ids, parse_fotmob_table
+from collector.cache import note_list_invalidation
 from collector.http import fetch_url
 from collector.list_extra import extra_for_list, store_list_extra
 from collector.models import SportsEvent
@@ -265,6 +266,12 @@ def run_if_due(db: Session, *, getter=None, heartbeat=None) -> Optional[Dict[str
                 row.participants_json = dump_json(participants)
                 row.extra_json = dump_json(extra)
                 store_list_extra(row, extra)
+                note_list_invalidation(
+                    db,
+                    sport=row.sport_id,
+                    competition=row.competition_id,
+                    start_time=row.start_time,
+                )
                 comp_rows_updated += 1
 
         if comp_rows_updated:
