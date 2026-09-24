@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from collector.adapters_sportscore import MATCHES_URL, TEAM_URL, _payload_matches, match_to_event
 from collector.http import fetch_url
 from collector.lock import lock_status
-from collector.models import SportsCollectorJob, SportsCompetition, SportsSource, SportsSourceCompetition
+from collector.models import SportsCollectorJob, SportsCompetition, SportsEvent, SportsSource, SportsSourceCompetition
 from collector.sources import source_collectable
 from collector.util import dump_json, load_json, slugify
 
@@ -59,15 +59,12 @@ def _schedule_job(db: Session) -> SportsCollectorJob:
 
 
 def _source(db: Session) -> Optional[SportsSource]:
+    # Breadth must never fall through to an old competition-specific source.
+    # The dedicated global source declares the widget's mandatory public
+    # branding; source_collectable() therefore disables collection unless the
+    # product policy changes explicitly.
     dedicated = db.get(SportsSource, "sportscore-global")
-    if dedicated is not None and source_collectable(dedicated):
-        return dedicated
-    candidates = (
-        db.query(SportsSource)
-        .filter(SportsSource.adapter_key == "sportscore", SportsSource.enabled.is_(True))
-        .all()
-    )
-    return next((source for source in candidates if source_collectable(source)), None)
+    return dedicated if dedicated is not None and source_collectable(dedicated) else None
 
 def _identity_material(row: Dict[str, Any]) -> Tuple[str, str]:
     name = str(row.get("competition") or "").strip()
@@ -167,6 +164,41 @@ def _ensure_mapping(
     return mapping
 
 
+
+def quarantine_legacy_contamination(db: Session) -> Dict[str, int]:
+    """Hide legacy SportScore rows that have no trustworthy sport identity.
+
+    Historical breadth runs could fall through to unrelated competition
+    mappings. Rows with an empty/unknown sport cannot be safely recovered from
+    that mapping, so keep them internal for audit and exclude them from public
+    canonical output.
+    """
+    rows = (
+        db.query(SportsEvent)
+        .join(SportsSource, SportsEvent.primary_source_id == SportsSource.source_id)
+        .filter(
+            SportsSource.adapter_key == "sportscore",
+            SportsEvent.canonical_event_id.is_(None),
+            SportsEvent.sport_id.in_(["", "unknown"]),
+        )
+        .all()
+    )
+    quarantined = 0
+    for row in rows:
+        extra = load_json(row.extra_json, {}) or {}
+        flags = list(extra.get("quality_flags") or [])
+        if "sportscore_legacy_contamination" not in flags:
+            flags.append("sportscore_legacy_contamination")
+        extra["quality_flags"] = flags
+        extra["display_eligible"] = False
+        extra["quarantine_reason"] = "sportscore_missing_trusted_sport_identity"
+        row.extra_json = dump_json(extra)
+        row.display_eligible = False
+        quarantined += 1
+    if quarantined:
+        db.flush()
+    return {"quarantined": quarantined}
+
 def repair_missing_sport_ids(db: Session) -> Dict[str, int]:
     """Repair only SportScore source-native rows whose ID encodes an allowed sport."""
     from collector.models import SportsEvent
@@ -201,9 +233,11 @@ def run_breadth_ingest(
 ) -> Dict[str, Any]:
     from collector.provider_crosswalk import _ingest
 
+    quarantine = quarantine_legacy_contamination(db)
     source = _source(db)
     if source is None:
-        return {"status": "missing_source", "ingested": 0, "sports": {}}
+        db.commit()
+        return {"status": "disabled_branding_required", "ingested": 0, "sports": {}, **quarantine}
 
     repaired = repair_missing_sport_ids(db)
     fetch = getter or fetch_url
@@ -332,9 +366,11 @@ def run_team_schedule_backfill(
     """Slow recent+upcoming backfill using team/player slugs discovered on active boards."""
     from collector.provider_crosswalk import _ingest
 
+    quarantine = quarantine_legacy_contamination(db)
     source = _source(db)
     if source is None:
-        return {"status": "missing_source", "requests": 0, "ingested": 0, "sports": {}}
+        db.commit()
+        return {"status": "disabled_branding_required", "requests": 0, "ingested": 0, "sports": {}, **quarantine}
 
     repaired = repair_missing_sport_ids(db)
     fetch = getter or fetch_url
