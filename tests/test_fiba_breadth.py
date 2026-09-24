@@ -82,3 +82,35 @@ def test_fiba_scheduled_game_does_not_publish_zero_placeholders_as_score():
     })
     assert event["status"] == "scheduled"
     assert event["score"] == {"home": None, "away": None}
+
+
+
+def test_fiba_game_parser_preserves_identity_artwork():
+    event = game_to_event(
+        {
+            "gameId": "asset-1",
+            "gameDateTime": "2026-09-25T10:00:00Z",
+            "teamA": {
+                "organisationId": "10",
+                "officialName": "Serbia",
+                "logoUrl": "https://cdn.example/serbia.svg",
+                "countryCode": "SRB",
+            },
+            "teamB": {
+                "organisationId": "20",
+                "officialName": "Spain",
+                "image": {"url": "https://cdn.example/spain.svg"},
+                "countryCode": "ESP",
+            },
+            "competition": {
+                "officialName": "FIBA Test Cup",
+                "logo": "https://cdn.example/fiba.svg",
+            },
+        },
+        {"slug": "fiba-test-cup", "name": "FIBA Test Cup"},
+    )
+    assert event["home"]["logo"] == "https://cdn.example/serbia.svg"
+    assert event["home"]["country_id"] == "SRB"
+    assert event["away"]["logo"] == "https://cdn.example/spain.svg"
+    assert event["away"]["country_id"] == "ESP"
+    assert event["competition_logo"] == "https://cdn.example/fiba.svg"
