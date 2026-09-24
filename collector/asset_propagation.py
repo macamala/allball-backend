@@ -565,18 +565,18 @@ def propagate_identity_assets(db) -> Dict[str, int]:
                     known["country_id"] = candidate["country_id"]
                 if candidate.get("country_ids") and not known.get("country_ids"):
                     known["country_ids"] = candidate["country_ids"]
-            if not known:
+            verified_logo = verified_participant_logo(sport, side)
+            if not known and not verified_logo:
                 continue
             merged = dict(side)
-            verified_logo = verified_participant_logo(sport, merged)
-            if verified_logo and not _asset(merged).get("logo"):
+            if known.get("logo") and not _asset(merged).get("logo"):
+                merged["logo"] = known["logo"]
+                stats["participant_logos_filled"] += 1
+            elif verified_logo and not _asset(merged).get("logo"):
                 merged["logo"] = verified_logo
                 stats["participant_logos_filled"] += 1
                 stats["verified_participant_logos_filled"] += 1
                 row_changed = True
-            if known.get("logo") and not _asset(merged).get("logo"):
-                merged["logo"] = known["logo"]
-                stats["participant_logos_filled"] += 1
                 if known.get("_standing_logo"):
                     stats["standing_participant_logos_filled"] += 1
                 row_changed = True
