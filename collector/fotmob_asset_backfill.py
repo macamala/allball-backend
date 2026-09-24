@@ -9,6 +9,7 @@ Existing ids/logos are never overwritten.
 
 from __future__ import annotations
 
+import re
 import time
 from collections import defaultdict
 from typing import Any, Dict, List, Optional, Tuple
@@ -74,6 +75,75 @@ def _roster(payload: Any) -> List[Dict[str, str]]:
     return out
 
 
+_ROSTER_GENERIC = {
+    "united", "city", "athletic", "sporting", "racing", "real", "club",
+}
+_ROSTER_GENDER = {"wfc", "women", "womens", "ladies"}
+
+
+def _gender_tokens(value: str) -> List[str]:
+    return [
+        "women" if token in _ROSTER_GENDER else token
+        for token in fold_for_identity(value).split()
+    ]
+
+
+def _consonant_key(token: str) -> str:
+    token = token.replace("q", "k")
+    return re.sub(r"[aeiouy]+", "", token)
+
+
+def _roster_variant_equivalent(left: str, right: str) -> bool:
+    """Competition-scoped fallback; caller must require a unique roster match."""
+    a = _gender_tokens(left)
+    b = _gender_tokens(right)
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+
+    # Women's feeds vary between WFC / Women / Ladies.
+    if len(a) == len(b) and all(x == y for x, y in zip(a, b)):
+        return True
+
+    # One-token club short names are allowed only as a unique first/last token
+    # in the official roster, never for generic football words.
+    if len(a) == 1 and len(a[0]) >= 5 and a[0] not in _ROSTER_GENERIC:
+        return a[0] in {b[0], b[-1]}
+    if len(b) == 1 and len(b[0]) >= 5 and b[0] not in _ROSTER_GENERIC:
+        return b[0] in {a[0], a[-1]}
+
+    # Feed legal/sponsor abbreviations often add one short token (Grêmio FB,
+    # Port MTI) around an otherwise unique roster identity.
+    shorter, longer = (a, b) if len(a) <= len(b) else (b, a)
+    if len(shorter) >= 1 and len(longer) - len(shorter) <= 2:
+        if longer[: len(shorter)] == shorter or longer[-len(shorter) :] == shorter:
+            extras = (
+                longer[len(shorter) :]
+                if longer[: len(shorter)] == shorter
+                else longer[: len(longer) - len(shorter)]
+            )
+            if all(len(token) <= 4 or token not in _ROSTER_GENERIC for token in extras):
+                return True
+
+    # Romanisation variants inside the same confirmed roster:
+    # Samarqand/Samarkand, Andijon/Andijan, etc.
+    if len(a) == len(b):
+        changed = False
+        for x, y in zip(a, b):
+            if x == y:
+                continue
+            if min(len(x), len(y)) < 5 or abs(len(x) - len(y)) > 1:
+                return False
+            if _consonant_key(x) != _consonant_key(y):
+                return False
+            changed = True
+        if changed:
+            return True
+
+    return False
+
+
 def _unique_match(name: str, roster: List[Dict[str, str]]) -> Optional[Dict[str, str]]:
     folded = fold_for_identity(name)
     if not folded:
@@ -83,8 +153,18 @@ def _unique_match(name: str, roster: List[Dict[str, str]]) -> Optional[Dict[str,
         return exact[0]
     if len(exact) > 1:
         return None
+
     aliases = [row for row in roster if names_equivalent(name, row["name"])]
-    return aliases[0] if len(aliases) == 1 else None
+    if len(aliases) == 1:
+        return aliases[0]
+    if len(aliases) > 1:
+        return None
+
+    variants = [
+        row for row in roster
+        if _roster_variant_equivalent(name, row["name"])
+    ]
+    return variants[0] if len(variants) == 1 else None
 
 
 def _fill_side(side: Any, roster: List[Dict[str, str]]) -> Tuple[Any, bool]:
