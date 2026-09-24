@@ -3,6 +3,8 @@ from types import SimpleNamespace
 from collector.dirty import event_unchanged, observation_signature
 from collector.breadth_audit import _visible_identity_requirement
 from collector.opendota_asset_backfill import _fill_side as fill_opendota_side, _parse_catalog as parse_opendota_catalog
+from collector.adapters_opendota import _event as opendota_event
+from collector.verified_participant_assets import verified_competition_logo
 from collector.merge import merge_event_fields
 from collector.participant_text import participant_payload
 from collector.util import dump_json
@@ -100,6 +102,9 @@ def test_unchanged_event_is_reopened_for_missing_identity_assets():
 def test_visible_asset_audit_requires_logos_only_for_team_style_events():
     assert _visible_identity_requirement({"event_family": "team_match", "sport": "football"}) == "logo"
     assert _visible_identity_requirement({"event_family": "esports_match", "sport": "dota-2"}) == "logo"
+    assert _visible_identity_requirement(
+        {"event_family": "team_match", "sport": "volleyball", "competition_key": "cev-eurovolley-men"}
+    ) == "country_or_logo"
 
 
 def test_visible_asset_audit_uses_country_for_individual_head_to_head():
@@ -153,3 +158,32 @@ def test_opendota_logo_fill_never_overwrites_or_name_matches():
     wrong_id, changed = fill_opendota_side({"id": "123", "name": "Xtreme Gaming"}, asset)
     assert changed is False
     assert not wrong_id.get("logo")
+
+
+
+def test_verified_wta_competition_artwork_is_available_without_affecting_football_map():
+    logo = verified_competition_logo("tennis", "wta-tour", {})
+    assert logo and "wtatennis.com" in logo
+    assert verified_competition_logo("tennis", "unknown-tour", {}) is None
+
+
+def test_opendota_event_preserves_real_league_name_on_stable_professional_key():
+    event = opendota_event(
+        {
+            "match_id": 123,
+            "radiant_team_id": 1,
+            "radiant_name": "Alpha",
+            "dire_team_id": 2,
+            "dire_name": "Beta",
+            "leagueid": 999,
+            "league_name": "BetBoom Streamers Battle 15",
+            "start_time": 1790265600,
+            "duration": 1800,
+        },
+        "professional",
+    )
+    assert event["competition_key"] == "professional"
+    assert event["competition"] == "Dota 2 Professional"
+    assert event["source_competition_name"] == "BetBoom Streamers Battle 15"
+    assert event["source_competition_id"] == "999"
+    assert event["extra"]["source_competition_name"] == "BetBoom Streamers Battle 15"
