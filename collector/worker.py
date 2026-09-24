@@ -590,6 +590,38 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
                 db.rollback()
 
             try:
+                from collector.fiba_breadth import run_if_due as run_fiba_breadth_if_due
+
+                def _pulse_fiba() -> None:
+                    heartbeat_scheduler_lock(db, owner=owner)
+                    db.commit()
+
+                fiba_breadth = run_fiba_breadth_if_due(
+                    db,
+                    owner=owner,
+                    heartbeat=_pulse_fiba,
+                )
+                if fiba_breadth:
+                    logger.info(
+                        "FIBA global basketball breadth %s",
+                        {
+                            "status": fiba_breadth.get("status"),
+                            "requests": fiba_breadth.get("requests"),
+                            "event_pages": fiba_breadth.get("event_pages"),
+                            "global_games": fiba_breadth.get("global_games"),
+                            "competitions": fiba_breadth.get("competitions"),
+                            "events": fiba_breadth.get("events"),
+                            "eligible": fiba_breadth.get("eligible"),
+                            "ingested": fiba_breadth.get("ingested"),
+                            "http_errors": fiba_breadth.get("http_errors"),
+                        },
+                    )
+                    _maybe_log_breadth(db, force=True)
+            except Exception:
+                logger.exception("FIBA global basketball breadth failed")
+                db.rollback()
+
+            try:
                 from collector.sofascore_crosswalk import run_if_due as run_sofascore_breadth_if_due
 
                 def _pulse_sofa() -> None:
