@@ -1,5 +1,9 @@
+from types import SimpleNamespace
+
+from collector.dirty import event_unchanged, observation_signature
 from collector.merge import merge_event_fields
 from collector.participant_text import participant_payload
+from collector.util import dump_json
 
 
 def _event(home=None, away=None, **extra):
@@ -68,3 +72,23 @@ def test_competition_logo_fills_blank_and_survives_failover():
         incoming_source_id="asset-source",
     )
     assert filled["competition_logo"] == "https://cdn.example/league.svg"
+
+
+
+def test_unchanged_event_is_reopened_for_missing_identity_assets():
+    incoming = _event(
+        home={"name": "Alpha FC", "logo": "https://cdn.example/alpha.svg"},
+        competition_logo="https://cdn.example/league.svg",
+        start_time="2026-09-24T10:00:00Z",
+    )
+    existing = SimpleNamespace(
+        extra_json=dump_json({"obs_signature": observation_signature(incoming)}),
+        participants_json=dump_json({
+            "home": {"name": "Alpha FC"},
+            "away": {"name": "Beta FC"},
+            "participant_a": {"name": "Alpha FC"},
+            "participant_b": {"name": "Beta FC"},
+        }),
+        start_time=object(),
+    )
+    assert event_unchanged(existing, incoming) is False
