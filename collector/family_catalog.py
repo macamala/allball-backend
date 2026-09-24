@@ -187,7 +187,7 @@ FAMILY_URLS = {
     "microplus-timing": "https://results.microplustimingservices.com",
     "fivb-web": "https://en.volleyballworld.com",
     "volleyballworld": "https://en.volleyballworld.com",
-    "ehf-web": "https://www.eurohandball.com",
+    "ehf-web": "https://old.eurohandball.com/events/competitions",
     "fih-web": "https://www.fih.hockey",
     "altiusrt": "https://www.altiusrt.com",
     "world-netball-web": "https://netball.sport",
@@ -415,6 +415,8 @@ CANONICAL_HOST_FIX = {
 }
 
 COMPETITION_PAGE_URLS = {
+    ("ehf-web", "ehf-champions-league"): "https://old.eurohandball.com/ec/00-01/cl/men/2026-27/round/1/Group%2BPhase",
+    ("ehf-web", "ehf-competitions"): "https://old.eurohandball.com/events/competitions",
     ("dataproject-wcm", "italy-superlega"): "https://www.legavolley.it/calendario",
     ("dataproject-web", "italy-superlega"): "https://www.legavolley.it/calendario",
     ("dataproject-web", "plusliga"): "https://plusliga.pl/games",
