@@ -42,12 +42,18 @@ _breadth_logged_at = 0.0
 _fifa_identity_reconciled = False
 
 
-def _collect_official_creators(db) -> None:
+def _collect_official_creators(db, heartbeat=None) -> None:
     """Create UFC bouts and World Athletics discipline events once per process."""
     global _creators_collected
     if _creators_collected or not writes_enabled():
         return
     _creators_collected = True
+
+    def pulse() -> None:
+        if heartbeat is not None:
+            heartbeat()
+
+    pulse()
     from collector.adapters import FetchRequest
     from collector.adapters_final import UfcOfficialAdapter
     from collector.collect import _consume_result, collect_competition
@@ -63,7 +69,9 @@ def _collect_official_creators(db) -> None:
         else None
     )
     if ufc is not None and ufc_source is not None and ufc_mapping is not None:
+        pulse()
         fetched = UfcOfficialAdapter().fetch(FetchRequest(capability="fixtures", sport_id="mma", competition_id="ufc"))
+        pulse()
         logger.info(
             "Official creator ufc fetch ok=%s status=%s events=%s error=%s",
             fetched.ok,
@@ -141,6 +149,7 @@ def _collect_official_creators(db) -> None:
         if competition is None:
             continue
         try:
+            pulse()
             stats = collect_competition(
                 db,
                 competition,
@@ -149,6 +158,7 @@ def _collect_official_creators(db) -> None:
                 include_fallback=False,
             )
             logger.info("Official creator %s %s", competition_id, {k: stats.get(k) for k in ("written", "merged", "rejected")})
+            pulse()
             if competition_id == "ireland-gri-meetings":
                 db.commit()
                 logger.info("Official creator ireland-gri-meetings committed")
@@ -171,7 +181,13 @@ def _collect_official_creators(db) -> None:
             else None
         )
         if wst is not None and wst_source is not None and wst_mapping is not None:
-            wst_events = collect_wst_tournament(lambda url: fetch_text(url, timeout=25))
+            def _wst_get(url: str):
+                pulse()
+                result = fetch_text(url, timeout=25)
+                pulse()
+                return result
+
+            wst_events = collect_wst_tournament(_wst_get)
             logger.info("Official creator wst events=%s", len(wst_events))
             if wst_events:
                 logger.info(
@@ -197,7 +213,9 @@ def _collect_official_creators(db) -> None:
     except Exception:
         logger.exception("Official creator wst failed")
         db.rollback()
-    _collect_zero_event_proofs(db)
+    pulse()
+    _collect_zero_event_proofs(db, heartbeat=pulse)
+    pulse()
     db.commit()
 
 
@@ -236,7 +254,7 @@ def _ensure_mapping(db, competition_id: str, families: tuple):
     return competition, source, mapping
 
 
-def _collect_zero_event_proofs(db) -> None:
+def _collect_zero_event_proofs(db, heartbeat=None) -> None:
     """Persist the bounded official proofs. One pass per process, no historical backfill."""
     from collector.adapters import FetchRequest, FetchResult
     from collector.adapters_feeds import FifaFootballAdapter, WorldRugbyAdapter
@@ -245,6 +263,10 @@ def _collect_zero_event_proofs(db) -> None:
     from collector.http import fetch_text
     from collector.zero_event_closeout import zero_event_collectors
 
+    def pulse() -> None:
+        if heartbeat is not None:
+            heartbeat()
+
     def _store(competition_id: str, families: tuple, result: FetchResult) -> None:
         competition, source, mapping = _ensure_mapping(db, competition_id, families)
         if competition is None or source is None or mapping is None:
@@ -252,7 +274,8 @@ def _collect_zero_event_proofs(db) -> None:
             return
         if not result.events and not result.standings:
             logger.info("Zero-event proof %s empty %s", competition_id, result.parse_reason)
-            return
+            return        pulse()
+
         logger.info(
             "Zero-event proof %s %s",
             competition_id,
@@ -265,9 +288,12 @@ def _collect_zero_event_proofs(db) -> None:
                 result=result,
             ),
         )
+        pulse()
 
     try:
+        pulse()
         fifa = FifaFootballAdapter().fetch(FetchRequest(capability="snapshot", competition_id="fifa-connected-competitions"))
+        pulse()
         finished = [
             row
             for row in fifa.events or []
@@ -290,18 +316,24 @@ def _collect_zero_event_proofs(db) -> None:
     except Exception:
         logger.exception("Zero-event proof fifa failed")
     try:
+        pulse()
         rugby = WorldRugbyAdapter().fetch(FetchRequest(capability="snapshot", competition_id="internationals-rwc"))
+        pulse()
         _store("internationals-rwc", ("pulselive",), rugby)
     except Exception:
         logger.exception("Zero-event proof rugby failed")
     try:
+        pulse()
         pga = PgaGraphqlAdapter().fetch(FetchRequest(capability="snapshot", competition_id="pga-tour"))
+        pulse()
         _store("pga-tour", ("pga-graphql", "pga-tour-web"), pga)
     except Exception:
         logger.exception("Zero-event proof pga failed")
 
     def getter(url: str) -> str:
+        pulse()
         fetched = fetch_text(url, timeout=25)
+        pulse()
         return fetched.payload if fetched.ok and isinstance(fetched.payload, str) else ""
 
     families = {
@@ -316,7 +348,7 @@ def _collect_zero_event_proofs(db) -> None:
         "africa-cup-of-nations": ("caf-web", "thesportsdb", "fifa-digital"),
     }
     try:
-        collected = zero_event_collectors(getter)
+        collected = zero_event_collectors(getter, heartbeat=pulse)
     except Exception:
         logger.exception("Zero-event proof collectors failed")
         return
@@ -765,7 +797,35 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
                 logger.exception("TheSportsDB known-league fixture backfill failed")
                 db.rollback()
 
-            _collect_official_creators(db)
+            def _pulse_creator_lease() -> None:
+
+
+                lease_db = SessionLocal()
+
+
+                try:
+
+
+                    if not heartbeat_scheduler_lock(lease_db, owner=owner):
+
+
+                        raise RuntimeError("scheduler lease lost during official creator pass")
+
+
+                    lease_db.commit()
+
+
+                finally:
+
+
+                    lease_db.close()
+
+
+
+            _collect_official_creators(db, heartbeat=_pulse_creator_lease)
+
+
+            _pulse_creator_lease()
             from collector.watch_set import rebuild_watch_set
 
             rebuild_watch_set(db)
