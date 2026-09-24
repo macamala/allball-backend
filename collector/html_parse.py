@@ -518,7 +518,7 @@ def _dict_event(row: Any) -> Optional[Dict[str, Any]]:
     status = str(status_raw).lower()
     if status in {"ft", "full-time", "full_time", "complete", "completed"}:
         status = "finished"
-    return _event(
+    event = _event(
         home=home,
         away=away,
         start=row.get("start_time")
@@ -534,6 +534,17 @@ def _dict_event(row: Any) -> Optional[Dict[str, Any]]:
         venue=row.get("venue") or row.get("stadium") or row.get("location"),
         source_id=str(row.get("id") or row.get("matchId") or row.get("gameId") or f"{home}-{away}"),
     )
+    if not event:
+        return None
+    home_raw = row.get("_home_row") or row.get("home") or row.get("homeTeam") or row.get("home_team") or row.get("team1") or row.get("hometeam") or row.get("localTeam") or row.get("teamHome")
+    away_raw = row.get("_away_row") or row.get("away") or row.get("awayTeam") or row.get("away_team") or row.get("team2") or row.get("awayteam") or row.get("visitorTeam") or row.get("teamAway")
+    home_identity = _identity_payload(home_raw, home)
+    away_identity = _identity_payload(away_raw, away)
+    if any(home_identity.get(key) for key in ("id", "logo", "country_id")):
+        event["home"] = {**(event.get("home") or {}), **{k: v for k, v in home_identity.items() if v not in (None, "")}}
+    if any(away_identity.get(key) for key in ("id", "logo", "country_id")):
+        event["away"] = {**(event.get("away") or {}), **{k: v for k, v in away_identity.items() if v not in (None, "")}}
+    return event
 
 
 def parse_tables(html: str) -> List[Dict[str, Any]]:
