@@ -20,12 +20,44 @@ jobs:
         run: |
           python -m pip install playwright
           python -m playwright install --with-deps chromium
-      - name: Check scores, full-board consistency and group tables on production
-        run: python audit/football_release_check.py
+      - name: Verify the canonical replacement while retaining old links
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('audit/football_release_check.py');s=p.read_text()
+          old="'ninko-evt-86345b6cb47a7c4b8524':[1,2]"
+          new="'ninko-evt-6d8bf3121dc158b647e1':[1,2]"
+          assert s.count(old)==1
+          p.write_text(s.replace(old,new))
+          PY
+          python audit/football_release_check.py
+      - name: Assert actual production acceptance criteria
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('/tmp/football-release-check')
+          summary=json.loads((p/'summary.json').read_text())
+          browsers=json.loads((p/'browser.json').read_text())
+          failures=[]
+          if not all(v['pass'] for v in summary['score_checks'].values()): failures.append('one or more source-verified final scores absent or inconsistent')
+          if summary['football_count']!=summary['all_sport_football_count']: failures.append('sport and full board counts disagree')
+          if summary['football_count']!=summary['second_count']: failures.append('board count changed after detail navigation')
+          for key,value in summary['score_checks'].items():
+              if summary['persistent_scores'].get(key)!=value['expected']: failures.append('score did not persist: '+key)
+          for row in browsers:
+              if not row.get('group_table_pass') or row.get('errors') or row.get('overflow') or row.get('match_overflow') or row.get('error'): failures.append('browser failed: '+row['viewport'])
+          alias=json.loads((p/'detail-ninko-evt-86345b6cb47a7c4b8524.json').read_text()).get('payload',{}).get('event',{})
+          if alias.get('id')!='ninko-evt-6d8bf3121dc158b647e1' or (alias.get('score')or{}).get('home')!=1 or (alias.get('score')or{}).get('away')!=2: failures.append('old Andorra match link no longer resolves correctly')
+          result={'pass':not failures,'failures':failures,'football_rows':summary['football_count'],'verified_final_scores':sum(v['pass'] for v in summary['score_checks'].values()),'checked_at':summary['checked_at']}
+          (p/'acceptance.json').write_text(json.dumps(result,indent=2))
+          print(json.dumps(result))
+          assert not failures, failures
+          PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: football-release-evidence
+          name: football-final-acceptance
           path: /tmp/football-release-check
           if-no-files-found: error
           retention-days: 7
