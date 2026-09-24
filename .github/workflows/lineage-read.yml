@@ -1,0 +1,53 @@
+name: Read-only canonical lineage snapshot
+on:
+  push:
+    branches: [audit/lineage-state-20260925]
+permissions:
+  contents: read
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Capture public event representations
+        run: |
+          mkdir -p /tmp/lineage-evidence
+          python - <<'PY'
+          import json, urllib.request, urllib.parse
+          from datetime import datetime, timezone
+          from pathlib import Path
+          base='https://allball-backend-production.up.railway.app'
+          paths={
+            'root':'/sports-data/matches/ninko-evt-6d8bf3121dc158b647e1',
+            'alias':'/sports-data/matches/ninko-evt-86345b6cb47a7c4b8524',
+            'events':'/sports-data/events?'+urllib.parse.urlencode({'sport':'football','date_from':'2026-09-24T14:00:00Z','date_to':'2026-09-25T13:59:59Z'}),
+            'health':'/health'
+          }
+          result={'at':datetime.now(timezone.utc).isoformat()}
+          for name,path in paths.items():
+            try:
+              req=urllib.request.Request(base+path,headers={'User-Agent':'NinkoSports-release-verification/1.0','Cache-Control':'no-cache'})
+              with urllib.request.urlopen(req,timeout=25) as r:
+                result[name]={'http':r.status,'payload':json.load(r)}
+            except Exception as e: result[name]={'error':str(e)}
+          Path('/tmp/lineage-evidence/public.json').write_text(json.dumps(result,indent=2))
+          print('Public read snapshot saved; no database or configuration writes.')
+          PY
+      - name: Bundle exact tracked application source for offline regressions
+        run: |
+          python - <<'PY'
+          import subprocess,tarfile
+          files=subprocess.check_output(['git','ls-files','-z']).decode().split('\0')
+          with tarfile.open('/tmp/lineage-evidence/backend-source.tgz','w:gz') as tar:
+            for f in files:
+              if f and (f.endswith('.py') or f.endswith('.json') or f=='requirements.txt') and not f.startswith(('.git/','node_modules/')):
+                tar.add(f,arcname=f,recursive=False)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: canonical-lineage-snapshot
+          path: /tmp/lineage-evidence
+          retention-days: 3
