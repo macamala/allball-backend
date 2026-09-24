@@ -179,6 +179,57 @@ def _derive_fotmob_assets(row: SportsEvent, extra: Dict[str, Any], participants:
     return row_changed, extra_changed, participant_filled
 
 
+def _sofascore_identity_context(row: SportsEvent, extra: Dict[str, Any]) -> bool:
+    family = str(extra.get("source_family") or "").strip().lower()
+    primary = str(getattr(row, "primary_source_id", "") or "").strip().lower()
+    if family == "sofascore-web" or "sofascore" in primary:
+        return True
+    field_sources = extra.get("field_sources") if isinstance(extra.get("field_sources"), dict) else {}
+    return any("sofascore" in str(value or "").lower() for value in field_sources.values())
+
+
+def _derive_sofascore_assets(
+    row: SportsEvent,
+    extra: Dict[str, Any],
+    participants: Dict[str, Any],
+) -> Tuple[bool, bool, int]:
+    """Derive SofaScore artwork only when stored IDs are SofaScore-owned."""
+    if not _sofascore_identity_context(row, extra):
+        return False, False, 0
+    row_changed = False
+    extra_changed = False
+    participant_filled = 0
+    competition_id = str(
+        extra.get("sofascore_tournament_id")
+        or extra.get("source_competition_id")
+        or ""
+    ).strip()
+    if competition_id and competition_id.isdigit() and not extra.get("competition_logo"):
+        extra["competition_logo"] = (
+            f"https://img.sofascore.com/api/v1/unique-tournament/{competition_id}/image"
+        )
+        row_changed = True
+        extra_changed = True
+
+    field_sources = extra.get("field_sources") if isinstance(extra.get("field_sources"), dict) else {}
+    for side_name in ("home", "away", "participant_a", "participant_b"):
+        side = participants.get(side_name)
+        if not isinstance(side, dict) or _asset(side).get("logo"):
+            continue
+        source_owner = str(field_sources.get(side_name) or "").lower()
+        if source_owner and "sofascore" not in source_owner:
+            continue
+        team_id = str(side.get("id") or "").strip()
+        if not team_id.isdigit():
+            continue
+        merged = dict(side)
+        merged["logo"] = f"https://img.sofascore.com/api/v1/team/{team_id}/image"
+        participants[side_name] = merged
+        row_changed = True
+        participant_filled += 1
+    return row_changed, extra_changed, participant_filled
+
+
 def propagate_identity_assets(db) -> Dict[str, int]:
     rows = (
         db.query(SportsEvent)
@@ -239,6 +290,8 @@ def propagate_identity_assets(db) -> Dict[str, int]:
         "participant_countries_filled": 0,
         "source_native_competition_logos_filled": 0,
         "source_native_participant_logos_filled": 0,
+        "sofascore_competition_logos_filled": 0,
+        "sofascore_participant_logos_filled": 0,
         "standing_participant_logos_filled": 0,
         "standing_participant_countries_filled": 0,
     }
@@ -263,6 +316,17 @@ def propagate_identity_assets(db) -> Dict[str, int]:
             stats["source_native_competition_logos_filled"] += 1
         if direct_participants:
             stats["source_native_participant_logos_filled"] += direct_participants
+
+        sofa_changed, sofa_extra_changed, sofa_participants = _derive_sofascore_assets(
+            row, extra, participants
+        )
+        if sofa_changed:
+            row_changed = True
+        if sofa_extra_changed:
+            extra_changed = True
+            stats["sofascore_competition_logos_filled"] += 1
+        if sofa_participants:
+            stats["sofascore_participant_logos_filled"] += sofa_participants
 
         if not extra.get("competition_logo"):
             logo = competition_assets.get((sport, competition))
