@@ -42,6 +42,14 @@ def test_tsdb_league_logo_extracts_badge():
     ).endswith("nhl.png")
 
 
+def test_tsdb_cfl_team_catalogue_is_asset_only_and_not_coverage_authority():
+    spec = TSDB_BY_COMP["cfl"]
+    assert spec["source_competition_id"] == "4405"
+    assert spec["sport_id"] == "american-football"
+    assert spec["asset_only"] is True
+    assert "cfl" not in TSDB_LOGO_BY_COMP
+
+
 def test_tsdb_non_team_competition_artwork_catalogue_is_asset_only():
     assert TSDB_LOGO_BY_COMP["formula-1"]["source_competition_id"] == "4370"
     assert TSDB_LOGO_BY_COMP["formula-2"]["source_competition_id"] == "4486"
