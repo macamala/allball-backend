@@ -655,6 +655,39 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
                 db.rollback()
 
             try:
+                from collector.wta_breadth import run_if_due as run_wta_breadth_if_due
+
+                def _pulse_wta_breadth() -> None:
+                    heartbeat_scheduler_lock(db, owner=owner)
+                    db.commit()
+
+                wta_breadth = run_wta_breadth_if_due(
+                    db,
+                    owner=owner,
+                    heartbeat=_pulse_wta_breadth,
+                )
+                if wta_breadth:
+                    logger.info(
+                        "WTA global tennis breadth %s",
+                        {
+                            "status": wta_breadth.get("status"),
+                            "calendar_rows": wta_breadth.get("calendar_rows"),
+                            "tournaments": wta_breadth.get("tournaments"),
+                            "requests": wta_breadth.get("requests"),
+                            "competitions": wta_breadth.get("competitions"),
+                            "events": wta_breadth.get("events"),
+                            "eligible": wta_breadth.get("eligible"),
+                            "ingested": wta_breadth.get("ingested"),
+                            "http_errors": wta_breadth.get("http_errors"),
+                            "by_competition": wta_breadth.get("by_competition"),
+                        },
+                    )
+                    _maybe_log_breadth(db, force=True)
+            except Exception:
+                logger.exception("WTA global tennis breadth failed")
+                db.rollback()
+
+            try:
                 from collector.fiba_breadth import run_if_due as run_fiba_breadth_if_due
 
                 def _pulse_fiba() -> None:
