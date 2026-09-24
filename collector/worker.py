@@ -527,6 +527,16 @@ def _maybe_log_breadth(db, *, force: bool = False) -> None:
                 db.rollback()
 
             try:
+                from collector.sofascore_dota_asset_backfill import run_if_due as run_sofa_dota_assets_prelock
+
+                sofa_dota_assets = run_sofa_dota_assets_prelock(db)
+                if sofa_dota_assets:
+                    logger.info("PRELOCK_SOFASCORE_DOTA_ASSETS %s", sofa_dota_assets)
+            except Exception:
+                logger.exception("Pre-lock SofaScore Dota artwork repair failed")
+                db.rollback()
+
+            try:
                 from collector.thesportsdb_asset_backfill import run_if_due as run_tsdb_assets_prelock
 
                 tsdb_assets = run_tsdb_assets_prelock(db)
