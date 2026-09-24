@@ -11,6 +11,7 @@ This is an internal audit surface only. It does not invent or synthesize artwork
 from __future__ import annotations
 
 from collections import defaultdict
+from datetime import datetime, timedelta
 from typing import Any, Dict
 
 from collector.competition_presentation import metadata_for
@@ -261,3 +262,98 @@ def asset_coverage_payload(db) -> Dict[str, Any]:
         "by_sport": by_sport,
     }
     return {"summary": summary, "competitions": output}
+
+
+
+def visible_asset_gap_snapshot(db, *, past_hours: int = 6, future_hours: int = 72, limit: int = 80) -> Dict[str, Any]:
+    """Source-aware identity gaps for events users are likely to see now/next."""
+    lower = datetime.utcnow() - timedelta(hours=past_hours)
+    upper = datetime.utcnow() + timedelta(hours=future_hours)
+    rows = (
+        db.query(SportsEvent)
+        .filter(
+            SportsEvent.display_eligible.is_(True),
+            SportsEvent.start_time >= lower,
+            SportsEvent.start_time <= upper,
+        )
+        .order_by(SportsEvent.start_time.asc())
+        .all()
+    )
+    gaps = []
+    summary: Dict[str, Dict[str, int]] = defaultdict(
+        lambda: {
+            "events": 0,
+            "missing_competition_logo": 0,
+            "missing_team_logo_slots": 0,
+            "missing_individual_country_slots": 0,
+        }
+    )
+    for row in rows:
+        sport = str(row.sport_id or "unknown")
+        family = str(row.event_family or "")
+        participants = load_json(row.participants_json, {}) or {}
+        extra = load_json(row.extra_json, {}) or {}
+        home = participants.get("home") if isinstance(participants.get("home"), dict) else {}
+        away = participants.get("away") if isinstance(participants.get("away"), dict) else {}
+        comp_missing = not bool(extra.get("competition_logo"))
+        missing_sides = []
+        missing_countries = []
+        for label, side in (("home", home), ("away", away)):
+            if not side or not _participant_name(side):
+                continue
+            if family in TEAM_FAMILIES and not _has_logo(side):
+                missing_sides.append(label)
+            if family in INDIVIDUAL_FAMILIES and not _has_country(side):
+                missing_countries.append(label)
+
+        bucket = summary[sport]
+        bucket["events"] += 1
+        bucket["missing_competition_logo"] += int(comp_missing)
+        bucket["missing_team_logo_slots"] += len(missing_sides)
+        bucket["missing_individual_country_slots"] += len(missing_countries)
+
+        if not (comp_missing or missing_sides or missing_countries):
+            continue
+        gaps.append(
+            {
+                "event_id": row.event_id,
+                "start_time": row.start_time.isoformat() + "Z" if row.start_time else None,
+                "sport": sport,
+                "competition": row.competition_id,
+                "family": family,
+                "primary_source": row.primary_source_id,
+                "source_family": extra.get("source_family"),
+                "source_competition_id": extra.get("source_competition_id"),
+                "source_competition_entity_kind": extra.get("source_competition_entity_kind"),
+                "competition_logo": bool(extra.get("competition_logo")),
+                "home": {
+                    "name": _participant_name(home),
+                    "id": home.get("id"),
+                    "logo": bool(_has_logo(home)),
+                    "country": home.get("country_id") or home.get("country"),
+                },
+                "away": {
+                    "name": _participant_name(away),
+                    "id": away.get("id"),
+                    "logo": bool(_has_logo(away)),
+                    "country": away.get("country_id") or away.get("country"),
+                },
+                "missing_team_logo_sides": missing_sides,
+                "missing_individual_country_sides": missing_countries,
+            }
+        )
+
+    gaps.sort(
+        key=lambda row: (
+            -len(row.get("missing_team_logo_sides") or []),
+            -len(row.get("missing_individual_country_sides") or []),
+            -int(not row.get("competition_logo")),
+            str(row.get("start_time") or ""),
+        )
+    )
+    return {
+        "from": lower.isoformat() + "Z",
+        "to": upper.isoformat() + "Z",
+        "summary": dict(summary),
+        "gaps": gaps[:limit],
+    }
