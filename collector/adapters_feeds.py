@@ -118,15 +118,29 @@ class FifaFootballAdapter:
         calendar = self._get("https://api.fifa.com/api/v3/calendar/matches?count=50&language=en")
         world_cup = None
         knockout = None
+        rolling = None
         if request.competition_id == "fifa-connected-competitions":
             world_cup = self._get(FIFA_WORLD_CUP_WINDOW)
             knockout = self._get(FIFA_WORLD_CUP_KNOCKOUT)
-        if not live.ok and not calendar.ok and not (world_cup and world_cup.ok) and not (knockout and knockout.ok):
+            now = datetime.now(timezone.utc).date()
+            rolling_from = (now - timedelta(days=2)).isoformat()
+            rolling_to = (now + timedelta(days=7)).isoformat()
+            rolling = self._get(
+                "https://api.fifa.com/api/v3/calendar/matches"
+                f"?from={rolling_from}&to={rolling_to}&count=500&language=en"
+            )
+        if (
+            not live.ok
+            and not calendar.ok
+            and not (world_cup and world_cup.ok)
+            and not (knockout and knockout.ok)
+            and not (rolling and rolling.ok)
+        ):
             return live if not live.ok else calendar
         events = []
         seen = set()
         payloads = [live.payload, calendar.payload]
-        for extra in (world_cup, knockout):
+        for extra in (world_cup, knockout, rolling):
             if extra and extra.ok:
                 payloads.append(extra.payload)
         for payload in payloads:
