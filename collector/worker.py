@@ -560,6 +560,36 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
                 logger.exception("FotMob date-board backfill failed")
 
             try:
+                from collector.bbc_tennis_breadth import run_if_due as run_bbc_tennis_breadth_if_due
+
+                def _pulse_bbc_tennis() -> None:
+                    heartbeat_scheduler_lock(db, owner=owner)
+                    db.commit()
+
+                bbc_tennis = run_bbc_tennis_breadth_if_due(
+                    db,
+                    owner=owner,
+                    heartbeat=_pulse_bbc_tennis,
+                )
+                if bbc_tennis:
+                    logger.info(
+                        "BBC tennis breadth %s",
+                        {
+                            "status": bbc_tennis.get("status"),
+                            "requests": bbc_tennis.get("requests"),
+                            "competitions": bbc_tennis.get("competitions"),
+                            "events": bbc_tennis.get("events"),
+                            "eligible": bbc_tennis.get("eligible"),
+                            "ingested": bbc_tennis.get("ingested"),
+                            "http_errors": bbc_tennis.get("http_errors"),
+                        },
+                    )
+                    _maybe_log_breadth(db, force=True)
+            except Exception:
+                logger.exception("BBC tennis breadth failed")
+                db.rollback()
+
+            try:
                 from collector.sofascore_crosswalk import run_if_due as run_sofascore_breadth_if_due
 
                 def _pulse_sofa() -> None:
