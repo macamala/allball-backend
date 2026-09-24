@@ -1,6 +1,8 @@
 import json
 
-from collector.bbc_tennis_breadth import _competition_id, parse_bbc_tennis_html
+from types import SimpleNamespace
+
+from collector.bbc_tennis_breadth import _competition_id, _source, parse_bbc_tennis_html
 
 
 def _bbc_html(payload):
@@ -34,3 +36,27 @@ def test_bbc_tennis_board_keeps_real_tournament_identity():
 
 def test_bbc_tennis_competition_id_is_stable():
     assert _competition_id("Tokyo Open") == _competition_id("Tokyo Open")
+
+
+
+def test_bbc_tennis_breadth_uses_dedicated_global_source():
+    source = SimpleNamespace(
+        source_id="bbc-tennis-global",
+        enabled=True,
+        public_branding_required=False,
+        licensed=False,
+        requires_credentials=False,
+        credential_env=None,
+    )
+
+    class FakeDb:
+        def __init__(self):
+            self.requested = []
+
+        def get(self, model, source_id):
+            self.requested.append(source_id)
+            return source if source_id == "bbc-tennis-global" else None
+
+    db = FakeDb()
+    assert _source(db) is source
+    assert db.requested == ["bbc-tennis-global"]
