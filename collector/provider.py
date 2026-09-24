@@ -976,6 +976,10 @@ class NinkoCollectedSportsDataProvider:
             if start_to is not None:
                 query = query.filter(SportsEvent.start_time <= start_to)
             query = query.filter(SportsEvent.canonical_event_id.is_(None))
+            query = query.filter(
+                SportsEvent.sport_id.isnot(None),
+                SportsEvent.sport_id.notin_(["", "unknown"]),
+            )
             # display_eligible=False is authoritative. Dynamic/global
             # competition IDs expand the catalog but never bypass quality.
             query = query.filter(
@@ -1107,6 +1111,8 @@ class NinkoCollectedSportsDataProvider:
                 keeper = db.query(SportsEvent).filter_by(event_id=row.canonical_event_id).first()
                 if keeper:
                     row = keeper
+            if not str(row.sport_id or "").strip() or str(row.sport_id or "").strip().lower() == "unknown":
+                return None
             blocked_ids, blocked_families = _blocked_public_sources(db)
             if not _row_public_source_allowed(row, blocked_ids, blocked_families):
                 return None
