@@ -21,7 +21,7 @@ from collector.util import dump_json, load_json, parse_datetime, slugify
 
 logger = logging.getLogger(__name__)
 
-JOB_KEY = "ehf-global-breadth-v4"
+JOB_KEY = "ehf-global-breadth-v5"
 SOURCE_ID = "ehf-global"
 INDEX_URL = "https://old.eurohandball.com/events/competitions"
 BASE = "https://old.eurohandball.com"

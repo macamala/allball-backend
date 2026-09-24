@@ -789,6 +789,10 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
                         {
                             "status": ehf_breadth.get("status"),
                             "requests": ehf_breadth.get("requests"),
+                            "api_http_status": ehf_breadth.get("api_http_status"),
+                            "api_events": ehf_breadth.get("api_events"),
+                            "history_requests": ehf_breadth.get("history_requests"),
+                            "history_pages": ehf_breadth.get("history_pages"),
                             "pages": ehf_breadth.get("pages"),
                             "competitions": ehf_breadth.get("competitions"),
                             "events": ehf_breadth.get("events"),
