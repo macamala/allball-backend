@@ -610,6 +610,16 @@ def apply_phase2(db: Session) -> Dict[str, Any]:
         db.commit()
 
     enrichment = promote_observation_enrichment(db)
+
+    # Final invariant: duplicate quarantine must never leave a recent football
+    # fixture with zero public representatives. This runs after every other
+    # startup integrity step so nothing later in the same pass can re-hide it.
+    from collector.integrity import restore_orphaned_duplicate_football
+
+    orphan_guard = restore_orphaned_duplicate_football(db)
+    if orphan_guard.get("restored"):
+        db.commit()
+
     return {
         "collapse": collapse,
         "precision": precision,
@@ -617,4 +627,5 @@ def apply_phase2(db: Session) -> Dict[str, Any]:
         "quarantine": quarantine,
         "source_native_revalidated": source_native,
         "enrichment": enrichment,
+        "orphan_duplicate_guard": orphan_guard,
     }
