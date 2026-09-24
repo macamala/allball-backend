@@ -758,23 +758,53 @@ def parse_nuxt_data(html: str) -> List[Dict[str, Any]]:
     return walk_json_events(payload)
 
 
+def _liquipedia_media_url(value: str) -> str:
+    src = str(value or "").strip()
+    if not src or src.startswith("data:"):
+        return ""
+    if src.startswith("//"):
+        return "https:" + src
+    return urljoin("https://liquipedia.net/", src)
+
+
+def _liquipedia_team_assets(block: str, name_re) -> List[Dict[str, str]]:
+    """Pair a displayed team name with the closest preceding Liquipedia image."""
+    rows: List[Dict[str, str]] = []
+    img_re = re.compile(
+        r"""<img[^>]+(?:data-src|src)=["']([^"']+)["'][^>]*>""",
+        re.I,
+    )
+    for match in name_re.finditer(block or ""):
+        label = (match.group(1) or match.group(2) or "").strip()
+        if not label:
+            continue
+        prefix = (block or "")[max(0, match.start() - 900) : match.start()]
+        images = img_re.findall(prefix)
+        logo = _liquipedia_media_url(images[-1]) if images else ""
+        rows.append({"name": label, "logo": logo})
+    unique: List[Dict[str, str]] = []
+    seen = set()
+    for row in rows:
+        key = row["name"].casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(row)
+    return unique
+
+
 def parse_liquipedia_html(html: str) -> List[Dict[str, Any]]:
     events = []
     blocks = re.split(r'(?=<div[^>]+class="[^"]*match-info(?:\s|")[^"]*")', html or "", flags=re.I)
     name_re = re.compile(
-        r'class="name"[^>]*>\s*<a[^>]*>([^<]+)</a>|class="[^"]*team-template-text[^"]*"[^>]*>([^<]+)',
+        r'class="name"[^>]*>\s*<a[^>]*>([^<]+)</a>|class="[^"]*team-template-text[^"]*"[^>]*>(?:\s*<a[^>]*>)?([^<]+)',
         re.I,
     )
     score_re = re.compile(r'class="[^"]*match-info-header-scoreholder-score[^"]*"[^>]*>([^<]+)', re.I)
     sources = blocks if len(blocks) > 2 else [html or ""]
     for block in sources:
-        names = []
-        for match in name_re.findall(block):
-            label = (match[0] or match[1] or "").strip()
-            if label:
-                names.append(label)
-        names = list(dict.fromkeys(names))
-        if len(names) < 2:
+        teams = _liquipedia_team_assets(block, name_re)
+        if len(teams) < 2:
             continue
         scores = [item.strip() for item in score_re.findall(block)]
         home_score = away_score = None
@@ -784,22 +814,34 @@ def parse_liquipedia_html(html: str) -> List[Dict[str, Any]]:
                 away_score = int(scores[1])
             except (TypeError, ValueError):
                 home_score = away_score = None
-        event = _event(home=names[0], away=names[1], home_score=home_score, away_score=away_score)
+        event = _event(
+            home=teams[0]["name"],
+            away=teams[1]["name"],
+            home_score=home_score,
+            away_score=away_score,
+        )
         if event:
+            if teams[0].get("logo"):
+                event["home"]["logo"] = teams[0]["logo"]
+            if teams[1].get("logo"):
+                event["away"]["logo"] = teams[1]["logo"]
             events.append(event)
         if len(events) >= 40:
             break
     if events:
         return _dedupe(events)
-    teams = [item.strip() for item in re.findall(r'class="[^"]*team-template-text[^"]*"[^>]*>([^<]+)', html or "", re.I)]
+    teams = _liquipedia_team_assets(html or "", name_re)
     for index in range(0, len(teams) - 1, 2):
-        event = _event(home=teams[index], away=teams[index + 1])
+        event = _event(home=teams[index]["name"], away=teams[index + 1]["name"])
         if event:
+            if teams[index].get("logo"):
+                event["home"]["logo"] = teams[index]["logo"]
+            if teams[index + 1].get("logo"):
+                event["away"]["logo"] = teams[index + 1]["logo"]
             events.append(event)
         if len(events) >= 40:
             break
     return _dedupe(events)
-
 
 def datetime_from_unix(value: Any) -> Optional[str]:
     try:
