@@ -274,7 +274,8 @@ def _collect_zero_event_proofs(db, heartbeat=None) -> None:
             return
         if not result.events and not result.standings:
             logger.info("Zero-event proof %s empty %s", competition_id, result.parse_reason)
-            return        pulse()
+            return
+        pulse()
 
         logger.info(
             "Zero-event proof %s %s",
