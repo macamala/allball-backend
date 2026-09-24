@@ -1082,8 +1082,39 @@ def sports_data_match(match_id: str):
 
 
 @app.get("/sports-data/teams/{slug}")
-def sports_data_team(slug: str):
-    return empty_team_payload(slug)
+def sports_data_team(
+    slug: str,
+    sport: Optional[str] = Query(None),
+    competition: Optional[str] = Query(None),
+    name: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    from collector.entity_profiles import team_profile
+
+    return team_profile(
+        db,
+        entity_key=slug,
+        sport=sport,
+        competition=competition,
+        name=name,
+    )
+
+
+@app.get("/sports-data/players/{player_key}")
+def sports_data_player(
+    player_key: str,
+    name: Optional[str] = Query(None),
+    event_id: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    from collector.entity_profiles import player_profile
+
+    return player_profile(
+        db,
+        player_key=player_key,
+        name=name,
+        event_id=event_id,
+    )
 
 
 @app.get("/sitemap.xml")
