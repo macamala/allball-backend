@@ -740,6 +740,35 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
                 db.rollback()
 
             try:
+                from collector.acb_breadth import run_if_due as run_acb_breadth_if_due
+
+                def _pulse_acb() -> None:
+                    heartbeat_scheduler_lock(db, owner=owner)
+                    db.commit()
+
+                acb_breadth = run_acb_breadth_if_due(
+                    db,
+                    owner=owner,
+                    heartbeat=_pulse_acb,
+                )
+                if acb_breadth:
+                    logger.info(
+                        "ACB season breadth %s",
+                        {
+                            "status": acb_breadth.get("status"),
+                            "requests": acb_breadth.get("requests"),
+                            "http_status": acb_breadth.get("http_status"),
+                            "events": acb_breadth.get("events"),
+                            "eligible": acb_breadth.get("eligible"),
+                            "ingested": acb_breadth.get("ingested"),
+                        },
+                    )
+                    _maybe_log_breadth(db, force=True)
+            except Exception:
+                logger.exception("ACB season breadth failed")
+                db.rollback()
+
+            try:
                 from collector.volleyballworld_breadth import run_if_due as run_volleyballworld_breadth_if_due
 
                 def _pulse_volleyballworld() -> None:
