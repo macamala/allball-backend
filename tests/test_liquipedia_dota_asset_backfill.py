@@ -1,4 +1,10 @@
-from collector.liquipedia_dota_asset_backfill import _catalog_from_html, _key
+from collector.liquipedia_dota_asset_backfill import (
+    PAGES,
+    _catalog_from_html,
+    _key,
+    _primary_competition_logo,
+    _team_keys_from_html,
+)
 
 
 def test_liquipedia_dota_catalog_keeps_exact_team_artwork():
@@ -40,3 +46,34 @@ def test_liquipedia_dota_catalog_drops_conflicting_same_identity():
     """
     catalog = _catalog_from_html(html)
     assert "ybn" not in catalog
+
+
+
+def test_liquipedia_dota_primary_artwork_prefers_exact_current_infobox_image():
+    betboom = """
+    <img src="/commons/images/thumb/2/2b/BetBoom_Streamers_Battle_13_allmode.png/50px-BetBoom_Streamers_Battle_13_allmode.png">
+    <img src="/commons/images/2/2b/BetBoom_Streamers_Battle_13_allmode.png">
+    """
+    pgl = """
+    <img src="/commons/images/thumb/0/0c/PGL_Wallachia_icon_allmode.png/43px-PGL_Wallachia_icon_allmode.png">
+    <img src="/commons/images/thumb/a/a8/PGL_Wallachia_allmode.png/600px-PGL_Wallachia_allmode.png">
+    """
+    assert _primary_competition_logo(betboom, PAGES[0]).endswith(
+        "/commons/images/2/2b/BetBoom_Streamers_Battle_13_allmode.png"
+    )
+    assert _primary_competition_logo(pgl, PAGES[1]).endswith(
+        "/600px-PGL_Wallachia_allmode.png"
+    )
+
+
+def test_liquipedia_dota_team_membership_does_not_require_team_logo():
+    html = """
+    <div class="match-info">
+      <span class="team-template-text"><a>YBN Team</a></span>
+      <span class="team-template-image-icon"><img src="/commons/images/a/aa/Rostik.png"></span>
+      <span class="team-template-text"><a>Rostik Team</a></span>
+    </div>
+    """
+    keys = _team_keys_from_html(html)
+    assert "ybn" in keys
+    assert "rostik" in keys
