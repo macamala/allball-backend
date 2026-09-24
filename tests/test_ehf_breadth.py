@@ -1,5 +1,5 @@
 from collector.competition_identity import source_native_public_competition_id
-from collector.ehf_breadth import competition_meta, discover_round_urls, parse_round_page
+from collector.ehf_breadth import competition_meta, discover_round_urls, parse_current_api, parse_round_page
 
 
 def test_ehf_index_discovers_current_round_links_and_keeps_fallbacks():
@@ -71,3 +71,67 @@ def test_ehf_source_native_id_requires_validated_prefix():
     )
     assert accepted == "handball-ehf-champions-league-men"
     assert rejected is None
+
+
+
+def test_current_ehf_livescore_api_vue_shape():
+    payload = {
+        "days": [
+            {
+                "calendarUrl": "/en/matches/2026-09-25/",
+                "liveScoreMatches": [
+                    {
+                        "match": {
+                            "id": "ehf-live-1",
+                            "competitionShortName": "EHF Champions League Men",
+                            "competitionType": "Men",
+                            "url": "/en/match/ehf-live-1/",
+                            "homeTeam": {"id": "home-1", "name": "RK Partizan"},
+                            "guestTeam": {"id": "away-1", "name": "Füchse Berlin"},
+                        },
+                        "matchStats": {"isLive": True, "startTime": "18:45", "time": "42"},
+                        "homeStats": {"totalGoals": 20},
+                        "guestStats": {"totalGoals": 18},
+                    }
+                ],
+            }
+        ]
+    }
+    rows = parse_current_api(payload)
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["source_event_id"] == "ehf-live-1"
+    assert row["competition_key"] == "handball-ehf-ehf-champions-league-men-men"
+    assert row["home"]["name"] == "RK Partizan"
+    assert row["away"]["name"] == "Füchse Berlin"
+    assert row["status"] == "live"
+    assert row["score"] == {"home": 20, "away": 18}
+    assert row["start_time"] == "2026-09-25T18:45:00+02:00"
+    assert row["source_event_ids"] == {"ehf-web": "ehf-live-1"}
+
+
+def test_current_ehf_api_scheduled_match_hides_placeholder_zeroes():
+    payload = {
+        "days": [
+            {
+                "calendarUrl": "/en/matches/2026-10-08/",
+                "liveScoreMatches": [
+                    {
+                        "match": {
+                            "id": "ehf-future-1",
+                            "competitionShortName": "EHF Champions League Women",
+                            "competitionType": "Women",
+                            "homeTeam": {"name": "Team A"},
+                            "guestTeam": {"name": "Team B"},
+                        },
+                        "matchStats": {"isLive": False, "startTime": "20:45"},
+                        "homeStats": {"totalGoals": 0},
+                        "guestStats": {"totalGoals": 0},
+                    }
+                ],
+            }
+        ]
+    }
+    row = parse_current_api(payload)[0]
+    assert row["status"] == "scheduled"
+    assert row["score"] == {"home": None, "away": None}
