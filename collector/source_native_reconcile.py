@@ -14,7 +14,7 @@ from collector.list_extra import extra_for_list, store_list_extra
 from collector.models import SportsCollectorJob, SportsEvent
 from collector.util import dump_json, isoformat, load_json, slugify
 
-JOB_KEY = "source-native-football-revalidate-v3"
+JOB_KEY = "source-native-football-revalidate-v4"
 SAFE_FAMILIES = {"fotmob", "fifa", "fifa-digital", "fifa-json"}
 NON_BLOCKING_FLAGS = {
     "competition_attribution_mismatch",
