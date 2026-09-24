@@ -451,6 +451,11 @@ def participant_payload(
             "logo": logo,
             "source_name": source_name or shown,
             "country_id": country if isinstance(country, str) and len(country) <= 3 else None,
+            "country_ids": [
+                str(value)
+                for value in (raw.get("country_ids") or [])
+                if isinstance(value, str) and 1 < len(value.strip()) <= 3
+            ] or None,
         }
     name = clean_participant_name(str(raw or ""), sport=sport_id, competition_country=competition_country)
     from collector.participant_alias import canonical_display_name
