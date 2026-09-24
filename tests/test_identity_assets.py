@@ -172,6 +172,12 @@ def test_verified_hrnsw_competition_artwork_uses_official_host():
     assert logo and "hrnsw.com.au" in logo
 
 
+def test_verified_gbgb_competition_artwork_uses_official_host():
+    logo = verified_competition_logo("greyhound-racing", "gbgb-meetings", {})
+    assert logo and "www.gbgb.org.uk" in logo
+    assert logo.endswith("/logo.png")
+
+
 def test_opendota_event_preserves_real_league_name_on_stable_professional_key():
     event = opendota_event(
         {
