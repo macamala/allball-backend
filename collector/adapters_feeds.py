@@ -233,6 +233,22 @@ class FifaFootballAdapter:
         }
 
 
+def _nhl_team_logo(team: Dict[str, Any]) -> str:
+    direct = _asset_url(team)
+    if direct:
+        return direct
+    abbrev = str(team.get("abbrev") or "").strip().upper()
+    return f"https://assets.nhle.com/logos/nhl/svg/{abbrev}_light.svg" if abbrev else ""
+
+
+def _mlb_team_logo(team: Dict[str, Any]) -> str:
+    direct = _asset_url(team)
+    if direct:
+        return direct
+    team_id = str(team.get("id") or "").strip()
+    return f"https://www.mlbstatic.com/team-logos/{team_id}.svg" if team_id else ""
+
+
 class NhlAdapter:
     adapter_key = "nhl-web"
     source_id = "nhl-web"
@@ -312,14 +328,21 @@ class NhlAdapter:
                     )
         event = {
             "id": f"nhl:{row.get('id')}",
-            "home": _feed_team(home, home.get("abbrev") or place.get("default") or ""),
-            "away": _feed_team(away, away.get("abbrev") or away_place.get("default") or ""),
+            "home": {
+                **_feed_team(home, home.get("abbrev") or place.get("default") or ""),
+                "logo": _nhl_team_logo(home),
+            },
+            "away": {
+                **_feed_team(away, away.get("abbrev") or away_place.get("default") or ""),
+                "logo": _nhl_team_logo(away),
+            },
             "status": status,
             "source_status": state or status,
             "score": score,
             "start_time": row.get("startTimeUTC"),
             "venue": venue.get("default"),
             "competition": "nhl",
+            "competition_logo": "https://assets.nhle.com/logos/nhl/svg/NHL_light.svg",
             "sport": "ice-hockey",
             "source_family": "nhl-web",
             "source_event_id": str(row.get("id") or ""),
@@ -416,14 +439,23 @@ class MlbAdapter:
             )
         event = {
             "id": f"mlb:{row.get('gamePk')}",
-            "home": {"id": str(home.get("id") or ""), "name": home.get("name") or ""},
-            "away": {"id": str(away.get("id") or ""), "name": away.get("name") or ""},
+            "home": {
+                "id": str(home.get("id") or ""),
+                "name": home.get("name") or "",
+                "logo": _mlb_team_logo(home),
+            },
+            "away": {
+                "id": str(away.get("id") or ""),
+                "name": away.get("name") or "",
+                "logo": _mlb_team_logo(away),
+            },
             "status": status,
             "source_status": status_block.get("detailedState") or abstract or status,
             "score": score,
             "start_time": row.get("gameDate"),
             "venue": (row.get("venue") or {}).get("name"),
             "competition": "mlb",
+            "competition_logo": "https://www.mlbstatic.com/team-logos/league-on-light/1.svg",
             "sport": "baseball",
             "source_family": "mlb-statsapi",
             "source_event_id": str(row.get("gamePk") or ""),
