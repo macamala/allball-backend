@@ -831,6 +831,7 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
 
             rebuild_watch_set(db)
             db.commit()
+            _pulse_creator_lease()
             try:
                 from collector.backfill import run_if_due
 
