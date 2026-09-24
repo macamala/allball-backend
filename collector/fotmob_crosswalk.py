@@ -10,7 +10,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, object_session
 
 from collector.adapters_fotmob import (
     FOTMOB_LEAGUES,
@@ -327,12 +327,14 @@ def _fill_identity_assets(row: SportsEvent, parsed: Dict[str, Any]) -> bool:
         row.participants_json = dump_json(participants)
         row.extra_json = dump_json(extra)
         store_list_extra(row, extra)
-        note_list_invalidation(
-            db=row._sa_instance_state.session,
+        session = object_session(row)
+        if session is not None:
+            note_list_invalidation(
+            db=session,
             sport=row.sport_id,
             competition=row.competition_id,
             start_time=row.start_time,
-        )
+            )
     return changed
 
 
@@ -410,6 +412,26 @@ def crosswalk_fotmob_ids(
         .filter(SportsEvent.start_time >= bound)
         .all()
     )
+
+    # Exact-ID enrichment first: if a canonical row already carries a FotMob
+    # match id, attach artwork directly from the matching date-board row.
+    # This avoids any competition/name ambiguity and prioritizes what users
+    # actually see today/upcoming.
+    parsed_by_id: Dict[str, Dict[str, Any]] = {}
+    for match in matches:
+        competition_id, _league_id, _league_name, _ccode = _fotmob_competition_identity(match)
+        if not competition_id:
+            continue
+        parsed = match_to_event(match, competition_id)
+        if parsed and parsed.get("source_event_id"):
+            parsed_by_id[str(parsed["source_event_id"])] = parsed
+
+    direct_asset_updates = 0
+    for row in keepers:
+        fid = families_with_ids(load_json(row.extra_json, {}) or {}).get("fotmob")
+        parsed = parsed_by_id.get(str(fid)) if fid else None
+        if parsed and _fill_identity_assets(row, parsed):
+            direct_asset_updates += 1
     by_comp: Dict[str, List[SportsEvent]] = {}
     for row in keepers:
         by_comp.setdefault(row.competition_id, []).append(row)
@@ -464,6 +486,8 @@ def crosswalk_fotmob_ids(
         ambiguous,
         skipped_conflict,
     )
+    if direct_asset_updates:
+        logger.info("fotmob_exact_id_asset_updates=%s", direct_asset_updates)
     return {
         "upstream_total": upstream_total,
         "upstream_eligible": eligible,
@@ -472,6 +496,7 @@ def crosswalk_fotmob_ids(
         "ingested": ingested,
         "ambiguous": ambiguous,
         "protected_conflicts": skipped_conflict,
+        "direct_asset_updates": direct_asset_updates,
     }
 
 
