@@ -251,6 +251,7 @@ def public_multisport_day_snapshot(day_offset: int = 1, *, include_samples: bool
         )
 
     assets_by_sport: Dict[str, Dict[str, int]] = {}
+    asset_gaps: Dict[str, List[Dict[str, Any]]] = {}
     for row in events:
         sport = str(row.get("sport") or "unknown")
         bucket = assets_by_sport.setdefault(
@@ -278,6 +279,25 @@ def public_multisport_day_snapshot(day_offset: int = 1, *, include_samples: bool
             bucket["side_countries"] += countries
             bucket["events_with_both_side_logos"] += int(logos == 2)
             bucket["events_with_both_side_countries"] += int(countries == 2)
+            missing_competition_logo = not bool(row.get("competition_logo"))
+            missing_side_logos = [side_name for side_name, side in (("home", home), ("away", away)) if not _side_logo(side)]
+            if missing_competition_logo or missing_side_logos:
+                gaps = asset_gaps.setdefault(sport, [])
+                if len(gaps) < 16:
+                    gaps.append(
+                        {
+                            "id": row.get("id"),
+                            "competition": row.get("competition_name") or row.get("competition"),
+                            "competition_key": row.get("competition_key"),
+                            "home": home.get("name"),
+                            "home_id": home.get("id"),
+                            "away": away.get("name"),
+                            "away_id": away.get("id"),
+                            "missing_competition_logo": missing_competition_logo,
+                            "missing_side_logos": missing_side_logos,
+                            "utc": row.get("start_time"),
+                        }
+                    )
 
     distinct_competitions: Dict[str, int] = {}
     for sport in sport_counts:
@@ -298,6 +318,7 @@ def public_multisport_day_snapshot(day_offset: int = 1, *, include_samples: bool
         "sports": dict(sport_counts.most_common()),
         "competitions_by_sport": distinct_competitions,
         "assets_by_sport": assets_by_sport,
+        "asset_gaps": asset_gaps,
         "samples": samples,
     }
 
