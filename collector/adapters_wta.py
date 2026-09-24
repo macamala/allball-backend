@@ -125,6 +125,58 @@ def _country_for_side(row: Dict[str, Any], prefix: str, name: str, player_countr
     return lookup.get(f"name:{_fold_player_name(name)}", "")
 
 
+def _countries_for_side(
+    row: Dict[str, Any],
+    prefix: str,
+    name: str,
+    player_countries: Optional[Dict[str, str]],
+) -> List[str]:
+    """Return every known nationality for a singles player or doubles pair.
+
+    WTA doubles rows can expose the partner as A2/B2. Preserve both countries
+    when available from the match row or the tournament player catalogue.
+    """
+    lookup = player_countries or {}
+    countries: List[str] = []
+
+    for suffix in ("", "2"):
+        country = (
+            row.get(f"CountryCode{prefix}{suffix}")
+            or row.get(f"Country{prefix}{suffix}")
+            or row.get(f"PlayerCountryCode{prefix}{suffix}")
+            or row.get(f"PlayerCountry{prefix}{suffix}")
+            or row.get(f"Nationality{prefix}{suffix}")
+        )
+        if country in (None, ""):
+            player_id = (
+                row.get(f"PlayerID{prefix}{suffix}")
+                or row.get(f"PlayerId{prefix}{suffix}")
+                or row.get(f"Player{prefix}ID{suffix}")
+                or row.get(f"Player{prefix}Id{suffix}")
+            )
+            if player_id not in (None, ""):
+                country = lookup.get(f"id:{player_id}", "")
+
+        if country in (None, ""):
+            first = str(row.get(f"PlayerNameFirst{prefix}{suffix}") or "").strip()
+            last = str(row.get(f"PlayerNameLast{prefix}{suffix}") or "").strip()
+            member_name = " ".join(part for part in (first, last) if part)
+            if member_name:
+                country = lookup.get(f"name:{_fold_player_name(member_name)}", "")
+
+        value = str(country or "").strip()
+        if value and value not in countries:
+            countries.append(value)
+
+    # Some WTA payloads omit A2/B2 country fields while the tournament player
+    # catalogue still knows both names. Use the displayed pair as a final,
+    # conservative lookup and only add countries that resolve exactly.
+    for value in _countries_for_name(name, player_countries):
+        if value and value not in countries:
+            countries.append(value)
+    return countries
+
+
 def match_to_event(
     row: Dict[str, Any],
     competition_id: str,
@@ -165,17 +217,13 @@ def match_to_event(
             or row.get(f"Player{prefix}Id1")
             or row.get(f"Player{prefix}ID1")
         )
-        country = _country_for_side(row, prefix, side["name"], player_countries)
+        country_ids = _countries_for_side(row, prefix, side["name"], player_countries)
         if player_id not in (None, ""):
             side["id"] = str(player_id)
-        if country not in (None, ""):
-            side["country_id"] = str(country)
-        else:
-            country_ids = _countries_for_name(side["name"], player_countries)
-            if len(country_ids) == 1:
-                side["country_id"] = country_ids[0]
-            elif country_ids:
-                side["country_ids"] = country_ids
+        if len(country_ids) == 1:
+            side["country_id"] = country_ids[0]
+        elif country_ids:
+            side["country_ids"] = country_ids
         if seed not in (None, ""):
             side["seed"] = seed
         if rank not in (None, ""):
