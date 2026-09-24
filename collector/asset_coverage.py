@@ -127,7 +127,7 @@ def asset_coverage_payload(db) -> Dict[str, Any]:
                 bucket = participant_seen[key]
                 current = bucket.get(participant_key) or {"name": name, "logo": False, "sources": set()}
                 current["logo"] = current["logo"] or _has_logo(side)
-                source_family = str(extra.get("source_family") or row.extra_json and "unknown" or "unknown")
+                source_family = str(extra.get("source_family") or "unknown")
                 if source_family:
                     current.setdefault("sources", set()).add(source_family)
                 bucket[participant_key] = current
