@@ -73,6 +73,7 @@ DETAIL_FAMILIES = (
     "wst-web",
     "ufc-web",
     "eurohockey-web",
+    "fiba-web",
 )
 
 
@@ -509,6 +510,200 @@ def parse_fotmob_details(payload: Any) -> Dict[str, Any]:
             "shots": len(shots),
             "shots_on_target": sum(1 for shot in shots if isinstance(shot, dict) and shot.get("isOnTarget")),
         }
+    return out
+
+
+def _fiba_clean(value: Any) -> Any:
+    return None if value == "$undefined" else value
+
+
+def parse_fiba_game_detail(html: str) -> Dict[str, Any]:
+    from collector.fiba_breadth import decoded_flight_chunks, find_dicts
+
+    node = None
+    for payload in decoded_flight_chunks(html or ""):
+        hits = find_dicts(payload, {"game", "playersTeamA", "gameDetails"})
+        if hits:
+            node = hits[0]
+            break
+    if not isinstance(node, dict):
+        return {}
+
+    out: Dict[str, Any] = {}
+    game = node.get("game") if isinstance(node.get("game"), dict) else {}
+    details = node.get("gameDetails") if isinstance(node.get("gameDetails"), dict) else {}
+    teams = details.get("c") if isinstance(details.get("c"), list) else []
+    home_team = teams[0] if len(teams) > 0 and isinstance(teams[0], dict) else {}
+    away_team = teams[1] if len(teams) > 1 and isinstance(teams[1], dict) else {}
+
+    # Team box score -> common statistics rows.
+    labels = (
+        ("PTS", "Points"),
+        ("REB", "Rebounds"),
+        ("OR", "Offensive rebounds"),
+        ("DR", "Defensive rebounds"),
+        ("AS", "Assists"),
+        ("ST", "Steals"),
+        ("BS", "Blocks"),
+        ("TO", "Turnovers"),
+        ("PF", "Fouls"),
+        ("FGM", "Field goals made"),
+        ("FGA", "Field goals attempted"),
+        ("FG2M", "2PT made"),
+        ("FG2A", "2PT attempted"),
+        ("FG3M", "3PT made"),
+        ("FG3A", "3PT attempted"),
+        ("FTM", "Free throws made"),
+        ("FTA", "Free throws attempted"),
+    )
+    home_stats = home_team.get("Stats") if isinstance(home_team.get("Stats"), dict) else {}
+    away_stats = away_team.get("Stats") if isinstance(away_team.get("Stats"), dict) else {}
+    statistics = []
+    for key, label in labels:
+        left = _fiba_clean(home_stats.get(key))
+        right = _fiba_clean(away_stats.get(key))
+        if left is None and right is None:
+            continue
+        statistics.append({"label": label, "home": left, "away": right})
+    if statistics:
+        out["statistics"] = statistics
+
+    # PBP periods contain cumulative scores. Convert to points scored in each
+    # quarter / overtime so Match Centre can render proper period rows.
+    pbp = node.get("playByPlay") if isinstance(node.get("playByPlay"), dict) else {}
+    periods_blob = pbp.get("items") if isinstance(pbp.get("items"), dict) else {}
+    periods = []
+    incidents = []
+    prev_home = prev_away = 0
+    for period_key, block in periods_blob.items():
+        if not isinstance(block, dict):
+            continue
+        try:
+            cum_home = int(_fiba_clean(block.get("scoreA")) or 0)
+            cum_away = int(_fiba_clean(block.get("scoreB")) or 0)
+            periods.append({
+                "label": str(block.get("name") or period_key),
+                "home": cum_home - prev_home,
+                "away": cum_away - prev_away,
+            })
+            prev_home, prev_away = cum_home, cum_away
+        except (TypeError, ValueError):
+            pass
+        for action in block.get("items") or []:
+            if not isinstance(action, dict):
+                continue
+            text = _fiba_clean(action.get("txt"))
+            action_type = str(_fiba_clean(action.get("act")) or _fiba_clean(action.get("ac")) or "event")
+            if not text and action_type == "event":
+                continue
+            home_score = _fiba_clean(action.get("SA"))
+            away_score = _fiba_clean(action.get("SB"))
+            incidents.append({
+                "type": action_type,
+                "period": str(block.get("name") or period_key),
+                "minute": _fiba_clean(action.get("Time")),
+                "player_id": _fiba_clean(action.get("pId")),
+                "text": text,
+                "score_after": {"home": home_score, "away": away_score}
+                if home_score is not None or away_score is not None
+                else None,
+            })
+    if periods:
+        out["periods"] = periods
+    if incidents:
+        out["incidents"] = incidents
+
+    # Join roster metadata to box-score children on person id.
+    def roster_map(key: str) -> Dict[str, Dict[str, Any]]:
+        roster = {}
+        for player in node.get(key) or []:
+            if not isinstance(player, dict):
+                continue
+            pid = str(_fiba_clean(player.get("personId")) or "").replace("P_", "")
+            if not pid:
+                continue
+            name = " ".join(
+                part for part in (
+                    str(_fiba_clean(player.get("firstName")) or "").strip(),
+                    str(_fiba_clean(player.get("lastName")) or "").strip(),
+                )
+                if part
+            ).strip()
+            roster[pid] = {
+                "id": pid,
+                "name": name or str(_fiba_clean(player.get("shortName")) or pid),
+                "number": _fiba_clean(player.get("uniformNumber")),
+                "position": _fiba_clean(player.get("position")),
+                "captain": bool(_fiba_clean(player.get("isCaptain"))),
+            }
+        return roster
+
+    home_roster = roster_map("playersTeamA")
+    away_roster = roster_map("playersTeamB")
+    player_stats = []
+    lineups = {"home": {"start": [], "bench": []}, "away": {"start": [], "bench": []}}
+
+    def add_side(team: Dict[str, Any], roster: Dict[str, Dict[str, Any]], side: str) -> None:
+        for child in team.get("Children") or []:
+            if not isinstance(child, dict):
+                continue
+            pid = str(_fiba_clean(child.get("Id")) or "").replace("P_", "")
+            meta = dict(roster.get(pid) or {"id": pid, "name": pid})
+            stats = child.get("Stats") if isinstance(child.get("Stats"), dict) else {}
+            starter = bool(_fiba_clean(stats.get("Starter")))
+            played = bool(_fiba_clean(stats.get("HasPlayed")))
+            lineup_row = {**meta, "starter": starter, "has_played": played}
+            lineups[side]["start" if starter else "bench"].append(lineup_row)
+            player_stats.append({
+                **meta,
+                "side": side,
+                "starter": starter,
+                "minutes": _fiba_clean(stats.get("MIN")) or _fiba_clean(stats.get("Minutes")),
+                "points": _fiba_clean(stats.get("PTS")),
+                "rebounds": _fiba_clean(stats.get("REB")),
+                "offensive_rebounds": _fiba_clean(stats.get("OR")),
+                "defensive_rebounds": _fiba_clean(stats.get("DR")),
+                "assists": _fiba_clean(stats.get("AS")),
+                "steals": _fiba_clean(stats.get("ST")),
+                "blocks": _fiba_clean(stats.get("BS")),
+                "turnovers": _fiba_clean(stats.get("TO")),
+                "fouls": _fiba_clean(stats.get("PF")),
+                "fgm": _fiba_clean(stats.get("FGM")),
+                "fga": _fiba_clean(stats.get("FGA")),
+                "fg3m": _fiba_clean(stats.get("FG3M")),
+                "fg3a": _fiba_clean(stats.get("FG3A")),
+                "ftm": _fiba_clean(stats.get("FTM")),
+                "fta": _fiba_clean(stats.get("FTA")),
+                "efficiency": _fiba_clean(stats.get("EFF")),
+                "plus_minus": _fiba_clean(stats.get("PM")),
+            })
+
+    add_side(home_team, home_roster, "home")
+    add_side(away_team, away_roster, "away")
+    if any(lineups[side]["start"] or lineups[side]["bench"] for side in ("home", "away")):
+        out["lineups"] = lineups
+    if player_stats:
+        out["player_statistics"] = player_stats
+
+    officials = []
+    for key in ("officials", "referees"):
+        values = node.get(key) or details.get(key) or game.get(key) or []
+        if isinstance(values, dict):
+            values = list(values.values())
+        for item in values if isinstance(values, list) else []:
+            if isinstance(item, dict):
+                name = item.get("name") or item.get("fullName")
+                if name:
+                    officials.append({"name": name, "role": item.get("role") or item.get("type")})
+            elif item:
+                officials.append({"name": str(item)})
+    if officials:
+        out["officials"] = officials
+
+    out["sport_detail"] = {
+        "play_by_play_actions": len(incidents),
+        "game_id": str(game.get("gameId") or ""),
+    }
     return out
 
 
@@ -1015,7 +1210,7 @@ def _merge_detail(base: Dict[str, Any], part: Dict[str, Any]) -> Dict[str, Any]:
     return base
 
 
-def fetch_family_detail(family: str, source_event_id: str, getter=None, sport: str = "") -> Dict[str, Any]:
+def fetch_family_detail(family: str, source_event_id: str, getter=None, sport: str = "", context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     getter = getter or fetch_url
     family = (family or "").lower()
     out: Dict[str, Any] = {}
@@ -1074,6 +1269,14 @@ def fetch_family_detail(family: str, source_event_id: str, getter=None, sport: s
             rows = parse_sofa_standings(standings.payload)
             if rows:
                 out["classification"] = rows
+        return out
+    if family == "fiba-web":
+        url = str((context or {}).get("fiba_game_url") or "").strip()
+        if not url:
+            return out
+        result = _get(getter, url)
+        if result.ok and isinstance(result.payload, str):
+            out.update(parse_fiba_game_detail(result.payload))
         return out
     if family == "mlb-statsapi":
         result = _get(getter, MLB_FEED.format(game_pk=source_event_id.replace("mlb:", "")))
@@ -1237,12 +1440,12 @@ def enrich_event_row(db: Session, row: SportsEvent, getter=None) -> None:
 
     def _one(item):
         family, source_id = item
-        return family, fetch_family_detail(family, source_id, getter=getter, sport=str(row.sport_id or ""))
+        return family, fetch_family_detail(family, source_id, getter=getter, sport=str(row.sport_id or ""), context=extra)
 
     if len(jobs) == 1:
         family, source_id = jobs[0]
         if not (family in tried and _fresh(extra, row.status or "") and extra.get("detail_empty") is False):
-            _merge_detail(detail, fetch_family_detail(family, source_id, getter=getter, sport=str(row.sport_id or "")))
+            _merge_detail(detail, fetch_family_detail(family, source_id, getter=getter, sport=str(row.sport_id or ""), context=extra))
             used.append(family)
     else:
         with ThreadPoolExecutor(max_workers=min(3, len(jobs))) as pool:
