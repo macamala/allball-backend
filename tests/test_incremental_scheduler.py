@@ -951,3 +951,42 @@ def test_missing_competition_live_job_is_marked_so_it_leaves_due_queue(monkeypat
         db.close()
         reset_family_health()
 
+
+
+
+def test_unused_live_reservation_is_donated_to_starved_background():
+    now = datetime(2026, 9, 24, 10, 0, 0)
+    jobs = [
+        {
+            "job_key": "refresh:live-one:live_scores",
+            "competition_id": "live-one",
+            "family": "live-one-family",
+            "urgency": "LIVE",
+            "priority": 1,
+            "request_key": "live-one-family|live",
+            "last_run_at": now - timedelta(seconds=120),
+            "next_due_at": now - timedelta(seconds=60),
+        }
+    ]
+    for index in range(12):
+        jobs.append(
+            {
+                "job_key": f"refresh:bg-{index}:fixtures",
+                "competition_id": f"bg-{index}",
+                "family": f"background-{index}",
+                "urgency": "TODAY",
+                "priority": 4,
+                "request_key": f"background-{index}|url",
+                "last_run_at": None,
+                "next_due_at": None,
+            }
+        )
+
+    groups, stats = select_fair_groups(jobs, now, max_physical=12)
+    live_groups = [group for group in groups if group[0]["urgency"] == "LIVE"]
+    background_groups = [group for group in groups if group[0]["urgency"] == "TODAY"]
+
+    assert len(live_groups) == 1
+    assert len(background_groups) == MAX_BACKGROUND_PHYSICAL
+    assert stats["selected_groups"] == 1 + MAX_BACKGROUND_PHYSICAL
+    assert stats["live_families_starved"] == 0
