@@ -428,13 +428,27 @@ def participant_payload(
         from collector.participant_alias import canonical_display_name
 
         shown = canonical_display_name(name, sport=sport_id)
+        logo = (
+            raw.get("logo")
+            or raw.get("image")
+            or raw.get("crest")
+            or raw.get("badge")
+            or raw.get("team_logo")
+            or raw.get("teamLogo")
+            or raw.get("logo_url")
+            or raw.get("logoUrl")
+            or raw.get("image_url")
+            or raw.get("imageUrl")
+            or raw.get("emblem")
+            or raw.get("icon")
+        )
         return {
             "id": raw.get("id") or "",
             "slug": raw.get("slug") or "",
             "name": shown,
             "display_name": shown,
             "side": side,
-            "logo": raw.get("logo") or raw.get("image"),
+            "logo": logo,
             "source_name": source_name or shown,
             "country_id": country if isinstance(country, str) and len(country) <= 3 else None,
         }
