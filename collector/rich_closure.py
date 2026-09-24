@@ -1088,14 +1088,14 @@ _HOCKEY_MONTHS = {
     "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
 }
 _UFC_RESULT = re.compile(
-    r"([A-Z][\w'’. -]{1,48}?) defeated ([A-Z][\w'’. -]{1,48}?) by ([A-Za-z ]{2,40}?)"
+    r"^([A-Z][\w'’. -]{1,48}?) defeated ([A-Z][\w'’. -]{1,48}?) by ([A-Za-z ]{2,40}?)"
     r"(?: \(([^)]+)\))?(?: at (\d+:\d{2}) of Round (\d+))?$"
 )
 _UFC_DEFEATS_STOP = re.compile(
-    r"([A-Z][\w'’. -]{1,48}?) defeats ([A-Z][\w'’. -]{1,48}?) by ([A-Za-z]+), (?:(?!Round )([A-Za-z ]+?), )?Round (\d+), (\d+:\d{2})"
+    r"^([A-Z][\w'’. -]{1,48}?) defeats ([A-Z][\w'’. -]{1,48}?) by ([A-Za-z]+), (?:(?!Round )([A-Za-z ]+?), )?Round (\d+), (\d+:\d{2})$"
 )
 _UFC_DEFEATS_DECISION = re.compile(
-    r"([A-Z][\w'’. -]{1,48}?) defeats ([A-Z][\w'’. -]{1,48}?) by ([A-Za-z ]{2,40}?) \(([^)]+)\)"
+    r"^([A-Z][\w'’. -]{1,48}?) defeats ([A-Z][\w'’. -]{1,48}?) by ([A-Za-z ]{2,40}?) \(([^)]+)\)$"
 )
 _ROME_TEAMS = ("croatia", "czechia", "italy", "portugal", "scotland", "switzerland", "turkiye", "ukraine")
 
@@ -1336,6 +1336,30 @@ def parse_wst_frames(html: str) -> Dict[str, Any]:
     return {"sport_detail": {"games": games, "best_of": len(games)}}
 
 
+_UFC_PROMO_NAME = re.compile(
+    r"\b(?:free fight|full fight|live now|stories|crypto\.com|dana white|just happened|"
+    r"watch now|highlights?|preview|recap|results?|fight pass|ufc|vs\.?|tickets?)\b",
+    re.I,
+)
+
+
+def _valid_ufc_fighter_name(value: Any) -> bool:
+    name = re.sub(r"\s+", " ", str(value or "")).strip(" -–—")
+    if not name or len(name) > 55:
+        return False
+    if _UFC_PROMO_NAME.search(name):
+        return False
+    if re.search(r"https?://|www\.|[@#]|\d{2,}", name, re.I):
+        return False
+    tokens = [tok for tok in name.split() if tok]
+    if len(tokens) < 2 or len(tokens) > 6:
+        return False
+    # A fighter name should be overwhelmingly alphabetic/name punctuation.
+    if not all(re.fullmatch(r"[A-Za-zÀ-ÖØ-öø-ÿ'’.\-]+", tok) for tok in tokens):
+        return False
+    return True
+
+
 def parse_ufc_results(html: str) -> Dict[str, Any]:
     text = re.sub(r"<script[\s\S]*?</script>", " ", html or "", flags=re.I)
     text = re.sub(r"<[^>]+>", "\n", text)
@@ -1343,7 +1367,7 @@ def parse_ufc_results(html: str) -> Dict[str, Any]:
     seen = set()
     for line in text.split("\n"):
         line = re.sub(r"\s+", " ", line).strip()
-        match = _UFC_RESULT.search(line) or _UFC_DEFEATS_STOP.search(line) or _UFC_DEFEATS_DECISION.search(line)
+        match = _UFC_RESULT.fullmatch(line) or _UFC_DEFEATS_STOP.fullmatch(line) or _UFC_DEFEATS_DECISION.fullmatch(line)
         if not match:
             continue
         groups = match.groups()
@@ -1354,6 +1378,10 @@ def parse_ufc_results(html: str) -> Dict[str, Any]:
             clock, rnd = "", None
         else:
             winner, loser, method, detail, clock, rnd = groups
+        winner = re.sub(r"\s+", " ", winner).strip()
+        loser = re.sub(r"\s+", " ", loser).strip()
+        if not _valid_ufc_fighter_name(winner) or not _valid_ufc_fighter_name(loser):
+            continue
         key = (winner, loser)
         if key in seen:
             continue
