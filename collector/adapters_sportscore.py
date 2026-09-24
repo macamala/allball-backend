@@ -345,8 +345,18 @@ def match_to_event(row: Dict[str, Any], competition_id: str) -> Optional[Dict[st
     source_event_id = slug or str(row.get("id") or row.get("match_id") or "")
     event = {
         "id": row.get("url") or (f"sportscore:{source_event_id}" if source_event_id else f"sportscore:{competition_id}:{home}:{away}:{row.get('time')}"),
-        "home": {"name": home, "logo": row.get("home_logo")},
-        "away": {"name": away, "logo": row.get("away_logo")},
+        "home": {
+            "id": str(row.get("home_id") or row.get("home_team_id") or ""),
+            "name": home,
+            "logo": row.get("home_logo") or row.get("home_badge") or row.get("home_image"),
+            "country_id": row.get("home_country_code") or row.get("home_country") or row.get("home_nationality"),
+        },
+        "away": {
+            "id": str(row.get("away_id") or row.get("away_team_id") or ""),
+            "name": away,
+            "logo": row.get("away_logo") or row.get("away_badge") or row.get("away_image"),
+            "country_id": row.get("away_country_code") or row.get("away_country") or row.get("away_nationality"),
+        },
         "status": status,
         "score": score,
         "start_time": row.get("time"),
@@ -357,6 +367,7 @@ def match_to_event(row: Dict[str, Any], competition_id: str) -> Optional[Dict[st
         "source_event_id": source_event_id or None,
         "source_event_ids": {"sportscore": source_event_id} if source_event_id else {},
         "source_competition_id": row.get("competition"),
+        "competition_logo": row.get("competition_logo") or row.get("league_logo") or row.get("tournament_logo"),
         "extra": {
             "attribution": ATTRIBUTION,
             "upstream_family": "thesports",
