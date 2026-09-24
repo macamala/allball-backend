@@ -28,6 +28,51 @@ F1_STREAM = "https://livetiming.formula1.com/static/StreamStatus.json"
 WA_COMPETITIONS = "https://api.worldaquatics.com/fina/competitions?pageSize=40"
 
 
+def _asset_url(node: Any) -> str:
+    if not isinstance(node, dict):
+        return ""
+    for key in ("logo", "logoUrl", "image", "imageUrl", "badge", "crest", "teamLogo", "icon"):
+        value = node.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        if isinstance(value, dict):
+            href = value.get("url") or value.get("href") or value.get("src")
+            if isinstance(href, str) and href.strip():
+                return href.strip()
+    for key in ("logos", "images", "assets"):
+        rows = node.get(key)
+        if isinstance(rows, list):
+            for item in rows:
+                if isinstance(item, dict):
+                    href = item.get("url") or item.get("href") or item.get("src")
+                    if isinstance(href, str) and href.strip():
+                        return href.strip()
+    return ""
+
+
+def _cfl_squad_assets(payload: Any) -> Dict[str, str]:
+    out: Dict[str, str] = {}
+    stack = [payload]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, dict):
+            logo = _asset_url(node)
+            keys = [
+                node.get("id"), node.get("squadId"), node.get("teamId"),
+                node.get("abbreviation"), node.get("abbr"), node.get("shortName"),
+                node.get("name"),
+            ]
+            if logo:
+                for value in keys:
+                    text = str(value or "").strip().lower()
+                    if text:
+                        out[text] = logo
+            stack.extend(node.values())
+        elif isinstance(node, list):
+            stack.extend(node)
+    return out
+
+
 def _filter(events: List[Dict[str, Any]], capability: str) -> List[Dict[str, Any]]:
     if capability in {"snapshot", "event", "live"}:
         return events
@@ -57,10 +102,14 @@ class CflScoreboardAdapter:
         if not rounds.ok:
             return rounds
         payload = rounds.payload
-        events = self._events(payload)
+        squad_assets: Dict[str, str] = {}
+        squads = self._get(CFL_SQUADS)
+        if squads.ok:
+            squad_assets = _cfl_squad_assets(squads.payload)
+        events = self._events(payload, squad_assets=squad_assets)
         return FetchResult(ok=True, http_status=rounds.http_status, events=_filter(events, request.capability))
 
-    def _events(self, payload: Any) -> List[Dict[str, Any]]:
+    def _events(self, payload: Any, squad_assets: Optional[Dict[str, str]] = None) -> List[Dict[str, Any]]:
         events: List[Dict[str, Any]] = []
         rows = payload
         if isinstance(payload, dict):
@@ -72,12 +121,12 @@ class CflScoreboardAdapter:
                 continue
             games = round_row.get("tournaments") or round_row.get("games") or round_row.get("matches") or []
             for game in games:
-                event = self._game(game)
+                event = self._game(game, squad_assets=squad_assets)
                 if event:
                     events.append(event)
         return events
 
-    def _game(self, game: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def _game(self, game: Dict[str, Any], squad_assets: Optional[Dict[str, str]] = None) -> Optional[Dict[str, Any]]:
         home = game.get("homeSquad") or game.get("home") or game.get("team1") or game.get("homeTeam") or {}
         away = game.get("awaySquad") or game.get("away") or game.get("team2") or game.get("awayTeam") or {}
         if not isinstance(home, dict):
@@ -107,10 +156,24 @@ class CflScoreboardAdapter:
             score["clock"] = clock
         if period not in (None, ""):
             score["period"] = period
+        assets = squad_assets or {}
+        def squad_logo(side: Dict[str, Any], name: str) -> str:
+            direct = _asset_url(side)
+            if direct:
+                return direct
+            for value in (
+                side.get("id"), side.get("squadId"), side.get("teamId"),
+                side.get("abbreviation"), side.get("abbr"), side.get("shortName"), name,
+            ):
+                key = str(value or "").strip().lower()
+                if key and assets.get(key):
+                    return assets[key]
+            return ""
+
         return {
             "id": f"cfl:{game.get('id') or game.get('gameId') or home_name}-{away_name}",
-            "home": {"id": str(home.get("id") or ""), "name": str(home_name)},
-            "away": {"id": str(away.get("id") or ""), "name": str(away_name)},
+            "home": {"id": str(home.get("id") or ""), "name": str(home_name), "logo": squad_logo(home, str(home_name))},
+            "away": {"id": str(away.get("id") or ""), "name": str(away_name), "logo": squad_logo(away, str(away_name))},
             "status": status,
             "score": score,
             "start_time": game.get("startTime") or game.get("date") or game.get("kickoff"),
