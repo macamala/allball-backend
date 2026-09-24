@@ -17,6 +17,7 @@ from collector.models import SportsEvent, SportsStandingSnapshot
 from collector.participant_text import fold_for_identity
 from sports_registry.geography import get_geo
 from collector.util import dump_json, load_json
+from collector.verified_participant_assets import verified_participant_logo
 
 
 TEAM_FAMILIES = {"team_match", "esports_match"}
@@ -440,6 +441,7 @@ def propagate_identity_assets(db) -> Dict[str, int]:
         "standing_participant_logos_filled": 0,
         "standing_participant_countries_filled": 0,
         "national_team_countries_filled": 0,
+        "verified_participant_logos_filled": 0,
     }
 
     # Pass 2: fill blanks only. Never overwrite a non-empty value.
@@ -557,6 +559,12 @@ def propagate_identity_assets(db) -> Dict[str, int]:
             if not known:
                 continue
             merged = dict(side)
+            verified_logo = verified_participant_logo(sport, merged)
+            if verified_logo and not _asset(merged).get("logo"):
+                merged["logo"] = verified_logo
+                stats["participant_logos_filled"] += 1
+                stats["verified_participant_logos_filled"] += 1
+                row_changed = True
             if known.get("logo") and not _asset(merged).get("logo"):
                 merged["logo"] = known["logo"]
                 stats["participant_logos_filled"] += 1
