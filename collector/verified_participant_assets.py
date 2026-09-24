@@ -19,6 +19,8 @@ _VERIFIED_FOOTBALL_COMPETITIONS: Dict[str, str] = {
     "football-alg-ligue-1": "https://images.fotmob.com/image_resources/logo/leaguelogo/516.png",
     "football-col-liga-femenina": "https://img.sofascore.com/api/v1/unique-tournament/18555/image",
     "colombia-primera-a": "https://images.fotmob.com/image_resources/logo/leaguelogo/274.png",
+    "womens-super-league": "https://img.sofascore.com/api/v1/unique-tournament/1044/image",
+    "uruguay-primera": "https://images.fotmob.com/image_resources/logo/leaguelogo/161.png",
 }
 
 
