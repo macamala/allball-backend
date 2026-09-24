@@ -644,6 +644,38 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
                     _maybe_log_breadth(db, force=True)
             except Exception:
                 logger.exception("FotMob date-board backfill failed")
+                db.rollback()
+
+            try:
+                from collector.fotmob_asset_backfill import run_if_due as run_fotmob_asset_backfill_if_due
+
+                def _pulse_fotmob_assets() -> None:
+                    heartbeat_scheduler_lock(db, owner=owner)
+                    db.commit()
+
+                fotmob_assets = run_fotmob_asset_backfill_if_due(
+                    db,
+                    heartbeat=_pulse_fotmob_assets,
+                )
+                if fotmob_assets:
+                    logger.info(
+                        "FotMob identity asset backfill %s",
+                        {
+                            "status": fotmob_assets.get("status"),
+                            "leagues": fotmob_assets.get("leagues"),
+                            "requests": fotmob_assets.get("requests"),
+                            "rows_updated": fotmob_assets.get("rows_updated"),
+                            "participants_filled": fotmob_assets.get("participants_filled"),
+                            "competition_logos_filled": fotmob_assets.get("competition_logos_filled"),
+                            "http_errors": fotmob_assets.get("http_errors"),
+                            "by_competition": fotmob_assets.get("by_competition"),
+                        },
+                    )
+                    if fotmob_assets.get("rows_updated"):
+                        _maybe_log_breadth(db, force=True)
+            except Exception:
+                logger.exception("FotMob identity asset backfill failed")
+                db.rollback()
 
             try:
                 from collector.atp_official_probe import run_if_due as run_atp_official_probe_if_due
