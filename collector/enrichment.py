@@ -216,8 +216,6 @@ def is_display_eligible(event: Dict[str, Any]) -> bool:
         "name_is_date",
         "name_is_time",
         "name_is_score",
-        "numeric_table_cell",
-        "source_text_contamination",
         "html_in_name",
         "generic_heading",
         "url_in_name",
