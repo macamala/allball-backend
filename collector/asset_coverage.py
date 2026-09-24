@@ -167,6 +167,37 @@ def asset_coverage_payload(db) -> Dict[str, Any]:
         output.append(item)
 
     output.sort(key=lambda row: (row["asset_complete"], row["sport"], row["competition"]))
+    by_sport: Dict[str, Dict[str, int]] = {}
+    for row in output:
+        sport = str(row.get("sport") or "unknown")
+        bucket = by_sport.setdefault(
+            sport,
+            {
+                "competitions": 0,
+                "asset_complete": 0,
+                "missing_competition_logo": 0,
+                "missing_required_country_flag": 0,
+                "team_participants_missing_logo": 0,
+                "individual_participants_missing_country": 0,
+            },
+        )
+        bucket["competitions"] += 1
+        bucket["asset_complete"] += int(bool(row.get("asset_complete")))
+        bucket["missing_competition_logo"] += int(not row.get("competition_logo_present"))
+        bucket["missing_required_country_flag"] += int(
+            bool(row.get("country_flag_required")) and not row.get("country_flag_present")
+        )
+        bucket["team_participants_missing_logo"] += max(
+            0,
+            int(row.get("observed_team_participants") or 0)
+            - int(row.get("team_participants_with_logo") or 0),
+        )
+        bucket["individual_participants_missing_country"] += max(
+            0,
+            int(row.get("observed_individual_participants") or 0)
+            - int(row.get("individual_participants_with_country") or 0),
+        )
+
     summary = {
         "competitions": len(output),
         "asset_complete": sum(1 for row in output if row["asset_complete"]),
@@ -184,5 +215,6 @@ def asset_coverage_payload(db) -> Dict[str, Any]:
         "competitions_with_participant_flag_gaps": sum(
             1 for row in output if not row["participant_flags_complete"]
         ),
+        "by_sport": by_sport,
     }
     return {"summary": summary, "competitions": output}
