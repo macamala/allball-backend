@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 import time
 from collections import Counter, defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy.exc import OperationalError
@@ -301,6 +301,106 @@ def _mutate_row(row: SportsEvent, quarantine: set, repair: set) -> bool:
     if dirty:
         row.extra_json = dump_json(extra)
     return dirty
+
+
+def restore_orphaned_duplicate_football(
+    db: Session,
+    *,
+    days_back: int = 3,
+    days_forward: int = 14,
+) -> Dict[str, Any]:
+    """Restore one trusted recent football row when duplicate quarantine hid the whole fixture.
+
+    A duplicate is only safely hidden when another public canonical row represents
+    the same participant pair/date cluster. This guard never creates an extra public
+    copy when a keeper is already visible.
+    """
+    now = datetime.utcnow()
+    rows = (
+        db.query(SportsEvent)
+        .filter(
+            SportsEvent.sport_id == "football",
+            SportsEvent.start_time >= now - timedelta(days=days_back),
+            SportsEvent.start_time <= now + timedelta(days=days_forward),
+        )
+        .all()
+    )
+    clusters: Dict[Any, List[SportsEvent]] = defaultdict(list)
+    for row in rows:
+        key = _cluster_key(_sides(row))
+        if key:
+            clusters[key].append(row)
+
+    restored: List[str] = []
+    for cluster_rows in clusters.values():
+        def _extra(row: SportsEvent) -> Dict[str, Any]:
+            return load_json(row.extra_json, {}) or {}
+
+        public = [
+            row
+            for row in cluster_rows
+            if row.display_eligible is not False
+            and _extra(row).get("display_eligible") is not False
+            and not row.canonical_event_id
+            and not _extra(row).get("canonical_event_id")
+        ]
+        if public:
+            continue
+
+        candidates = []
+        for row in cluster_rows:
+            extra = _extra(row)
+            flags = {str(flag) for flag in (extra.get("quality_flags") or [])}
+            family = str(extra.get("source_family") or "").strip().lower()
+            method = str(extra.get("resolution_method") or "").strip().lower()
+            if "duplicate_or_contaminated" not in flags:
+                continue
+            if family not in PROTECTED_SOURCE_NATIVE_FOOTBALL_FAMILIES:
+                continue
+            if method not in {
+                "mapping_request_trusted",
+                "source_native_revalidated",
+                "source_native_preserved",
+                "recovered_mapping_owned",
+            } and not extra.get("source_native_revalidated_at"):
+                continue
+            event = _sides(row)
+            if not is_display_eligible(event):
+                continue
+            candidates.append((row, extra))
+
+        if not candidates:
+            continue
+
+        candidates.sort(
+            key=lambda item: (
+                1 if item[1].get("source_event_id") else 0,
+                1 if item[1].get("source_competition_id") else 0,
+                item[0].updated_at or datetime.min,
+                str(item[0].event_id or ""),
+            ),
+            reverse=True,
+        )
+        row, extra = candidates[0]
+        flags = [flag for flag in (extra.get("quality_flags") or []) if flag != "duplicate_or_contaminated"]
+        extra["quality_flags"] = flags
+        extra["display_eligible"] = True
+        extra["quarantine_disposition"] = "RESTORED_ORPHAN_DUPLICATE"
+        extra["orphan_duplicate_restored_at"] = datetime.utcnow().isoformat() + "Z"
+        extra.pop("canonical_event_id", None)
+        row.display_eligible = True
+        row.canonical_event_id = None
+        row.extra_json = dump_json(extra)
+        restored.append(row.event_id)
+
+    if restored:
+        db.flush()
+        cache_clear(db, prefix="events:")
+    return {
+        "scanned_clusters": len(clusters),
+        "restored": len(restored),
+        "restored_ids": restored[:50],
+    }
 
 
 def apply_backfill(db: Session, plan: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
