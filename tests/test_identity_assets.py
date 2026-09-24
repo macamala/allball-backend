@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 
 from collector.dirty import event_unchanged, observation_signature
-from collector.breadth_audit import _visible_identity_requirement
+from collector.breadth_audit import _side_is_composite_pair, _visible_identity_requirement
 from collector.opendota_asset_backfill import _fill_side as fill_opendota_side, _parse_catalog as parse_opendota_catalog
 from collector.merge import merge_event_fields
 from collector.participant_text import participant_payload
@@ -153,3 +153,17 @@ def test_opendota_logo_fill_never_overwrites_or_name_matches():
     wrong_id, changed = fill_opendota_side({"id": "123", "name": "Xtreme Gaming"}, asset)
     assert changed is False
     assert not wrong_id.get("logo")
+
+
+
+def test_national_team_competition_accepts_country_identity():
+    assert _visible_identity_requirement({
+        "event_family": "team_match",
+        "sport": "volleyball",
+        "competition_key": "cev-eurovolley-men",
+    }) == "country"
+
+
+def test_mixed_doubles_side_does_not_require_one_synthetic_country():
+    assert _side_is_composite_pair({"name": "Maja Chwalinska / Barbora Krejcikova"}) is True
+    assert _side_is_composite_pair({"name": "Maria Timofeeva"}) is False
