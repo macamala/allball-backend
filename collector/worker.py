@@ -454,6 +454,35 @@ def _maybe_log_breadth(db, *, force: bool = False) -> None:
         from collector.asset_coverage import asset_coverage_payload
         asset_coverage = asset_coverage_payload(db)
         logger.info("IDENTITY_ASSET_COVERAGE %s", asset_coverage.get("summary") or {})
+        asset_rows = [
+            row
+            for row in (asset_coverage.get("competitions") or [])
+            if not row.get("asset_complete")
+        ]
+        asset_rows.sort(
+            key=lambda row: (
+                -(
+                    max(
+                        0,
+                        int(row.get("observed_team_participants") or 0)
+                        - int(row.get("team_participants_with_logo") or 0),
+                    )
+                    + max(
+                        0,
+                        int(row.get("observed_individual_participants") or 0)
+                        - int(row.get("individual_participants_with_country") or 0),
+                    )
+                    + (6 if not row.get("competition_logo_present") else 0)
+                    + (
+                        4
+                        if row.get("country_flag_required") and not row.get("country_flag_present")
+                        else 0
+                    )
+                ),
+                str(row.get("sport") or ""),
+                str(row.get("competition") or ""),
+            )
+        )
         asset_gaps = [
             {
                 "sport": row.get("sport"),
@@ -465,9 +494,8 @@ def _maybe_log_breadth(db, *, force: bool = False) -> None:
                 "missing": (row.get("missing_participants") or [])[:8],
                 "missing_countries": (row.get("missing_country_participants") or [])[:8],
             }
-            for row in (asset_coverage.get("competitions") or [])
-            if not row.get("asset_complete")
-        ][:30]
+            for row in asset_rows[:40]
+        ]
         if asset_gaps:
             logger.info("IDENTITY_ASSET_GAPS %s", asset_gaps)
         _breadth_logged_at = now_audit
