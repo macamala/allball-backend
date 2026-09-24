@@ -60,6 +60,7 @@ def _team(node: Any) -> Dict[str, str]:
     return {
         "id": str(node.get("teamId") or ""),
         "name": node.get("teamName") or node.get("shortName") or "",
+        "logo": node.get("teamIconUrl") or node.get("teamIconURL") or node.get("logo"),
     }
 
 
