@@ -84,6 +84,34 @@ def find_dicts(obj: Any, required: Set[str], *, limit: int = 10000) -> List[Dict
     return found
 
 
+def _asset_href(node: Any) -> str:
+    if not isinstance(node, dict):
+        return ""
+    for key in ("logo", "image", "logoUrl", "imageUrl", "badge", "crest", "thumbnail"):
+        value = _clean(node.get(key))
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        if isinstance(value, dict):
+            href = value.get("href") or value.get("url") or value.get("src")
+            if isinstance(href, str) and href.strip():
+                return href.strip()
+    for key in ("logos", "images", "media", "assets"):
+        values = node.get(key)
+        if isinstance(values, list):
+            for item in values:
+                if isinstance(item, dict):
+                    href = item.get("href") or item.get("url") or item.get("src")
+                    if isinstance(href, str) and href.strip():
+                        return href.strip()
+    for key in ("organisation", "organization", "team", "club"):
+        nested = node.get(key)
+        if isinstance(nested, dict):
+            href = _asset_href(nested)
+            if href:
+                return href
+    return ""
+
+
 def parse_event_index(html: str) -> List[Dict[str, Any]]:
     events: Dict[str, Dict[str, Any]] = {}
     for payload in decoded_flight_chunks(html):
@@ -109,6 +137,7 @@ def parse_event_index(html: str) -> List[Dict[str, Any]]:
                 "city": city,
                 "gender": str(_clean(item.get("gender")) or _clean(item.get("fibaGender")) or "").strip(),
                 "zone": str(_clean(item.get("fibaSource")) or "").strip(),
+                "logo": _asset_href(item) or None,
             }
     return sorted(events.values(), key=lambda row: (row.get("start") or "", row["slug"]))
 
@@ -219,6 +248,11 @@ def game_to_event(game: Dict[str, Any], event_meta: Optional[Dict[str, Any]] = N
 
     comp = _clean(game.get("competition")) or {}
     zone = comp.get("fibaZone") if isinstance(comp, dict) else None
+    competition_logo = (
+        _asset_href(comp)
+        or _asset_href(game.get("event") if isinstance(game.get("event"), dict) else {})
+        or str((event_meta or {}).get("logo") or "").strip()
+    )
     country = str(
         _clean(game.get("hostCountry"))
         or (event_meta or {}).get("country")
@@ -249,6 +283,7 @@ def game_to_event(game: Dict[str, Any], event_meta: Optional[Dict[str, Any]] = N
         "fiba_home_code": home_code or None,
         "fiba_away_code": away_code or None,
         "fiba_game_url": game_url,
+        "competition_logo": competition_logo or None,
     }
     return {
         "id": f"fiba:{gid}",
@@ -261,13 +296,18 @@ def game_to_event(game: Dict[str, Any], event_meta: Optional[Dict[str, Any]] = N
         "source_family": "fiba-web",
         "source_competition_id": source_competition_id,
         "source_competition_name": competition_name,
+        "competition_logo": competition_logo or None,
         "home": {
             "id": str(_clean(team_a.get("organisationId")) or _clean(team_a.get("teamId")) or "").strip(),
             "name": home_name,
+            "logo": _asset_href(team_a) or None,
+            "country_id": str(_clean(team_a.get("countryCode")) or _clean(team_a.get("country")) or "").strip() or None,
         },
         "away": {
             "id": str(_clean(team_b.get("organisationId")) or _clean(team_b.get("teamId")) or "").strip(),
             "name": away_name,
+            "logo": _asset_href(team_b) or None,
+            "country_id": str(_clean(team_b.get("countryCode")) or _clean(team_b.get("country")) or "").strip() or None,
         },
         "status": status,
         "score": {"home": home_score, "away": away_score},
