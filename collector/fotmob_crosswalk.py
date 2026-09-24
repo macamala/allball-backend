@@ -22,6 +22,7 @@ from collector.adapters_fotmob import (
 from collector.competition_identity import unique_label_competition
 from collector.identity_events import identity_confidence
 from collector.competition_presentation import SOURCE_ALPHA3_TO_GEO
+from collector.cache import note_list_invalidation
 from collector.list_extra import store_list_extra
 from collector.lock import lock_status
 from collector.models import SportsCollectorJob, SportsCompetition, SportsEvent, SportsSource, SportsSourceCompetition
@@ -326,6 +327,12 @@ def _fill_identity_assets(row: SportsEvent, parsed: Dict[str, Any]) -> bool:
         row.participants_json = dump_json(participants)
         row.extra_json = dump_json(extra)
         store_list_extra(row, extra)
+        note_list_invalidation(
+            db=row._sa_instance_state.session,
+            sport=row.sport_id,
+            competition=row.competition_id,
+            start_time=row.start_time,
+        )
     return changed
 
 
