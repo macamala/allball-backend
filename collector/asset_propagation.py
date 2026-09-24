@@ -68,11 +68,18 @@ def _asset(side: Any) -> Dict[str, str]:
         or side.get("nationality")
         or ""
     ).strip()
-    out: Dict[str, str] = {}
+    countries = [
+        str(value).strip()
+        for value in (side.get("country_ids") or [])
+        if str(value).strip()
+    ]
+    out: Dict[str, Any] = {}
     if logo:
         out["logo"] = logo
     if country:
         out["country_id"] = country
+    if countries:
+        out["country_ids"] = list(dict.fromkeys(countries))
     return out
 
 
@@ -108,6 +115,8 @@ def propagate_identity_assets(db) -> Dict[str, int]:
                     current["logo"] = observed["logo"]
                 if observed.get("country_id") and not current.get("country_id"):
                     current["country_id"] = observed["country_id"]
+                if observed.get("country_ids") and not current.get("country_ids"):
+                    current["country_ids"] = observed["country_ids"]
 
     stats = {
         "rows_scanned": len(rows),
@@ -146,6 +155,8 @@ def propagate_identity_assets(db) -> Dict[str, int]:
                     known["logo"] = candidate["logo"]
                 if candidate.get("country_id") and not known.get("country_id"):
                     known["country_id"] = candidate["country_id"]
+                if candidate.get("country_ids") and not known.get("country_ids"):
+                    known["country_ids"] = candidate["country_ids"]
             if not known:
                 continue
             merged = dict(side)
@@ -155,6 +166,10 @@ def propagate_identity_assets(db) -> Dict[str, int]:
                 row_changed = True
             if known.get("country_id") and not _asset(merged).get("country_id"):
                 merged["country_id"] = known["country_id"]
+                stats["participant_countries_filled"] += 1
+                row_changed = True
+            if known.get("country_ids") and not _asset(merged).get("country_ids"):
+                merged["country_ids"] = known["country_ids"]
                 stats["participant_countries_filled"] += 1
                 row_changed = True
             participants[side_name] = merged
