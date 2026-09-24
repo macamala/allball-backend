@@ -31,7 +31,7 @@ from sports_registry.geography import label_for
 
 logger = logging.getLogger(__name__)
 
-DATE_BOARD_JOB = "fotmob-date-boards-v4"
+DATE_BOARD_JOB = "fotmob-date-boards-v5"
 _YOUTH = ("u17", "u18", "u19", "u20", "u21", "u23", "youth", "junior")
 _WOMEN = ("women", "womens", "woms")
 _RESERVE = ("reserve", " ii", "2nd", "b team")
@@ -139,13 +139,28 @@ def _ensure_dynamic_fotmob_mapping(
         )
         db.add(competition)
         db.flush()
-    source = (
-        db.query(SportsSource)
-        .filter(SportsSource.adapter_key == "fotmob", SportsSource.enabled.is_(True))
-        .first()
-    )
+    source = db.query(SportsSource).filter_by(source_id="fotmob-global", enabled=True).first()
     if source is None:
         return None
+
+    # v4 accidentally used the first enabled FotMob source in the database,
+    # which could be a competition-specific source (for example Albania).
+    # Disable only those dynamically-created legacy mappings; verified static
+    # competition mappings are left untouched.
+    legacy_dynamic = (
+        db.query(SportsSourceCompetition)
+        .filter(
+            SportsSourceCompetition.competition_id == competition_id,
+            SportsSourceCompetition.source_id != source.source_id,
+            SportsSourceCompetition.upstream_family == "fotmob",
+            SportsSourceCompetition.coverage_notes == "FotMob source-native daily-board breadth",
+            SportsSourceCompetition.enabled.is_(True),
+        )
+        .all()
+    )
+    for legacy in legacy_dynamic:
+        legacy.enabled = False
+
     mapping = (
         db.query(SportsSourceCompetition)
         .filter_by(competition_id=competition_id, source_id=source.source_id)
@@ -155,7 +170,7 @@ def _ensure_dynamic_fotmob_mapping(
         mapping = SportsSourceCompetition(
             competition_id=competition_id,
             source_id=source.source_id,
-            priority=900,
+            priority=40,
             source_competition_id=league_id,
             enabled=True,
             coverage_scope="full",
