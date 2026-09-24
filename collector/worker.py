@@ -451,6 +451,56 @@ def _maybe_log_breadth(db, *, force: bool = False) -> None:
                 logger.exception("FIFA identity reconcile failed")
                 db.rollback()
 
+        # Artwork repair is safe to run before the scheduler lease because it
+        # only fills blank asset fields. This lets a fresh deployment repair the
+        # public scoreboard even while an older worker still owns the collect lock.
+        if writes_enabled():
+            try:
+                from collector.fotmob_asset_backfill import run_if_due as run_fotmob_assets_prelock
+
+                fotmob_assets = run_fotmob_assets_prelock(db)
+                if fotmob_assets:
+                    logger.info(
+                        "PRELOCK_FOTMOB_ASSETS %s",
+                        {
+                            "status": fotmob_assets.get("status"),
+                            "leagues": fotmob_assets.get("leagues"),
+                            "requests": fotmob_assets.get("requests"),
+                            "rows_updated": fotmob_assets.get("rows_updated"),
+                            "participants_filled": fotmob_assets.get("participants_filled"),
+                            "competition_logos_filled": fotmob_assets.get("competition_logos_filled"),
+                            "http_errors": fotmob_assets.get("http_errors"),
+                            "by_competition": fotmob_assets.get("by_competition"),
+                        },
+                    )
+            except Exception:
+                logger.exception("Pre-lock FotMob artwork repair failed")
+                db.rollback()
+
+            try:
+                from collector.thesportsdb_asset_backfill import run_if_due as run_tsdb_assets_prelock
+
+                tsdb_assets = run_tsdb_assets_prelock(db)
+                if tsdb_assets:
+                    logger.info(
+                        "PRELOCK_TSDB_ASSETS %s",
+                        {
+                            "status": tsdb_assets.get("status"),
+                            "leagues": tsdb_assets.get("leagues"),
+                            "requests": tsdb_assets.get("requests"),
+                            "rows_updated": tsdb_assets.get("rows_updated"),
+                            "participants_filled": tsdb_assets.get("participants_filled"),
+                            "competition_logos_filled": tsdb_assets.get("competition_logos_filled"),
+                            "http_errors": tsdb_assets.get("http_errors"),
+                            "direct_team_requests": tsdb_assets.get("direct_team_requests"),
+                            "direct_name_requests": tsdb_assets.get("direct_name_requests"),
+                            "by_competition": tsdb_assets.get("by_competition"),
+                        },
+                    )
+            except Exception:
+                logger.exception("Pre-lock TheSportsDB artwork repair failed")
+                db.rollback()
+
         from collector.breadth_audit import (
             tomorrow_football_snapshot,
             tomorrow_public_football_snapshot,
