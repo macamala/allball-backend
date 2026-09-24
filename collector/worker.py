@@ -819,13 +819,17 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
                 db.commit()
                 db.info["registry_bootstrapped"] = True
 
-            # FOOTBALL SCORE LANE: score/status freshness must never wait behind
-            # artwork, breadth, standings, creator or enrichment maintenance.
-            # Use the proven incremental scheduler unchanged, then keep looping
-            # on the score lane while any public football event is in its
-            # kickoff/live window.
+            # Football score/status gets the first, tiny request budget.
+            # This lane is FotMob-only and live-ish-only so a slow unrelated
+            # football provider can never block current scores.
             if scheduler_enabled():
-                score_summary = run_incremental_tick(db, sport_id="football")
+                score_summary = run_incremental_tick(
+                    db,
+                    sport_id="football",
+                    source_family="fotmob",
+                    liveish_only=True,
+                    max_physical=2,
+                )
                 db.commit()
                 logger.info(
                     "FOOTBALL_SCORE_LANE %s",
@@ -842,38 +846,26 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
                         "duration_s",
                     )},
                 )
-                from datetime import datetime, timedelta
-                from collector.models import SportsEvent
 
-                score_now = datetime.utcnow()
-                hot_football = (
-                    db.query(SportsEvent)
-                    .filter(
-                        SportsEvent.canonical_event_id.is_(None),
-                        SportsEvent.sport_id == "football",
-                        SportsEvent.display_eligible.isnot(False),
-                        SportsEvent.start_time >= score_now - timedelta(hours=5),
-                        SportsEvent.start_time <= score_now + timedelta(minutes=20),
-                        SportsEvent.status.in_((
-                            "scheduled",
-                            "delayed",
-                            "live",
-                            "halftime",
-                            "break",
-                            "stale",
-                        )),
-                    )
-                    .count()
+                # Give every sport a bounded live-ish pass before any expensive
+                # asset/breadth maintenance. Background/discovery stays out.
+                live_summary = run_incremental_tick(
+                    db,
+                    liveish_only=True,
+                    max_physical=6,
                 )
-                logger.info("FOOTBALL_SCORE_WINDOW hot=%s", hot_football)
-                if hot_football:
-                    heartbeat_scheduler_lock(db, owner=owner)
-                    db.commit()
-                    if advisory:
-                        postgres_advisory_unlock(db)
-                        advisory = None
-                    time.sleep(max(5, min(15, live_idle_seconds(interval))))
-                    continue
+                db.commit()
+                logger.info(
+                    "ALLSPORT_LIVE_LANE %s",
+                    {k: live_summary.get(k) for k in (
+                        "due_jobs",
+                        "selected_jobs",
+                        "families_selected",
+                        "sports_selected",
+                        "events_changed",
+                        "duration_s",
+                    )},
+                )
 
             try:
                 from collector.source_identity_repair import repair_source_identity_leaks

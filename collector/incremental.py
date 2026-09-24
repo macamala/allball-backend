@@ -643,7 +643,7 @@ def mark_slot(db: Session, job: Dict[str, Any], *, status: str, http_calls: int 
     row.priority = int(job.get("priority") or 50)
 
 
-def run_incremental_tick(db: Session, *, sleeper=None, now: Optional[datetime] = None, sport_id: Optional[str] = None) -> Dict[str, Any]:
+def run_incremental_tick(\n    db: Session,\n    *,\n    sleeper=None,\n    now: Optional[datetime] = None,\n    sport_id: Optional[str] = None,\n    source_family: Optional[str] = None,\n    liveish_only: bool = False,\n    max_physical: Optional[int] = None,\n) -> Dict[str, Any]:
     """Execute due incremental jobs. Kill switch: scheduler off returns immediately."""
     import time
 
@@ -669,7 +669,20 @@ def run_incremental_tick(db: Session, *, sleeper=None, now: Optional[datetime] =
     due = build_due_jobs(db, now=now)
     if sport_id:
         due = [job for job in due if str(job.get("sport") or "") == str(sport_id)]
-    groups, schedule = select_fair_groups(due, now)
+    if source_family:
+        due = [job for job in due if str(job.get("family") or "") == str(source_family)]
+    if liveish_only:
+        due = [
+            job for job in due
+            if str(job.get("urgency") or "") in {
+                "LIVE", "LIVE_CANDIDATE", "IMMINENT", "RECENTLY_FINISHED"
+            }
+        ]
+    groups, schedule = select_fair_groups(
+        due,
+        now,
+        max_physical=max_physical if max_physical is not None else MAX_PHYSICAL,
+    )
     groups = sorted(
         groups,
         key=lambda group: (
@@ -838,6 +851,8 @@ def run_incremental_tick(db: Session, *, sleeper=None, now: Optional[datetime] =
         "due_jobs": schedule["due_jobs"],
         "selected_jobs": schedule["selected_jobs"],
         "sport_filter": sport_id,
+        "source_family_filter": source_family,
+        "liveish_only": liveish_only,
         "oldest_due_age_s": schedule["oldest_due_age_s"],
         "families_selected": schedule["families_selected"],
         "sports_selected": schedule["sports_selected"],
