@@ -336,6 +336,18 @@ def test_ufc_method_round_and_time():
     assert paris_rows[2].get("time") in (None, "")
 
 
+def test_ufc_parser_rejects_promo_text_as_fighters():
+    html = """
+    <p>Payton Talbott Free Fight Full Fight defeats Raul Rosas Jr. by KO, Round 1, 2:54</p>
+    <p>Barcelos Live now Stories Crypto.com UFC defeats Van by TKO, Round 2, 1:10</p>
+    <p>Raoni Barcelos defeats Raul Rosas Jr. by Unanimous Decision (30-27, 30-27, 29-28)</p>
+    """
+    rows = parse_ufc_results(html)["classification"]
+    assert len(rows) == 1
+    assert rows[0]["name"] == "Raoni Barcelos"
+    assert rows[0]["team"] == "Raul Rosas Jr."
+
+
 def test_eurohockey_rome_identity_and_standings():
     page = """
     <a href="/calendar/event?id=c4d5b17a-29e1-4398-9bb0-72551b896742">EuroHockey Championship Qualifier I Men 2026 Rome</a>
