@@ -12,6 +12,7 @@ from collector.zero_event_closeout import (
     parse_pll_schedule,
     parse_pll_standings,
     parse_vnl_match,
+    zero_event_collectors,
     tennis_identity,
 )
 
