@@ -177,3 +177,69 @@ def test_standings_logo_propagates_into_matching_event_team():
     finally:
         db.rollback()
         db.close()
+
+
+
+def test_sofascore_native_ids_backfill_artwork_only_in_sofascore_context():
+    db = _session()
+    ids = ["ninko-evt-sofa-assets", "ninko-evt-not-sofa-assets"]
+    try:
+        db.query(SportsEvent).filter(SportsEvent.event_id.in_(ids)).delete(synchronize_session=False)
+        db.add(
+            SportsEvent(
+                event_id=ids[0],
+                sport_id="handball",
+                competition_id="test-sofa-assets",
+                event_family="team_match",
+                status="scheduled",
+                fingerprint="fp-sofa-assets",
+                primary_source_id="sofascore-global",
+                participants_json=dump_json({
+                    "home": {"id": "123", "name": "Alpha HC"},
+                    "away": {"id": "456", "name": "Beta HC"},
+                }),
+                extra_json=dump_json({
+                    "source_family": "sofascore-web",
+                    "source_competition_id": "987",
+                    "sofascore_tournament_id": "987",
+                }),
+                display_eligible=True,
+            )
+        )
+        db.add(
+            SportsEvent(
+                event_id=ids[1],
+                sport_id="handball",
+                competition_id="test-other-assets-2",
+                event_family="team_match",
+                status="scheduled",
+                fingerprint="fp-not-sofa-assets",
+                primary_source_id="other-provider",
+                participants_json=dump_json({
+                    "home": {"id": "123", "name": "Other Alpha"},
+                    "away": {"id": "456", "name": "Other Beta"},
+                }),
+                extra_json=dump_json({
+                    "source_family": "other",
+                    "source_competition_id": "987",
+                }),
+                display_eligible=True,
+            )
+        )
+        db.flush()
+        propagate_identity_assets(db)
+
+        sofa = db.get(SportsEvent, ids[0])
+        parts = load_json(sofa.participants_json, {}) or {}
+        extra = load_json(sofa.extra_json, {}) or {}
+        assert parts["home"]["logo"].endswith("/team/123/image")
+        assert extra["competition_logo"].endswith("/unique-tournament/987/image")
+
+        other = db.get(SportsEvent, ids[1])
+        other_parts = load_json(other.participants_json, {}) or {}
+        other_extra = load_json(other.extra_json, {}) or {}
+        assert not other_parts["home"].get("logo")
+        assert not other_extra.get("competition_logo")
+    finally:
+        db.rollback()
+        db.close()
