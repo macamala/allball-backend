@@ -16,7 +16,7 @@ from collector.models import SportsReadCache
 from collector.util import dump_json, load_json
 from sports_registry.cache_policy import policy_for
 
-LIST_CACHE_VERSION = "p0v29"
+LIST_CACHE_VERSION = "p0v30"
 LIST_PREFIX = f"events:{LIST_CACHE_VERSION}|"
 _DAY = re.compile(r"(\d{4}-\d{2}-\d{2})")
 
@@ -44,6 +44,11 @@ def cache_get(db: Session, key: str, now: Optional[datetime] = None) -> Any:
 
 def cache_set(db: Session, key: str, payload: Any, policy_key: str) -> None:
     ttl = int(policy_for(policy_key).get("ttl_seconds") or 300)
+    # A score-centre day board changes throughout the day. Even if an
+    # invalidation is delayed during a worker handover, never let a list
+    # snapshot stay authoritative for five minutes.
+    if key.startswith(LIST_PREFIX) and policy_key == "upcoming_fixtures":
+        ttl = min(ttl, 60)
     expires = datetime.utcnow() + timedelta(seconds=ttl)
     row = db.query(SportsReadCache).filter_by(cache_key=key).first()
     raw = dump_json(payload)
