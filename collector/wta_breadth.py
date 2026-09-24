@@ -9,11 +9,19 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Any, Callable, Dict, Optional, Set
+from typing import Any, Callable, Dict, List, Optional, Set
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from collector.adapters_wta import BASE, _player_country_map, discover_current_tournaments, match_to_event
+from collector.adapters_wta import (
+    BASE,
+    _countries_for_name,
+    _player_country_map,
+    discover_current_tournaments,
+    match_to_event,
+)
+from collector.cache import note_list_invalidation
 from collector.competition_identity import unique_label_competition
 from collector.http import fetch_url
 from collector.lock import lock_status
@@ -182,6 +190,121 @@ def _event_in_window(event: Dict[str, Any], *, low: datetime, high: datetime) ->
     return low <= stamp <= high
 
 
+def _merge_country_index(
+    target: Dict[str, str],
+    incoming: Dict[str, str],
+    ambiguous: Set[str],
+) -> None:
+    """Merge exact WTA player-country keys without accepting conflicts."""
+    for key, country in (incoming or {}).items():
+        value = str(country or "").strip()
+        if not key or not value or key in ambiguous:
+            continue
+        previous = target.get(key)
+        if previous and previous != value:
+            target.pop(key, None)
+            ambiguous.add(key)
+            continue
+        target[key] = value
+
+
+def _side_has_country(side: Any) -> bool:
+    if not isinstance(side, dict):
+        return False
+    if str(side.get("country_id") or side.get("country") or "").strip():
+        return True
+    return any(str(value or "").strip() for value in (side.get("country_ids") or []))
+
+
+def _repair_visible_wta_countries(
+    db: Session,
+    *,
+    player_countries: Dict[str, str],
+    low: datetime,
+    high: datetime,
+) -> Dict[str, int]:
+    """Fill blank WTA participant countries from official active player lists.
+
+    This is identity-only. It never changes score, status, start time,
+    competition identity, or event visibility.
+    """
+    stats = {
+        "rows_scanned": 0,
+        "rows_updated": 0,
+        "participant_sides_filled": 0,
+    }
+    if not player_countries:
+        return stats
+
+    rows = (
+        db.query(SportsEvent)
+        .filter(
+            SportsEvent.sport_id == "tennis",
+            or_(SportsEvent.display_eligible.is_(True), SportsEvent.display_eligible.is_(None)),
+            SportsEvent.start_time >= low,
+            SportsEvent.start_time <= high,
+        )
+        .all()
+    )
+    for row in rows:
+        extra = load_json(row.extra_json, {}) or {}
+        source_family = str(extra.get("source_family") or "").strip().lower()
+        primary = str(row.primary_source_id or "").strip().lower()
+        competition = str(row.competition_id or "").strip().lower()
+        is_wta = (
+            primary.startswith("wta")
+            or source_family.startswith("wta")
+            or competition == "wta-tour"
+            or competition.startswith("tennis-wta-")
+        )
+        if not is_wta:
+            continue
+
+        stats["rows_scanned"] += 1
+        participants = load_json(row.participants_json, {}) or {}
+        changed = False
+        for side_name, mirror_name in (("home", "participant_a"), ("away", "participant_b")):
+            side = participants.get(side_name)
+            if not isinstance(side, dict) or _side_has_country(side):
+                continue
+            name = str(side.get("display_name") or side.get("name") or "").strip()
+            countries = _countries_for_name(name, player_countries)
+            if not countries:
+                continue
+            merged = dict(side)
+            if len(countries) == 1:
+                merged["country_id"] = countries[0]
+            else:
+                merged["country_ids"] = countries
+            participants[side_name] = merged
+
+            mirror = participants.get(mirror_name)
+            if isinstance(mirror, dict) and not _side_has_country(mirror):
+                mirror_merged = dict(mirror)
+                if len(countries) == 1:
+                    mirror_merged["country_id"] = countries[0]
+                else:
+                    mirror_merged["country_ids"] = countries
+                participants[mirror_name] = mirror_merged
+            changed = True
+            stats["participant_sides_filled"] += 1
+
+        if not changed:
+            continue
+        row.participants_json = dump_json(participants)
+        note_list_invalidation(
+            db,
+            sport=row.sport_id,
+            competition=row.competition_id,
+            start_time=row.start_time,
+        )
+        stats["rows_updated"] += 1
+
+    if stats["rows_updated"]:
+        db.flush()
+    return stats
+
+
 def run_breadth_ingest(
     db: Session,
     *,
@@ -227,9 +350,12 @@ def run_breadth_ingest(
         "ingested": 0,
         "competitions": 0,
         "http_errors": 0,
+        "country_repair": {},
         "by_competition": {},
     }
     competitions: Set[str] = set()
+    global_player_countries: Dict[str, str] = {}
+    ambiguous_player_country_keys: Set[str] = set()
 
     for meta in active:
         group = meta.get("tournamentGroup") if isinstance(meta.get("tournamentGroup"), dict) else {}
@@ -253,6 +379,11 @@ def run_breadth_ingest(
         stats["requests"] += 1
         if getattr(players_result, "ok", False):
             player_countries = _player_country_map(getattr(players_result, "payload", None))
+            _merge_country_index(
+                global_player_countries,
+                player_countries,
+                ambiguous_player_country_keys,
+            )
 
         result = fetch(f"{BASE}/tournaments/{group_id}/{year}/matches")
         stats["requests"] += 1
@@ -325,6 +456,16 @@ def run_breadth_ingest(
             break
 
     stats["competitions"] = len(competitions)
+    stats["country_repair"] = _repair_visible_wta_countries(
+        db,
+        player_countries=global_player_countries,
+        low=low,
+        high=high,
+    )
+    if stats["country_repair"].get("rows_updated"):
+        db.commit()
+        if heartbeat:
+            heartbeat()
     cache_clear(db, prefix="events:")
     job = _job(db)
     job.last_run_at = datetime.utcnow()
