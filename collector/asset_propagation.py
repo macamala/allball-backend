@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Any, Dict, Tuple
 
 from collector.competition_presentation import metadata_for
+from collector.cache import note_list_invalidation
 from collector.list_extra import store_list_extra
 from collector.models import SportsEvent, SportsStandingSnapshot
 from collector.participant_text import fold_for_identity
@@ -579,6 +580,12 @@ def propagate_identity_assets(db) -> Dict[str, int]:
             if extra_changed:
                 row.extra_json = dump_json(extra)
                 store_list_extra(row, extra)
+            note_list_invalidation(
+                db,
+                sport=row.sport_id,
+                competition=row.competition_id,
+                start_time=row.start_time,
+            )
             stats["rows_updated"] += 1
 
     if stats["rows_updated"]:
