@@ -344,6 +344,7 @@ def run_if_due(db: Session, *, getter=None) -> Optional[Dict[str, Any]]:
         "ambiguous_or_unmatched": 0,
         "no_roster": 0,
         "matches": {},
+        "unmatched": [],
     }
 
     roster_cache: Dict[str, set[str]] = {}
@@ -362,6 +363,12 @@ def run_if_due(db: Session, *, getter=None) -> Optional[Dict[str, Any]]:
         allowed_team_ids = roster_cache.get(competition_id) or set()
         if not allowed_team_ids:
             stats["no_roster"] += 1
+            stats["unmatched"].append({
+                "competition": competition_id,
+                "name": name,
+                "occurrences": occurrences,
+                "reason": "no_roster",
+            })
             _last_search[cache_key] = now
             continue
 
@@ -379,6 +386,13 @@ def run_if_due(db: Session, *, getter=None) -> Optional[Dict[str, Any]]:
         )
         if not team:
             stats["ambiguous_or_unmatched"] += 1
+            stats["unmatched"].append({
+                "competition": competition_id,
+                "name": name,
+                "occurrences": occurrences,
+                "reason": "ambiguous_or_unmatched",
+                "roster_size": len(allowed_team_ids),
+            })
             continue
 
         changed_rows, slots = _apply_asset(
