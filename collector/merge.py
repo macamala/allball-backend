@@ -73,6 +73,24 @@ def _prefer(current: Any, incoming: Any, incoming_wins: bool) -> Any:
     return incoming if _filled(incoming) else current
 
 
+def _merge_side(current: Any, incoming: Any, incoming_wins: bool) -> Dict[str, Any]:
+    """Merge participant identity without dropping artwork/country from another source."""
+    cur = dict(current or {}) if isinstance(current, dict) else {}
+    inc = dict(incoming or {}) if isinstance(incoming, dict) else {}
+    if not cur:
+        return inc
+    if not inc:
+        return cur
+    choose_incoming = incoming_wins and _filled(inc.get("name"))
+    primary = inc if choose_incoming else cur
+    secondary = cur if choose_incoming else inc
+    out = dict(primary)
+    for key in ("id", "slug", "name", "display_name", "source_name", "country_id", "logo"):
+        if not _filled(out.get(key)) and _filled(secondary.get(key)):
+            out[key] = secondary.get(key)
+    return out
+
+
 def score_known(score: Any) -> bool:
     if not isinstance(score, dict):
         return False
@@ -251,6 +269,7 @@ def merge_event_fields(
         "session_type",
         "game_id",
         "country_id",
+        "competition_logo",
         "meeting_id",
         "start_time",
         "lineups",
@@ -301,23 +320,26 @@ def merge_event_fields(
             elif not provenance.get(key):
                 provenance[key] = incoming_source_id
     out["live"] = is_live(out.get("status") or "")
-    out["home"] = current.get("home") or incoming.get("home") or {}
-    out["away"] = current.get("away") or incoming.get("away") or {}
-    if incoming_is_higher_priority:
-        if _filled((incoming.get("home") or {}).get("name")):
-            out["home"] = incoming.get("home")
-            provenance["home"] = incoming_source_id
-        if _filled((incoming.get("away") or {}).get("name")):
-            out["away"] = incoming.get("away")
-            provenance["away"] = incoming_source_id
-    elif not _filled((out.get("home") or {}).get("name")) and _filled((incoming.get("home") or {}).get("name")):
-        out["home"] = incoming.get("home")
+    current_home = current.get("home") or {}
+    current_away = current.get("away") or {}
+    incoming_home = incoming.get("home") or {}
+    incoming_away = incoming.get("away") or {}
+    out["home"] = _merge_side(current_home, incoming_home, incoming_is_higher_priority)
+    out["away"] = _merge_side(current_away, incoming_away, incoming_is_higher_priority)
+    if incoming_source_id and _filled(incoming_home.get("name")) and (
+        incoming_is_higher_priority or not _filled(current_home.get("name"))
+    ):
         provenance["home"] = incoming_source_id
-    out["participant_a"] = incoming.get("participant_a") or out.get("home") or current.get("participant_a") or {}
-    out["participant_b"] = incoming.get("participant_b") or out.get("away") or current.get("participant_b") or {}
-    if incoming_is_higher_priority:
-        out["participant_a"] = incoming.get("participant_a") or out.get("home") or {}
-        out["participant_b"] = incoming.get("participant_b") or out.get("away") or {}
+    if incoming_source_id and _filled(incoming_away.get("name")) and (
+        incoming_is_higher_priority or not _filled(current_away.get("name"))
+    ):
+        provenance["away"] = incoming_source_id
+    current_a = current.get("participant_a") or current_home
+    current_b = current.get("participant_b") or current_away
+    incoming_a = incoming.get("participant_a") or incoming_home
+    incoming_b = incoming.get("participant_b") or incoming_away
+    out["participant_a"] = _merge_side(current_a, incoming_a, incoming_is_higher_priority)
+    out["participant_b"] = _merge_side(current_b, incoming_b, incoming_is_higher_priority)
     home_name = (out.get("home") or {}).get("name")
     away_name = (out.get("away") or {}).get("name")
     a_name = (out.get("participant_a") or {}).get("name")
