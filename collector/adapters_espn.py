@@ -177,6 +177,37 @@ def _espn_logo(node: Any) -> str:
     return ""
 
 
+def _espn_country(node: Any) -> str:
+    if not isinstance(node, dict):
+        return ""
+    owners = [node]
+    for key in ("athlete", "team", "competitor"):
+        value = node.get(key)
+        if isinstance(value, dict):
+            owners.append(value)
+    for owner in owners:
+        for key in ("countryCode", "country_code", "nationality", "nation", "country"):
+            value = owner.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+            if isinstance(value, dict):
+                code = (
+                    value.get("abbreviation")
+                    or value.get("code")
+                    or value.get("alpha2")
+                    or value.get("alpha3")
+                    or value.get("name")
+                )
+                if isinstance(code, str) and code.strip():
+                    return code.strip()
+        flag = owner.get("flag")
+        if isinstance(flag, dict):
+            code = flag.get("alt") or flag.get("code") or flag.get("abbreviation")
+            if isinstance(code, str) and code.strip():
+                return code.strip()
+    return ""
+
+
 def _espn_league_logo(leagues: Any, board: Dict[str, Any]) -> str:
     league = leagues[0] if isinstance(leagues, list) and leagues and isinstance(leagues[0], dict) else {}
     for owner in (league, board.get("league") if isinstance(board.get("league"), dict) else {}):
@@ -264,11 +295,13 @@ def parse_espn_scoreboard(payload: Any, *, sport: str = "") -> List[Dict[str, An
                         "id": str(home.get("id") or ((home.get("team") or {}).get("id") if isinstance(home.get("team"), dict) else "") or ""),
                         "name": competitor_name(home) or home.get("displayName") or home.get("abbrev"),
                         "logo": _espn_logo(home),
+                        "country_id": _espn_country(home) or None,
                     },
                     "away": {
                         "id": str(away.get("id") or ((away.get("team") or {}).get("id") if isinstance(away.get("team"), dict) else "") or ""),
                         "name": competitor_name(away) or away.get("displayName") or away.get("abbrev"),
                         "logo": _espn_logo(away),
+                        "country_id": _espn_country(away) or None,
                     },
                     "status": status,
                     "score": {key: value for key, value in score.items() if value is not None},
