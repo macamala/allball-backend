@@ -282,6 +282,12 @@ def _source_tournament_id(row: Dict[str, Any]) -> str:
     return str(source.get("id") or "").strip()
 
 
+def _source_tournament_kind(row: Dict[str, Any]) -> str:
+    tour = row.get("tournament") if isinstance(row.get("tournament"), dict) else {}
+    unique = tour.get("uniqueTournament") if isinstance(tour.get("uniqueTournament"), dict) else {}
+    return "unique-tournament" if unique.get("id") else ("tournament" if tour.get("id") else "")
+
+
 def _source_tournament_name(row: Dict[str, Any]) -> str:
     source = _source_tournament(row)
     return str(source.get("name") or "").strip()
@@ -401,6 +407,7 @@ def sofa_event(row: Dict[str, Any], competition_id: str, sport_id: str) -> Optio
     tour = row.get("tournament") or {}
     unique = tour.get("uniqueTournament") or {}
     source_competition_id = _source_tournament_id(row)
+    source_competition_entity_kind = _source_tournament_kind(row)
     source_competition_name = _source_tournament_name(row) or unique.get("name") or tour.get("name") or competition_id
     source_country = _source_country(row)
     source_season = _source_season(row)
@@ -431,6 +438,7 @@ def sofa_event(row: Dict[str, Any], competition_id: str, sport_id: str) -> Optio
         "source_family": "sofascore-web",
         "source_event_id": str(row.get("id") or ""),
         "source_competition_id": source_competition_id or None,
+        "source_competition_entity_kind": source_competition_entity_kind or None,
         "source_competition_name": source_competition_name,
         "season": source_season_name or None,
         "source_season_id": source_season_id or None,
@@ -442,6 +450,7 @@ def sofa_event(row: Dict[str, Any], competition_id: str, sport_id: str) -> Optio
             "source_event_ids": {"sofascore-web": str(row.get("id") or "")},
             "source_event_id": str(row.get("id") or ""),
             "source_competition_id": source_competition_id or None,
+            "source_competition_entity_kind": source_competition_entity_kind or None,
             "source_competition_name": source_competition_name,
             "source_season_id": source_season_id or None,
             "source_season_name": source_season_name or None,
@@ -484,6 +493,7 @@ def sofa_field_event(row: Dict[str, Any], competition_id: str, sport_id: str) ->
     if isinstance(start, (int, float)):
         start_time = datetime.fromtimestamp(int(start), tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     source_competition_id = _source_tournament_id(row)
+    source_competition_entity_kind = _source_tournament_kind(row)
     source_country = _source_country(row)
     source_season = _source_season(row)
     source_season_id = str(source_season.get("id") or "").strip()
@@ -502,6 +512,7 @@ def sofa_field_event(row: Dict[str, Any], competition_id: str, sport_id: str) ->
         "competition_logo": _competition_logo_url(row),
         "source_family": "sofascore-web",
         "source_competition_id": source_competition_id or None,
+        "source_competition_entity_kind": source_competition_entity_kind or None,
         "source_competition_name": tournament_name,
         "season": source_season_name or None,
         "source_season_id": source_season_id or None,
