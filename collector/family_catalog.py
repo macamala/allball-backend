@@ -52,6 +52,7 @@ JSON_ADAPTERS = {
     "super-rugby-html": "super-rugby-html",
     "eliteprospects": "eliteprospects",
     "volleyballworld": "volleyballworld",
+    "fivb-web": "volleyballworld",
     "cev-competition-area": "cev-competition-area",
     "dataproject-web": "dataproject-web",
     "dataproject-wcm": "dataproject-web",
