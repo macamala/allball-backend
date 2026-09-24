@@ -85,7 +85,7 @@ def _merge_side(current: Any, incoming: Any, incoming_wins: bool) -> Dict[str, A
     primary = inc if choose_incoming else cur
     secondary = cur if choose_incoming else inc
     out = dict(primary)
-    for key in ("id", "slug", "name", "display_name", "source_name", "country_id", "logo"):
+    for key in ("id", "slug", "name", "display_name", "source_name", "country_id", "country_ids", "logo"):
         if not _filled(out.get(key)) and _filled(secondary.get(key)):
             out[key] = secondary.get(key)
     return out
