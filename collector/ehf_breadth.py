@@ -69,6 +69,7 @@ def history_mirror_url(url: str) -> str:
     parsed = urlparse(url)
     path = parsed.path
     path = path.replace("/ec/00-01/cl/", "/ec/cl/")
+    path = path.replace("/ec/00-03/el/", "/ec/el/")
     path = path.replace("/ec/00-03/", "/ec/el/")
     path = path.replace("/ec/00-04/ct/", "/ec/ct/")
     return f"{HISTORY_BASE}{path}"
