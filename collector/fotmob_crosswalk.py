@@ -290,15 +290,55 @@ def _event_view(row: SportsEvent) -> Dict[str, Any]:
     }
 
 
-def _attach(row: SportsEvent, fotmob_id: str) -> bool:
+def _fill_identity_assets(row: SportsEvent, parsed: Dict[str, Any]) -> bool:
+    participants = load_json(row.participants_json, {}) or {}
+    changed = False
+    for key in ("home", "away"):
+        incoming = parsed.get(key) if isinstance(parsed.get(key), dict) else {}
+        current = participants.get(key) if isinstance(participants.get(key), dict) else {}
+        if not current:
+            current = {}
+        merged = dict(current)
+        for field in ("id", "slug", "logo", "country_id"):
+            if incoming.get(field) and not merged.get(field):
+                merged[field] = incoming.get(field)
+                changed = True
+        if merged:
+            participants[key] = merged
+            alt = "participant_a" if key == "home" else "participant_b"
+            alt_current = participants.get(alt) if isinstance(participants.get(alt), dict) else {}
+            alt_merged = dict(alt_current or merged)
+            for field in ("id", "slug", "logo", "country_id"):
+                if merged.get(field) and not alt_merged.get(field):
+                    alt_merged[field] = merged.get(field)
+                    changed = True
+            participants[alt] = alt_merged
+    extra = load_json(row.extra_json, {}) or {}
+    competition_logo = parsed.get("competition_logo")
+    if competition_logo and not extra.get("competition_logo"):
+        extra["competition_logo"] = competition_logo
+        changed = True
+    country_id = parsed.get("country_id")
+    if country_id and not row.country_id:
+        row.country_id = country_id
+        changed = True
+    if changed:
+        row.participants_json = dump_json(participants)
+        row.extra_json = dump_json(extra)
+        store_list_extra(row, extra)
+    return changed
+
+
+def _attach(row: SportsEvent, fotmob_id: str, parsed: Optional[Dict[str, Any]] = None) -> bool:
     extra = load_json(row.extra_json, {}) or {}
     before = dict(families_with_ids(extra))
     extra["source_event_ids"] = merge_family_ids(extra.get("source_event_ids"), family="fotmob", source_event_id=fotmob_id)
-    if families_with_ids(extra) == before:
-        return False
-    row.extra_json = dump_json(extra)
-    store_list_extra(row, extra)
-    return True
+    id_changed = families_with_ids(extra) != before
+    if id_changed:
+        row.extra_json = dump_json(extra)
+        store_list_extra(row, extra)
+    asset_changed = _fill_identity_assets(row, parsed or {}) if parsed else False
+    return id_changed or asset_changed
 
 
 def _unique_matches(matches: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -405,7 +445,7 @@ def crosswalk_fotmob_ids(
                     ingested += 1
                     by_comp.setdefault(competition_id, [])
             continue
-        if _attach(best, str(parsed["source_event_id"])):
+        if _attach(best, str(parsed["source_event_id"]), parsed):
             attached += 1
     db.flush()
     logger.info(
