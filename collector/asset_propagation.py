@@ -14,6 +14,7 @@ from collector.competition_presentation import metadata_for
 from collector.cache import note_list_invalidation
 from collector.list_extra import store_list_extra
 from collector.models import SportsEvent, SportsStandingSnapshot
+from collector.participant_alias import names_equivalent
 from collector.participant_text import fold_for_identity
 from sports_registry.geography import get_geo
 from collector.util import dump_json, load_json
@@ -382,6 +383,7 @@ def propagate_identity_assets(db) -> Dict[str, int]:
 
     competition_assets: Dict[Tuple[str, str], str] = {}
     participant_assets: Dict[Tuple[str, str, str, str], Dict[str, str]] = {}
+    scoped_named_assets: Dict[Tuple[str, str, str], list] = {}
     standing_assets: Dict[Tuple[str, str, str, str], Dict[str, str]] = {}
 
     # Standings are a trusted competition-scoped source of club identity.
@@ -416,6 +418,22 @@ def propagate_identity_assets(db) -> Dict[str, int]:
             observed = _asset(side)
             if not observed:
                 continue
+            display_name = str(side.get("display_name") or side.get("name") or "").strip()
+            if display_name and observed.get("logo"):
+                scope = (sport, competition, _bucket(family))
+                bucket = scoped_named_assets.setdefault(scope, [])
+                folded_display = fold_for_identity(display_name)
+                if folded_display and not any(
+                    item.get("folded") == folded_display and item.get("logo") == observed.get("logo")
+                    for item in bucket
+                ):
+                    bucket.append(
+                        {
+                            "name": display_name,
+                            "folded": folded_display,
+                            "logo": observed.get("logo"),
+                        }
+                    )
             for key in _identity_keys(sport, family, side):
                 current = participant_assets.setdefault(key, {})
                 if observed.get("logo") and not current.get("logo"):
@@ -443,6 +461,7 @@ def propagate_identity_assets(db) -> Dict[str, int]:
         "national_team_countries_filled": 0,
         "verified_participant_logos_filled": 0,
         "verified_competition_logos_filled": 0,
+        "equivalent_name_logos_filled": 0,
     }
 
     # Pass 2: fill blanks only. Never overwrite a non-empty value.
@@ -565,6 +584,30 @@ def propagate_identity_assets(db) -> Dict[str, int]:
                     known["country_id"] = candidate["country_id"]
                 if candidate.get("country_ids") and not known.get("country_ids"):
                     known["country_ids"] = candidate["country_ids"]
+
+            # Safe alias propagation is competition-scoped. It never crosses
+            # leagues and only accepts candidates the existing identity matcher
+            # considers equivalent (legal prefixes/suffixes, abbreviations,
+            # deterministic transliterations, etc.).
+            if not known.get("logo"):
+                side_name_text = str(side.get("display_name") or side.get("name") or "").strip()
+                if side_name_text:
+                    scope = (sport, competition, _bucket(family))
+                    equivalent = [
+                        item
+                        for item in scoped_named_assets.get(scope, [])
+                        if item.get("logo") and names_equivalent(side_name_text, item.get("name") or "")
+                    ]
+                    if equivalent:
+                        exact_fold = fold_for_identity(side_name_text)
+                        exact = [item for item in equivalent if item.get("folded") == exact_fold]
+                        chosen_pool = exact or equivalent
+                        # Multiple provider URLs for the same matched identity
+                        # are harmless; pick deterministically by URL.
+                        chosen = sorted(chosen_pool, key=lambda item: str(item.get("logo") or ""))[0]
+                        known["logo"] = chosen["logo"]
+                        known["_equivalent_name_logo"] = True
+
             verified_logo = verified_participant_logo(sport, side)
             if not known and not verified_logo:
                 continue
@@ -574,6 +617,8 @@ def propagate_identity_assets(db) -> Dict[str, int]:
                 stats["participant_logos_filled"] += 1
                 if known.get("_standing_logo"):
                     stats["standing_participant_logos_filled"] += 1
+                if known.get("_equivalent_name_logo"):
+                    stats["equivalent_name_logos_filled"] += 1
                 row_changed = True
             elif verified_logo and not _asset(merged).get("logo"):
                 merged["logo"] = verified_logo
