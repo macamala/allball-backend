@@ -300,7 +300,12 @@ def test_wta_discovery_uses_current_window_not_ao_archive():
 def test_junk_participant_names_are_quarantined():
     assert "name_is_date" in quality_flags_for_name("19.09.2026")
     assert "name_is_date" in quality_flags_for_name("2026-09-19")
+    assert "name_is_time" in quality_flags_for_name("18h00")
+    assert "numeric_table_cell" in quality_flags_for_name("0 | 1 | 5")
+    assert "source_text_contamination" in quality_flags_for_name("Mansfield Town H2H stats . A visitor from Kenya")
+    assert "source_text_contamination" in quality_flags_for_name("Squad update Munster 5 minutes ago")
     assert is_display_eligible({"home": {"name": "19.09.2026"}, "away": {"name": "ALU SC"}}) is False
+    assert is_display_eligible({"home": {"name": "18h00"}, "away": {"name": "Tirana"}}) is False
     assert is_display_eligible({"home": {"name": "Arsenal"}, "away": {"name": "Villa"}}) is True
     assert sanitize_participant_name("19.09.2026") == ""
     assert sanitize_participant_name("Wsf1") == "Winner of SF1"
