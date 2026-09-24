@@ -687,6 +687,38 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
                 db.rollback()
 
             try:
+                from collector.ehf_breadth import run_if_due as run_ehf_breadth_if_due
+
+                def _pulse_ehf() -> None:
+                    heartbeat_scheduler_lock(db, owner=owner)
+                    db.commit()
+
+                ehf_breadth = run_ehf_breadth_if_due(
+                    db,
+                    owner=owner,
+                    heartbeat=_pulse_ehf,
+                )
+                if ehf_breadth:
+                    logger.info(
+                        "EHF global breadth %s",
+                        {
+                            "status": ehf_breadth.get("status"),
+                            "requests": ehf_breadth.get("requests"),
+                            "pages": ehf_breadth.get("pages"),
+                            "competitions": ehf_breadth.get("competitions"),
+                            "events": ehf_breadth.get("events"),
+                            "eligible": ehf_breadth.get("eligible"),
+                            "ingested": ehf_breadth.get("ingested"),
+                            "http_errors": ehf_breadth.get("http_errors"),
+                            "by_competition": ehf_breadth.get("by_competition"),
+                        },
+                    )
+                    _maybe_log_breadth(db, force=True)
+            except Exception:
+                logger.exception("EHF global breadth failed")
+                db.rollback()
+
+            try:
                 from collector.sofascore_crosswalk import run_if_due as run_sofascore_breadth_if_due
 
                 def _pulse_sofa() -> None:
