@@ -31,6 +31,33 @@ from collector.source_ids import as_family_map
 from collector.util import dump_json, load_json
 
 HUB_FAMILIES = {"bbc-sport", "sportscore", "espn-html"}
+PROTECTED_SOURCE_NATIVE_FOOTBALL_FAMILIES = {"fotmob", "fifa", "fifa-digital", "fifa-json"}
+
+
+def _protected_source_native_football(item: Any, extra: Optional[Dict[str, Any]] = None) -> bool:
+    """True only for football rows already positively revalidated from source-native identity.
+
+    These rows may still be merged/corrected, but a later generic integrity pass must not
+    hide the last public copy merely because canonical competition attribution is ambiguous.
+    """
+    if isinstance(item, SportsEvent):
+        sport = str(item.sport_id or "").strip().lower()
+        extra = extra if isinstance(extra, dict) else (load_json(item.extra_json, {}) or {})
+    else:
+        event = item if isinstance(item, dict) else {}
+        sport = str(event.get("sport") or "").strip().lower()
+        extra = extra if isinstance(extra, dict) else (event.get("extra") or {})
+    family = str((extra or {}).get("source_family") or "").strip().lower()
+    method = str((extra or {}).get("resolution_method") or "").strip().lower()
+    return bool(
+        sport == "football"
+        and family in PROTECTED_SOURCE_NATIVE_FOOTBALL_FAMILIES
+        and (
+            (extra or {}).get("source_native_revalidated_at")
+            or method == "source_native_revalidated"
+        )
+        and str((extra or {}).get("source_competition_name") or "").strip()
+    )
 
 
 def _sides(row: SportsEvent) -> Dict[str, Any]:
@@ -153,9 +180,23 @@ def plan_backfill(db: Session) -> Dict[str, Any]:
                 return bool(name) and label_matches_competition(str(name), cid)
 
             supported = [item for item in items if _label_supported(item)]
+            protected = [item for item in items if _protected_source_native_football(item)]
             keep_id = None
             if len(supported) == 1:
                 keep_id = supported[0]["event_id"]
+            elif protected:
+                # Never let a generic cross-competition duplicate heuristic hide every
+                # already revalidated source-native football copy. Keep one deterministic
+                # public row; later canonical collapse can still merge a proven duplicate.
+                chosen = sorted(
+                    protected,
+                    key=lambda item: (
+                        item.get("updated_at") or datetime.min,
+                        str(item.get("event_id") or ""),
+                    ),
+                    reverse=True,
+                )[0]
+                keep_id = chosen["event_id"]
             elif len(items) == 2:
                 unique_leaks = {leak_score[cid] for cid in comps}
                 if len(unique_leaks) == 1:
@@ -447,6 +488,22 @@ def apply_competition_attribution(
             row.display_eligible = True
             row.extra_json = dump_json(extra)
             corrected += 1
+            continue
+        if _protected_source_native_football(row, extra):
+            # Source-native football was already positively revalidated from the
+            # provider's own competition identity. Preserve public visibility if
+            # generic canonical attribution cannot prove a safer remap.
+            flags = [
+                flag
+                for flag in (extra.get("quality_flags") or [])
+                if flag not in {"competition_attribution_mismatch", "duplicate_or_contaminated"}
+            ]
+            extra["quality_flags"] = flags
+            extra["display_eligible"] = True
+            extra["competition_attribution"] = "source_native_preserved"
+            row.extra_json = dump_json(extra)
+            row.display_eligible = True
+            recovered += 1
             continue
         extra["display_eligible"] = False
         extra["competition_attribution"] = "quarantined_unproven"
