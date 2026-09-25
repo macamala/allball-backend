@@ -1,0 +1,56 @@
+name: C15 football data and tables gate
+on:
+  push:
+    branches: [fix/football-tables-live-c15-20260925]
+    paths: ['.github/workflows/c15-backend.yml', 'audit/c15-parts/**']
+permissions:
+  contents: write
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Require the reviewed exact bytes before applying any code
+        run: |
+          mkdir -p evidence
+          python - <<'PY'
+          from pathlib import Path
+          import gzip,base64,hashlib
+          parts=sorted(Path('audit/c15-parts').glob('*.b64'))
+          assert len(parts)==4
+          for p in parts:print(p,hashlib.sha256(p.read_bytes()).hexdigest())
+          patch=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts),validate=True))
+          assert hashlib.sha256(patch).hexdigest()=='658fbe648931ba80234f1563843ffe50d29296ba3ab94cbb2714b931d110ebec'
+          Path('/tmp/c15.patch').write_bytes(patch)
+          PY
+          git apply --check /tmp/c15.patch
+          git apply /tmp/c15.patch
+          git add -N collector/football_table_identity.py collector/football_enrichment_cycle.py tests/test_c15_live_tables.py
+          git diff 0a73c89653d24ca4c84da43b91dae3bfd08f7030 -- app.py collector tests > evidence/source.patch
+          cmp /tmp/c15.patch evidence/source.patch
+          python -m pip install -r requirements.txt pytest
+      - name: All C14 and older retained regressions plus C15
+        run: |
+          python -m pytest -q $(cat audit/football_test_selection.txt) tests/test_hidden_football_aliases.py tests/test_fotmob_match_centre.py tests/test_entity_profile_navigation.py tests/test_c14_live_player.py tests/test_canonical_detail.py tests/test_fiba_rich_detail.py tests/test_sofa_rich_detail.py tests/test_c15_live_tables.py --junitxml=evidence/tests.xml
+      - name: Publish passing source only to the isolated branch
+        run: |
+          git diff --check
+          git config user.name 'NinkoSports regression checks'
+          git config user.email '79318740+macamala@users.noreply.github.com'
+          git add app.py collector/adapters_fotmob.py collector/detail_enrich.py collector/football_board_priority.py collector/football_enrichment_cycle.py collector/football_table_identity.py collector/priority_cycle.py collector/provider.py collector/standings_enrich.py tests/test_c15_live_tables.py
+          git commit -m 'Refresh live lineups and source clocks, resolve scoped competition tables, and warm bounded current football data'
+          git push origin HEAD:refs/heads/fix/football-tables-live-c15-20260925
+          git rev-parse HEAD > evidence/candidate.txt
+          git diff-tree --no-commit-id --name-only -r HEAD | xargs sha256sum > evidence/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: c15-backend-gate
+          path: evidence
+          retention-days: 30
