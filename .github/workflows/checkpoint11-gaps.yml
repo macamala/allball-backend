@@ -1,0 +1,57 @@
+name: Checkpoint11 verified gaps backend gate
+on:
+  push:
+    branches: [fix/verified-gaps-c11-20260925]
+    paths: ['audit/apply_c11_gaps.py', '.github/workflows/checkpoint11-gaps.yml']
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: python audit/apply_c11_gaps.py
+      - run: python -m pip install -r requirements.txt
+      - run: |
+          mkdir -p /tmp/c11-backend
+          python -m compileall -q collector tests app.py
+          python -m pytest -q $(cat audit/football_test_selection.txt) --disable-warnings --junitxml=/tmp/c11-backend/tests.xml
+      - if: always()
+        run: |
+          mkdir -p /tmp/c11-backend
+          git add -N collector tests audit/football_test_selection.txt
+          git diff --binary > /tmp/c11-backend/source.patch
+          sha256sum /tmp/c11-backend/source.patch
+          git rev-parse HEAD > /tmp/c11-backend/staging-sha.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: checkpoint11-backend-gate
+          path: /tmp/c11-backend
+          retention-days: 30
+  publish-tested-source:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - run: |
+          python audit/apply_c11_gaps.py
+          git add collector tests audit/football_test_selection.txt
+          git config user.name 'NinkoSports regression checks'
+          git config user.email '79318740+macamala@users.noreply.github.com'
+          git commit -m 'Revalidate exact native football roots and repair official FIFA artwork URLs'
+          git push origin HEAD:fix/verified-gaps-c11-20260925
+          echo "TESTED_SOURCE_COMMIT=$(git rev-parse HEAD)"
