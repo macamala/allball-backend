@@ -1,0 +1,55 @@
+name: Checkpoint11 read-only asset inputs
+on:
+  push:
+    branches: [audit/football-recovery-20260925-10]
+    paths: ['.github/workflows/checkpoint11-inputs.yml']
+permissions:
+  contents: read
+jobs:
+  evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: |
+          mkdir -p /tmp/c11-inputs
+          python - <<'PY'
+          import json,urllib.request,hashlib
+          from pathlib import Path
+          from concurrent.futures import ThreadPoolExecutor
+          from datetime import datetime,timezone
+          out=Path('/tmp/c11-inputs');api='https://allball-backend-production.up.railway.app'
+          urls={
+            'today':api+'/sports-data/events?unlimited=1&date_from=2026-09-24T14%3A00%3A00Z&date_to=2026-09-25T13%3A59%3A59Z',
+            'tomorrow':api+'/sports-data/events?unlimited=1&date_from=2026-09-25T14%3A00%3A00Z&date_to=2026-09-26T13%3A59%3A59Z',
+            'fifa-myanmar':'https://api.fifa.com/api/v3/picture/flags-sq-2/MYA',
+            'fifa-timor':'https://api.fifa.com/api/v3/picture/flags-sq-2/TLS',
+            'fifa-firpo':'https://api.fifa.com/api/v3/picture/teams-sq-2/1894031',
+            'fifa-alianza':'https://api.fifa.com/api/v3/picture/teams-sq-2/1885981',
+            'flag-serbia':'https://flagcdn.com/w40/rs.png',
+            'flag-england':'https://flagcdn.com/w40/gb-eng.png',
+            'flag-scotland':'https://flagcdn.com/w40/gb-sct.png',
+            'flag-wales':'https://flagcdn.com/w40/gb-wls.png',
+            'flag-northern-ireland':'https://flagcdn.com/w40/gb-nir.png',
+            'flag-kosovo':'https://flagcdn.com/w40/xk.png'
+          }
+          def fetch(item):
+            key,url=item;d={'url':url,'checked_at':datetime.now(timezone.utc).isoformat()}
+            try:
+              with urllib.request.urlopen(urllib.request.Request(url,headers={'User-Agent':'NinkoSports-asset-QA/1.0'}),timeout=20) as r:
+                b=r.read();d.update(http=r.status,content_type=r.headers.get('Content-Type'),bytes=len(b),sha256=hashlib.sha256(b).hexdigest())
+                if key in ('today','tomorrow'):d['payload']=json.loads(b)
+                else:(out/(key+'.bin')).write_bytes(b)
+            except Exception as e:d['error']=str(e)
+            (out/(key+'.json')).write_text(json.dumps(d,ensure_ascii=False,indent=2));return key,{k:v for k,v in d.items() if k!='payload'}
+          with ThreadPoolExecutor(max_workers=3) as pool:result=dict(pool.map(fetch,urls.items()))
+          print(json.dumps(result,indent=2));(out/'summary.json').write_text(json.dumps(result,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: checkpoint11-asset-inputs
+          path: /tmp/c11-inputs
+          retention-days: 30
