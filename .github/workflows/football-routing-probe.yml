@@ -1,0 +1,44 @@
+name: Football routing public evidence
+on:
+  push:
+    branches: [audit/football-routing-20260925]
+permissions:
+  contents: read
+jobs:
+  evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: f36ea7a1476d5c7f17a8ce67c6b10968cccd52dc
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: |
+          mkdir -p /tmp/routing-evidence
+          python audit/football_acceptance.py --out /tmp/routing-evidence/current
+          python - <<'PY'
+          from concurrent.futures import ThreadPoolExecutor
+          from pathlib import Path
+          import json, urllib.request, urllib.error
+          ids=['ninko-evt-4fb1a3b00321ce6cb7ab','ninko-evt-db7f5cf3bfeda17ddd77','ninko-evt-9f1af9113c00da18c198']
+          def get(eid):
+            url='https://allball-backend-production.up.railway.app/sports-data/matches/'+eid
+            try:
+              with urllib.request.urlopen(url,timeout=15) as r:
+                return eid,{'http':r.status,'payload':json.load(r)}
+            except Exception as e: return eid,{'error':str(e)}
+          with ThreadPoolExecutor(max_workers=3) as pool: data=dict(pool.map(get,ids))
+          Path('/tmp/routing-evidence/aliases.json').write_text(json.dumps(data,indent=2))
+          for eid,x in data.items():
+            event=(x.get('payload') or {}).get('event') or {}
+            print(eid,json.dumps({'http':x.get('http'),'error':x.get('error'),**{k:event.get(k) for k in ('id','home','away','competition_key','start_time','status','score')}}))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: football-routing-public-evidence
+          path: /tmp/routing-evidence
+          retention-days: 30
