@@ -1,0 +1,71 @@
+name: Checkpoint11 production data and artwork acceptance
+on:
+  push:
+    branches: [audit/football-recovery-20260925-10]
+    paths: ['audit/checkpoint11_asset_acceptance.py', '.github/workflows/checkpoint11-production.yml']
+permissions:
+  contents: read
+jobs:
+  assets:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: |
+          python -m pip install playwright
+          python -m playwright install --with-deps chromium
+      - run: python audit/checkpoint11_asset_acceptance.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: checkpoint11-public-artwork
+          path: /tmp/c11-assets
+          retention-days: 30
+  previous-screenshot-regressions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: macamala/allball-frontend
+          ref: 9a18f3ec91610356304fc614b9a10b621792291f
+          path: frontend
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: |
+          python -m pip install playwright
+          python -m playwright install --with-deps chromium
+      - name: Preserve real scores, old aliases and actual polling
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('audit/screenshot_production_acceptance.py');s=p.read_text()
+          s=s.replace("main.locator('.score-row').first.wait_for", "main.locator('.score-row-link').first.wait_for")
+          s=s.replace("page.locator('.score-centre-main .score-row').first.wait_for", "page.locator('.score-centre-main .score-row-link').first.wait_for")
+          old="   REPORT['browser'][-1]['poll_responses']=requests[before:]"
+          new=old+"\n   assert any('/status-delta?' in r['url'] and r['status']==200 for r in requests[before:]), 'No actual delta poll'\n   assert any('/events?' in r['url'] and r['status']==200 for r in requests[before:]), 'No actual full refresh'"
+          assert old in s;p.write_text(s.replace(old,new))
+          PY
+          python audit/screenshot_production_acceptance.py
+      - name: Preserve compact and full mobile standings and group switching
+        if: always()
+        env:
+          MOBILE_QA_SITE: https://ninkosports.com
+          MOBILE_QA_OUT: /tmp/screenshot-after/standings
+        run: python frontend/audit/mobile_standings_browser.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: checkpoint11-preserved-screenshots
+          path: /tmp/screenshot-after
+          retention-days: 30
