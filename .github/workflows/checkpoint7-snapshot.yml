@@ -61,4 +61,5 @@ jobs:
         with:
           name: checkpoint7-exact-source-snapshot
           path: /tmp/checkpoint7-source
+          include-hidden-files: true
           retention-days: 30
