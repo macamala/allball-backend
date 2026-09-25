@@ -42,3 +42,4 @@ tests/test_live_delta_screenshots.py
 tests/test_source_root_revalidation.py
 tests/test_image_asset_templates.py
 tests/test_database_driver_startup.py
+tests/test_public_fixture_stability.py

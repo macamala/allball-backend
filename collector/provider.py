@@ -720,7 +720,12 @@ def _dedupe_public_fixture_rows(events: List[Dict[str, Any]], preferred_ids: set
     it wins over a source-native dynamic id.
     """
     kept: List[Dict[str, Any]] = []
-    for row in events:
+    # Equal-kickoff SQL rows have no implicit order. A stable input order keeps
+    # the existing score/verified-competition precedence independent of query
+    # plan, sport filter, cache miss or arrival order. Never mutate input rows.
+    ordered = sorted(events, key=lambda r: (str(r.get("start_time") or ""),
+                     str(r.get("sport") or ""), str(r.get("id") or "")))
+    for row in ordered:
         home = str((row.get("home") or {}).get("name") or "")
         away = str((row.get("away") or {}).get("name") or "")
         stamp = str(row.get("start_time") or "")[:16]
@@ -1037,11 +1042,11 @@ class NinkoCollectedSportsDataProvider:
             unbounded = not date_from and not date_to
             db_start = time.perf_counter()
             if unbounded and not allow_unfiltered:
-                query = query.order_by(SportsEvent.start_time.desc())
+                query = query.order_by(SportsEvent.start_time.desc(), SportsEvent.event_id.desc())
                 query = query.limit(int(os.getenv("NINKO_EVENTS_UNFILTERED_LIMIT", "400")))
                 rows = list(reversed(query.all()))
             else:
-                query = query.order_by(SportsEvent.start_time.asc())
+                query = query.order_by(SportsEvent.start_time.asc(), SportsEvent.event_id.asc())
                 rows = query.all()
             db_done = time.perf_counter()
             blocked_ids, blocked_families = _blocked_public_sources(db)
