@@ -1,0 +1,43 @@
+name: C14 live and player backend gate
+on:
+  push:
+    branches: [fix/football-live-player-c14-20260925]
+    paths: ['audit/c14_integration.patch', '.github/workflows/c14-live-player.yml', 'tests/test_c14_live_player.py', 'collector/player_enrichment.py']
+permissions:
+  contents: write
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: |
+          echo '9aa366aabbbaf2c9d2b2d7d2124031280bb3b4bf2ee0172d35cc9a11265dbcaa  audit/c14_integration.patch' | sha256sum -c
+          git apply --check audit/c14_integration.patch
+          git apply audit/c14_integration.patch
+          mkdir -p evidence
+          git diff 43bf5a54d280ee7bb2b07f75bd8fe7ba7c62f7c9 -- app.py collector tests > evidence/source.patch
+          echo 'addac8a3a40902018bc2e6d7f388d0187ef5f8ec6b011c569cbb671a7d52a094  evidence/source.patch' | sha256sum -c
+          python -m pip install -r requirements.txt pytest
+      - run: python -m pytest -q $(cat audit/football_test_selection.txt) tests/test_hidden_football_aliases.py tests/test_fotmob_match_centre.py tests/test_entity_profile_navigation.py tests/test_c14_live_player.py --junitxml=evidence/tests.xml
+      - name: Publish tested source to isolated branch only
+        run: |
+          git diff --check
+          git config user.name 'NinkoSports regression checks'
+          git config user.email '79318740+macamala@users.noreply.github.com'
+          git add app.py collector
+          git commit -m 'Prioritize minute updates and expose lightweight scores with verified player club and valuation facts'
+          git push origin HEAD:refs/heads/fix/football-live-player-c14-20260925
+          git rev-parse HEAD > evidence/candidate.txt
+          git diff --name-only 43bf5a54d280ee7bb2b07f75bd8fe7ba7c62f7c9 -- app.py collector tests | xargs sha256sum > evidence/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: c14-backend-gate
+          path: evidence
+          retention-days: 30
