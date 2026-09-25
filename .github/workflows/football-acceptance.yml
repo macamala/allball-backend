@@ -1,0 +1,47 @@
+name: All football normalized acceptance
+on:
+  push:
+    branches: [audit/all-football-20260925]
+    paths: ['audit/football_acceptance.py', '.github/workflows/football-acceptance.yml']
+permissions:
+  contents: read
+  actions: read
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/download-artifact@v4
+        with:
+          name: all-football-baseline
+          run-id: 36078082816
+          github-token: ${{ github.token }}
+          path: /tmp/original-baseline
+      - name: Analyze original snapshot under the same normalization rules
+        run: python audit/football_acceptance.py --offline /tmp/original-baseline --out /tmp/football-evidence/before
+      - name: Read all available league results and unresolved fixture identities
+        run: python audit/football_acceptance.py --out /tmp/football-evidence/current
+      - name: Compare recorded issues, preserving regressions and unresolved identities
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('/tmp/football-evidence')
+          a=json.loads((p/'before/acceptance.json').read_text());b=json.loads((p/'current/acceptance.json').read_text())
+          old={i['id'] for i in a['issues'] if i['kind']=='played_mismatch'}
+          new={i['id'] for i in b['issues'] if i['kind']=='played_mismatch'}
+          result={'before':a['totals'],'after':b['totals'],'before_leagues':a['competition_count'],'after_leagues':b['competition_count'],'remaining_original_mismatch_ids':sorted(old&new),'new_mismatch_ids':sorted(new-old),'no_longer_mismatched_ids':sorted(old-new),'note':'No longer mismatched requires row-presence validation; a missing row is not a fixed result.'}
+          (p/'comparison.json').write_text(json.dumps(result,indent=2));print(json.dumps(result,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: all-football-normalized-acceptance
+          path: /tmp/football-evidence
+          retention-days: 30
