@@ -1,0 +1,57 @@
+name: Checkpoint8 source and public evidence
+on:
+  push:
+    branches: [audit/football-checkpoint8-20260925]
+    paths: ['.github/workflows/checkpoint8-evidence.yml']
+permissions:
+  contents: read
+jobs:
+  evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ff81b42f5e4c755be1a1c758f24fb8eb5a57c8b9
+          persist-credentials: false
+          path: source
+      - uses: actions/checkout@v4
+        with:
+          ref: f36ea7a1476d5c7f17a8ce67c6b10968cccd52dc
+          persist-credentials: false
+          path: audit-code
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: |
+          mkdir -p /tmp/checkpoint8
+          git -C source archive --format=tar.gz HEAD > /tmp/checkpoint8/backend-ff81.tar.gz
+          cp audit-code/audit/football_acceptance.py /tmp/checkpoint8/
+          python audit-code/audit/football_acceptance.py --out /tmp/checkpoint8/current
+      - name: Read public health and unresolved fixture details
+        run: |
+          python - <<'PY'
+          import json,urllib.request
+          from pathlib import Path
+          from concurrent.futures import ThreadPoolExecutor
+          from datetime import datetime,timezone
+          p=Path('/tmp/checkpoint8');report=json.loads((p/'current/acceptance.json').read_text())
+          ids=['ninko-evt-8ea488bb6f0bcf5038b7','ninko-evt-bb4071086c3ea042f6e9','ninko-evt-4fb1a3b00321ce6cb7ab','ninko-evt-db7f5cf3bfeda17ddd77','ninko-evt-86345b6cb47a7c4b8524']
+          urls=['https://ninkosports.com/live-scores','https://allball-backend-production.up.railway.app/health']
+          urls += ['https://allball-backend-production.up.railway.app/sports-data/matches/'+eid for eid in ids]
+          def get(url):
+            try:
+              with urllib.request.urlopen(url,timeout=20) as r:
+                text=r.read().decode();data=json.loads(text) if 'json' in r.headers.get('Content-Type','') else text[:160]
+                return url,{'http_status':r.status,'checked_at':datetime.now(timezone.utc).isoformat(),'payload':data}
+            except Exception as e:return url,{'error':str(e),'checked_at':datetime.now(timezone.utc).isoformat()}
+          with ThreadPoolExecutor(max_workers=3) as pool: checks=dict(pool.map(get,urls))
+          (p/'public-checks.json').write_text(json.dumps(checks,indent=2))
+          print(json.dumps({'checked_at':report['checked_at'],'totals':report['totals'],'competition_count':report['competition_count'],'checks':{u:x.get('http_status',x.get('error')) for u,x in checks.items()}},indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: checkpoint8-source-and-current-evidence
+          path: /tmp/checkpoint8
+          retention-days: 30
