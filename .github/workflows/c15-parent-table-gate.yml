@@ -1,0 +1,75 @@
+name: C15 seasonal parent table gate
+on:
+  push:
+    branches: [fix/seasonal-parent-tables-c15-20260925]
+    paths: ['audit/c15_parent_tables.patch', '.github/workflows/c15-parent-table-gate.yml']
+permissions:
+  contents: write
+  actions: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 36122750101
+          name: c15-remaining-table-native-evidence
+          path: /tmp/native-table-evidence
+      - run: |
+          echo '1cd264c6b20758c0280bcb054714652e2a58ee6837c109a855f727982c8eb77a  audit/c15_parent_tables.patch' | sha256sum -c
+          git apply --check audit/c15_parent_tables.patch
+          git apply audit/c15_parent_tables.patch
+          git add -N tests/test_c15_parent_league_tables.py
+          mkdir -p evidence
+          git diff c7710745a2e1599eea045b6e760dec45887eb93d -- collector tests > evidence/source.patch
+          cmp audit/c15_parent_tables.patch evidence/source.patch
+          python -m pip install -r requirements.txt pytest
+      - run: python -m pytest -q $(cat audit/football_test_selection.txt) tests/test_hidden_football_aliases.py tests/test_fotmob_match_centre.py tests/test_entity_profile_navigation.py tests/test_c14_live_player.py tests/test_canonical_detail.py tests/test_fiba_rich_detail.py tests/test_sofa_rich_detail.py tests/test_c15_live_tables.py tests/test_c15_parent_league_tables.py --junitxml=evidence/tests.xml
+      - name: Replay real captured native evidence without network or production writes
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from collector.football_table_identity import scoped_table
+          from collector.fotmob_tables import parse_tables
+          p=Path('/tmp/native-table-evidence');report=[]
+          for f in sorted(p.glob('board-*.json')):
+            for league in json.loads(f.read_text()).get('payload',{}).get('leagues',[]):
+              parent=str(league.get('primaryId') or league.get('parentLeagueId') or league.get('id'));leaf=str(league.get('id'))
+              path=p/('league-'+parent+'.json')
+              if not path.exists() or parent==leaf:continue
+              root=json.loads(path.read_text()).get('payload')
+              for m in league.get('matches',[])[:4]:
+                context={'parent_id':parent,'leaf_id':leaf,'teams':[str(m.get(s,{}).get('id')) for s in ['home','away']],'match_id':str(m.get('id')),'start_time':m.get('status',{}).get('utcTime')}
+                result=scoped_table(root,context)
+                if result:
+                  rows=parse_tables(result)
+                  report.append({'parent':parent,'leaf':leaf,'name':league.get('name'),'match':context['match_id'],'rows':len(rows)});break
+          Path('evidence/native-replay.json').write_text(json.dumps(report,indent=2))
+          assert any(r['parent']=='108' and r['leaf']=='938219' and r['rows']==24 for r in report)
+          print('Captured native table identities accepted:',len({(r['parent'],r['leaf']) for r in report}))
+          PY
+      - name: Publish only tested isolated candidate
+        run: |
+          git diff --check
+          git config user.name 'NinkoSports regression checks'
+          git config user.email '79318740+macamala@users.noreply.github.com'
+          git add collector/football_table_identity.py tests/test_c15_parent_league_tables.py
+          git commit -m 'Resolve seasonal IDs to single current league tables only with exact fixture and member proof'
+          git push origin HEAD:refs/heads/fix/seasonal-parent-tables-c15-20260925
+          git rev-parse HEAD > evidence/candidate.txt
+          sha256sum collector/football_table_identity.py tests/test_c15_parent_league_tables.py > evidence/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: c15-parent-table-gate
+          path: evidence
+          retention-days: 30
