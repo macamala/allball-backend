@@ -1,0 +1,165 @@
+diff --git a/collector/football_table_identity.py b/collector/football_table_identity.py
+index ec61e9e..8817f11 100644
+--- a/collector/football_table_identity.py
++++ b/collector/football_table_identity.py
+@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
+ import re
+ from collector.models import SportsEvent
+ from collector.source_ids import id_for_family
+-from collector.util import load_json
++from collector.util import load_json, parse_datetime
+ from collector.maintenance_policy import automatic_promotion_blocked
+ from collector.fotmob_rich import verified_detail_identity
+ 
+@@ -48,7 +48,8 @@ def resolve_context(db, competition_key, context, getter):
+         parent = numeric(meta.get('source_parent_competition_id'))
+         row_leaf = numeric(meta.get('source_group_id') or meta.get('source_competition_id'))
+         if parent and row_leaf == leaf:
+-            return {**context, 'parent_id': parent, 'leaf_id': leaf, 'teams': sides}
++            return {**context, 'parent_id': parent, 'leaf_id': leaf, 'teams': sides,
++                    'match_id': mid, 'start_time': row.start_time.isoformat()}
+         if fallback is None:
+             fallback = (row, parts, mid)
+     if fallback:
+@@ -63,10 +64,37 @@ def resolve_context(db, competition_key, context, getter):
+             parent = numeric(general.get('parentLeagueId')) or actual_leaf
+             if actual_leaf == leaf and parent:
+                 teams = [numeric((general.get(s+'Team') or {}).get('id')) for s in ('home','away')]
+-                return {**context, 'parent_id': parent, 'leaf_id': actual_leaf, 'teams': teams}
++                return {**context, 'parent_id': parent, 'leaf_id': actual_leaf, 'teams': teams,
++                        'match_id': mid, 'start_time': row.start_time.isoformat()}
+     return {**context, 'parent_id': leaf, 'leaf_id': leaf, 'teams': []}
+ 
+ 
++def _current_fixture_witness(root, context):
++    """A seasonal ID may use a stable single league table, but only when this
++    response's selected season includes the exact known match and oriented IDs.
++    Membership alone is not proof of a current season or a group.
++    """
++    details = root.get('details') or {}
++    if not details.get('selectedSeason'):
++        return False
++    mid = numeric(context.get('match_id'))
++    kickoff = parse_datetime(context.get('start_time'))
++    teams = context.get('teams') or []
++    if not mid or not kickoff or len(teams) != 2 or any(not numeric(t) for t in teams) or teams[0] == teams[1]:
++        return False
++    fixtures = root.get('fixtures') or {}
++    matches = fixtures.get('allMatches') if isinstance(fixtures, dict) else None
++    if not isinstance(matches, list):
++        return False
++    found = [m for m in matches if isinstance(m, dict) and numeric(m.get('id')) == mid]
++    if len(found) != 1:
++        return False
++    match = found[0]
++    actual = [numeric((match.get(side) or {}).get('id')) for side in ('home', 'away')]
++    at = parse_datetime((match.get('status') or {}).get('utcTime'))
++    return actual == [numeric(t) for t in teams] and at is not None and abs((at-kickoff).total_seconds()) <= 60
++
++
+ def scoped_table(root, context):
+     """Select the exact group subtree; a parent response is not a single table."""
+     if not isinstance(root, dict):
+@@ -92,6 +120,26 @@ def scoped_table(root, context):
+             for key in ('data','table','tables'):
+                 if key in node: walk(node[key])
+     walk(root.get('table'))
+-    if len(found) != 1:
++    if len(found) == 1:
++        return {'details': details, 'table': [{'data': found[0]}]}
++    if found:
++        return None
++    # Native daily boards use seasonal IDs (e.g. 938219); a plain league's
++    # current table can carry its stable ID (108). Never apply this relaxation
++    # to composite/multiple groups, playoffs, or an unproven season fixture.
++    tables = root.get('table')
++    if not isinstance(tables, list) or len(tables) != 1:
++        return None
++    entry = tables[0]
++    node = entry.get('data') if isinstance(entry, dict) else None
++    if (not isinstance(node, dict) or node.get('composite') or node.get('tables')
++            or numeric(node.get('leagueId')) != parent
++            or not isinstance(node.get('table'), dict)
++            or not isinstance(node['table'].get('all'), list)
++            or not _current_fixture_witness(root, context)):
++        return None
++    from collector.fotmob_tables import parse_tables
++    members = {r.get('team_id') for r in parse_tables(root)}
++    if not set(context['teams']).issubset(members):
+         return None
+-    return {'details': details, 'table': [{'data': found[0]}]}
++    return root
+diff --git a/tests/test_c15_parent_league_tables.py b/tests/test_c15_parent_league_tables.py
+new file mode 100644
+index 0000000..fc873d4
+--- /dev/null
++++ b/tests/test_c15_parent_league_tables.py
+@@ -0,0 +1,68 @@
++"""Seasonal football source IDs require a current-season fixture witness."""
++from copy import deepcopy
++from datetime import timedelta
++from types import SimpleNamespace
++import pytest
++from collector.football_table_identity import scoped_table
++from collector.standings_enrich import _fetch_fotmob_dynamic_standings
++from collector.util import dump_json, load_json
++from tests.test_c15_live_tables import db, add_case
++
++
++def single_case(db):
++    cid, row, native, root = add_case(db)
++    # Same pattern as the observed League One 938219 -> 108 response.
++    root['details']['name'] = 'Test League'
++    root['table'] = [{'data': {'leagueId': 900, 'leagueName': 'Test League',
++                              'table': {'all': root['table'][0]['data']['tables'][0]['table']['all']}}}]
++    root['fixtures'] = {'allMatches': [{'id': '101', 'home': {'id':'1'}, 'away':{'id':'2'},
++        'status': {'utcTime': row.start_time.isoformat()}}]}
++    return cid, row, native, root
++
++
++def test_exact_seasonal_match_authorizes_single_stable_parent_table(db):
++    cid, row, native, root = single_case(db)
++    before=(row.extra_json,row.participants_json,row.score_json,row.fingerprint,row.competition_id,row.display_eligible)
++    calls=[]
++    def get(url):
++        calls.append(url)
++        return SimpleNamespace(ok=True,payload=native if 'matchDetails' in url else root)
++    fetched=_fetch_fotmob_dynamic_standings(db,cid,getter=get)
++    assert [r['team'] for r in fetched['rows']] == ['Alpha','Beta']
++    assert fetched['season']=='2026' and fetched['source_leaf_id']=='9001'
++    assert len(calls)==2
++    assert (row.extra_json,row.participants_json,row.score_json,row.fingerprint,row.competition_id,row.display_eligible)==before
++
++
++def test_stored_native_parent_still_requires_fixture_in_the_returned_season(db):
++    cid,row,native,root=single_case(db)
++    meta=load_json(row.extra_json);meta.update(source_group_id='9001',source_parent_competition_id='900');row.extra_json=dump_json(meta);db.commit()
++    calls=[]
++    def get(url):calls.append(url);return SimpleNamespace(ok=True,payload=root)
++    assert len(_fetch_fotmob_dynamic_standings(db,cid,getter=get)['rows'])==2
++    assert len(calls)==1
++    root['fixtures']['allMatches']=[]
++    assert _fetch_fotmob_dynamic_standings(db,cid,getter=get)=={}
++
++
++@pytest.mark.parametrize('wrong',['no-season','missing-fixture','wrong-match','duplicate-match','reversed-teams','wrong-team','wrong-time','unknown-time','missing-member','wrong-parent','multiple-tables','composite','nested-groups','invalid-table','no-context-witness'])
++def test_parent_fallback_never_borrows_an_unproven_group_or_old_season(db,wrong):
++    cid,row,native,root=single_case(db)
++    context={'parent_id':'900','leaf_id':'9001','teams':['1','2'],'match_id':'101','start_time':row.start_time.isoformat()}
++    fixture=root['fixtures']['allMatches'][0]
++    if wrong=='no-season':root['details'].pop('selectedSeason')
++    if wrong=='missing-fixture':root['fixtures']['allMatches']=[]
++    if wrong=='wrong-match':fixture['id']='999'
++    if wrong=='duplicate-match':root['fixtures']['allMatches'].append(deepcopy(fixture))
++    if wrong=='reversed-teams':fixture['home'],fixture['away']=fixture['away'],fixture['home']
++    if wrong=='wrong-team':fixture['away']['id']='9'
++    if wrong=='wrong-time':fixture['status']['utcTime']=(row.start_time-timedelta(days=365)).isoformat()
++    if wrong=='unknown-time':fixture['status']['utcTime']=None
++    if wrong=='missing-member':root['table'][0]['data']['table']['all'].pop()
++    if wrong=='wrong-parent':root['details']['id']=999
++    if wrong=='multiple-tables':root['table'].append(deepcopy(root['table'][0]))
++    if wrong=='composite':root['table'][0]['data']['composite']=True
++    if wrong=='nested-groups':root['table'][0]['data']['tables']=[{'leagueId':999}]
++    if wrong=='invalid-table':root['table'][0]['data']['table']={'all':None}
++    if wrong=='no-context-witness':context.pop('match_id')
++    assert scoped_table(root,context) is None
