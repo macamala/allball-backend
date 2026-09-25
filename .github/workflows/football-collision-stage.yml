@@ -1,0 +1,61 @@
+name: Football collision and all-league regression gate
+on:
+  push:
+    branches: [fix/football-collision-routing-20260925]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: python audit/apply_football_collision.py
+      - run: python -m pip install -r requirements.txt
+      - run: python -m compileall -q collector tests
+      - name: All football regressions including 213 recorded competition identities
+        run: |
+          mkdir -p /tmp/collision-evidence
+          python -m pytest -q $(cat audit/football_test_selection.txt) --disable-warnings --junitxml=/tmp/collision-evidence/tests.xml
+      - name: Preserve exact source and source-only diff
+        if: always()
+        run: |
+          mkdir -p /tmp/collision-evidence
+          git add -N collector tests
+          git diff --binary > /tmp/collision-evidence/source.patch
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib,json
+          paths=['collector/collect.py','collector/football_board_refresh.py','collector/football_write_identity.py','tests/test_football_collision_routing.py','audit/football_test_selection.txt']
+          data={p:hashlib.sha256(Path(p).read_bytes()).hexdigest() for p in paths if Path(p).exists()}
+          Path('/tmp/collision-evidence/source-sha256.json').write_text(json.dumps(data,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: football-collision-regression-evidence
+          path: /tmp/collision-evidence
+          retention-days: 30
+  publish-tested-branch:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - run: |
+          python audit/apply_football_collision.py
+          git add collector tests audit/football_test_selection.txt
+          git config user.name 'NinkoSports regression checks'
+          git config user.email '79318740+macamala@users.noreply.github.com'
+          git commit -m 'Route retired football IDs safely and retain unresolved identities without blocking other fixtures'
+          git push origin HEAD:fix/football-collision-routing-20260925
+          echo "TESTED_SOURCE_COMMIT=$(git rev-parse HEAD)"
