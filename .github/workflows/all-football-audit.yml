@@ -1,0 +1,32 @@
+name: All football production audit
+on:
+  push:
+    branches: [audit/all-football-20260925]
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 8
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Read all football leagues, not a fixed competition list
+        run: python audit/all_football_audit.py
+      - name: Preserve baseline source for isolated regression work
+        if: always()
+        run: |
+          mkdir -p /tmp/all-football
+          git archive --format=tar.gz 82f139f2dd915e13a8faebc1de941046d155fbf6 > /tmp/all-football/backend-source.tar.gz
+          git rev-parse HEAD > /tmp/all-football/audit-ref.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: all-football-baseline
+          path: /tmp/all-football
+          retention-days: 14
