@@ -1,0 +1,167 @@
+diff --git a/collector/football_history.py b/collector/football_history.py
+index 915a64e..4ec98f5 100644
+--- a/collector/football_history.py
++++ b/collector/football_history.py
+@@ -6,7 +6,9 @@ stored public identity is proved. A historical record is not a new live event.
+ from copy import deepcopy
+ from datetime import datetime
+ import re
+-from sqlalchemy import or_, func
++from sqlalchemy import or_
++import logging
++import time
+ from collector.util import parse_datetime, isoformat, load_json
+ from collector.source_ids import id_for_family
+ from collector.participant_alias import punctuation_identity_key
+@@ -126,36 +128,53 @@ def parse_history(root):
+ 
+ 
+ def known_native_rows(db, mids):
+-    """Find existing restrictions even in another competition or pre-observation rows.
++    """Find all existing restrictions with two bounded reads, regardless of season.
+ 
+-    Queries are bounded batches over exact typed references, not name matching.
+-    The textual prefilter is followed by the existing typed-ID parser.
++    One compiled regexp prefilter replaces N rich-TEXT replace/LIKE operations
++    per row and repeated observation scans. The existing typed-ID parser remains
++    the authority; matching a textual value alone never authorizes an identity.
++    No visibility, competition or time filter can hide a restricted old alias.
+     """
+     from collector.models import SportsEvent, SportsEventObservation
+     mids = sorted({_id(mid) for mid in mids if _id(mid)})
+-    by_native, seen = {}, {}
+-    observed = []
+-    for offset in range(0, len(mids), 80):
+-        batch = mids[offset:offset+80]
+-        observations = db.query(SportsEventObservation.event_id, SportsEventObservation.source_event_id).filter(
+-            SportsEventObservation.source_family == 'fotmob', SportsEventObservation.source_event_id.in_(batch)).distinct().all()
+-        observed.extend(observations)
+-        ids = {eid for eid, _ in observations}
+-        compact = func.replace(SportsEvent.extra_json, ' ', '')
+-        clauses = [compact.like('%"fotmob":"'+mid+'"%') for mid in batch]
+-        candidates = db.query(SportsEvent).filter(SportsEvent.sport_id == 'football',
+-            or_(SportsEvent.event_id.in_(ids), *clauses)).limit(4001).all()
+-        if len(candidates) > 4000:
+-            raise ValueError('Native identity index exceeded its safe read bound')
+-        seen.update({r.event_id: r for r in candidates})
+-    for row in seen.values():
++    if not mids:
++        return {}
++    if len(mids) > 2500:
++        raise ValueError('Native identity request exceeded its safe read bound')
++    started = time.monotonic()
++    observations = db.query(SportsEventObservation.event_id, SportsEventObservation.source_event_id).filter(
++        SportsEventObservation.source_family == 'fotmob',
++        SportsEventObservation.source_event_id.in_(mids)).distinct().limit(4001).all()
++    observed_at = time.monotonic()
++    if len(observations) > 4000:
++        raise ValueError('Native observation index exceeded its safe read bound')
++    ids = {eid for eid, _ in observations}
++    # Values are normalized numeric IDs, not a regex/SQL supplied by a caller.
++    # Include legacy dict/list and source_family/source_event_id forms. False
++    # positives in other JSON fields are rejected by id_for_family below.
++    choices = '(?:' + '|'.join(mids) + ')'
++    value = r'(?:"\s*(?:[A-Za-z-]+:)?' + choices + r'\s*"|' + choices + r'\s*[,}])'
++    pattern = r'"(?:fotmob|source_event_id)"\s*:\s*' + value + r'|"fotmob:\s*' + choices + r'\s*"'
++    candidates = db.query(SportsEvent).filter(SportsEvent.sport_id == 'football',
++        or_(SportsEvent.event_id.in_(ids), SportsEvent.extra_json.regexp_match(pattern))).limit(4001).all()
++    if len(candidates) > 4000:
++        raise ValueError('Native identity index exceeded its safe read bound')
++    seen = {row.event_id: row for row in candidates}
++    by_native = {}
++    wanted = set(mids)
++    for row in candidates:
+         mid = id_for_family(load_json(row.extra_json, {}) or {}, 'fotmob')
+-        if mid in mids:
++        if mid in wanted:
+             by_native.setdefault(mid, []).append(row)
+-    for eid, mid in observed:
++    for eid, mid in observations:
+         row = seen.get(eid)
+         if row is not None and row not in by_native.get(mid, []):
+             by_native.setdefault(mid, []).append(row)
++    elapsed = time.monotonic()-started
++    if elapsed >= 1:
++        logging.getLogger(__name__).info(
++            'HISTORY_ID_LOOKUP mids=%s observations=%s rows=%s observation_ms=%.1f total_ms=%.1f',
++            len(mids), len(observations), len(candidates), (observed_at-started)*1000, elapsed*1000)
+     return by_native
+ 
+ 
+ diff --git a/tests/test_c16_identity_lookup.py b/tests/test_c16_identity_lookup.py
+new file mode 100644
+index 0000000..5cba179
+--- /dev/null
++++ b/tests/test_c16_identity_lookup.py
+@@ -0,0 +1,71 @@
++"""Full-season lookup is bounded without forgetting legacy/manual restrictions."""
++import json
++import pytest
++from sqlalchemy import event
++from collector.football_history import known_native_rows, public_history, parse_history
++from collector.models import SportsEventObservation
++from collector.util import dump_json
++from tests.test_c16_competition_hub import db, add_row, history_root
++from datetime import datetime
++
++
++@pytest.mark.parametrize('meta',[
++    {'source_event_ids': {'fotmob':'99'}},
++    {'source_event_ids': {'fotmob':99}},
++    {'source_event_ids': {'fotmob':'fotmob:99'}},
++    {'source_event_ids': {'fotmob':'FOTMOB:99'}},
++    {'source_event_ids': [{'fotmob':'99'}]},
++    {'source_event_ids': ['fotmob:99']},
++    {'source_family':'fotmob','source_event_id':'99'},
++    {'source_family':'fotmob','source_event_id':99},
++    {'source_family':'fotmob','source_event_id':'fotmob:99'},
++])
++def test_legacy_hidden_rows_are_still_found_without_observations(db, meta):
++    row=add_row(db,eid='hidden',mid='99',key='other-league',display_eligible=False,
++                extra_json=json.dumps(meta,indent='\t'))
++    before=(row.extra_json,row.display_eligible,row.event_id,row.score_json)
++    assert known_native_rows(db,['99'])['99']==[row]
++    root=history_root();current=add_row(db,at=datetime.fromisoformat(root['general']['matchTimeUTCDate'].removesuffix('Z')))
++    assert public_history(db,current,parse_history(root))==([], {})
++    assert (row.extra_json,row.display_eligible,row.event_id,row.score_json)==before
++
++
++def test_full_season_uses_two_queries_not_one_scan_per_eighty_matches(db):
++    row=add_row(db,mid='1700')
++    queries=[]
++    def capture(conn,cursor,statement,parameters,context,executemany):
++        if statement.lstrip().upper().startswith('SELECT'):queries.append(statement)
++    engine=db.get_bind();event.listen(engine,'before_cursor_execute',capture)
++    try:
++        result=known_native_rows(db,[str(n) for n in range(1000,1701)])
++    finally:event.remove(engine,'before_cursor_execute',capture)
++    assert result=={'1700':[row]}
++    assert len(queries)==2,queries
++    assert 'replace(' not in queries[1].lower() and ' like ' not in queries[1].lower()
++
++
++def test_prefilter_is_not_identity_and_does_not_confuse_numeric_prefixes(db):
++    add_row(db,eid='other-family',extra_json=dump_json({'source_event_ids':{'sofascore':'99'},'source_event_id':'99','source_family':'sofascore'}))
++    add_row(db,eid='bigger',mid='991')
++    add_row(db,eid='untyped',extra_json=dump_json({'source_event_ids':['99']}))
++    assert known_native_rows(db,['99'])=={}
++
++
++def test_observation_conflicts_remain_restrictions_even_without_matching_typed_id(db):
++    row=add_row(db,eid='historical-alias',mid='other',display_eligible=False)
++    db.add(SportsEventObservation(event_id=row.event_id,source_id='fm',source_family='fotmob',source_event_id='99'));db.commit()
++    assert known_native_rows(db,['99'])=={'99':[row]}
++
++
++def test_empty_or_invalid_request_does_not_scan_any_table(db):
++    queries=[];engine=db.get_bind()
++    def capture(*args):queries.append(args)
++    event.listen(engine,'before_cursor_execute',capture)
++    try:assert known_native_rows(db,[])==known_native_rows(db,['bad|.*','99" OR 1=1',''])=={}
++    finally:event.remove(engine,'before_cursor_execute',capture)
++    assert not queries
++
++
++def test_excessive_lookup_fails_closed_before_queries(db):
++    with pytest.raises(ValueError,match='request exceeded'):
++        known_native_rows(db,map(str,range(1,2502)))
