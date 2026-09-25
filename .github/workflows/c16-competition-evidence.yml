@@ -1,0 +1,43 @@
+name: C16 competition source evidence
+on:
+  push:
+    branches: [audit/football-recovery-20260925-10]
+    paths: ['.github/workflows/c16-competition-evidence.yml']
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - run: |
+          mkdir -p /tmp/c16-evidence
+          python - <<'PY'
+          import json,urllib.request,concurrent.futures
+          from pathlib import Path
+          from datetime import datetime,timezone
+          from urllib.parse import urlencode
+          out=Path('/tmp/c16-evidence');base='https://allball-backend-production.up.railway.app'
+          urls={}
+          for key,lid in [('england-league-one','108'),('ireland-premier-division','126'),('uefa-nations-league','9806'),('football-fifa-asean-cup-premier-division-grp-a','13287')]:
+            urls['native-league-'+lid]='https://www.fotmob.com/api/data/leagues?id='+lid
+            urls['table-'+key]=base+'/sports-data/standings?'+urlencode({'league':key})
+            urls['events-'+key]=base+'/sports-data/events?'+urlencode({'competition':key,'sport':'football','unlimited':1,'date_from':'2026-01-01T00:00:00Z','date_to':'2027-07-01T00:00:00Z'})
+          for mid in ['6232978','5100971','5837087']:
+            urls['native-detail-'+mid]='https://www.fotmob.com/api/data/matchDetails?matchId='+mid
+          urls['public-sligo']=base+'/sports-data/matches/ninko-evt-8ea488bb6f0bcf5038b7'
+          urls['public-bangladesh']=base+'/sports-data/matches/ninko-evt-0f0c8b1216525d84d854'
+          def get(pair):
+            name,url=pair;d={'url':url,'at':datetime.now(timezone.utc).isoformat()}
+            try:
+              with urllib.request.urlopen(urllib.request.Request(url,headers={'Accept':'application/json'}),timeout=20) as r:d.update(http=r.status,payload=json.load(r))
+            except Exception as e:d['error']=str(e)
+            (out/(name+'.json')).write_text(json.dumps(d,ensure_ascii=False,indent=2));return name,d.get('http'),d.get('error')
+          with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:print(list(pool.map(get,urls.items())))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: c16-competition-source-evidence
+          path: /tmp/c16-evidence
+          retention-days: 30
