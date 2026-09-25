@@ -1,0 +1,28 @@
+name: C13 public match centre acceptance
+on:
+  push:
+    branches: [audit/football-recovery-20260925-10]
+    paths: ['audit/checkpoint13_match_acceptance.py', '.github/workflows/c13-public-acceptance.yml']
+permissions:
+  contents: read
+jobs:
+  production:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: |
+          python -m pip install playwright
+          python -m playwright install --with-deps chromium
+      - run: python audit/checkpoint13_match_acceptance.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: c13-public-match-centre
+          path: /tmp/c13-public
+          retention-days: 30
