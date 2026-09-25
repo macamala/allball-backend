@@ -184,6 +184,11 @@ def _fetch_native(db, key, season, getter):
                      'group': match.get('group') or match.get('groupName'), 'details_available': False})
     duplicate_ids = {r['_native_id'] for r in rows if sum(x['_native_id'] == r['_native_id'] for x in rows) > 1}
     rows = [r for r in rows if r['_native_id'] not in duplicate_ids]
+    if not rows:
+        # A partial tournament parent must not impose its season on unrelated
+        # already accepted groups. Without a verified schedule, retain the
+        # canonical competition view rather than filtering it to an empty page.
+        return {}
     return {'events': rows, 'season': selected, 'table_views': {v: _table_variant(scoped, v) for v in ('home', 'away')},
             'table_rows': table_rows, 'checked_at': isoformat(datetime.utcnow()), 'parent': context['parent_id']}
 

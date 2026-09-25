@@ -190,3 +190,21 @@ def test_history_storage_private_and_result_unchanged(db):
     assert load_json(row.extra_json)['_football_history']['h2h'][0]['score']['home']==2
     assert '_football_history' not in public_event(load_json(row.extra_json))
     assert (row.event_id,row.status,row.score_json,row.fingerprint)==before[:4]
+
+
+def test_partial_composite_parent_does_not_erase_existing_group_schedule(db):
+    key, row, root = setup(db)
+    row.extra_json = dump_json({'source_event_ids': {'fotmob': '101'}, 'group': 'Group A'})
+    db.commit()
+    table = root['table'][0]['data']['table']
+    root['table'] = [{'data': {'leagueId': 10, 'composite': True, 'tables': [
+        {'leagueId': 1010, 'leagueName': 'Test League Group A', 'table': table}]}}]
+    for match in root['fixtures']['allMatches']:
+        match['group'] = 'A'  # Bare letters cannot authorize a composite group.
+    out = hub(db, Provider(), key, group='Group A', getter=get_for(root))
+    assert [e['id'] for e in out['events']] == ['known']
+    assert not out['coverage']['native_season_schedule']
+    assert out['season'] is None
+    assert not out['table_views']
+    archived = hub(db, Provider(), key, group='Group A', season='2025', getter=get_for(root))
+    assert archived['events'] == []
