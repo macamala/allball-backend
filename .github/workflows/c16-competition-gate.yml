@@ -1,0 +1,59 @@
+name: C16 competition and history gate
+on:
+  push:
+    branches: [feature/competition-centre-c16-20260925]
+    paths: ['audit/c16_source.*.b64', '.github/workflows/c16-competition-gate.yml']
+permissions:
+  contents: write
+  actions: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 36129893421
+          name: c16-competition-source-evidence
+          path: /tmp/native-c16
+      - run: |
+          mkdir -p evidence
+          python - <<'PY'
+          import gzip,base64,hashlib
+          from pathlib import Path
+          encoded=''.join(Path(f'audit/c16_source.{i}.b64').read_text().strip() for i in range(3))
+          patch=gzip.decompress(base64.b64decode(encoded,validate=True))
+          assert hashlib.sha256(patch).hexdigest()=='086138abec4620caa5b1b019a6f2978a89c0bb25672860d9bb1bbc9126ebb010'
+          Path('evidence/reviewed.patch').write_bytes(patch)
+          PY
+          git apply --check evidence/reviewed.patch
+          git apply evidence/reviewed.patch
+          git add -N app.py collector tests audit/c16_native_replay.py
+          git diff -- app.py collector tests audit/c16_native_replay.py > evidence/source.patch
+          cmp evidence/reviewed.patch evidence/source.patch
+          python -m pip install -r requirements.txt pytest
+      - run: python -m pytest -q $(cat audit/football_test_selection.txt) tests/test_hidden_football_aliases.py tests/test_fotmob_match_centre.py tests/test_entity_profile_navigation.py tests/test_c14_live_player.py tests/test_canonical_detail.py tests/test_fiba_rich_detail.py tests/test_sofa_rich_detail.py tests/test_c15_live_tables.py tests/test_c15_parent_league_tables.py tests/test_worker_shutdown_handoff.py tests/test_c16_competition_hub.py --junitxml=evidence/tests.xml
+      - run: PYTHONPATH=. python audit/c16_native_replay.py /tmp/native-c16 evidence
+      - name: Publish only the tested isolated candidate
+        run: |
+          git diff --check
+          git config user.name 'NinkoSports regression checks'
+          git config user.email '79318740+macamala@users.noreply.github.com'
+          git add app.py collector tests audit/c16_native_replay.py
+          git commit -m 'Connect competition schedules, past results and verified head-to-head history without changing canonical scores'
+          git push origin HEAD:refs/heads/feature/competition-centre-c16-20260925
+          git rev-parse HEAD > evidence/candidate.txt
+          git diff --name-only 2c69cc00bdede9b1735e38d162bceaecdd6e73e6 HEAD -- app.py collector tests audit/c16_native_replay.py | xargs sha256sum > evidence/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: c16-competition-gate
+          path: evidence
+          retention-days: 30
