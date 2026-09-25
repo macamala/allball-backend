@@ -1,0 +1,47 @@
+diff --git a/tests/test_data_integrity.py b/tests/test_data_integrity.py
+index 4c916ce..2f8d04e 100644
+--- a/tests/test_data_integrity.py
++++ b/tests/test_data_integrity.py
+@@ -136,7 +136,9 @@ def test_mojibake_repaired_but_unicode_kept():
+ 
+ 
+ def test_premier_league_label_does_not_absorb_other_countries():
+-    assert label_matches_competition("Premier League", "england-premier-league")
++    # A generic worldwide label is not evidence of English competition identity.
++    # Explicit labels or same-node provider ID/country proof are required.
++    assert not label_matches_competition("Premier League", "england-premier-league")
+     assert label_matches_competition("English Premier League", "england-premier-league")
+     assert not label_matches_competition("Nigerian Premier League", "england-premier-league")
+     assert not label_matches_competition("Ukraine Premier League", "england-premier-league")
+@@ -155,10 +157,15 @@ def test_premier_league_label_does_not_absorb_other_countries():
+         "rejected_label_other_competition",
+     }
+     ok_epl, _ = event_accepted_for_mapping(
+-        {"source_competition_name": "Premier League", "source_family": "bbc-sport", "sport": "football"},
++        {"source_competition_name": "English Premier League", "source_family": "bbc-sport", "sport": "football"},
+         "england-premier-league",
+     )
+     assert ok_epl is True
++    ambiguous, _ = event_accepted_for_mapping(
++        {"source_competition_name": "Premier League", "source_family": "bbc-sport", "sport": "football"},
++        "england-premier-league",
++    )
++    assert ambiguous is False
+     assert correct_public_competition_id(
+         stored_competition_id="england-premier-league",
+         source_competition_name="Nigerian Premier League",
+@@ -904,3 +911,14 @@ def test_orphan_guard_ignores_nonpublic_internal_sibling():
+         db.query(SportsEvent).filter(SportsEvent.event_id.in_(ids)).delete(synchronize_session=False)
+         db.commit()
+         db.close()
++
++
++def test_generic_premier_league_requires_independent_same_node_country_and_id():
++    def event(league_id, country):
++        return {"source_family": "fotmob", "sport": "football",
++                "source_competition_id": str(league_id), "source_competition_name": "Premier League",
++                "source_competition_context": {"id": league_id, "name": "Premier League", "ccode": country}}
++    assert event_accepted_for_mapping(event(47, "ENG"), "england-premier-league")[0]
++    assert not event_accepted_for_mapping(event(47, "GHA"), "england-premier-league")[0]
++    assert not event_accepted_for_mapping(event(522, "GHA"), "england-premier-league")[0]
++    assert event_accepted_for_mapping(event(522, "GHA"), "football-gha-premier-league")[0]
