@@ -38,11 +38,11 @@ def test_repeated_app_startup_respects_explicit_maintenance_policy(monkeypatch, 
 
     with SessionLocal() as db:
         keeper = SportsEvent(event_id='startup-keeper', fingerprint='startup-keeper',
-            sport_id='football', competition_id='uefa-nations-league', status='finished',
+            event_family='team_match', sport_id='football', competition_id='uefa-nations-league', status='finished',
             display_eligible=True, participants_json=dump_json({'home':{'name':'Andorra'},'away':{'name':'Malta'}}),
             score_json=dump_json({'home':1,'away':2}), extra_json=dump_json({'display_eligible':True}))
         child = SportsEvent(event_id='startup-alias', fingerprint='startup-alias',
-            sport_id='football', competition_id='uefa-nations-league', status='scheduled',
+            event_family='team_match', sport_id='football', competition_id='uefa-nations-league', status='scheduled',
             canonical_event_id=keeper.event_id, display_eligible=False,
             score_json='{}', extra_json=dump_json({'display_eligible':False,'canonical_event_id':keeper.event_id,'collapse_role':'observation_only'}))
         store_list_extra(keeper, {'display_eligible':True})
