@@ -60,6 +60,11 @@ def _ts(value: Any) -> datetime:
 
 def _obs_ts(row: Dict[str, Any]) -> datetime:
     observed = observation_time(row)
+    if observed is None and row.get("source_family") == "fotmob":
+        # FotMob date boards expose explicit state but often no per-match
+        # modified timestamp. Compare the actual HTTP observations (cache hits
+        # retain their original stamp), never processing/redeploy time.
+        observed = parse_datetime(row.get("source_fetch_time"))
     if observed is None:
         return datetime.min
     return observed.replace(tzinfo=None) if observed.tzinfo else observed
@@ -363,9 +368,13 @@ def merge_event_fields(
         family=str(incoming.get("source_family") or ""),
         source_event_id=incoming.get("source_event_id"),
     )
-    out["source_family"] = incoming.get("source_family") or current.get("source_family")
+    # Evidence must follow the observation that won the status merge. Keeping
+    # old source_status=scheduled would demote a genuine newly-live match.
+    winner = incoming if live_wins else current
+    other = current if live_wins else incoming
+    out["source_family"] = winner.get("source_family") or other.get("source_family")
     out["field_freshness"] = freshness
-    out["source_status"] = current.get("source_status") or incoming.get("source_status") or current.get("status")
+    out["source_status"] = winner.get("source_status") or winner.get("status") or other.get("source_status")
     if incoming.get("source_status") and live_wins:
         out["source_status_incoming"] = incoming.get("source_status")
     if incoming.get("source_event_updated_at") and (incoming_ts >= current_ts or not current.get("source_event_updated_at")):
@@ -501,9 +510,9 @@ def apply_row_fields(row, merged: Dict[str, Any], source_id: str, higher: bool) 
             row.live = False
             extra["status_inferred"] = False
             row.extra_json = dump_json(extra)
-    from collector.list_extra import store_list_extra
+    from collector.maintenance_policy import sync_public_visibility
 
-    store_list_extra(row, extra)
+    sync_public_visibility(row, extra, extra.get("display_eligible") is not False)
     try:
         from sqlalchemy.orm import object_session
         from collector.cache import note_list_invalidation

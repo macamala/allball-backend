@@ -19,7 +19,7 @@ from collector.adapters_fotmob import (
     board_dates,
     match_to_event,
 )
-from collector.competition_identity import unique_label_competition
+from collector.competition_identity import unique_label_competition, canonical_country_matches
 from collector.identity_events import identity_confidence
 from collector.competition_presentation import SOURCE_ALPHA3_TO_GEO
 from collector.cache import note_list_invalidation
@@ -88,7 +88,7 @@ def _canonical_fotmob_competition(league_name: str, ccode: str) -> Optional[str]
     if len(exact) == 1:
         return exact[0]
     direct = unique_label_competition(name, sport_id="football")
-    if direct:
+    if direct and canonical_country_matches(direct, code):
         return direct
     code = str(ccode or "").strip().upper()
     if not code or code in {"INT", "WORLD"}:
@@ -97,7 +97,8 @@ def _canonical_fotmob_competition(league_name: str, ccode: str) -> Optional[str]
     country = str(label_for(geo) or geo or "").strip()
     if not country:
         return None
-    return unique_label_competition(f"{name} {country}", sport_id="football")
+    candidate = unique_label_competition(f"{name} {country}", sport_id="football")
+    return candidate if candidate and canonical_country_matches(candidate, code) else None
 
 
 def _fotmob_competition_identity(match: Dict[str, Any]) -> Tuple[Optional[str], str, str, str]:
@@ -303,6 +304,18 @@ def _event_view(row: SportsEvent) -> Dict[str, Any]:
     }
 
 
+def _corrected_competition_logo(current: str, parsed: Dict[str, Any]) -> str:
+    incoming = str(parsed.get("competition_logo") or "")
+    if not current:
+        return incoming
+    group = str(parsed.get("source_badge_group_id") or "")
+    parent = str(parsed.get("source_badge_parent_id") or "")
+    prefix = "https://images.fotmob.com/image_resources/logo/leaguelogo/"
+    if group and parent and group != parent and current == prefix + group + ".png" and incoming == prefix + parent + ".png":
+        return incoming
+    return current
+
+
 def _fill_identity_assets(row: SportsEvent, parsed: Dict[str, Any]) -> bool:
     participants = load_json(row.participants_json, {}) or {}
     changed = False
@@ -327,8 +340,8 @@ def _fill_identity_assets(row: SportsEvent, parsed: Dict[str, Any]) -> bool:
                     changed = True
             participants[alt] = alt_merged
     extra = load_json(row.extra_json, {}) or {}
-    competition_logo = parsed.get("competition_logo")
-    if competition_logo and not extra.get("competition_logo"):
+    competition_logo = _corrected_competition_logo(str(extra.get("competition_logo") or ""), parsed)
+    if competition_logo and competition_logo != extra.get("competition_logo"):
         extra["competition_logo"] = competition_logo
         changed = True
     country_id = parsed.get("country_id")

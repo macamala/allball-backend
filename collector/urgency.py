@@ -49,7 +49,7 @@ def classify_event(status: Optional[str], start_time: Optional[datetime], *, now
     now = _aware(now) or datetime.utcnow()
     start = _aware(start_time)
     st = (status or "").lower()
-    if st == "live":
+    if st in {"live", "halftime", "break", "ht", "inplay", "in_play"}:
         return "LIVE"
     if st == "stale":
         return "TODAY"

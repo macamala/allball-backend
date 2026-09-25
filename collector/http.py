@@ -13,7 +13,8 @@ import urllib.parse
 import urllib.request
 import threading
 import time
-from collections import deque
+from collections import deque, OrderedDict
+from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Optional
 
 from collector.adapters import FetchResult
@@ -22,7 +23,13 @@ from collector.family_health import family_from_host, note_family_failure, reset
 USER_AGENT = "NinkoSportsCollector/2.5 (+https://ninkosports.com; sports-data collection)"
 DEFAULT_TIMEOUT = 20
 
-_CACHE: Dict[str, FetchResult] = {}
+# Only short request coalescing belongs here. Adapters own their longer-lived
+# roster/fixture caches; a process-lifetime HTTP cache freezes score updates.
+HTTP_CACHE_TTL_SECONDS = 5.0
+HTTP_CACHE_MAX_ENTRIES = 512
+_CACHE: Dict[str, FetchResult] = OrderedDict()
+_CACHE_AT: Dict[str, float] = {}
+_CACHE_LOCK = threading.RLock()
 STATS: Dict[str, int] = {
     "requests": 0,
     "cache_hits": 0,
@@ -103,7 +110,9 @@ HttpGetter = Callable[[str, Optional[Dict[str, str]]], FetchResult]
 
 
 def reset_http_stats() -> None:
-    _CACHE.clear()
+    with _CACHE_LOCK:
+        _CACHE.clear()
+        _CACHE_AT.clear()
     _HOST_BLOCKED_UNTIL.clear()
     _HOST_BLOCK_KIND.clear()
     _HOST_LAST_REQUEST.clear()
@@ -208,16 +217,43 @@ def _note_request(url: str, result: FetchResult) -> None:
     STATS["rolling_hour"] = rolling_http_hour()
 
 
-def _cached(url: str) -> Optional[FetchResult]:
-    hit = _CACHE.get(url)
-    if hit is not None:
+def _cache_key(url: str, representation: str, headers: Optional[Dict[str, str]]) -> str:
+    # Raw bytes and decoded JSON must not share incompatible cached payloads.
+    return representation + "|" + url + "|" + json.dumps(sorted((headers or {}).items()))
+
+
+def _cached(key: str) -> Optional[FetchResult]:
+    now = time.monotonic()
+    with _CACHE_LOCK:
+        hit = _CACHE.get(key)
+        fetched = _CACHE_AT.get(key)
+        if hit is None:
+            return None
+        if fetched is None or now - fetched >= HTTP_CACHE_TTL_SECONDS or now < fetched:
+            _CACHE.pop(key, None)
+            _CACHE_AT.pop(key, None)
+            return None
+        _CACHE.move_to_end(key)
         STATS["cache_hits"] += 1
-    return hit
+        return hit
 
 
-def _store(url: str, result: FetchResult) -> FetchResult:
+def _store(key: str, result: FetchResult) -> FetchResult:
+    if result.fetched_at is None:
+        result.fetched_at = datetime.now(timezone.utc).isoformat()
     if result.http_status != 0:
-        _CACHE[url] = result
+        with _CACHE_LOCK:
+            now = time.monotonic()
+            for stale_key, stored_at in list(_CACHE_AT.items()):
+                if now - stored_at >= HTTP_CACHE_TTL_SECONDS or now < stored_at:
+                    _CACHE.pop(stale_key, None)
+                    _CACHE_AT.pop(stale_key, None)
+            _CACHE[key] = result
+            _CACHE_AT[key] = now
+            _CACHE.move_to_end(key)
+            while len(_CACHE) > HTTP_CACHE_MAX_ENTRIES:
+                expired, _ = _CACHE.popitem(last=False)
+                _CACHE_AT.pop(expired, None)
     return result
 
 
@@ -321,7 +357,8 @@ def fetch_url(
     headers: Optional[Dict[str, str]] = None,
     timeout: Optional[int] = None,
 ) -> FetchResult:
-    cached = _cached(url)
+    cache_key = _cache_key(url, "json", headers)
+    cached = _cached(cache_key)
     if cached is not None:
         return cached
     if _host_blocked(url):
@@ -378,21 +415,21 @@ def fetch_url(
                 if fam:
                     note_family_failure(fam, http_status=429, error_type="RATE_LIMITED", retry_after_s=retry_after)
             _note_request(url, result)
-            return _store(url, result)
+            return _store(cache_key, result)
         result = FetchResult(ok=False, http_status=status, error=f"http {status}")
         if status == 503:
             _block_host(url, 180.0, kind="unavailable")
             _note_request(url, result)
             return result
         _note_request(url, result)
-        return _store(url, result)
+        return _store(cache_key, result)
     except Exception as exc:  # noqa: BLE001
         return _transport_error(url, exc)
 
     if _is_challenge(status, raw):
         result = FetchResult(ok=False, http_status=status, restricted=True, error="access restricted")
         _note_request(url, result)
-        return _store(url, result)
+        return _store(cache_key, result)
     payload: Any
     try:
         payload = json.loads(raw.decode("utf-8"))
@@ -400,10 +437,10 @@ def fetch_url(
         text = raw.decode("utf-8", "replace")
         result = FetchResult(ok=False, http_status=status, error="non-json response", payload=text[:300])
         _note_request(url, result)
-        return _store(url, result)
+        return _store(cache_key, result)
     result = FetchResult(ok=True, http_status=status, payload=payload)
     _note_request(url, result)
-    return _store(url, result)
+    return _store(cache_key, result)
 
 
 def fetch_bytes(
@@ -413,7 +450,8 @@ def fetch_bytes(
     timeout: Optional[int] = None,
 ) -> FetchResult:
     """GET raw bytes. Used for zip datasets and non-JSON bodies."""
-    cached = _cached(url)
+    cache_key = _cache_key(url, "bytes", headers)
+    cached = _cached(cache_key)
     if cached is not None:
         return cached
     if _host_blocked(url):
@@ -464,19 +502,19 @@ def fetch_bytes(
                 if fam:
                     note_family_failure(fam, http_status=429, error_type="RATE_LIMITED", retry_after_s=120)
             _note_request(url, result)
-            return _store(url, result)
+            return _store(cache_key, result)
         result = FetchResult(ok=False, http_status=status, error=f"http {status}")
         _note_request(url, result)
-        return _store(url, result)
+        return _store(cache_key, result)
     except Exception as exc:  # noqa: BLE001
         return _transport_error(url, exc)
     if _is_challenge(status, raw):
         result = FetchResult(ok=False, http_status=status, restricted=True, error="access restricted")
         _note_request(url, result)
-        return _store(url, result)
+        return _store(cache_key, result)
     result = FetchResult(ok=True, http_status=status, payload=raw)
     _note_request(url, result)
-    return _store(url, result)
+    return _store(cache_key, result)
 
 
 def fetch_text(
@@ -499,7 +537,7 @@ def fetch_text(
     lowered = text[:4000].lower()
     if any(marker.decode("utf-8", "ignore") in lowered if isinstance(marker, bytes) else marker in lowered for marker in CHALLENGE_MARKERS):
         return FetchResult(ok=False, http_status=result.http_status, restricted=True, error="access restricted")
-    return FetchResult(ok=True, http_status=result.http_status, payload=text)
+    return FetchResult(ok=True, http_status=result.http_status, payload=text, fetched_at=result.fetched_at)
 
 
 def urljoin_query(base: str, params: Dict[str, Any]) -> str:

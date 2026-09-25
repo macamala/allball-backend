@@ -116,6 +116,12 @@ def asset_league_ids(
     return out
 
 
+class FotMobBoardError(RuntimeError):
+    def __init__(self, result: FetchResult):
+        self.result = result
+        super().__init__(str(result.error or "FotMob board unavailable"))
+
+
 MATCHES_URL = "https://www.fotmob.com/api/data/matches?date={date}"
 SCORE_URL = "https://www.fotmob.com/api/data/match-score?matchId={match_id}"
 
@@ -252,6 +258,10 @@ def _fotmob_status(status: Dict[str, Any]) -> str:
         return "delayed"
     if bool(status.get("finished")):
         return "finished"
+    live_time = status.get("liveTime") if isinstance(status.get("liveTime"), dict) else {}
+    phase = str(live_time.get("short") or live_time.get("long") or "").strip().lower().replace("-", "")
+    if bool(status.get("started")) and (normalized in {"ht", "halftime", "break"} or phase in {"ht", "halftime", "break"}):
+        return "break"
     if bool(status.get("started")):
         return "live"
     return "scheduled"
@@ -316,10 +326,16 @@ def match_to_event(match: Dict[str, Any], competition_id: str, *, source_league_
         "score": score,
         "start_time": start,
         "source_family": "fotmob",
+        "sport": "football",
+        "source_competition_context": dict(league),
         "source_event_id": str(match.get("id") or ""),
         "source_competition_id": source_league_id,
         "source_competition_name": str(league.get("name") or ""),
         "competition_logo": _league_logo(league),
+        "source_badge_group_id": str(league.get("id") or ""),
+        "source_badge_parent_id": str(league.get("parentLeagueId") or league.get("primaryId") or league.get("id") or ""),
+        "source_fetch_time": match.get("_source_fetched_at"),
+        "fetch_completed_at": match.get("_source_fetched_at"),
         **group_identity,
         "extra": {
             **group_identity,
@@ -380,10 +396,15 @@ def _load_boards(
                 payload = json.loads(result.payload)
             except (TypeError, ValueError):
                 payload = None
-        if payload is not None:
-            for match in _extract_matches(payload):
-                match["_board_date"] = day
-                rows.append(match)
+        if not getattr(result, "ok", False) or payload is None:
+            # Failed reads are not a healthy empty board. Do not poison the
+            # board cache or let discovery acknowledge this day as complete.
+            raise FotMobBoardError(result)
+        fetched_at = getattr(result, "fetched_at", None) or datetime.now(timezone.utc).isoformat()
+        for match in _extract_matches(payload):
+            match["_board_date"] = day
+            match["_source_fetched_at"] = fetched_at
+            rows.append(match)
     if batch is not None:
         batch[batch_key] = rows
     _BOARD[cache_key] = rows
@@ -452,18 +473,24 @@ class FotMobAdapter:
                 parse_status="ok" if unique_rows else "empty",
                 request_count=len(league_ids),
             )
-        if request.capability == "live_scores":
-            live_dates = board_dates(past_days=1, future_days=0)
-            matches = _load_boards(
-                self._get,
-                dates=live_dates,
-                ttl_seconds=LIVE_BOARD_TTL_SECONDS,
-            )
-        else:
-            matches = _load_boards(
-                self._get,
-                ttl_seconds=FIXTURE_BOARD_TTL_SECONDS,
-            )
+        try:
+            if request.capability == "live_scores":
+                live_dates = board_dates(past_days=1, future_days=0)
+                matches = _load_boards(
+                    self._get,
+                    dates=live_dates,
+                    ttl_seconds=LIVE_BOARD_TTL_SECONDS,
+                )
+            else:
+                matches = _load_boards(
+                    self._get,
+                    ttl_seconds=FIXTURE_BOARD_TTL_SECONDS,
+                )
+        except FotMobBoardError as exc:
+            failed = exc.result
+            return FetchResult(ok=False, http_status=failed.http_status,
+                               restricted=failed.restricted, error=str(exc),
+                               classification=failed.classification, parse_status="failed")
         allowed = set(league_ids)
         events: List[Dict[str, Any]] = []
         for match in matches:

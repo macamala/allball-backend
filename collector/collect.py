@@ -66,7 +66,7 @@ from collector.lock import (
 from collector.progress import persist_progress, stage
 from collector.schedule import due_capabilities, mark_job
 from collector.sources import plan_sources, source_collectable, source_config_missing
-from collector.util import dump_json, isoformat, load_json, payload_hash, sha_id, slugify
+from collector.util import dump_json, isoformat, load_json, parse_datetime, payload_hash, sha_id, slugify
 from collector.match import _register_event, match_event
 from sports_registry.sports import get_sport
 
@@ -162,7 +162,9 @@ def _fetch(
     }
     for event in result.events or []:
         if isinstance(event, dict):
-            event.update({k: v for k, v in stamp.items() if not event.get(k)})
+            actual = event.get("source_fetch_time") or result.fetched_at
+            event_stamp = {**stamp, "fetch_completed_at": actual or stamp["fetch_completed_at"]}
+            event.update({k: v for k, v in event_stamp.items() if not event.get(k)})
     return result
 
 
@@ -480,12 +482,14 @@ def _consume_result(
                     incr("unchanged_skipped")
                     totals["skipped"] = int(totals.get("skipped") or 0) + 1
                     skipped = True
-                    contact = datetime.utcnow()
-                    existing.retrieved_at = contact
+                    contact = parse_datetime(incoming.get("source_fetch_time")) or datetime.utcnow()
                     extra = load_json(existing.extra_json, {}) or {}
-                    stamp = isoformat(contact)
-                    extra["source_fetch_time"] = stamp
-                    extra["last_contact_at"] = stamp
+                    previous = parse_datetime(extra.get("source_fetch_time"))
+                    if previous is None or contact >= previous:
+                        existing.retrieved_at = contact
+                        stamp = isoformat(contact)
+                        extra["source_fetch_time"] = stamp
+                        extra["last_contact_at"] = stamp
                     from collector.source_ids import merge_family_ids
 
                     extra["source_event_ids"] = merge_family_ids(
@@ -577,8 +581,8 @@ def _consume_result(
             )
         )
         written += 1
-    if capability == "live_scores":
-        stamp_live_contact(db, competition_id=competition.competition_id)
+    # Each accepted event already carries its actual observation timestamp.
+    # A successful but empty/partial feed must NOT freshen absent live matches.
     return {"written": written, "merged": merged, "rejected": rejected, "normalized": len(events)}
 
 

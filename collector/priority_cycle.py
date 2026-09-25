@@ -51,6 +51,20 @@ def run_priority_cycle(db, *, owner: str) -> bool:
         logger.info("%s %s", label, {key: result.get(key) for key in (
             "due_jobs", "selected_jobs", "jobs_processed", "events_changed", "duration_s", "stopped", "reason",
         )})
+    from collector.football_board_refresh import run_football_board_refresh
+
+    try:
+        board = run_football_board_refresh(db, owner=owner)
+        db.commit()
+        if board.get("pages"):
+            logger.info("FOOTBALL_BOARD_REFRESH %s", board)
+    except Exception:
+        db.rollback()
+        logger.exception("Bounded football board refresh failed; retaining prior results")
+    if not heartbeat_scheduler_lock(db, owner=owner):
+        db.rollback()
+        raise RuntimeError("Results scheduler lease lost")
+    db.commit()
     active = has_priority_events(db)
     if active and time.monotonic() - _last_discovery >= 60:
         # Do not starve tomorrow's fixtures while international matches are live

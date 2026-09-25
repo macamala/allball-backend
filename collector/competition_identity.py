@@ -51,6 +51,17 @@ def _native_sport_id(value: str) -> str:
     return {"soccer": "football", "waterpolo": "water-polo"}.get(sport, sport)
 
 
+def canonical_country_matches(competition_id: str, ccode: str) -> bool:
+    """A domestic label is not portable across countries (e.g. China FA Cup)."""
+    code = str(ccode or "").strip().upper()
+    if not code:
+        return True  # A known explicit league ID can stand without a country label.
+    from collector.competition_presentation import metadata_for, SOURCE_ALPHA3_TO_GEO
+    meta = metadata_for(competition_id, "football")
+    expected = str(meta.get("country_code") or "")
+    return not expected or SOURCE_ALPHA3_TO_GEO.get(code, code.lower()) == expected
+
+
 def source_native_public_competition_id(
     *,
     stored_competition_id: str,
@@ -82,6 +93,10 @@ def source_native_public_competition_id(
         if stored != native and not country_qualified and not provider_qualified:
             return None
         canonical = unique_label_competition(name, sport_id="football", exclude=stored)
+        if canonical and country_qualified:
+            country = stored.split("-", 2)[1]
+            if not canonical_country_matches(canonical, country):
+                return stored
         return canonical or stored
 
     if not stored.startswith(f"{sport}-"):
@@ -492,7 +507,45 @@ def correct_public_competition_id(
     return None
 
 
+def _fotmob_source_context_resolution(raw: Dict[str, Any], mapping_id: str) -> Optional[Dict[str, Any]]:
+    """Exact same-node league IDs/country, not generic name guesses or other providers' IDs.
+
+    The FotMob adapter emits this context directly from the source league node.
+    Returning a rejection rather than falling through is essential when context
+    contradicts a mapping. Without context, legacy rules remain unchanged.
+    """
+    if raw.get("source_family") != "fotmob":
+        return None
+    context = raw.get("source_competition_context")
+    if not isinstance(context, dict):
+        return None
+    sid = str(raw.get("source_competition_id") or "")
+    name = str(raw.get("source_competition_name") or "")
+    ids = {str(context.get(key)) for key in ("id", "primaryId", "parentLeagueId") if context.get(key) is not None}
+    base = {"source_family": "fotmob", "source_competition_id": sid,
+            "source_competition_name": name, "canonical_competition_id": mapping_id,
+            "suggested_competition_id": None, "accepted": False,
+            "resolution_method": "rejected_fotmob_source_context", "resolution_confidence": 0}
+    if (_native_sport_id(raw.get("sport") or raw.get("sport_id") or "") != "football"
+            or not sid or sid not in ids or not name or name != str(context.get("name") or "")):
+        return base
+    from collector.fotmob_crosswalk import _fotmob_competition_identity
+    resolved, _, _, country = _fotmob_competition_identity({"_league": context})
+    declared_country = str(raw.get("country_id") or "").upper()
+    if declared_country and country and declared_country != country:
+        return base
+    if resolved and not canonical_country_matches(resolved, country):
+        return base
+    if resolved != mapping_id:
+        return {**base, "suggested_competition_id": resolved}
+    return {**base, "accepted": True, "resolution_method": "fotmob_source_native",
+            "resolution_confidence": 100}
+
+
 def event_accepted_for_mapping(raw: Dict[str, Any], mapping_competition_id: str) -> Tuple[bool, Dict[str, Any]]:
+    native = _fotmob_source_context_resolution(raw, mapping_competition_id)
+    if native is not None:
+        return bool(native["accepted"]), native
     resolved = resolve_competition(
         mapping_competition_id=mapping_competition_id,
         source_competition_id=str(raw.get("source_competition_id") or "") or None,

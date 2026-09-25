@@ -71,6 +71,7 @@ class FetchResult:
     empty_reason: Optional[str] = None
     request_count: int = 0
     parse_reason: Optional[str] = None
+    fetched_at: Optional[str] = None  # Actual HTTP observation; cache hits retain it.
 
 
 class SourceAdapter(Protocol):
