@@ -13,6 +13,12 @@ if not DATABASE_URL:
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = "postgresql://" + DATABASE_URL[len("postgres://") :]
 
+# Use the driver declared in requirements.txt, independent of SQLAlchemy defaults.
+# SQLAlchemy 2.1 changed a bare postgresql:// URL to require psycopg v3.
+# Explicit driver URLs are intentionally preserved; no credentials are altered.
+if DATABASE_URL.startswith("postgresql://"):
+    DATABASE_URL = "postgresql+psycopg2://" + DATABASE_URL[len("postgresql://") :]
+
 engine_kwargs = {}
 if DATABASE_URL.startswith("sqlite"):
     engine_kwargs = {
