@@ -30,7 +30,11 @@ from collector.util import dump_json, isoformat, load_json, parse_datetime
 
 logger = logging.getLogger(__name__)
 JOB_PREFIX = "football-board-refresh-v1:"
-POLICY_REVISION = 2
+POLICY_REVISION = 3
+MAX_DEFERRED_IDENTITIES = 1000
+DEFERRED_REASONS = {"event_identity_conflict", "source_identity_conflict",
+                    "broken_or_cyclic_lineage", "legacy_identity_unproven",
+                    "legacy_fingerprint_conflict", "competition_acceptance"}
 MAX_EVENTS_PER_PAGE = 100
 PAGE_BUDGET_SECONDS = 8
 HOT_INTERVAL_SECONDS = 30
@@ -212,6 +216,8 @@ def consume_board_match(db, raw: dict, source: SportsSource, identity: dict) -> 
                              competition=db.get(SportsCompetition, cid), capability="results",
                              result=FetchResult(ok=True, http_status=200, events=[parsed], parse_status="ok"))
     if result.get("rejected"):
+        if result.get("identity_conflicts") == result["rejected"]:
+            return {"rejected": result["rejected"], "reason": "event_identity_conflict"}
         raise RuntimeError("Observation persistence rejected; cursor retained for retry")
     # Artwork is independent of status/score signatures. Replace only a proven
     # old group badge with its actual parent badge, not arbitrary existing art.
@@ -229,6 +235,7 @@ def refresh_day(db, day: str, source: SportsSource, *, now: datetime, getter=Non
         db.add(job)
         db.flush()
     state = _state(job)
+    deferred = dict(state.get("deferred") or {})
     # New validation rules retry prior rejections; this resets only the cursor,
     # never event rows, scores or canonical identities. Unversioned partial
     # cursors from v1 are replayed safely through the idempotent ingestion gate.
@@ -268,6 +275,21 @@ def refresh_day(db, day: str, source: SportsSource, *, now: datetime, getter=Non
             state["error"] = str(exc)[:300]
             failed = True
             break  # Failed observation is not acknowledged by the cursor.
+        reason = result.get("reason")
+        if reason in DEFERRED_REASONS:
+            if sid not in deferred and len(deferred) >= MAX_DEFERRED_IDENTITIES:
+                # Do not acknowledge a conflict that cannot be durably recorded.
+                state["error"] = "deferred_identity_capacity_reached"
+                reasons["deferred_capacity"] += 1
+                failed = True
+                break
+            previous = deferred.get(sid) or {}
+            deferred[sid] = {"reason": reason, "attempts": int(previous.get("attempts") or 0) + 1,
+                             "first_seen_at": previous.get("first_seen_at") or isoformat(now),
+                             "last_seen_at": isoformat(now), "source_family": "fotmob",
+                             "source_event_id": sid}
+        elif not result.get("rejected"):
+            deferred.pop(sid, None)
         totals["processed"] += 1
         for key in ("written", "rejected", "skipped"):
             totals[key] += int(result.get(key) or 0)
@@ -282,16 +304,18 @@ def refresh_day(db, day: str, source: SportsSource, *, now: datetime, getter=Non
     delay = 120 if failed else interval if complete else 0
     state.update({"policy_revision": POLICY_REVISION, "after_id": "" if complete else after, "complete": complete,
                   "next_due_at": isoformat(now + timedelta(seconds=delay)), "totals": totals,
-                  "reasons": dict(reasons)})
+                  "reasons": dict(reasons), "deferred": deferred,
+                  "data_complete": complete and not deferred})
     if not failed:
         state["last_success_at"] = isoformat(now)
         state.pop("error", None)
     job.last_run_at = now
-    job.last_status = "failed" if failed else "ok"
+    job.last_status = "failed" if failed else "partial" if deferred else "ok"
     job.items_written = totals["written"]
     job.last_error = dump_json(state)
     flush_list_invalidations(db)
-    return {"day": day, "complete": complete, **totals, "reasons": dict(reasons)}
+    return {"day": day, "complete": complete, "data_complete": complete and not deferred,
+            "deferred_count": len(deferred), **totals, "reasons": dict(reasons)}
 
 
 def run_football_board_refresh(db, *, owner: str, now: datetime | None = None, getter=None) -> dict:

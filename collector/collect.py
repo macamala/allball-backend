@@ -67,6 +67,7 @@ from collector.progress import persist_progress, stage
 from collector.schedule import due_capabilities, mark_job
 from collector.sources import plan_sources, source_collectable, source_config_missing
 from collector.util import dump_json, isoformat, load_json, parse_datetime, payload_hash, sha_id, slugify
+from collector.football_write_identity import FootballIdentityConflict, football_write_target
 from collector.match import _register_event, match_event
 from sports_registry.sports import get_sport
 
@@ -433,6 +434,7 @@ def _consume_result(
     written = 0
     merged = 0
     rejected = 0
+    identity_conflicts = 0
     config = load_json(mapping.source_config_json, {}) or {}
     totals = db.info.setdefault("persist_totals", {"done": 0, "target": 0})
     cid = competition.competition_id
@@ -475,6 +477,7 @@ def _consume_result(
                 incoming["source_url"] = config.get("url")
                 incoming = reconcile_live_status(incoming)
                 existing = match_event(db, incoming, source_id=source.source_id)
+                existing = football_write_target(db, incoming, existing)
                 from collector.keeper_revalidation import revalidate_current_keeper
 
                 revalidate_current_keeper(db, existing, incoming, source_id=source.source_id)
@@ -543,11 +546,13 @@ def _consume_result(
             for key in ("event_details", "events_by_fp", "events_by_comp", "events_by_id", "id_map", "entities"):
                 db.info.pop(key, None)
             rejected += 1
+            deterministic_conflict = isinstance(exc, FootballIdentityConflict)
+            identity_conflicts += int(deterministic_conflict)
             record_ingestion_error(
                 db,
                 competition_id=competition.competition_id,
                 source_id=source.source_id,
-                error_type="DB_FAILURE",
+                error_type="IDENTITY_CONFLICT" if deterministic_conflict else "DB_FAILURE",
                 message=str(exc),
             )
             if str(exc) == "simulated persist failure":
@@ -583,7 +588,7 @@ def _consume_result(
         written += 1
     # Each accepted event already carries its actual observation timestamp.
     # A successful but empty/partial feed must NOT freshen absent live matches.
-    return {"written": written, "merged": merged, "rejected": rejected, "normalized": len(events)}
+    return {"written": written, "merged": merged, "rejected": rejected, "normalized": len(events), "identity_conflicts": identity_conflicts}
 
 
 def stamp_live_contact(
