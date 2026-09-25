@@ -1,0 +1,62 @@
+name: Football fixture linkage and cursor regression gate
+on:
+  push:
+    branches: [fix/football-fixture-linkage-20260925]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: python audit/apply_football_linkage.py
+      - run: python -m pip install -r requirements.txt
+      - run: python -m compileall -q collector tests
+      - name: Existing football and integrity regressions plus new lineage proofs
+        run: |
+          mkdir -p /tmp/linkage-evidence
+          python -m pytest -q $(cat audit/football_test_selection.txt) --disable-warnings --junitxml=/tmp/linkage-evidence/tests.xml
+      - name: Preserve tested source and hashes
+        if: always()
+        run: |
+          mkdir -p /tmp/linkage-evidence
+          git add -N collector tests
+          git diff --binary -- collector tests audit/football_test_selection.txt > /tmp/linkage-evidence/source.patch
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib,json
+          expected=json.loads(Path('audit/football_linkage_sha256.json').read_text())
+          actual={p:hashlib.sha256(Path(p).read_bytes()).hexdigest() for p in expected if Path(p).exists()}
+          Path('/tmp/linkage-evidence/source-sha256.json').write_text(json.dumps(actual,indent=2))
+          assert actual==expected,(actual,expected)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: football-linkage-regression-evidence
+          path: /tmp/linkage-evidence
+          retention-days: 30
+  publish-tested-branch:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - run: |
+          python audit/apply_football_linkage.py
+          git add collector tests audit/football_test_selection.txt
+          git config user.name 'NinkoSports regression checks'
+          git config user.email '79318740+macamala@users.noreply.github.com'
+          git commit -m 'Link source-proven football duplicates without rehashing IDs or resetting date cursors'
+          git push origin HEAD:fix/football-fixture-linkage-20260925
+          echo "TESTED_SOURCE_COMMIT=$(git rev-parse HEAD)"
