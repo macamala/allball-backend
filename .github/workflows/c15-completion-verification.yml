@@ -1,0 +1,85 @@
+name: C15 final score and table verification
+on:
+  push:
+    branches: [audit/football-recovery-20260925-10]
+    paths: ['.github/workflows/c15-completion-verification.yml']
+permissions:
+  contents: read
+  actions: read
+jobs:
+  named-fixture-timing:
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 36121382147
+          artifact-ids: 10859256562
+          merge-multiple: true
+          path: /tmp/c15-before
+      - run: |
+          mkdir -p /tmp/c15-final-timing
+          python - <<'PY'
+          import json,time,urllib.request,concurrent.futures
+          from pathlib import Path
+          from datetime import datetime,timezone
+          from urllib.parse import urlencode
+          api='https://allball-backend-production.up.railway.app';mid='ninko-evt-0f0c8b1216525d84d854';out=Path('/tmp/c15-final-timing')
+          def get(pair):
+            name,url=pair;start=time.monotonic();d={'url':url,'started_at':datetime.now(timezone.utc).isoformat()}
+            try:
+              with urllib.request.urlopen(urllib.request.Request(url,headers={'Accept':'application/json'}),timeout=15) as r:d.update(http=r.status,payload=json.load(r))
+            except Exception as e:d['error']=str(e)
+            d.update(at=datetime.now(timezone.utc).isoformat(),seconds=time.monotonic()-start)
+            (out/(name+'.json')).write_text(json.dumps(d,ensure_ascii=False,indent=2));return name,d
+          report={'timing':[],'at':datetime.now(timezone.utc).isoformat()};finals=0
+          with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
+            for i in range(40):
+              d=dict(pool.map(get,[(f'native-{i}','https://www.fotmob.com/api/data/matches?date=20260925'),(f'public-{i}',api+'/sports-data/matches/'+mid+'/score')]))
+              native=[m for l in d[f'native-{i}'].get('payload',{}).get('leagues',[]) for m in l.get('matches',[]) if str(m.get('id'))=='6232978'];n=native[0] if native else {};e=d[f'public-{i}'].get('payload',{}).get('event') or {}
+              sample={'at':datetime.now(timezone.utc).isoformat(),'http':[d[f'native-{i}'].get('http'),d[f'public-{i}'].get('http')],'native':n,'public':{k:e.get(k) for k in ('id','status','score','score_observed_at','canonical_updated_at')}}
+              stamp=e.get('score_observed_at')
+              if stamp:
+                try:sample['observation_age_s']=(datetime.now(timezone.utc)-datetime.fromisoformat(stamp.replace('Z','+00:00'))).total_seconds()
+                except Exception:pass
+              report['timing'].append(sample)
+              finished=bool((n.get('status') or {}).get('finished')) and e.get('status')=='finished'
+              finals=finals+1 if finished else 0
+              if finals>=3:break
+              if i<39:time.sleep(8)
+            before=json.loads(Path('/tmp/c15-before/public.json').read_text());current=get(('public-cohort',before['url']))[1]
+            old_ids={e['id'] for e in before['payload']['events']};new_ids={e['id'] for e in current.get('payload',{}).get('events',[])}
+            report['retention']={'before':len(old_ids),'after':len(new_ids),'removed':sorted(old_ids-new_ids),'added':sorted(new_ids-old_ids),'pass':current.get('http')==200 and not old_ids-new_ids}
+            more=[('native-detail','https://www.fotmob.com/api/data/matchDetails?matchId=6232978'),('public-detail',api+'/sports-data/matches/'+mid),('toppserien-still-open',api+'/sports-data/standings?league=football-nor-toppserien')]
+            report['details']=dict(pool.map(get,more))
+          (out/'report.json').write_text(json.dumps(report,ensure_ascii=False,indent=2))
+          print(json.dumps({'retention':report['retention'],'samples':len(report['timing']),'last':report['timing'][-1],'toppserien_rows':len(report['details']['toppserien-still-open'].get('payload',{}).get('rows',[]))},ensure_ascii=False))
+          assert report['retention']['pass'] and all(r['http']==[200,200] and r['public']['id']==mid for r in report['timing'])
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: c15-completion-timing
+          path: /tmp/c15-final-timing
+          retention-days: 30
+  deployed-standalone-and-lineup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: |
+          python -m pip install playwright
+          python -m playwright install --with-deps chromium
+      - run: python audit/checkpoint15_public_acceptance.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: c15-completion-browser
+          path: /tmp/c15-final
+          retention-days: 30
