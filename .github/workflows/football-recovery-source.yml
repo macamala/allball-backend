@@ -12,19 +12,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: c2f5b5d610718cc43b6205296444387ea3b6df7c
+          ref: 2f5108c7d5394bc4c87743a885f39e9472e7ebe2
           persist-credentials: false
           path: backend
       - uses: actions/checkout@v4
         with:
           repository: macamala/allball-frontend
-          ref: d0db12fe066fba328e86e9e8a80b313c20d3d2df
+          ref: 9a18f3ec91610356304fc614b9a10b621792291f
           persist-credentials: false
           path: frontend
       - run: |
           mkdir -p /tmp/exact-source
-          git -C backend archive --format=tar.gz HEAD > /tmp/exact-source/backend-c2f5b5d.tar.gz
-          git -C frontend archive --format=tar.gz HEAD > /tmp/exact-source/frontend-d0db12f.tar.gz
+          git -C backend archive --format=tar.gz HEAD > /tmp/exact-source/backend.tar.gz
+          git -C frontend archive --format=tar.gz HEAD > /tmp/exact-source/frontend.tar.gz
           git -C backend rev-parse HEAD > /tmp/exact-source/backend-sha.txt
           git -C frontend rev-parse HEAD > /tmp/exact-source/frontend-sha.txt
           cd /tmp/exact-source && sha256sum *.tar.gz > SHA256SUMS
