@@ -1,0 +1,51 @@
+name: C16 normalized competition keys gate
+on:
+  push:
+    branches: [fix/competition-canonical-keys-c16-20260925]
+    paths: ['audit/c16_normalized_keys.patch','.github/workflows/c16-normalized-keys-gate.yml']
+permissions:
+  contents: write
+  actions: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 36129893421
+          name: c16-competition-source-evidence
+          path: /tmp/native-c16
+      - run: |
+          mkdir -p evidence
+          echo '3dbaa3925ccf7a7607ace44d12cd954e3795cccfd229a9b5f9fa73f71a176173  audit/c16_normalized_keys.patch' | sha256sum -c
+          git apply --check audit/c16_normalized_keys.patch
+          git apply audit/c16_normalized_keys.patch
+          git diff -- collector/competition_hub.py tests/test_c16_competition_hub.py > evidence/source.patch
+          cmp audit/c16_normalized_keys.patch evidence/source.patch
+          python -m pip install -r requirements.txt pytest
+      - run: python -m pytest -q $(cat audit/football_test_selection.txt) tests/test_hidden_football_aliases.py tests/test_fotmob_match_centre.py tests/test_entity_profile_navigation.py tests/test_c14_live_player.py tests/test_canonical_detail.py tests/test_fiba_rich_detail.py tests/test_sofa_rich_detail.py tests/test_c15_live_tables.py tests/test_c15_parent_league_tables.py tests/test_worker_shutdown_handoff.py tests/test_c16_competition_hub.py tests/test_c16_identity_lookup.py --junitxml=evidence/tests.xml
+      - run: PYTHONPATH=. python audit/c16_native_replay.py /tmp/native-c16 evidence
+      - name: Publish tested isolated candidate only
+        run: |
+          git diff --check
+          git config user.name 'NinkoSports regression checks'
+          git config user.email '79318740+macamala@users.noreply.github.com'
+          git add collector/competition_hub.py tests/test_c16_competition_hub.py
+          git commit -m 'Include source-proven canonical competition records despite differing internal storage keys'
+          git push origin HEAD:refs/heads/fix/competition-canonical-keys-c16-20260925
+          git rev-parse HEAD > evidence/candidate.txt
+          sha256sum collector/competition_hub.py tests/test_c16_competition_hub.py > evidence/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: c16-normalized-key-gate
+          path: evidence
+          retention-days: 30
