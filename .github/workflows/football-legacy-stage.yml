@@ -1,0 +1,63 @@
+name: Football legacy identity and final result gate
+on:
+  push:
+    branches: [fix/football-legacy-classification-20260925]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      DATABASE_URL: sqlite:////tmp/football-legacy-tests.db
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: python audit/apply_football_legacy.py
+      - run: python -m pip install -r requirements.txt
+      - name: Test existing all-football regressions and legacy safeguards
+        run: |
+          python -m compileall -q collector tests
+          python -m pytest -q $(cat audit/football_test_selection.txt) --disable-warnings --junitxml=/tmp/football-legacy-tests.xml
+      - name: Preserve tested source and individual file hashes
+        if: always()
+        run: |
+          mkdir -p /tmp/football-legacy-evidence
+          cp /tmp/football-legacy-tests.xml /tmp/football-legacy-evidence/ || true
+          git add -N collector tests
+          git diff --binary -- collector tests audit/football_test_selection.txt > /tmp/football-legacy-evidence/tested-source.patch
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib,json,subprocess
+          files=subprocess.check_output(['git','diff','--name-only','--','collector','tests','audit/football_test_selection.txt']).decode().splitlines()
+          out={name:hashlib.sha256(Path(name).read_bytes()).hexdigest() for name in files}
+          Path('/tmp/football-legacy-evidence/source-sha256.json').write_text(json.dumps(out,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: football-legacy-regression-evidence
+          path: /tmp/football-legacy-evidence
+          retention-days: 30
+  publish-tested-branch:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - run: |
+          python3 audit/apply_football_legacy.py
+          git add collector tests audit/football_test_selection.txt
+          git config user.name 'NinkoSports regression checks'
+          git config user.email '79318740+macamala@users.noreply.github.com'
+          git commit -m 'Repair source-proven legacy football classifications in place and preserve newest final scores'
+          git push origin HEAD:fix/football-legacy-classification-20260925
+          echo "TESTED_SOURCE_COMMIT=$(git rev-parse HEAD)"
