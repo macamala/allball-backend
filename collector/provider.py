@@ -133,6 +133,7 @@ _STATUS_CACHE: Dict[str, Any] = {"at": 0.0, "payload": None}
 _STATUS_TTL_S = 20.0
 
 INTERNAL_EVENT_KEYS = {
+    "profile_ref",
     "source_group_id",
     "source_parent_competition_id",
     "field_sources",
@@ -309,6 +310,7 @@ def _apply_source_competition_display(
 
 
 LIST_PUBLIC_KEYS = (
+    "score_observed_at",
     "group",
     "group_name",
     "id",
@@ -772,6 +774,7 @@ def is_frozen_public_competition(event: Dict[str, Any]) -> bool:
 
 
 LIVE_PUBLIC_KEYS = (
+    "score_observed_at",
     "id",
     "sport",
     "competition",
@@ -1134,7 +1137,7 @@ class NinkoCollectedSportsDataProvider:
     def get_live_events(self) -> List[NormalizedEvent]:
         return self.get_events(status="live")
 
-    def get_event(self, event_id: str) -> Optional[NormalizedEvent]:
+    def get_event(self, event_id: str, *, lightweight: bool = False) -> Optional[NormalizedEvent]:
         db = _session(self._session_factory)
         try:
             row = db.query(SportsEvent).filter_by(event_id=event_id).first()
@@ -1152,6 +1155,10 @@ class NinkoCollectedSportsDataProvider:
             blocked_ids, blocked_families = _blocked_public_sources(db)
             if not _row_public_source_allowed(row, blocked_ids, blocked_families):
                 return None
+            if lightweight:
+                # Same alias/source/visibility normalization, no external detail or history work.
+                payload = self._to_normalized(row, include_detail=False)
+                return public_event_detail(payload) if payload is not None else None
             try:
                 from collector.detail_enrich import enrich_event_row
 
@@ -1387,6 +1394,7 @@ class NinkoCollectedSportsDataProvider:
         else:
             payload["observation_count"] = 1
         payload["source_fetch_time"] = extra.get("source_fetch_time") or extra.get("last_contact_at") or isoformat(row.retrieved_at)
+        payload["score_observed_at"] = payload["source_fetch_time"]
         payload["last_contact_at"] = extra.get("last_contact_at") or payload["source_fetch_time"]
         payload["canonical_updated_at"] = extra.get("canonical_updated_at") or isoformat(row.updated_at)
         payload["source_event_updated_at"] = extra.get("source_event_updated_at")

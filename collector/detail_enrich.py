@@ -29,7 +29,7 @@ NHL_LANDING = "https://api-web.nhle.com/v1/gamecenter/{game_id}/landing"
 NHL_BOXSCORE = "https://api-web.nhle.com/v1/gamecenter/{game_id}/boxscore"
 SPORTSCORE_MATCH = "https://sportscore.com/api/widget/match/?sport={sport}&slug={slug}&src=ninkosports"
 
-TTL_LIVE = 45
+TTL_LIVE = 20
 TTL_SCHEDULED = 1800
 TTL_FINISHED = 7 * 24 * 3600
 TTL_NEGATIVE = 900

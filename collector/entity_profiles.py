@@ -174,6 +174,12 @@ def team_profile(
         query = query.filter(SportsEvent.sport_id == sport)
     if competition:
         query = query.filter(SportsEvent.competition_id == competition)
+    # Narrow before the limit so unrelated future fixtures cannot evict history.
+    import json
+    probes = [v for v in (entity_key, name) if v]
+    if probes:
+        query = query.filter(or_(*[SportsEvent.participants_json.contains(json.dumps(v, ensure_ascii=False)[1:-1], autoescape=True) for v in probes],
+                                 *[SportsEvent.participants_json.contains(json.dumps(v, ensure_ascii=True)[1:-1], autoescape=True) for v in probes]))
     rows = query.order_by(SportsEvent.start_time.desc()).limit(1200).all()
 
     identity: Dict[str, Any] = {}
@@ -314,6 +320,7 @@ def player_profile(
     name = str(name or "").strip()
     identity: Dict[str, Any] = {}
     appearances: List[Dict[str, Any]] = []
+    profile_ref = None
 
     query = db.query(SportsEvent, SportsEventDetail).join(
         SportsEventDetail,
@@ -345,7 +352,23 @@ def player_profile(
         for payload in payloads:
             for player in _iter_player_dicts(payload):
                 if _matches_player(player, player_key=player_key, name=name):
+                    # An established numeric identity must not absorb namesakes.
+                    pid = str(player.get("id") or player.get("player_id") or "")
+                    if player_key.isdigit() and pid and pid != player_key:
+                        continue
+                    if identity.get("id") and pid and str(identity["id"]) != pid:
+                        continue
                     identity = _merge_player(identity, player)
+                    ref = player.get('profile_ref')
+                    if not ref and row.sport_id == 'football':
+                        from collector.source_ids import id_for_family
+                        pid = str(player.get('id') or '')
+                        if (pid.isdigit() and id_for_family(load_json(row.extra_json, {}) or {}, 'fotmob')
+                                and player.get('image') == f'https://images.fotmob.com/image_resources/playerimages/{pid}.png'):
+                            ref = {'family':'fotmob','id':pid}
+                    if (row.sport_id == 'football' and isinstance(ref, dict) and ref.get('family') == 'fotmob'
+                            and str(ref.get('id')) == str(player.get('id')) == str(identity.get('id'))):
+                        profile_ref = ref
                     if not name:
                         name = str(player.get("display_name") or player.get("name") or "").strip()
                     matched = True
@@ -354,6 +377,10 @@ def player_profile(
             if len(appearances) >= 20:
                 break
 
+    if identity and profile_ref:
+        from collector.player_enrichment import enriched_profile
+        identity.update(enriched_profile(profile_ref['id'], str(identity.get('name') or name)))
+    identity.pop('profile_ref', None)
     if not identity:
         return {
             "available": False,

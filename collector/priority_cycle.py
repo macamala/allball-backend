@@ -37,6 +37,20 @@ def has_priority_events(db, *, now=None) -> bool:
 def run_priority_cycle(db, *, owner: str) -> bool:
     """Return true while bulk maintenance must yield to active score polling."""
     global _last_discovery
+    # Source-native leagues must not wait behind slower all-sport/detail work.
+    # Same scheduler lease, cooldowns, cursor and observation acceptance gate.
+    from collector.football_board_refresh import run_football_board_refresh
+    try:
+        urgent = run_football_board_refresh(db, owner=owner, hot_only=True)
+        db.commit()
+        logger.info("FOOTBALL_HOT_FIRST %s", urgent)
+    except Exception:
+        db.rollback()
+        logger.exception("Hot football refresh failed; prior observations retained")
+    if not heartbeat_scheduler_lock(db, owner=owner):
+        db.rollback()
+        raise RuntimeError("Results scheduler lease lost")
+    db.commit()
     for label, filters in (
         ("FOOTBALL_SCORE_LANE", {"sport_id": "football", "source_family": "fotmob", "max_physical": 2}),
         ("ALLSPORT_LIVE_LANE", {"max_physical": 6}),

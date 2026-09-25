@@ -1072,6 +1072,20 @@ def internal_asset_coverage(request: Request, db: Session = Depends(get_db)):
     return asset_coverage_payload(db)
 
 
+@app.get("/sports-data/matches/{match_id}/score")
+def sports_data_match_score(match_id: str):
+    provider = get_active_provider()
+    payload = empty_match_payload(match_id)
+    payload.update(provider.status())
+    from collector.provider import NinkoCollectedSportsDataProvider
+    event = provider.get_event(match_id, lightweight=True) if isinstance(provider, NinkoCollectedSportsDataProvider) else None
+    if event:
+        payload["event"] = event
+        payload["header"] = provider.event_header(event)
+    payload["generated_at"] = datetime.utcnow().isoformat() + "Z"
+    return payload
+
+
 @app.get("/sports-data/matches/{match_id}")
 def sports_data_match(match_id: str):
     provider = get_active_provider()

@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 import math
 from typing import Any
 
-REVISION = 1
+REVISION = 2
 
 
 def number(value: Any):
@@ -125,6 +125,12 @@ def complete_fotmob_detail(root, out):
                     position = pitch_position(original.get('verticalLayout'))
                     if position:
                         p['pitch_position'] = position
+                    if original.get('id') and original.get('name'):
+                        p['profile_ref'] = {'family':'fotmob', 'id':str(original['id'])}
+                    if source.get('id') and source.get('name'):
+                        p['team_at_match'] = {'id':str(source['id']), 'name':source['name']}
+                    if number(original.get('age')) is not None:
+                        p['age'] = original['age']
                     if original.get('countryCode'):
                         p['country_id'] = original['countryCode']
                     # Provider formation-slot IDs (e.g. 115) are not position names.

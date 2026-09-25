@@ -46,6 +46,7 @@ def changed_result_signature(raw: dict, rows: list, now: datetime) -> str | None
         return None
     candidates = []
     differs = False
+    clock_changes = []
     for row in rows:
         if (row.sport_id != 'football' or automatic_promotion_blocked(row)
                 or not row.start_time or abs((row.start_time-kickoff).total_seconds()) > 180
@@ -61,13 +62,20 @@ def changed_result_signature(raw: dict, rows: list, now: datetime) -> str | None
         # blank. Schedule validation; the root planner, not this queue, decides
         # whether exact public identity/visibility recovery is permitted.
         differs |= stored_status != status or actual != supplied or hidden
-    if not candidates or not differs:
+        minute = (event.get('score') or {}).get('minute')
+        old_minute = (load_json(row.score_json, {}) or {}).get('minute')
+        if (not hidden and stored_status == status == 'live' and actual == supplied
+                and minute not in (None, '') and str(minute) != str(old_minute)):
+            clock_changes.append((row.event_id, str(old_minute), str(minute)))
+    if not candidates or not (differs or clock_changes):
         return None
     # Do not include fetch time: a new HTTP contact with identical evidence must
     # not bypass the conflict cooldown. A changed score/physical row may retry.
     proof = {'id': str(raw.get('id') or raw.get('matchId')), 'status': status,
              'score': supplied, 'kickoff': kickoff.isoformat(),
              'league': raw.get('_league'), 'existing': sorted(candidates)}
+    if not differs:
+        proof['clock_changes'] = clock_changes
     return hashlib.sha256(json.dumps(proof, sort_keys=True, default=str).encode()).hexdigest()
 
 

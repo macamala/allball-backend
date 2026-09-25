@@ -41,7 +41,7 @@ DEFERRED_REASONS = {"event_identity_conflict", "source_identity_conflict",
                     "legacy_fingerprint_conflict", "competition_acceptance"}
 MAX_EVENTS_PER_PAGE = 100
 PAGE_BUDGET_SECONDS = 8
-HOT_INTERVAL_SECONDS = 30
+HOT_INTERVAL_SECONDS = 15
 HISTORY_INTERVAL_SECONDS = 21600
 FUTURE_INTERVAL_SECONDS = 900
 
@@ -400,7 +400,7 @@ def refresh_day(db, day: str, source: SportsSource, *, now: datetime, getter=Non
             "deferred_count": len(deferred), **totals, "reasons": dict(reasons)}
 
 
-def run_football_board_refresh(db, *, owner: str, now: datetime | None = None, getter=None) -> dict:
+def run_football_board_refresh(db, *, owner: str, now: datetime | None = None, getter=None, hot_only: bool = False) -> dict:
     """At most one hot-day page + one rotating history/future page per cycle."""
     from collector.family_health import family_in_active_backoff, family_access_blocked
     from collector.http import family_host_blocked
@@ -423,7 +423,7 @@ def run_football_board_refresh(db, *, owner: str, now: datetime | None = None, g
         return {"skipped": "write_lock_held"}
     pages = []
     try:
-        for days in rolling_dates(now):
+        for days in (rolling_dates(now)[:1] if hot_only else rolling_dates(now)):
             if (family_in_active_backoff("fotmob") or family_access_blocked("fotmob")
                     or family_host_blocked("fotmob") or is_rate_limited(db, source.source_id, now=now)):
                 break
