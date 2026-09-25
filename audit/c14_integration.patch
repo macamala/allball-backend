@@ -1,0 +1,270 @@
+diff --git a/app.py b/app.py
+index 405059e..c18ba0c 100644
+--- a/app.py
++++ b/app.py
+@@ -1072,6 +1072,20 @@ def internal_asset_coverage(request: Request, db: Session = Depends(get_db)):
+     return asset_coverage_payload(db)
+ 
+ 
++@app.get("/sports-data/matches/{match_id}/score")
++def sports_data_match_score(match_id: str):
++    provider = get_active_provider()
++    payload = empty_match_payload(match_id)
++    payload.update(provider.status())
++    from collector.provider import NinkoCollectedSportsDataProvider
++    event = provider.get_event(match_id, lightweight=True) if isinstance(provider, NinkoCollectedSportsDataProvider) else None
++    if event:
++        payload["event"] = event
++        payload["header"] = provider.event_header(event)
++    payload["generated_at"] = datetime.utcnow().isoformat() + "Z"
++    return payload
++
++
+ @app.get("/sports-data/matches/{match_id}")
+ def sports_data_match(match_id: str):
+     provider = get_active_provider()
+diff --git a/collector/detail_enrich.py b/collector/detail_enrich.py
+index 90ed4fa..42ad794 100644
+--- a/collector/detail_enrich.py
++++ b/collector/detail_enrich.py
+@@ -29,7 +29,7 @@ NHL_LANDING = "https://api-web.nhle.com/v1/gamecenter/{game_id}/landing"
+ NHL_BOXSCORE = "https://api-web.nhle.com/v1/gamecenter/{game_id}/boxscore"
+ SPORTSCORE_MATCH = "https://sportscore.com/api/widget/match/?sport={sport}&slug={slug}&src=ninkosports"
+ 
+-TTL_LIVE = 45
++TTL_LIVE = 20
+ TTL_SCHEDULED = 1800
+ TTL_FINISHED = 7 * 24 * 3600
+ TTL_NEGATIVE = 900
+diff --git a/collector/entity_profiles.py b/collector/entity_profiles.py
+index f5ca1f6..ab56cf1 100644
+--- a/collector/entity_profiles.py
++++ b/collector/entity_profiles.py
+@@ -174,6 +174,12 @@ def team_profile(
+         query = query.filter(SportsEvent.sport_id == sport)
+     if competition:
+         query = query.filter(SportsEvent.competition_id == competition)
++    # Narrow before the limit so unrelated future fixtures cannot evict history.
++    import json
++    probes = [v for v in (entity_key, name) if v]
++    if probes:
++        query = query.filter(or_(*[SportsEvent.participants_json.contains(json.dumps(v, ensure_ascii=False)[1:-1], autoescape=True) for v in probes],
++                                 *[SportsEvent.participants_json.contains(json.dumps(v, ensure_ascii=True)[1:-1], autoescape=True) for v in probes]))
+     rows = query.order_by(SportsEvent.start_time.desc()).limit(1200).all()
+ 
+     identity: Dict[str, Any] = {}
+@@ -314,6 +320,7 @@ def player_profile(
+     name = str(name or "").strip()
+     identity: Dict[str, Any] = {}
+     appearances: List[Dict[str, Any]] = []
++    profile_ref = None
+ 
+     query = db.query(SportsEvent, SportsEventDetail).join(
+         SportsEventDetail,
+@@ -345,7 +352,23 @@ def player_profile(
+         for payload in payloads:
+             for player in _iter_player_dicts(payload):
+                 if _matches_player(player, player_key=player_key, name=name):
++                    # An established numeric identity must not absorb namesakes.
++                    pid = str(player.get("id") or player.get("player_id") or "")
++                    if player_key.isdigit() and pid and pid != player_key:
++                        continue
++                    if identity.get("id") and pid and str(identity["id"]) != pid:
++                        continue
+                     identity = _merge_player(identity, player)
++                    ref = player.get('profile_ref')
++                    if not ref and row.sport_id == 'football':
++                        from collector.source_ids import id_for_family
++                        pid = str(player.get('id') or '')
++                        if (pid.isdigit() and id_for_family(load_json(row.extra_json, {}) or {}, 'fotmob')
++                                and player.get('image') == f'https://images.fotmob.com/image_resources/playerimages/{pid}.png'):
++                            ref = {'family':'fotmob','id':pid}
++                    if (row.sport_id == 'football' and isinstance(ref, dict) and ref.get('family') == 'fotmob'
++                            and str(ref.get('id')) == str(player.get('id')) == str(identity.get('id'))):
++                        profile_ref = ref
+                     if not name:
+                         name = str(player.get("display_name") or player.get("name") or "").strip()
+                     matched = True
+@@ -354,6 +377,10 @@ def player_profile(
+             if len(appearances) >= 20:
+                 break
+ 
++    if identity and profile_ref:
++        from collector.player_enrichment import enriched_profile
++        identity.update(enriched_profile(profile_ref['id'], str(identity.get('name') or name)))
++    identity.pop('profile_ref', None)
+     if not identity:
+         return {
+             "available": False,
+diff --git a/collector/football_board_priority.py b/collector/football_board_priority.py
+index ddb7d85..c5cbbd0 100644
+--- a/collector/football_board_priority.py
++++ b/collector/football_board_priority.py
+@@ -46,6 +46,7 @@ def changed_result_signature(raw: dict, rows: list, now: datetime) -> str | None
+         return None
+     candidates = []
+     differs = False
++    clock_changes = []
+     for row in rows:
+         if (row.sport_id != 'football' or automatic_promotion_blocked(row)
+                 or not row.start_time or abs((row.start_time-kickoff).total_seconds()) > 180
+@@ -61,13 +62,20 @@ def changed_result_signature(raw: dict, rows: list, now: datetime) -> str | None
+         # blank. Schedule validation; the root planner, not this queue, decides
+         # whether exact public identity/visibility recovery is permitted.
+         differs |= stored_status != status or actual != supplied or hidden
+-    if not candidates or not differs:
++        minute = (event.get('score') or {}).get('minute')
++        old_minute = (load_json(row.score_json, {}) or {}).get('minute')
++        if (not hidden and stored_status == status == 'live' and actual == supplied
++                and minute not in (None, '') and str(minute) != str(old_minute)):
++            clock_changes.append((row.event_id, str(old_minute), str(minute)))
++    if not candidates or not (differs or clock_changes):
+         return None
+     # Do not include fetch time: a new HTTP contact with identical evidence must
+     # not bypass the conflict cooldown. A changed score/physical row may retry.
+     proof = {'id': str(raw.get('id') or raw.get('matchId')), 'status': status,
+              'score': supplied, 'kickoff': kickoff.isoformat(),
+              'league': raw.get('_league'), 'existing': sorted(candidates)}
++    if not differs:
++        proof['clock_changes'] = clock_changes
+     return hashlib.sha256(json.dumps(proof, sort_keys=True, default=str).encode()).hexdigest()
+ 
+ 
+diff --git a/collector/football_board_refresh.py b/collector/football_board_refresh.py
+index 168f9f9..d6b6930 100644
+--- a/collector/football_board_refresh.py
++++ b/collector/football_board_refresh.py
+@@ -41,7 +41,7 @@ DEFERRED_REASONS = {"event_identity_conflict", "source_identity_conflict",
+                     "legacy_fingerprint_conflict", "competition_acceptance"}
+ MAX_EVENTS_PER_PAGE = 100
+ PAGE_BUDGET_SECONDS = 8
+-HOT_INTERVAL_SECONDS = 30
++HOT_INTERVAL_SECONDS = 15
+ HISTORY_INTERVAL_SECONDS = 21600
+ FUTURE_INTERVAL_SECONDS = 900
+ 
+@@ -400,7 +400,7 @@ def refresh_day(db, day: str, source: SportsSource, *, now: datetime, getter=Non
+             "deferred_count": len(deferred), **totals, "reasons": dict(reasons)}
+ 
+ 
+-def run_football_board_refresh(db, *, owner: str, now: datetime | None = None, getter=None) -> dict:
++def run_football_board_refresh(db, *, owner: str, now: datetime | None = None, getter=None, hot_only: bool = False) -> dict:
+     """At most one hot-day page + one rotating history/future page per cycle."""
+     from collector.family_health import family_in_active_backoff, family_access_blocked
+     from collector.http import family_host_blocked
+@@ -423,7 +423,7 @@ def run_football_board_refresh(db, *, owner: str, now: datetime | None = None, g
+         return {"skipped": "write_lock_held"}
+     pages = []
+     try:
+-        for days in rolling_dates(now):
++        for days in (rolling_dates(now)[:1] if hot_only else rolling_dates(now)):
+             if (family_in_active_backoff("fotmob") or family_access_blocked("fotmob")
+                     or family_host_blocked("fotmob") or is_rate_limited(db, source.source_id, now=now)):
+                 break
+diff --git a/collector/fotmob_rich.py b/collector/fotmob_rich.py
+index 4d6a3b1..4317e9e 100644
+--- a/collector/fotmob_rich.py
++++ b/collector/fotmob_rich.py
+@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
+ import math
+ from typing import Any
+ 
+-REVISION = 1
++REVISION = 2
+ 
+ 
+ def number(value: Any):
+@@ -125,6 +125,12 @@ def complete_fotmob_detail(root, out):
+                     position = pitch_position(original.get('verticalLayout'))
+                     if position:
+                         p['pitch_position'] = position
++                    if original.get('id') and original.get('name'):
++                        p['profile_ref'] = {'family':'fotmob', 'id':str(original['id'])}
++                    if source.get('id') and source.get('name'):
++                        p['team_at_match'] = {'id':str(source['id']), 'name':source['name']}
++                    if number(original.get('age')) is not None:
++                        p['age'] = original['age']
+                     if original.get('countryCode'):
+                         p['country_id'] = original['countryCode']
+                     # Provider formation-slot IDs (e.g. 115) are not position names.
+diff --git a/collector/priority_cycle.py b/collector/priority_cycle.py
+index d8d07b6..5998732 100644
+--- a/collector/priority_cycle.py
++++ b/collector/priority_cycle.py
+@@ -37,6 +37,20 @@ def has_priority_events(db, *, now=None) -> bool:
+ def run_priority_cycle(db, *, owner: str) -> bool:
+     """Return true while bulk maintenance must yield to active score polling."""
+     global _last_discovery
++    # Source-native leagues must not wait behind slower all-sport/detail work.
++    # Same scheduler lease, cooldowns, cursor and observation acceptance gate.
++    from collector.football_board_refresh import run_football_board_refresh
++    try:
++        urgent = run_football_board_refresh(db, owner=owner, hot_only=True)
++        db.commit()
++        logger.info("FOOTBALL_HOT_FIRST %s", urgent)
++    except Exception:
++        db.rollback()
++        logger.exception("Hot football refresh failed; prior observations retained")
++    if not heartbeat_scheduler_lock(db, owner=owner):
++        db.rollback()
++        raise RuntimeError("Results scheduler lease lost")
++    db.commit()
+     for label, filters in (
+         ("FOOTBALL_SCORE_LANE", {"sport_id": "football", "source_family": "fotmob", "max_physical": 2}),
+         ("ALLSPORT_LIVE_LANE", {"max_physical": 6}),
+diff --git a/collector/provider.py b/collector/provider.py
+index 03bd3bc..c5cb2dd 100644
+--- a/collector/provider.py
++++ b/collector/provider.py
+@@ -133,6 +133,7 @@ _STATUS_CACHE: Dict[str, Any] = {"at": 0.0, "payload": None}
+ _STATUS_TTL_S = 20.0
+ 
+ INTERNAL_EVENT_KEYS = {
++    "profile_ref",
+     "source_group_id",
+     "source_parent_competition_id",
+     "field_sources",
+@@ -309,6 +310,7 @@ def _apply_source_competition_display(
+ 
+ 
+ LIST_PUBLIC_KEYS = (
++    "score_observed_at",
+     "group",
+     "group_name",
+     "id",
+@@ -772,6 +774,7 @@ def is_frozen_public_competition(event: Dict[str, Any]) -> bool:
+ 
+ 
+ LIVE_PUBLIC_KEYS = (
++    "score_observed_at",
+     "id",
+     "sport",
+     "competition",
+@@ -1134,7 +1137,7 @@ class NinkoCollectedSportsDataProvider:
+     def get_live_events(self) -> List[NormalizedEvent]:
+         return self.get_events(status="live")
+ 
+-    def get_event(self, event_id: str) -> Optional[NormalizedEvent]:
++    def get_event(self, event_id: str, *, lightweight: bool = False) -> Optional[NormalizedEvent]:
+         db = _session(self._session_factory)
+         try:
+             row = db.query(SportsEvent).filter_by(event_id=event_id).first()
+@@ -1152,6 +1155,10 @@ class NinkoCollectedSportsDataProvider:
+             blocked_ids, blocked_families = _blocked_public_sources(db)
+             if not _row_public_source_allowed(row, blocked_ids, blocked_families):
+                 return None
++            if lightweight:
++                # Same alias/source/visibility normalization, no external detail or history work.
++                payload = self._to_normalized(row, include_detail=False)
++                return public_event_detail(payload) if payload is not None else None
+             try:
+                 from collector.detail_enrich import enrich_event_row
+ 
+@@ -1387,6 +1394,7 @@ class NinkoCollectedSportsDataProvider:
+         else:
+             payload["observation_count"] = 1
+         payload["source_fetch_time"] = extra.get("source_fetch_time") or extra.get("last_contact_at") or isoformat(row.retrieved_at)
++        payload["score_observed_at"] = payload["source_fetch_time"]
+         payload["last_contact_at"] = extra.get("last_contact_at") or payload["source_fetch_time"]
+         payload["canonical_updated_at"] = extra.get("canonical_updated_at") or isoformat(row.updated_at)
+         payload["source_event_updated_at"] = extra.get("source_event_updated_at")
