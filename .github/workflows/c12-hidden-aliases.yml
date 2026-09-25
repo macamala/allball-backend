@@ -1,0 +1,44 @@
+name: C12 hidden aliases regression gate
+on:
+  push:
+    branches: [fix/hidden-aliases-c12-20260925]
+    paths: ['audit/c12_hidden_aliases.patch', '.github/workflows/c12-hidden-aliases.yml']
+permissions:
+  contents: write
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: |
+          echo 'efd2c77aee2a827aabd99cd54b119d6e82262e2dd5494541cf466b7609555e99  audit/c12_hidden_aliases.patch' | sha256sum -c
+          git apply --check audit/c12_hidden_aliases.patch
+          git apply audit/c12_hidden_aliases.patch
+          git add -N tests/test_hidden_football_aliases.py
+          mkdir -p evidence
+          git diff 2f5108c7d5394bc4c87743a885f39e9472e7ebe2 -- collector/football_fixture_linkage.py tests/test_hidden_football_aliases.py > evidence/source.patch
+          cmp audit/c12_hidden_aliases.patch evidence/source.patch
+          python -m pip install -r requirements.txt pytest
+      - run: python -m pytest -q $(cat audit/football_test_selection.txt) tests/test_hidden_football_aliases.py --junitxml=evidence/tests.xml
+      - name: Publish tested candidate only to isolated branch
+        run: |
+          git diff --check
+          git config user.name 'NinkoSports regression checks'
+          git config user.email '79318740+macamala@users.noreply.github.com'
+          git add collector/football_fixture_linkage.py tests/test_hidden_football_aliases.py
+          git commit -m 'Attach source-proven hidden duplicate aliases without promoting them or changing accepted results'
+          git push origin HEAD:refs/heads/fix/hidden-aliases-c12-20260925
+          git rev-parse HEAD > evidence/candidate.txt
+          sha256sum collector/football_fixture_linkage.py tests/test_hidden_football_aliases.py > evidence/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: c12-hidden-alias-evidence
+          path: evidence
+          retention-days: 30
