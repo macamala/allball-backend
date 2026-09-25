@@ -1,0 +1,81 @@
+name: C15 final deployed acceptance
+on:
+  push:
+    branches: [audit/football-recovery-20260925-10]
+    paths: ['.github/workflows/c15-final-acceptance.yml', 'audit/checkpoint15_public_acceptance.py']
+permissions:
+  contents: read
+  actions: read
+jobs:
+  live-and-table-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: |
+          python -m pip install playwright
+          python -m playwright install --with-deps chromium
+      - run: python audit/checkpoint15_public_acceptance.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: c15-final-browser
+          path: /tmp/c15-final
+          retention-days: 30
+  coverage-and-timing:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: c15-football-coverage
+          run-id: 36117380483
+          github-token: ${{ github.token }}
+          path: before
+      - run: |
+          mkdir -p /tmp/c15-final-coverage
+          python - <<'PY'
+          import json,time,urllib.request,concurrent.futures
+          from datetime import datetime,timezone
+          from pathlib import Path
+          from urllib.parse import urlencode
+          out=Path('/tmp/c15-final-coverage');api='https://allball-backend-production.up.railway.app';eid='ninko-evt-0f0c8b1216525d84d854'
+          def get(name,url):
+            t=time.monotonic()
+            try:
+              with urllib.request.urlopen(urllib.request.Request(url,headers={'Accept':'application/json'}),timeout=16) as r:d={'http':r.status,'payload':json.load(r)}
+            except Exception as e:d={'error':str(e)}
+            d.update(url=url,at=datetime.now(timezone.utc).isoformat(),seconds=time.monotonic()-t);(out/(name+'.json')).write_text(json.dumps(d,ensure_ascii=False,indent=2));return d
+          timing=[]
+          for n in range(7):
+            if n:time.sleep(20)
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+              a=pool.submit(get,'source-'+str(n),'https://www.fotmob.com/api/data/matches?date=20260925')
+              b=pool.submit(get,'score-'+str(n),api+'/sports-data/matches/'+eid+'/score')
+              source,score=a.result(),b.result()
+            matches=[m for l in source.get('payload',{}).get('leagues',[]) for m in l.get('matches',[]) if str(m.get('id'))=='6232978']
+            timing.append({'at':score['at'],'source':matches,'public':score.get('payload'),'source_http':source.get('http'),'public_http':score.get('http')})
+          (out/'timing.json').write_text(json.dumps(timing,ensure_ascii=False,indent=2))
+          before=json.loads(Path('before/coverage.json').read_text());before_public=json.loads(Path('before/public.json').read_text())['payload']['events']
+          after=get('public',api+'/sports-data/events?sport=football&unlimited=1&date_from=2026-09-24T14%3A00%3A00Z&date_to=2026-09-28T13%3A59%3A59Z').get('payload',{}).get('events',[])
+          def check(old):
+            key=old['competition'];r=get('table-'+key,api+'/sports-data/standings?'+urlencode({'league':key}));p=r.get('payload',{});rows=p.get('rows') or []
+            return {'competition':key,'before':old['table_rows'],'after':len(rows),'season':p.get('season'),'groups':sorted({str(x.get('group')) for x in rows}),'http':r.get('http'),'error':r.get('error')}
+          with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:coverage=list(pool.map(check,before))
+          oldids={e['id'] for e in before_public};newids={e['id'] for e in after}
+          summary={'at':datetime.now(timezone.utc).isoformat(),'competitions':len(coverage),'before_tables':sum(bool(x['before']) for x in coverage),'after_tables':sum(bool(x['after']) for x in coverage),'added_tables':[x['competition'] for x in coverage if not x['before'] and x['after']],'lost_tables':[x['competition'] for x in coverage if x['before'] and not x['after']],'before_events':len(oldids),'after_events':len(newids),'removed_event_ids':sorted(oldids-newids),'added_event_ids':sorted(newids-oldids),'coverage':coverage}
+          (out/'summary.json').write_text(json.dumps(summary,ensure_ascii=False,indent=2));print(json.dumps(summary,ensure_ascii=False))
+          assert not summary['lost_tables'] and not summary['removed_event_ids']
+          assert all(x['source_http']==x['public_http']==200 for x in timing)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: c15-final-coverage-and-timing
+          path: /tmp/c15-final-coverage
+          retention-days: 30
