@@ -1,0 +1,59 @@
+name: C16 complete competition preservation gate
+on:
+  push:
+    branches: [feature/competition-centre-c16-20260925]
+    paths: ['audit/c16_composite_preservation.patch', '.github/workflows/c16-composite-preservation-gate.yml']
+permissions:
+  contents: write
+  actions: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 36129893421
+          name: c16-competition-source-evidence
+          path: /tmp/native-c16
+      - run: |
+          mkdir -p evidence
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib
+          # Repair the known audit-text separator indent; exact reviewed hash
+          # must match before any source is applied.
+          patch=Path('audit/c16_composite_preservation.patch').read_bytes().replace(b'\n diff --git',b'\ndiff --git')
+          assert hashlib.sha256(patch).hexdigest()=='eb8b46821071d2ee594cd4c190cd99b05c1bbda734ddd85ac672528669b73241'
+          Path('evidence/reviewed.patch').write_bytes(patch)
+          PY
+          git apply --check evidence/reviewed.patch
+          git apply evidence/reviewed.patch
+          git diff 2c69cc00bdede9b1735e38d162bceaecdd6e73e6 -- app.py collector tests audit/c16_native_replay.py > evidence/source.patch
+          echo '80dc3616498ab06d1d1b75e99a2dc64c7144089efaec6364eb23494829cadbd6  evidence/source.patch' | sha256sum -c
+          python -m pip install -r requirements.txt pytest
+      - run: python -m pytest -q $(cat audit/football_test_selection.txt) tests/test_hidden_football_aliases.py tests/test_fotmob_match_centre.py tests/test_entity_profile_navigation.py tests/test_c14_live_player.py tests/test_canonical_detail.py tests/test_fiba_rich_detail.py tests/test_sofa_rich_detail.py tests/test_c15_live_tables.py tests/test_c15_parent_league_tables.py tests/test_worker_shutdown_handoff.py tests/test_c16_competition_hub.py --junitxml=evidence/tests.xml
+      - run: PYTHONPATH=. python audit/c16_native_replay.py /tmp/native-c16 evidence
+      - name: Publish only tested isolated candidate
+        run: |
+          git diff --check
+          git config user.name 'NinkoSports regression checks'
+          git config user.email '79318740+macamala@users.noreply.github.com'
+          git add collector/competition_hub.py tests/test_c16_competition_hub.py
+          git commit -m 'Retain canonical group schedules when a partial parent cannot prove native season fixtures'
+          git push origin HEAD:refs/heads/feature/competition-centre-c16-20260925
+          git rev-parse HEAD > evidence/candidate.txt
+          git diff --name-only 2c69cc00bdede9b1735e38d162bceaecdd6e73e6 HEAD -- app.py collector tests audit/c16_native_replay.py | xargs sha256sum > evidence/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: c16-complete-competition-gate
+          path: evidence
+          retention-days: 30
