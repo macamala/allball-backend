@@ -6,7 +6,9 @@ stored public identity is proved. A historical record is not a new live event.
 from copy import deepcopy
 from datetime import datetime
 import re
-from sqlalchemy import or_, func
+from sqlalchemy import or_
+import logging
+import time
 from collector.util import parse_datetime, isoformat, load_json
 from collector.source_ids import id_for_family
 from collector.participant_alias import punctuation_identity_key
@@ -126,36 +128,53 @@ def parse_history(root):
 
 
 def known_native_rows(db, mids):
-    """Find existing restrictions even in another competition or pre-observation rows.
+    """Find all existing restrictions with two bounded reads, regardless of season.
 
-    Queries are bounded batches over exact typed references, not name matching.
-    The textual prefilter is followed by the existing typed-ID parser.
+    One compiled regexp prefilter replaces N rich-TEXT replace/LIKE operations
+    per row and repeated observation scans. The existing typed-ID parser remains
+    the authority; matching a textual value alone never authorizes an identity.
+    No visibility, competition or time filter can hide a restricted old alias.
     """
     from collector.models import SportsEvent, SportsEventObservation
     mids = sorted({_id(mid) for mid in mids if _id(mid)})
-    by_native, seen = {}, {}
-    observed = []
-    for offset in range(0, len(mids), 80):
-        batch = mids[offset:offset+80]
-        observations = db.query(SportsEventObservation.event_id, SportsEventObservation.source_event_id).filter(
-            SportsEventObservation.source_family == 'fotmob', SportsEventObservation.source_event_id.in_(batch)).distinct().all()
-        observed.extend(observations)
-        ids = {eid for eid, _ in observations}
-        compact = func.replace(SportsEvent.extra_json, ' ', '')
-        clauses = [compact.like('%"fotmob":"'+mid+'"%') for mid in batch]
-        candidates = db.query(SportsEvent).filter(SportsEvent.sport_id == 'football',
-            or_(SportsEvent.event_id.in_(ids), *clauses)).limit(4001).all()
-        if len(candidates) > 4000:
-            raise ValueError('Native identity index exceeded its safe read bound')
-        seen.update({r.event_id: r for r in candidates})
-    for row in seen.values():
+    if not mids:
+        return {}
+    if len(mids) > 2500:
+        raise ValueError('Native identity request exceeded its safe read bound')
+    started = time.monotonic()
+    observations = db.query(SportsEventObservation.event_id, SportsEventObservation.source_event_id).filter(
+        SportsEventObservation.source_family == 'fotmob',
+        SportsEventObservation.source_event_id.in_(mids)).distinct().limit(4001).all()
+    observed_at = time.monotonic()
+    if len(observations) > 4000:
+        raise ValueError('Native observation index exceeded its safe read bound')
+    ids = {eid for eid, _ in observations}
+    # Values are normalized numeric IDs, not a regex/SQL supplied by a caller.
+    # Include legacy dict/list and source_family/source_event_id forms. False
+    # positives in other JSON fields are rejected by id_for_family below.
+    choices = '(?:' + '|'.join(mids) + ')'
+    value = r'(?:"\s*(?:[A-Za-z-]+:)?' + choices + r'\s*"|' + choices + r'\s*[,}])'
+    pattern = r'"(?:fotmob|source_event_id)"\s*:\s*' + value + r'|"fotmob:\s*' + choices + r'\s*"'
+    candidates = db.query(SportsEvent).filter(SportsEvent.sport_id == 'football',
+        or_(SportsEvent.event_id.in_(ids), SportsEvent.extra_json.regexp_match(pattern))).limit(4001).all()
+    if len(candidates) > 4000:
+        raise ValueError('Native identity index exceeded its safe read bound')
+    seen = {row.event_id: row for row in candidates}
+    by_native = {}
+    wanted = set(mids)
+    for row in candidates:
         mid = id_for_family(load_json(row.extra_json, {}) or {}, 'fotmob')
-        if mid in mids:
+        if mid in wanted:
             by_native.setdefault(mid, []).append(row)
-    for eid, mid in observed:
+    for eid, mid in observations:
         row = seen.get(eid)
         if row is not None and row not in by_native.get(mid, []):
             by_native.setdefault(mid, []).append(row)
+    elapsed = time.monotonic()-started
+    if elapsed >= 1:
+        logging.getLogger(__name__).info(
+            'HISTORY_ID_LOOKUP mids=%s observations=%s rows=%s observation_ms=%.1f total_ms=%.1f',
+            len(mids), len(observations), len(candidates), (observed_at-started)*1000, elapsed*1000)
     return by_native
 
 
