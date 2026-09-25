@@ -18,7 +18,7 @@ from collector.participant_text import fold_for_identity
 from collector.util import load_json
 
 
-def __names_equivalent(left: str, right: str) -> bool:
+def _names_equivalent(left: str, right: str) -> bool:
     a = fold_for_identity(left)
     b = fold_for_identity(right)
     return bool(a and b and a == b)
