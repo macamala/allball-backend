@@ -1,0 +1,88 @@
+name: Football resumed release public acceptance
+on:
+  push:
+    branches: [audit/football-resume-final-20260925]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  scores-and-preservation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: f36ea7a1476d5c7f17a8ce67c6b10968cccd52dc
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/download-artifact@v4
+        with:
+          name: football-routing-public-evidence
+          run-id: 36084223408
+          github-token: ${{ github.token }}
+          path: /tmp/before
+      - run: python audit/football_acceptance.py --out /tmp/final/current
+      - name: Compare actual public IDs and preserve source disagreements
+        run: |
+          python - <<'PY'
+          import json,urllib.request,urllib.error
+          from pathlib import Path
+          from concurrent.futures import ThreadPoolExecutor
+          def read_ids(path):
+            rows={}
+            for f in Path(path).glob('public-*.json'):
+              payload=json.loads(f.read_text())
+              assert payload.get('http_status')==200,f
+              for row in (payload.get('payload')or{}).get('events')or[]:rows[row['id']]=row
+            return rows
+          old=read_ids('/tmp/before/current');new=read_ids('/tmp/final/current')
+          removed=sorted(old.keys()-new.keys());added=sorted(new.keys()-old.keys())
+          result={'before':len(old),'after':len(new),'retained':len(old.keys()&new.keys()),'removed_ids':removed,'added_ids':added}
+          ids=list(dict.fromkeys(removed+['ninko-evt-4fb1a3b00321ce6cb7ab','ninko-evt-db7f5cf3bfeda17ddd77','ninko-evt-86345b6cb47a7c4b8524']))[:40]
+          def get(eid):
+            try:
+              with urllib.request.urlopen('https://allball-backend-production.up.railway.app/sports-data/matches/'+eid,timeout=15) as r:
+                event=json.load(r).get('event')or{}
+                return eid,{'http':r.status,'event':event}
+            except Exception as e:return eid,{'error':str(e)}
+          with ThreadPoolExecutor(max_workers=3) as pool:result['alias_checks']=dict(pool.map(get,ids))
+          report=json.loads(Path('/tmp/final/current/acceptance.json').read_text())
+          result['checked_at']=report['checked_at'];result['totals']=report['totals'];result['competition_count']=report['competition_count']
+          Path('/tmp/final/preservation.json').write_text(json.dumps(result,indent=2))
+          print(json.dumps({k:v for k,v in result.items() if k not in ('alias_checks','added_ids')},indent=2))
+          # Disagreements remain visible in artifacts; job completion is NOT a
+          # claim of all-football acceptance. No data is modified by this audit.
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: football-final-scores-preservation
+          path: /tmp/final
+          retention-days: 30
+  production-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env:
+      MOBILE_QA_SITE: https://ninkosports.com
+      MOBILE_QA_OUT: /tmp/football-browser
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: macamala/allball-frontend
+          ref: d0db12fe066fba328e86e9e8a80b313c20d3d2df
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: |
+          python -m pip install playwright
+          python -m playwright install --with-deps chromium
+      - run: python audit/mobile_standings_browser.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: football-final-production-browser
+          path: /tmp/football-browser
+          retention-days: 30
