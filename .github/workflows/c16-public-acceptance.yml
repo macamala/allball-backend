@@ -1,0 +1,113 @@
+name: C16 actual competition acceptance
+on:
+  push:
+    branches: [audit/football-recovery-20260925-10]
+    paths: ['.github/workflows/c16-public-acceptance.yml','audit/checkpoint16_public_acceptance.py']
+permissions:
+  contents: read
+  actions: read
+jobs:
+  competition-and-history:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 36126017633
+          artifact-ids: 10859673405
+          merge-multiple: true
+          path: /tmp/c15-baseline
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: |
+          python -m pip install playwright
+          python -m playwright install --with-deps chromium
+      - run: python audit/checkpoint16_public_acceptance.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: c16-real-competition-history
+          path: /tmp/c16-public
+          retention-days: 30
+  preserve-live-board:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: macamala/allball-frontend
+          ref: c86f6656bf7d40e9e7b2d0ec10b136896d6814f1
+          path: frontend
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: |
+          python -m pip install playwright
+          python -m playwright install --with-deps chromium
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('audit/screenshot_production_acceptance.py');s=p.read_text()
+          old=".score-row').first.wait_for(";assert s.count(old)==2
+          s=s.replace(old,".score-row-link').first.wait_for(")
+          needle="   REPORT['browser'][-1]['poll_responses']=requests[before:]";assert s.count(needle)==1
+          s=s.replace(needle,needle+"\n   successful=[r['url'] for r in requests[before:] if r['status']==200]\n   assert any('/sports-data/status-delta?' in u for u in successful)\n   assert any('/sports-data/events?' in u for u in successful)")
+          compile(s,str(p),'exec');p.write_text(s)
+          out=Path('/tmp/screenshot-after');out.mkdir(exist_ok=True);(out/'executed_acceptance.py').write_text(s)
+          PY
+      - run: python audit/screenshot_production_acceptance.py
+      - run: python frontend/audit/mobile_standings_browser.py
+        if: always()
+        env:
+          MOBILE_QA_SITE: https://ninkosports.com
+          MOBILE_QA_OUT: /tmp/screenshot-after/standings
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: c16-retained-live-mobile
+          path: /tmp/screenshot-after
+          retention-days: 30
+  preserve-rich-match-home-player:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: macamala/allball-frontend
+          ref: c86f6656bf7d40e9e7b2d0ec10b136896d6814f1
+          path: frontend
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: |
+          python -m pip install playwright
+          python -m playwright install --with-deps chromium
+      - run: python audit/checkpoint13_match_acceptance.py
+      - run: python audit/checkpoint14_public_acceptance.py
+        if: always()
+      - run: python frontend/audit/c14_profile_browser.py
+        if: always()
+        env:
+          TARGET_SITE: https://ninkosports.com
+          PROFILE_OUT: /tmp/c16-retained-profiles
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: c16-retained-rich-home-player
+          path: |
+            /tmp/c13-public
+            /tmp/c14-public
+            /tmp/c16-retained-profiles
+          retention-days: 30
