@@ -33,3 +33,5 @@ tests/test_football_collision_routing.py
 tests/test_football_fixture_linkage.py
 tests/test_public_fixture_aliases.py
 tests/test_data_integrity.py
+
+tests/test_football_board_priority.py

@@ -20,6 +20,7 @@ from collector.collect import _consume_result
 from collector.flags import collection_enabled, scheduler_enabled, writes_enabled
 from collector.fotmob_crosswalk import _ensure_dynamic_fotmob_mapping, _fotmob_competition_identity, _fill_identity_assets
 from collector.football_fixture_linkage import LINKAGE_REVISION, choose_indexed_keeper, link_accepted_duplicates
+from collector.football_board_priority import priority_plan, interleave_priority, record_priority_attempt, conflict_evidence
 from collector.keeper_revalidation import _same_pair
 from collector.limits import is_rate_limited, record_hit
 from collector.lock import acquire_write_lock, lock_status, release_write_lock
@@ -201,7 +202,8 @@ def consume_board_match(db, raw: dict, source: SportsSource, identity: dict) -> 
         elif len(valid) == len(roots):
             keeper = choose_indexed_keeper(valid, {**parsed, "competition_key": cid})
         if keeper is None:
-            return {"rejected": 1, "reason": "source_identity_conflict"}
+            return {"rejected": 1, "reason": "source_identity_conflict",
+                    "evidence": conflict_evidence(roots, parsed)}
         if automatic_promotion_blocked(keeper):
             return {"rejected": 1, "reason": "visibility_policy"}
         cid, reason = _legacy_target(db, keeper, parsed, cid, country, identity.get(sid, []))
@@ -290,10 +292,21 @@ def refresh_day(db, day: str, source: SportsSource, *, now: datetime, getter=Non
     ordered = (sorted((sid, matches[sid]) for sid in retry_ids)
                + sorted((key, raw) for key, raw in matches.items() if key > after and key not in retry_ids))
     index = _identity_index(db, day)
-    totals = {"seen": len(matches), "processed": 0, "written": 0, "rejected": 0, "skipped": 0}
+    priority_receipts = dict(state.get("priority_receipts") or {})
+    priorities = priority_plan(matches, index, priority_receipts, now, max_events)
+    ordered = interleave_priority(ordered, matches, priorities)
+    processed_ids = set()
+    exhausted = False
+    totals = {"seen": len(matches), "processed": 0, "written": 0, "rejected": 0, "skipped": 0,
+              "priority_processed": 0}
     reasons = defaultdict(int)
     failed = False
-    for sid, raw in ordered:
+    for sid, raw, is_priority in ordered:
+        if sid in processed_ids:
+            # Only sequential traversal may advance the coverage cursor.
+            if not is_priority and sid not in retry_ids:
+                after = sid
+            continue
         if totals["processed"] >= max_events or (totals["processed"] and time.monotonic() - started >= budget_seconds):
             break
         try:
@@ -318,6 +331,12 @@ def refresh_day(db, day: str, source: SportsSource, *, now: datetime, getter=Non
                              "first_seen_at": previous.get("first_seen_at") or isoformat(now),
                              "last_seen_at": isoformat(now), "source_family": "fotmob",
                              "source_event_id": sid, "linkage_revision": LINKAGE_REVISION}
+            evidence = result.get("evidence")
+            if evidence:
+                deferred[sid]["evidence"] = evidence
+                if previous.get("evidence") != evidence:
+                    logger.info("FOOTBALL_IDENTITY_EVIDENCE day=%s source_id=%s reason=%s proof=%s",
+                                day, sid, reason, dump_json(evidence))
         elif not result.get("rejected"):
             deferred.pop(sid, None)
         elif sid in deferred:
@@ -327,14 +346,20 @@ def refresh_day(db, day: str, source: SportsSource, *, now: datetime, getter=Non
             deferred[sid] = {**previous, "reason": reason or "rejected",
                              "attempts": int(previous.get("attempts") or 0)+1,
                              "last_seen_at": isoformat(now), "linkage_revision": LINKAGE_REVISION}
+        processed_ids.add(sid)
+        if sid in priorities:
+            record_priority_attempt(priority_receipts, sid, priorities[sid], now)
+        totals["priority_processed"] += int(is_priority)
         totals["processed"] += 1
         for key in ("written", "rejected", "skipped"):
             totals[key] += int(result.get(key) or 0)
         if result.get("reason"):
             reasons[result["reason"]] += 1
-        if sid not in retry_ids:
+        if not is_priority and sid not in retry_ids:
             after = sid
-    complete = not failed and totals["processed"] == len(ordered)
+    else:
+        exhausted = True
+    complete = not failed and exhausted
     date = datetime.strptime(day, "%Y%m%d").date()
     interval = (HOT_INTERVAL_SECONDS if date >= now.date()-timedelta(days=1) and date <= now.date()
                 else FUTURE_INTERVAL_SECONDS if date > now.date() else HISTORY_INTERVAL_SECONDS)
@@ -343,6 +368,7 @@ def refresh_day(db, day: str, source: SportsSource, *, now: datetime, getter=Non
     state.update({"policy_revision": POLICY_REVISION, "after_id": "" if complete else after, "complete": complete,
                   "next_due_at": isoformat(now + timedelta(seconds=delay)), "totals": totals,
                   "reasons": dict(reasons), "deferred": deferred,
+                  "priority_receipts": priority_receipts,
                   "data_complete": complete and not deferred})
     if not failed:
         state["last_success_at"] = isoformat(now)
