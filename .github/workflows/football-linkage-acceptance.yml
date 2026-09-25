@@ -1,0 +1,100 @@
+name: Football linkage production acceptance
+on:
+  push:
+    branches: [audit/football-linkage-acceptance-20260925]
+    paths: ['.github/workflows/football-linkage-acceptance.yml']
+permissions:
+  contents: read
+  actions: read
+jobs:
+  scores:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 828193d8b9ab1422638174260b72a88ec90ea9ce
+          persist-credentials: false
+          path: source
+      - uses: actions/checkout@v4
+        with:
+          ref: f36ea7a1476d5c7f17a8ce67c6b10968cccd52dc
+          persist-credentials: false
+          path: audit-code
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/download-artifact@v4
+        with:
+          artifact-ids: '10844546756'
+          run-id: 36085978240
+          github-token: ${{ github.token }}
+          merge-multiple: true
+          path: /tmp/linkage-before
+      - run: |
+          mkdir -p /tmp/linkage-after
+          git -C source archive --format=tar.gz HEAD > /tmp/linkage-after/backend-828193d.tar.gz
+          python audit-code/audit/football_acceptance.py --out /tmp/linkage-after/current
+      - name: Preserve fixture presence and explicit old links
+        run: |
+          python - <<'PY'
+          import json,urllib.request
+          from pathlib import Path
+          from concurrent.futures import ThreadPoolExecutor
+          p=Path('/tmp/linkage-after');before=Path('/tmp/linkage-before/current')
+          a=json.loads((before/'acceptance.json').read_text());b=json.loads((p/'current/acceptance.json').read_text())
+          def rows(base):
+            result={}
+            for f in base.glob('public-*.json'):
+              data=json.loads(f.read_text());assert data.get('http_status')==200,f
+              result.update({r['id']:r for r in (data.get('payload')or{}).get('events')or[]})
+            return result
+          old=rows(before);new=rows(p/'current');removed=sorted(old.keys()-new.keys())
+          fixed=['ninko-evt-8ea488bb6f0bcf5038b7','ninko-evt-bb4071086c3ea042f6e9','ninko-evt-4fb1a3b00321ce6cb7ab','ninko-evt-db7f5cf3bfeda17ddd77','ninko-evt-86345b6cb47a7c4b8524','ninko-evt-f150e48ad644076a2b20','ninko-evt-d807549bf94203765dd7']
+          ids=list(dict.fromkeys(fixed+removed))[:48]
+          def get(eid):
+            try:
+              req=urllib.request.Request('https://allball-backend-production.up.railway.app/sports-data/matches/'+eid,headers={'Accept':'application/json'})
+              with urllib.request.urlopen(req,timeout=20) as r:return eid,{'http':r.status,'payload':json.load(r)}
+            except Exception as e:return eid,{'error':str(e)}
+          with ThreadPoolExecutor(max_workers=3) as pool:details=dict(pool.map(get,ids))
+          result={'before_checked_at':a['checked_at'],'checked_at':b['checked_at'],'before':a['totals'],'after':b['totals'],'competitions':b['competition_count'],'retained_ids':len(old.keys()&new.keys()),'removed_ids':removed,'added_ids':sorted(new.keys()-old.keys()),'details':details,'removed_detail_checks_truncated':len(set(fixed+removed))>48}
+          old_bad={r['id'] for r in a['issues'] if r['kind']=='played_mismatch'};new_bad={r['id'] for r in b['issues'] if r['kind']=='played_mismatch'}
+          result['remaining_prior_mismatch_ids']=sorted(old_bad&new_bad);result['new_mismatch_ids']=sorted(new_bad-old_bad)
+          result['no_longer_mismatched_ids']=sorted(old_bad-new_bad)
+          result['note']='Disappearance is not a fixed result; inspect aliases and row presence. A completed audit is not whole-football acceptance.'
+          (p/'preservation.json').write_text(json.dumps(result,indent=2))
+          compact={k:v for k,v in result.items() if k not in ('details','added_ids')};compact['detail_summary']={eid:{'http':x.get('http'),'error':x.get('error'),**{k:((x.get('payload')or{}).get('event')or{}).get(k) for k in ('id','home','away','status','score')}} for eid,x in details.items()}
+          print(json.dumps(compact,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: football-linkage-public-acceptance
+          path: /tmp/linkage-after
+          retention-days: 30
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env:
+      MOBILE_QA_SITE: https://ninkosports.com
+      MOBILE_QA_OUT: /tmp/linkage-browser
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: macamala/allball-frontend
+          ref: d0db12fe066fba328e86e9e8a80b313c20d3d2df
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: |
+          python -m pip install playwright
+          python -m playwright install --with-deps chromium
+      - run: python audit/mobile_standings_browser.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: football-linkage-production-browser
+          path: /tmp/linkage-browser
+          retention-days: 30
