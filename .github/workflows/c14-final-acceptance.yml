@@ -1,0 +1,150 @@
+name: C14 final deployed acceptance
+on:
+  push:
+    branches: [audit/football-recovery-20260925-10]
+    paths: ['.github/workflows/c14-final-acceptance.yml']
+permissions:
+  contents: read
+jobs:
+  profiles-home-order:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: macamala/allball-frontend
+          ref: 5e65eca2a43939859e010182ba187f68ea74e3bc
+          path: frontend
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: |
+          python -m pip install playwright
+          python -m playwright install --with-deps chromium
+      - name: Actual deployed profile layout and current-club navigation
+        env:
+          TARGET_SITE: https://ninkosports.com
+          PROFILE_OUT: /tmp/c14-final-profiles
+        run: python frontend/audit/c14_profile_browser.py
+      - name: Actual player facts, news-only home and grouped competition order
+        if: always()
+        run: python audit/checkpoint14_public_acceptance.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: c14-final-profiles-and-home
+          path: |
+            /tmp/c14-final-profiles
+            /tmp/c14-public
+          retention-days: 30
+  previous-match-journey:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: |
+          python -m pip install playwright
+          python -m playwright install --with-deps chromium
+      - run: python audit/checkpoint13_match_acceptance.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: c14-final-rich-match-journey
+          path: /tmp/c13-public
+          retention-days: 30
+  previous-scores-and-mobile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: macamala/allball-frontend
+          ref: 5e65eca2a43939859e010182ba187f68ea74e3bc
+          path: frontend
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: |
+          python -m pip install playwright
+          python -m playwright install --with-deps chromium
+      - name: Require real anchors rather than loading placeholders and observed HTTP polling
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('audit/screenshot_production_acceptance.py');s=p.read_text()
+          old=".score-row').first.wait_for("
+          assert s.count(old)==2
+          s=s.replace(old,"a.score-row-link').first.wait_for(")
+          needle="   REPORT['browser'][-1]['poll_responses']=requests[before:]"
+          assert s.count(needle)==1
+          s=s.replace(needle,needle+'''
+             successful=[r['url'] for r in requests[before:] if r['status']==200]
+             assert any('/sports-data/status-delta?' in u for u in successful),'No successful automatic status update observed'
+             assert any('/sports-data/events?' in u for u in successful),'No successful automatic full board refresh observed'
+          '''.replace('             ','   '))
+          compile(s,str(p),'exec');p.write_text(s)
+          out=Path('/tmp/screenshot-after');out.mkdir(exist_ok=True);(out/'executed_acceptance.py').write_text(s)
+          PY
+      - run: python audit/screenshot_production_acceptance.py
+      - name: Existing compact/full standings and correct group switching
+        if: always()
+        env:
+          MOBILE_QA_SITE: https://ninkosports.com
+          MOBILE_QA_OUT: /tmp/screenshot-after/standings
+        run: python frontend/audit/mobile_standings_browser.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: c14-final-scores-mobile
+          path: /tmp/screenshot-after
+          retention-days: 30
+  source-timing:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - run: |
+          mkdir -p /tmp/c14-final-source
+          python - <<'PY'
+          import json,time,urllib.request,concurrent.futures
+          from pathlib import Path
+          from datetime import datetime,timezone
+          out=Path('/tmp/c14-final-source');api='https://allball-backend-production.up.railway.app';summary=[]
+          def get(name,url):
+            start=time.monotonic()
+            try:
+              with urllib.request.urlopen(urllib.request.Request(url,headers={'Accept':'application/json'}),timeout=20) as r:d={'http':r.status,'payload':json.load(r)}
+            except Exception as e:d={'error':str(e)}
+            d.update(url=url,at=datetime.now(timezone.utc).isoformat(),seconds=time.monotonic()-start);(out/(name+'.json')).write_text(json.dumps(d,ensure_ascii=False,indent=2));return d
+          for n in range(3):
+            if n:time.sleep(25)
+            day=datetime.now(timezone.utc).strftime('%Y%m%d')
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+              a=pool.submit(get,'source-'+str(n),'https://www.fotmob.com/api/data/matches?date='+day)
+              b=pool.submit(get,'public-'+str(n),api+'/sports-data/events?sport=football&date_from=2026-09-24T14%3A00%3A00Z&date_to=2026-09-26T13%3A59%3A59Z')
+              source,public=a.result(),b.result()
+            native=[m for l in source.get('payload',{}).get('leagues',[]) for m in l.get('matches',[]) if (m.get('status') or {}).get('started') and not (m.get('status') or {}).get('finished')]
+            active=[e for e in public.get('payload',{}).get('events',[]) if e.get('status') in ('live','break','halftime')]
+            for e in active[:3]:get('score-'+str(n)+'-'+e['id'],api+'/sports-data/matches/'+e['id']+'/score')
+            summary.append({'at':public['at'],'source_live':native,'public_live':active,'source_http':source.get('http'),'public_http':public.get('http')})
+          (out/'summary.json').write_text(json.dumps(summary,ensure_ascii=False,indent=2));print([(r['at'],len(r['source_live']),len(r['public_live'])) for r in summary])
+          assert all(r['source_http']==r['public_http']==200 for r in summary)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: c14-final-source-timing
+          path: /tmp/c14-final-source
+          retention-days: 30
