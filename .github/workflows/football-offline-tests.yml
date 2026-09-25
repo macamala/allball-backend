@@ -1,0 +1,24 @@
+name: Isolated football test dependencies
+on:
+  push:
+    branches: [audit/all-football-20260925]
+    paths: [.github/workflows/football-offline-tests.yml]
+permissions:
+  contents: read
+jobs:
+  dependencies:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: python -m pip wheel -r requirements.txt -w /tmp/wheelhouse
+      - uses: actions/upload-artifact@v4
+        with:
+          name: football-offline-wheels
+          path: /tmp/wheelhouse
+          retention-days: 3
