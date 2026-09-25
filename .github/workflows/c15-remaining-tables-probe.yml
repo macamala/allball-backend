@@ -1,0 +1,60 @@
+name: C15 remaining table source evidence
+on:
+  push:
+    branches: [audit/football-recovery-20260925-10]
+    paths: ['.github/workflows/c15-remaining-tables-probe.yml']
+permissions:
+  contents: read
+  actions: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: c7710745a2e1599eea045b6e760dec45887eb93d
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 36121382147
+          name: c15-final-coverage-and-timing
+          path: /tmp/before
+      - run: |
+          mkdir -p /tmp/c15-tables-probe
+          python - <<'PY'
+          import json,re,time,urllib.request,concurrent.futures,importlib.util
+          from pathlib import Path
+          from datetime import datetime,timezone
+          out=Path('/tmp/c15-tables-probe');before=Path('/tmp/before')
+          spec=importlib.util.spec_from_file_location('tables','collector/fotmob_tables.py');mod=importlib.util.module_from_spec(spec);spec.loader.exec_module(mod)
+          summary=json.loads((before/'summary.json').read_text());events=json.loads((before/'public.json').read_text())['payload']['events']
+          missing={c['competition'] for c in summary['coverage'] if not c['after']};mapping={}
+          for event in events:
+            if event['competition_key'] not in missing:continue
+            match=re.fullmatch(r'https://images\.fotmob\.com/image_resources/logo/leaguelogo/(\d+)\.png',event.get('competition_logo') or '')
+            if match:mapping.setdefault(match[1],[]).append(event)
+          def get(pair):
+            name,url=pair;data={'url':url,'at':datetime.now(timezone.utc).isoformat()}
+            try:
+              with urllib.request.urlopen(urllib.request.Request(url,headers={'Accept':'application/json'}),timeout=12) as r:data.update(http=r.status,payload=json.load(r))
+            except Exception as e:data['error']=str(e)
+            (out/(name+'.json')).write_text(json.dumps(data,ensure_ascii=False,indent=2));return name,data
+          # Logo IDs are discovery hints ONLY, not authorized source links or writes.
+          with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
+            results=dict(pool.map(get,[('league-'+lid,'https://www.fotmob.com/api/data/leagues?id='+lid) for lid in sorted(mapping)]))
+            boards=dict(pool.map(get,[('board-'+d,'https://www.fotmob.com/api/data/matches?date='+d) for d in ['20260924','20260925','20260926','20260927','20260928']]))
+          report=[]
+          for lid,evs in mapping.items():
+            root=results['league-'+lid].get('payload');rows=mod.parse_tables(root)
+            ids={str(r.get('team_id')) for r in rows}
+            report.append({'discovery_id':lid,'competitions':sorted({e['competition_key'] for e in evs}),'http':results['league-'+lid].get('http'),'root_type':type(root).__name__,'native_details':root.get('details') if isinstance(root,dict) else None,'parsed_rows':len(rows),'groups':sorted({str(r.get('group')) for r in rows}),'sample_teams':[r['team'] for r in rows[:4]],'has_both_sample_ids':{e['competition_key']:str(e['home'].get('id')) in ids and str(e['away'].get('id')) in ids for e in evs}})
+          (out/'probe-summary.json').write_text(json.dumps(report,ensure_ascii=False,indent=2));print(json.dumps([{k:v for k,v in r.items() if k not in ('native_details','has_both_sample_ids')} for r in report]))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: c15-remaining-table-native-evidence
+          path: /tmp/c15-tables-probe
+          retention-days: 30
