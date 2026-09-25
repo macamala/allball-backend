@@ -1,0 +1,48 @@
+name: C15 safe worker handoff gate
+on:
+  push:
+    branches: [fix/worker-handoff-c15-20260925]
+    paths: ['audit/c15_shutdown.patch', '.github/workflows/c15-worker-handoff-gate.yml']
+permissions:
+  contents: write
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: |
+          echo '4e72cef2c3f45249e23c7a6aadb4ecccd334f2c6d7ce897aea99525dc665907c  audit/c15_shutdown.patch' | sha256sum -c
+          git apply --check audit/c15_shutdown.patch
+          git apply audit/c15_shutdown.patch
+          mkdir -p evidence
+          cat > evidence/SHA256SUMS <<'HASHES'
+          d35fc466a24ef5a30839bbe85df0b18c3aea6c1c338de77ca83c44b8ddb249ff  collector/worker.py
+          5339f76d17227dc5840f441f5d49acfabd50f7d9f55a428f9bd5219e4a87ae1d  collector/worker_shutdown.py
+          634cec7f1fd0723364e131a0e4c030b9331907584661fe14742655b0243c3aca  tests/test_worker_shutdown_handoff.py
+          HASHES
+          sha256sum -c evidence/SHA256SUMS
+          git add -N collector/worker_shutdown.py tests/test_worker_shutdown_handoff.py
+          git diff 7ee4f7647cb169ad0d1de214d7b19a52f41e756f -- collector tests > evidence/source.patch
+          python -m pip install -r requirements.txt pytest
+      - run: python -m pytest -q $(cat audit/football_test_selection.txt) tests/test_hidden_football_aliases.py tests/test_fotmob_match_centre.py tests/test_entity_profile_navigation.py tests/test_c14_live_player.py tests/test_canonical_detail.py tests/test_fiba_rich_detail.py tests/test_sofa_rich_detail.py tests/test_c15_live_tables.py tests/test_c15_parent_league_tables.py tests/test_worker_shutdown_handoff.py --junitxml=evidence/tests.xml
+      - name: Publish isolated candidate only after all checks
+        run: |
+          git diff --check
+          git config user.name 'NinkoSports regression checks'
+          git config user.email '79318740+macamala@users.noreply.github.com'
+          git add collector/worker.py collector/worker_shutdown.py tests/test_worker_shutdown_handoff.py
+          git commit -m 'Gracefully roll back interrupted work and atomically release only owned leases on process shutdown'
+          git push origin HEAD:refs/heads/fix/worker-handoff-c15-20260925
+          git rev-parse HEAD > evidence/candidate.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: c15-worker-handoff-gate
+          path: evidence
+          retention-days: 30
