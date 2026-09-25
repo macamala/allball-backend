@@ -1,0 +1,21 @@
+# C13 forward preflight — 25 September 2026
+
+Initial C13 remains deployed at backend6252e64af7e06659909c402e36636a5de386b31b/frontend50e90628178e4ef1cdb242d7fca4b798fa525d31. This forward release preserves every initial C13/C12/C11/C10 change.
+
+## Actual failures and fixes
+Production match-centre run36105122497 passed native/API checks (10 named substitutions,37 unique statistics,22 shots,22 supplied player positions,correct0–1 score), all tested390/320px interactions and Andorra canonical old-link rendering. Desktop player navigation FAILED: entity_profiles defines __names_equivalent while callers use _names_equivalent; Railway traceback independently confirmed. No claim this journey passed before the fix. Initial artifact10850981859/local c13-public-first.zip retained.
+
+Visual inspection also found old nested roster grids assigning the entire button to a34px column: actual measured name width0px. Match detail also stayed left-aligned/narrow. Fix scopes43CSSlines to page-match: centered1100px desktop, fullwidth nested roster buttons, readable wrapped names,48px desktop/40px mobile headercrests. No scorehub/date/score/standing behaviour changes.
+
+## Exact candidates independently verified
+Backend43bf5a54d280ee7bb2b07f75bd8fe7ba7c62f7c9 on fix/entity-navigation-c13-20260925. Fresh maincompare ahead3/behind0. Runtime is ONE function rename; eight new tests include numeric/name players/teams, hidden/alias exclusion, unknown/partial names rejected. Baseline7failed/1passed; afterfix47focusedpassed. Full CI36105897098 SUCCESS804tests0failures/errors/skips. Artifact10851136331 ZIP4fca07135319050a23c1f768ad1eea6c14d69279ed2e7954c9b59d8f740a3e22 downloaded/ZIP/JUnit/source/filehashchecked. Source.patch equals local82ec65057e7ad282c06e41c9ef6bfa7e15cc107a6026b52ed7240eccadf641ae. Identity matching was not broadened.
+
+Frontend1889513abda991fd836f4e8dee08f2ef8da9c179 on fix/match-layout-c13-20260925. Fresh mastercompare ahead5/behind0. One runtimeCSSfile. CI36106721185 SUCCESS234tests0failures/errors+build+measured Chromium1440/390/320. Artifact10851322055 ZIPf8e876631ae8cc6602ef5d20ff8179885160796910d9f41f41c187d67e6f6a7b downloaded/ZIP/JUnit/sourcechecked. Exactsourcepatch86b5a0610d29732bba797cfe2874180a98ea974daa5c6d3f1d284e5fbe94422f matches localbytes; deployedcandidateCSShashca97e5a4189fe8571bc5490d662e2cf4c87c99732662d17b05675406eb9435dd matches local.
+Candidate CSS was injected ONLY into read-only test browser, not production. Before minimumnamewidth0 on all3sizes; after382.5/218/172.375px respectively. Desktop1100px,left/right170px,headercrests48px;mobile40px. No overflow/JSerrors. Actual roster390/overview1440 screenshots visually inspected. First visualgate36106176306 failed by waiting for the known zero-width name to become visible before applying candidate CSS; readiness changed to actual loaded pitch player. All width/centering/crest assertions retained, not weakened. Refreshed artifact metadata10851118229 supersedes a stale404 artifact reference; failure remains recorded.
+
+## Preservation test correction
+Initial C13 old score preservation run36098752465 had all API/10final/alias/futurefixture checks and7/8browserphases pass. Fridayinitial failed on visible skeletons; its screenshot confirms loading placeholders. Existing audit waits .score-row, which skeletons also use. Final acceptance will wait .score-row-link and require successful actual delta+full refresh responses; no result or identity assertions removed. The prior checkpoint wording about readiness is not substituted for current audit source.
+
+## Release rules and next action
+Non-force FF main/master to exactcandidates via existingRailway integration. No DB/manualscores/variables/Agent/newservices/stagedpatchacceptance/forcepush/reset. Observe all terminalSUCCESS+matchinghashes. Rollback only reviewed forwardrevert of helperrename/CSS preserving all preceding code/data.
+Then rerun real public native-vs-detail+timeline/shot/stat/tab/playerBack tests, ADD actual roster width/center assertions without CSS injection, and corrected complete oldscore/55secondpoll/mobiletable preservation. Keep Myanmar scoreboard and Sligo oldalias open; this is not whole-data/all-sports/Rezultati parity completion. Save finalactual evidence in checkpoint13.
