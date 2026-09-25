@@ -1,0 +1,57 @@
+name: Checkpoint11 stable public list and startup gate
+on:
+  push:
+    branches: [fix/stable-public-list-c11-20260925]
+    paths: ['audit/apply_stable_public_c11.py', '.github/workflows/stable-public-c11.yml']
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: python audit/apply_stable_public_c11.py
+      - run: python -m pip install -r requirements.txt
+      - run: |
+          mkdir -p /tmp/c11-stable
+          python -m pip freeze > /tmp/c11-stable/dependencies.txt
+          python -m pytest -q $(cat audit/football_test_selection.txt) --disable-warnings --junitxml=/tmp/c11-stable/tests.xml
+      - if: always()
+        run: |
+          mkdir -p /tmp/c11-stable
+          git add -N tests collector audit/football_test_selection.txt
+          git diff --binary 17315b71e870b1e49be84d6bbe70e2c8868d3bd6 -- database.py collector tests audit/football_test_selection.txt > /tmp/c11-stable/source.patch
+          git diff --ignore-space-at-eol 17315b71e870b1e49be84d6bbe70e2c8868d3bd6 -- database.py collector tests audit/football_test_selection.txt > /tmp/c11-stable/semantic.patch
+          sha256sum /tmp/c11-stable/*.patch
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: checkpoint11-stable-public-gate
+          path: /tmp/c11-stable
+          retention-days: 30
+  publish-tested-source:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - run: |
+          python audit/apply_stable_public_c11.py
+          git add collector/provider.py collector/cache.py tests/test_public_fixture_stability.py audit/football_test_selection.txt
+          git config user.name 'NinkoSports regression checks'
+          git config user.email '79318740+macamala@users.noreply.github.com'
+          git commit -m 'Keep the same public football representative across sport filters and cache rebuilds'
+          git push origin HEAD:fix/stable-public-list-c11-20260925
+          echo "TESTED_SOURCE_COMMIT=$(git rev-parse HEAD)"
