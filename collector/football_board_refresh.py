@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import time
 from collections import defaultdict
+from contextlib import nullcontext
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -20,6 +21,7 @@ from collector.collect import _consume_result
 from collector.flags import collection_enabled, scheduler_enabled, writes_enabled
 from collector.fotmob_crosswalk import _ensure_dynamic_fotmob_mapping, _fotmob_competition_identity, _fill_identity_assets
 from collector.football_fixture_linkage import LINKAGE_REVISION, choose_indexed_keeper, link_accepted_duplicates
+from collector.football_source_roots import plan_source_roots, plan_hidden_source_with_public_peer, apply_accepted_source_roots
 from collector.football_board_priority import priority_plan, interleave_priority, record_priority_attempt, conflict_evidence
 from collector.keeper_revalidation import _same_pair
 from collector.limits import is_rate_limited, record_hit
@@ -190,6 +192,7 @@ def consume_board_match(db, raw: dict, source: SportsSource, identity: dict) -> 
             return {"rejected": 1, "reason": "broken_or_cyclic_lineage"}
         roots[root.event_id] = root
     keeper = None
+    source_root_plan = None
     if roots:
         # An exact provider ID cannot authorize changing participant orientation
         # or joining two independent keepers. Leave conflicts for review.
@@ -201,11 +204,19 @@ def consume_board_match(db, raw: dict, source: SportsSource, identity: dict) -> 
             keeper = valid[0]
         elif len(valid) == len(roots):
             keeper = choose_indexed_keeper(valid, {**parsed, "competition_key": cid})
+            if keeper is None:
+                source_root_plan = plan_source_roots(db, valid, {**parsed, "competition_key": cid})
+                if source_root_plan is not None:
+                    keeper = roots[source_root_plan.keeper_id]
         if keeper is None:
             return {"rejected": 1, "reason": "source_identity_conflict",
                     "evidence": conflict_evidence(roots, parsed)}
         if automatic_promotion_blocked(keeper):
             return {"rejected": 1, "reason": "visibility_policy"}
+        if source_root_plan is None and len(roots) == 1:
+            source_root_plan = plan_hidden_source_with_public_peer(db, [keeper], {**parsed, "competition_key": cid})
+            if source_root_plan is not None:
+                keeper = db.get(SportsEvent, source_root_plan.keeper_id)
         cid, reason = _legacy_target(db, keeper, parsed, cid, country, identity.get(sid, []))
         if reason:
             return {"rejected": 1, "reason": reason}
@@ -231,14 +242,21 @@ def consume_board_match(db, raw: dict, source: SportsSource, identity: dict) -> 
         return {"rejected": 1, "reason": "competition_acceptance"}
     if keeper is not None:
         _apply_legacy_target(db, keeper, parsed, cid)
-    result = _consume_result(db, source=source, mapping=mapping,
-                             competition=db.get(SportsCompetition, cid), capability="results",
-                             result=FetchResult(ok=True, http_status=200, events=[parsed], parse_status="ok"),
-                             verified_target_id=keeper.event_id if keeper is not None else None)
-    if result.get("rejected"):
-        if result.get("identity_conflicts") == result["rejected"]:
-            return {"rejected": result["rejected"], "reason": "event_identity_conflict"}
-        raise RuntimeError("Observation persistence rejected; cursor retained for retry")
+    # A label-root consolidation must roll back as one unit even when a
+    # caller does not wrap this helper in the normal date-page savepoint.
+    with db.begin_nested() if source_root_plan is not None else nullcontext():
+        result = _consume_result(db, source=source, mapping=mapping,
+                                 competition=db.get(SportsCompetition, cid), capability="results",
+                                 result=FetchResult(ok=True, http_status=200, events=[parsed], parse_status="ok"),
+                                 verified_target_id=keeper.event_id if keeper is not None else None)
+        if result.get("rejected"):
+            if result.get("identity_conflicts") == result["rejected"]:
+                return {"rejected": result["rejected"], "reason": "event_identity_conflict"}
+            raise RuntimeError("Observation persistence rejected; cursor retained for retry")
+        if source_root_plan is not None:
+            if int(result.get("normalized") or 0) != 1:
+                raise RuntimeError("Source root observation was not normalized")
+            apply_accepted_source_roots(db, source_root_plan, parsed)
     # Artwork is independent of status/score signatures. Replace only a proven
     # old group badge with its actual parent badge, not arbitrary existing art.
     if keeper is not None:

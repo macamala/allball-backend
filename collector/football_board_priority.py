@@ -53,8 +53,14 @@ def changed_result_signature(raw: dict, rows: list, now: datetime) -> str | None
             continue
         actual = tuple(_score((load_json(row.score_json, {}) or {}).get(s)) for s in ('home', 'away'))
         stored_status = canonical_status(row.status)
-        candidates.append((row.event_id, row.competition_id, stored_status, actual))
-        differs |= stored_status != status or actual != supplied
+        hidden = row.display_eligible is False or any(
+            (load_json(getattr(row, key, None), {}) or {}).get('display_eligible') is False
+            for key in ('extra_json', 'list_extra_json'))
+        candidates.append((row.event_id, row.competition_id, stored_status, actual, hidden))
+        # A matching hidden source result may still leave an older public row
+        # blank. Schedule validation; the root planner, not this queue, decides
+        # whether exact public identity/visibility recovery is permitted.
+        differs |= stored_status != status or actual != supplied or hidden
     if not candidates or not differs:
         return None
     # Do not include fetch time: a new HTTP contact with identical evidence must
@@ -120,7 +126,11 @@ def conflict_evidence(roots: dict, event: dict) -> dict:
                     'canonical_event_id': row.canonical_event_id,
                     'source_ids': meta.get('source_event_ids'),
                     'source_competition_id': meta.get('source_competition_id'),
-                    'collapsed_count': len(meta.get('collapsed_from') or [])})
+                    'collapsed_count': len(meta.get('collapsed_from') or []),
+                    'quality_flags': meta.get('quality_flags'),
+                    'quarantine_disposition': meta.get('quarantine_disposition'),
+                    'source_group_id': meta.get('source_group_id'),
+                    'metadata_family': meta.get('source_family')})
     return {'root_count': len(roots), 'roots': out,
             'incoming_competition': event.get('source_competition_context'),
             'source_group_id': event.get('source_group_id')}

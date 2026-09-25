@@ -35,3 +35,4 @@ tests/test_public_fixture_aliases.py
 tests/test_data_integrity.py
 
 tests/test_football_board_priority.py
+tests/test_football_source_roots.py
