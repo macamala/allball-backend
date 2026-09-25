@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 import math
 from typing import Any
 
-REVISION = 2
+REVISION = 3
 
 
 def number(value: Any):
@@ -165,6 +165,10 @@ def complete_fotmob_detail(root, out):
             stats = group.get('stats') or {}
             if 'Expected goals (xG)' in stats:
                 player['xg'] = (stats['Expected goals (xG)'].get('stat') or {}).get('value')
+    from collector.football_history import parse_history
+    history = parse_history(root)
+    if history:
+        out['_football_history'] = history
     return out
 
 

@@ -1268,6 +1268,8 @@ def fetch_family_detail(family: str, source_event_id: str, getter=None, sport: s
             from collector.fotmob_rich import verified_detail_identity
             if verified_detail_identity(payload, source_event_id, (context or {}).get("_detail_identity")):
                 out["_verified_fotmob_detail"] = list(out)
+            else:
+                out.pop("_football_history", None)
         return out
     if family == "sofascore-web":
         from concurrent.futures import ThreadPoolExecutor
@@ -1545,6 +1547,8 @@ def enrich_event_row(db: Session, row: SportsEvent, getter=None) -> None:
     for key in ("venue", "referee", "attendance"):
         if detail.get(key) and not extra.get(key):
             extra[key] = detail[key]
+    if "_football_history" in verified_fotmob and detail.get("_football_history"):
+        extra["_football_history"] = detail["_football_history"]
     if detail.get("player_statistics"):
         extra["player_statistics"] = detail["player_statistics"] if "player_statistics" in verified_fotmob else extra.get("player_statistics") or detail["player_statistics"]
     if detail.get("sport_detail"):

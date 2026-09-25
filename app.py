@@ -857,6 +857,27 @@ def sports_data_standings(league: Optional[str] = Query(None), season: Optional[
     return payload
 
 
+@app.get("/sports-data/competitions/{competition_key}/hub")
+def sports_data_competition_hub(competition_key: str,
+        group: str = Query('', max_length=180), season: str = Query('', max_length=32)):
+    provider = get_active_provider()
+    action = getattr(provider, 'get_competition_hub', None)
+    if not callable(action):
+        return {'available': False, 'events': [], 'teams': [], 'groups': [], 'table_views': {}}
+    return action(competition_key, group=group, season=season)
+
+
+@app.get("/sports-data/competitions/{competition_key}/comparison")
+def sports_data_competition_comparison(competition_key: str,
+        match: str = Query(..., min_length=1, max_length=160),
+        group: str = Query('', max_length=180), season: str = Query('', max_length=32)):
+    provider = get_active_provider()
+    action = getattr(provider, 'get_competition_comparison', None)
+    if not callable(action):
+        return {'available': False, 'event': None, 'h2h': [], 'form': {}}
+    return action(competition_key, match, group=group, season=season)
+
+
 @app.get("/sports-data/competitions")
 def sports_data_competitions(sport: Optional[str] = Query(None)):
     provider = get_active_provider()

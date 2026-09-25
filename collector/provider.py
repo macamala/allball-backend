@@ -133,6 +133,7 @@ _STATUS_CACHE: Dict[str, Any] = {"at": 0.0, "payload": None}
 _STATUS_TTL_S = 20.0
 
 INTERNAL_EVENT_KEYS = {
+    "_football_history",
     "profile_ref",
     "source_group_id",
     "source_parent_competition_id",
@@ -666,6 +667,8 @@ def _history_context(
         SportsEvent.participants_json,
         SportsEvent.country_id,
         SportsEvent.canonical_event_id,
+        SportsEvent.extra_json, SportsEvent.list_extra_json, SportsEvent.display_eligible,
+        SportsEvent.primary_source_id, SportsEvent.contributing_sources_json,
     )
     base = (
         db.query(SportsEvent)
@@ -704,10 +707,14 @@ def _history_context(
             .all()
         )
 
+    from collector.maintenance_policy import automatic_promotion_blocked
+    blocked, families = _blocked_public_sources(db)
     merged: List[SportsEvent] = []
     seen = set()
     for row in [*same_competition, *broader]:
-        if row.event_id in seen:
+        if (row.event_id in seen or row.display_eligible is False or automatic_promotion_blocked(row)
+                or not _row_public_source_allowed(row, blocked, families)
+                or any((load_json(getattr(row, f, None), {}) or {}).get('display_eligible') is False for f in ('extra_json','list_extra_json'))):
             continue
         seen.add(row.event_id)
         merged.append(row)
@@ -1215,6 +1222,13 @@ class NinkoCollectedSportsDataProvider:
 
             payload = attach_canonical_detail(payload)
             h2h, form = _history_context(db, row)
+            if row.sport_id == "football" and extra.get("_football_history"):
+                from collector.football_history import public_history
+                native_h2h, native_form = public_history(db, row, extra["_football_history"])
+                if native_h2h:
+                    h2h = native_h2h
+                if native_form:
+                    form = {**(form or {}), **native_form}
             if h2h:
                 payload["h2h"] = h2h
             if form:
@@ -1237,6 +1251,22 @@ class NinkoCollectedSportsDataProvider:
         try:
             from collector.standings_enrich import standings_view
             return standings_view(db, competition_key, season)
+        finally:
+            db.close()
+
+    def get_competition_hub(self, key, *, group='', season=''):
+        from collector.competition_hub import hub
+        db = _session(self._session_factory)
+        try:
+            return hub(db, self, key, group=group, season=season)
+        finally:
+            db.close()
+
+    def get_competition_comparison(self, key, match, *, group='', season=''):
+        from collector.competition_hub import comparison
+        db = _session(self._session_factory)
+        try:
+            return comparison(db, self, key, match, group=group, season=season)
         finally:
             db.close()
 
