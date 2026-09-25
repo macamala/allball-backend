@@ -1,0 +1,49 @@
+name: C14 read-only data and latency evidence
+on:
+  push:
+    branches: [audit/football-recovery-20260925-10]
+    paths: ['.github/workflows/c14-data-probe.yml']
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 43bf5a54d280ee7bb2b07f75bd8fe7ba7c62f7c9
+          persist-credentials: false
+      - run: |
+          mkdir -p /tmp/c14-probe
+          python - <<'PY'
+          import json,time,urllib.request,concurrent.futures
+          from pathlib import Path
+          from datetime import datetime,timezone
+          from urllib.parse import urlencode
+          out=Path('/tmp/c14-probe');base='https://allball-backend-production.up.railway.app'
+          def get(pair):
+            name,url=pair;t=time.monotonic()
+            try:
+              with urllib.request.urlopen(urllib.request.Request(url,headers={'Accept':'application/json'}),timeout=20) as r:d={'url':url,'http':r.status,'payload':json.load(r)}
+            except Exception as e:d={'url':url,'error':str(e)}
+            d.update(fetched_at=datetime.now(timezone.utc).isoformat(),duration_s=time.monotonic()-t)
+            (out/(name+'.json')).write_text(json.dumps(d,ensure_ascii=False,indent=2));return name,d
+          with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
+            list(pool.map(get,[('player-'+str(i),'https://www.fotmob.com/api/data/playerData?id='+str(i)) for i in (825815,1234030,194165)]))
+          for n in range(4):
+            if n:time.sleep(25)
+            day=datetime.now(timezone.utc).strftime('%Y%m%d')
+            with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
+              got=dict(pool.map(get,[('board-'+str(n),'https://www.fotmob.com/api/data/matches?date='+day),('public-'+str(n),base+'/sports-data/events?'+urlencode({'sport':'football','date_from':'2026-09-24T14:00:00Z','date_to':'2026-09-26T13:59:59Z'}))]))
+            rows=got['public-'+str(n)].get('payload',{}).get('events',[])
+            active=[e for e in rows if e.get('status') in ('live','break','halftime')]
+            for e in active[:2]:get(('detail-'+str(n)+'-'+e['id'],base+'/sports-data/matches/'+e['id']))
+            print(n,'live',[(e['id'],e.get('home'),e.get('score'),e.get('source_fetch_time'),e.get('updated_at')) for e in active])
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: c14-data-probe
+          path: /tmp/c14-probe
+          retention-days: 30
