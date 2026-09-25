@@ -1,0 +1,57 @@
+name: C15 final match browser lifecycle
+on:
+  push:
+    branches: [audit/football-recovery-20260925-10]
+    paths: ['.github/workflows/c15-finished-match-check.yml']
+permissions:
+  contents: read
+jobs:
+  final-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: |
+          python -m pip install playwright
+          python -m playwright install --with-deps chromium
+          mkdir -p /tmp/c15-ft
+          python - <<'PY'
+          import json,re
+          from pathlib import Path
+          from datetime import datetime,timezone
+          from playwright.sync_api import sync_playwright
+          out=Path('/tmp/c15-ft');report={'at':datetime.now(timezone.utc).isoformat(),'checks':[]}
+          with sync_playwright() as p:
+            browser=p.chromium.launch()
+            for width in (1440,390,320):
+              ctx=browser.new_context(viewport={'width':width,'height':1000},timezone_id='Australia/Sydney');page=ctx.new_page();requests=[];errors=[]
+              page.on('response',lambda r:requests.append({'url':r.url,'http':r.status}) if '/sports-data/' in r.url else None)
+              page.on('pageerror',lambda e:errors.append(str(e)))
+              row={'width':width,'pass':False}
+              try:
+                page.goto('https://ninkosports.com/scores/event/ninko-evt-0f0c8b1216525d84d854',wait_until='domcontentloaded')
+                page.wait_for_function("document.querySelector('.mc-hero')?.textContent.includes('FT')",timeout=45000)
+                hero=page.locator('.mc-hero').inner_text();before=sum(r['url'].endswith('/score') for r in requests);page.wait_for_timeout(6200)
+                row.update(hero=hero,clock_stopped=page.locator('[role=timer]').count()==0,poll_stopped=sum(r['url'].endswith('/score') for r in requests)==before)
+                assert re.search(r'0\s*[–-]\s*3',hero) and 'FT' in hero
+                assert row['clock_stopped'] and row['poll_stopped'] and not page.evaluate('document.documentElement.scrollWidth>innerWidth+1')
+                page.screenshot(path=str(out/f'finished-{width}.png'))
+                page.goto('https://ninkosports.com/scores/competition/football-fifa-asean-cup-premier-division-grp-a/standings?sport=football',wait_until='domcontentloaded')
+                page.locator('.standings-team').first.wait_for(timeout=45000)
+                row['table_teams']=page.locator('.standings-team').all_text_contents()
+                assert len(row['table_teams'])==4 and page.locator('.mc-hero').count()==0
+                assert not page.evaluate('document.documentElement.scrollWidth>innerWidth+1')
+                row['pass']=not errors;page.screenshot(path=str(out/f'table-{width}.png'))
+              except Exception as e:row['error']=str(e);page.screenshot(path=str(out/f'failure-{width}.png'))
+              row.update(errors=errors,requests=requests);report['checks'].append(row);ctx.close()
+            browser.close()
+          (out/'report.json').write_text(json.dumps(report,ensure_ascii=False,indent=2));print(json.dumps(report,ensure_ascii=False));assert all(r['pass'] for r in report['checks'])
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: c15-finished-browser
+          path: /tmp/c15-ft
+          retention-days: 30
