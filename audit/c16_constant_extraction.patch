@@ -1,0 +1,46 @@
+diff --git a/collector/football_history.py b/collector/football_history.py
+index 4ec98f5..c13e902 100644
+--- a/collector/football_history.py
++++ b/collector/football_history.py
+@@ -6,7 +6,7 @@ stored public identity is proved. A historical record is not a new live event.
+ from copy import deepcopy
+ from datetime import datetime
+ import re
+-from sqlalchemy import or_
++from sqlalchemy import or_, func, column, String, select
+ import logging
+ import time
+ from collector.util import parse_datetime, isoformat, load_json
+@@ -155,8 +155,20 @@ def known_native_rows(db, mids):
+     choices = '(?:' + '|'.join(mids) + ')'
+     value = r'(?:"\s*(?:[A-Za-z-]+:)?' + choices + r'\s*"|' + choices + r'\s*[,}])'
+     pattern = r'"(?:fotmob|source_event_id)"\s*:\s*' + value + r'|"fotmob:\s*' + choices + r'\s*"'
++    predicate = SportsEvent.extra_json.regexp_match(pattern)
++    if db.get_bind().dialect.name == 'postgresql':
++        from sqlalchemy.dialects.postgresql import ARRAY
++        # Extract candidate IDs with a CONSTANT expression, then compare as a
++        # set. Embedding a full season's IDs in the rich-text regex still makes
++        # PostgreSQL scan long metadata repeatedly for nonmatching alternatives.
++        # Global extraction covers multiple legacy maps, not just the first ID.
++        extract = (r'(?:"(?:fotmob|source_event_id)"\s*:\s*"?\s*(?:[A-Za-z-]+:)?'
++                   r'|"fotmob:\s*)([0-9]{1,12})(?:\s*"|\s*[,}])')
++        refs = func.regexp_matches(SportsEvent.extra_json, extract, 'g').table_valued(
++            column('captures', ARRAY(String))).render_derived(name='native_refs')
++        predicate = select(1).select_from(refs).where(refs.c.captures[1].in_(mids)).exists()
+     candidates = db.query(SportsEvent).filter(SportsEvent.sport_id == 'football',
+-        or_(SportsEvent.event_id.in_(ids), SportsEvent.extra_json.regexp_match(pattern))).limit(4001).all()
++        or_(SportsEvent.event_id.in_(ids), predicate)).limit(4001).all()
+     if len(candidates) > 4000:
+         raise ValueError('Native identity index exceeded its safe read bound')
+     seen = {row.event_id: row for row in candidates}
+@@ -171,8 +183,8 @@ def known_native_rows(db, mids):
+         if row is not None and row not in by_native.get(mid, []):
+             by_native.setdefault(mid, []).append(row)
+     elapsed = time.monotonic()-started
+-    if elapsed >= 1:
+-        logging.getLogger(__name__).info(
++    if elapsed >= 5:
++        logging.getLogger(__name__).warning(
+             'HISTORY_ID_LOOKUP mids=%s observations=%s rows=%s observation_ms=%.1f total_ms=%.1f',
+             len(mids), len(observations), len(candidates), (observed_at-started)*1000, elapsed*1000)
+     return by_native
