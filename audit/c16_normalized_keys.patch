@@ -1,0 +1,67 @@
+diff --git a/collector/competition_hub.py b/collector/competition_hub.py
+index 6e4caa2..456439d 100644
+--- a/collector/competition_hub.py
++++ b/collector/competition_hub.py
+@@ -262,6 +262,25 @@ def hub(db, provider, key, *, group='', season='', getter=None):
+     public = []
+     by_mid = {}
+     native_by_id = {r['_native_id']: r for r in native_rows}
++    # Stored native keys may normalize to the requested canonical competition.
++    # Use the already checked global identity lookup, never a name-only search.
++    # A matching record still must pass every visibility/source/group guard and
++    # the existing public competition resolver below before entering this view.
++    included = {row.event_id for row in rows}
++    for mid, candidates in known.items():
++        reference = native_by_id.get(mid)
++        for candidate in candidates:
++            if candidate.event_id in included or not reference:
++                continue
++            stored = {**(load_json(candidate.participants_json, {}) or {}),
++                      'start_time': isoformat(candidate.start_time)}
++            if not _pair_time(reference, stored):
++                continue
++            if len(rows) >= MAX_ROWS:
++                truncated = True
++                break
++            rows.append(candidate)
++            included.add(candidate.event_id)
+     for row in rows:
+         meta, slim = load_json(row.extra_json, {}) or {}, load_json(row.list_extra_json, {}) or {}
+         if (row.canonical_event_id or row.display_eligible is False or automatic_promotion_blocked(row)
+diff --git a/tests/test_c16_competition_hub.py b/tests/test_c16_competition_hub.py
+index c947de5..97d745e 100644
+--- a/tests/test_c16_competition_hub.py
++++ b/tests/test_c16_competition_hub.py
+@@ -6,7 +6,7 @@ import pytest
+ from sqlalchemy import create_engine
+ from sqlalchemy.orm import Session
+ from collector.models import Base, SportsCompetition, SportsSourceCompetition, SportsEvent, SportsSource
+-from collector.util import dump_json, load_json, isoformat
++from collector.util import dump_json, load_json, isoformat, parse_datetime
+ from collector.football_history import parse_history, public_history
+ from collector.competition_hub import hub, comparison, _fetch_native, _CACHE, _INFLIGHT
+ 
+@@ -208,3 +208,23 @@ def test_partial_composite_parent_does_not_erase_existing_group_schedule(db):
+     assert not out['table_views']
+     archived = hub(db, Provider(), key, group='Group A', season='2025', getter=get_for(root))
+     assert archived['events'] == []
++
++
++@pytest.mark.parametrize('hidden', [False, True])
++def test_native_storage_key_uses_verified_public_competition_resolver(db, hidden):
++    key, row, root = setup(db)
++    at = parse_datetime(root['fixtures']['allMatches'][1]['status']['utcTime'])
++    native = add_row(db, eid='native-stored-key', mid='102', key='different-native-key', at=at,
++                    display_eligible=not hidden, status='finished', score_json=dump_json({'home':2,'away':1}))
++    before=(native.event_id,native.competition_id,native.display_eligible,native.score_json)
++    class ResolvedProvider(Provider):
++        def _to_normalized(self, event, **kwargs):
++            result=super()._to_normalized(event, **kwargs)
++            if event.event_id=='native-stored-key':result['competition_key']=key
++            return result
++    out=hub(db,ResolvedProvider(),key,getter=get_for(root))
++    matches=[e for e in out['events'] if e.get('id')=='native-stored-key']
++    assert bool(matches) is (not hidden)
++    assert not any(e['key']=='reference:102' for e in out['events'])
++    if matches:assert matches[0]['score']=={'home':2,'away':1}
++    assert (native.event_id,native.competition_id,native.display_eligible,native.score_json)==before
