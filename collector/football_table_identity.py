@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 import re
 from collector.models import SportsEvent
 from collector.source_ids import id_for_family
-from collector.util import load_json
+from collector.util import load_json, parse_datetime
 from collector.maintenance_policy import automatic_promotion_blocked
 from collector.fotmob_rich import verified_detail_identity
 
@@ -48,7 +48,8 @@ def resolve_context(db, competition_key, context, getter):
         parent = numeric(meta.get('source_parent_competition_id'))
         row_leaf = numeric(meta.get('source_group_id') or meta.get('source_competition_id'))
         if parent and row_leaf == leaf:
-            return {**context, 'parent_id': parent, 'leaf_id': leaf, 'teams': sides}
+            return {**context, 'parent_id': parent, 'leaf_id': leaf, 'teams': sides,
+                    'match_id': mid, 'start_time': row.start_time.isoformat()}
         if fallback is None:
             fallback = (row, parts, mid)
     if fallback:
@@ -63,8 +64,35 @@ def resolve_context(db, competition_key, context, getter):
             parent = numeric(general.get('parentLeagueId')) or actual_leaf
             if actual_leaf == leaf and parent:
                 teams = [numeric((general.get(s+'Team') or {}).get('id')) for s in ('home','away')]
-                return {**context, 'parent_id': parent, 'leaf_id': actual_leaf, 'teams': teams}
+                return {**context, 'parent_id': parent, 'leaf_id': actual_leaf, 'teams': teams,
+                        'match_id': mid, 'start_time': row.start_time.isoformat()}
     return {**context, 'parent_id': leaf, 'leaf_id': leaf, 'teams': []}
+
+
+def _current_fixture_witness(root, context):
+    """A seasonal ID may use a stable single league table, but only when this
+    response's selected season includes the exact known match and oriented IDs.
+    Membership alone is not proof of a current season or a group.
+    """
+    details = root.get('details') or {}
+    if not details.get('selectedSeason'):
+        return False
+    mid = numeric(context.get('match_id'))
+    kickoff = parse_datetime(context.get('start_time'))
+    teams = context.get('teams') or []
+    if not mid or not kickoff or len(teams) != 2 or any(not numeric(t) for t in teams) or teams[0] == teams[1]:
+        return False
+    fixtures = root.get('fixtures') or {}
+    matches = fixtures.get('allMatches') if isinstance(fixtures, dict) else None
+    if not isinstance(matches, list):
+        return False
+    found = [m for m in matches if isinstance(m, dict) and numeric(m.get('id')) == mid]
+    if len(found) != 1:
+        return False
+    match = found[0]
+    actual = [numeric((match.get(side) or {}).get('id')) for side in ('home', 'away')]
+    at = parse_datetime((match.get('status') or {}).get('utcTime'))
+    return actual == [numeric(t) for t in teams] and at is not None and abs((at-kickoff).total_seconds()) <= 60
 
 
 def scoped_table(root, context):
@@ -92,6 +120,26 @@ def scoped_table(root, context):
             for key in ('data','table','tables'):
                 if key in node: walk(node[key])
     walk(root.get('table'))
-    if len(found) != 1:
+    if len(found) == 1:
+        return {'details': details, 'table': [{'data': found[0]}]}
+    if found:
         return None
-    return {'details': details, 'table': [{'data': found[0]}]}
+    # Native daily boards use seasonal IDs (e.g. 938219); a plain league's
+    # current table can carry its stable ID (108). Never apply this relaxation
+    # to composite/multiple groups, playoffs, or an unproven season fixture.
+    tables = root.get('table')
+    if not isinstance(tables, list) or len(tables) != 1:
+        return None
+    entry = tables[0]
+    node = entry.get('data') if isinstance(entry, dict) else None
+    if (not isinstance(node, dict) or node.get('composite') or node.get('tables')
+            or numeric(node.get('leagueId')) != parent
+            or not isinstance(node.get('table'), dict)
+            or not isinstance(node['table'].get('all'), list)
+            or not _current_fixture_witness(root, context)):
+        return None
+    from collector.fotmob_tables import parse_tables
+    members = {r.get('team_id') for r in parse_tables(root)}
+    if not set(context['teams']).issubset(members):
+        return None
+    return root
