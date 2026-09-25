@@ -99,7 +99,7 @@ Frontend chain: C16c86f6656bf7d40e9e7b2d0ec10b136896d6814f1 -> finalmobileCSS0b2
 Preflights saved BEFORE each corresponding write:
 - `CHECKPOINT_16_RELEASE_PREFLIGHT.md`, commit2f3bac0c1dad097d05332014eb059b82cc57c5f4.
 - `CHECKPOINT_16_READ_PERFORMANCE_PREFLIGHT.md`, commit401b2c49701fdb59514f3d134d51c739a6cfd330.
-- `CHECKPOINT_16_FINAL_READ_PREFLIGHT.md`, commit0aae28161a2da757d09a1fe6af3890ab7f8f61ae.
+- `CHECKPOINT_16_FINAL_READ_PREFLIGHT.md`, commit66ced7389a1e8d23be879f3cf54b2e487edf0c4e.
 - `CHECKPOINT_16_MOBILE_LABEL_PREFLIGHT.md`, commita40eb800662fdcf65cb1b3783f0dfe75f7b4c306.
 
 Core backend runtimefiles: app.py, collector/competition_hub.py, football_history.py, provider.py, detail_enrich.py, fotmob_rich.py. Core frontendruntimefiles: CompetitionHubPanels, HeadToHeadPanel, competitionHub.js, useScopedResource, CompetitionStandingsPage, MatchCentre, competitionHub.css. Later lookup and mobile fixes are limited to these already reviewed areas.
