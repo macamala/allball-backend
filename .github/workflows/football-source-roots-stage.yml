@@ -1,0 +1,54 @@
+name: Football verified source-root regression gate
+on:
+  push:
+    branches: [fix/football-source-roots-20260925]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: python audit/apply_football_source_roots.py
+      - run: python -m pip install -r requirements.txt
+      - name: All prior football regressions and source-root proof tests
+        run: |
+          mkdir -p /tmp/source-root-evidence
+          python -m compileall -q collector tests
+          python -m pytest -q $(cat audit/football_test_selection.txt) --disable-warnings --junitxml=/tmp/source-root-evidence/tests.xml
+      - name: Preserve exact tested source
+        if: always()
+        run: |
+          mkdir -p /tmp/source-root-evidence
+          git add -N collector tests
+          git diff --binary > /tmp/source-root-evidence/source.patch
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: football-source-roots-regression-evidence
+          path: /tmp/source-root-evidence
+          retention-days: 30
+  publish-tested-branch:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - run: |
+          python audit/apply_football_source_roots.py
+          git add collector tests audit/football_test_selection.txt
+          git config user.name 'NinkoSports regression checks'
+          git config user.email '79318740+macamala@users.noreply.github.com'
+          git commit -m 'Consolidate verified source roots while preserving public football identities and guarded visibility'
+          git push origin HEAD:fix/football-source-roots-20260925
+          echo "TESTED_SOURCE_COMMIT=$(git rev-parse HEAD)"
