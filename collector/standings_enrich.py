@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from collections import OrderedDict
+import time
+import threading
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
@@ -15,6 +18,9 @@ from collector.util import dump_json, load_json
 from collector.verified_coverage import OPENLIGADB_LEAGUES
 
 TTL_SECONDS = 1800
+_NEGATIVE_TABLES = OrderedDict()
+_TABLE_LOCK = threading.RLock()
+_TABLE_INFLIGHT = set()
 FOTMOB_LEAGUE = "https://www.fotmob.com/api/data/leagues?id={league_id}"
 OPENLIGA_TABLE = "https://api.openligadb.de/getbltable/{shortcut}/{year}"
 NHL_STANDINGS = "https://api-web.nhle.com/v1/standings/now"
@@ -151,18 +157,30 @@ def _fetch_fotmob_dynamic_standings(db: Session, competition_key: str, *, getter
     if not context:
         return {}
     fetch = getter or fetch_url
-    result = fetch(FOTMOB_LEAGUE.format(league_id=context["league_id"]))
+    from collector.football_table_identity import resolve_context, scoped_table
+    context = resolve_context(db, competition_key, context, fetch)
+    if not context:
+        return {}
+    result = fetch(FOTMOB_LEAGUE.format(league_id=context["parent_id"]))
     if not getattr(result, "ok", False) or not isinstance(getattr(result, "payload", None), dict):
         return {}
-    rows = parse_fotmob_table(result.payload)
-    if not rows:
+    scoped = scoped_table(result.payload, context)
+    rows = parse_fotmob_table(scoped) if scoped else []
+    # Team membership strengthens group identity and prevents an old season's
+    # table from silently substituting for the current match's group.
+    teams = {str(r.get("team_id")) for r in rows}
+    expected = {str(t) for t in context.get("teams", []) if t}
+    if not rows or (expected and not expected.issubset(teams)):
         return {}
-    return wrap_standings(
-        rows,
-        competition=competition_key,
-        sport="football",
-        source="fotmob",
+    fetched = wrap_standings(
+        rows, competition=competition_key,
+        season=str((result.payload.get("details") or {}).get("selectedSeason") or "") or None,
+        sport="football", source="fotmob",
     )
+    fetched["source_parent_id"] = context["parent_id"]
+    fetched["source_leaf_id"] = context["leaf_id"]
+    fetched["identity_revision"] = 1
+    return fetched
 
 
 def _fetch_sofa_dynamic_standings(db: Session, competition_key: str, *, getter=None) -> Dict[str, Any]:
@@ -579,6 +597,8 @@ def _store_standings(db: Session, competition_key: str, fetched: Dict[str, Any])
     target.source_id = fetched.get("source")
     target.rows_json = dump_json(fetched)
     target.captured_at = datetime.utcnow()
+    from collector.cache import note_list_invalidation
+    note_list_invalidation(db, sport=fetched.get("sport"), competition=competition_key)
 
 
 def _read_body(getter, url: str, headers: Optional[Dict[str, str]] = None):
@@ -849,7 +869,7 @@ def wrap_standings(rows, *, competition, season=None, stage=None, group=None, sp
     return payload
 
 
-def load_standings(db: Session, competition_key: Optional[str], getter=None) -> List[Dict[str, Any]]:
+def _load_standings(db: Session, competition_key: Optional[str], getter=None) -> List[Dict[str, Any]]:
     if not competition_key:
         return []
     stored = (
@@ -859,8 +879,22 @@ def load_standings(db: Session, competition_key: Optional[str], getter=None) -> 
         .all()
     )
     cached = _best_snapshot(stored)
-    if _fresh(cached):
+    live = db.query(SportsEvent.event_id).filter(
+        SportsEvent.competition_id == competition_key,
+        SportsEvent.canonical_event_id.is_(None),
+        SportsEvent.display_eligible.isnot(False),
+        SportsEvent.status.in_(("live", "halftime", "break")),
+        SportsEvent.start_time >= datetime.utcnow()-timedelta(hours=5),
+    ).first() is not None
+    if _fresh(cached) and (not live or (datetime.utcnow()-cached.captured_at.replace(tzinfo=None)).total_seconds() < 60):
         return unwrap_standings(_snapshot_payload(cached))
+    # Backoff only empty tables, shorter during live play. A valid cached table
+    # remains visible during upstream failure. No invented zero-row tables.
+    if getter is None:
+        with _TABLE_LOCK:
+            key = (competition_key, live)
+            if _NEGATIVE_TABLES.get(key, 0) > time.monotonic():
+                return unwrap_standings(_snapshot_payload(cached)) if cached else []
     fetched: Dict[str, Any] = {}
     has_events = (
         db.query(SportsEvent.event_id)
@@ -876,12 +910,74 @@ def load_standings(db: Session, competition_key: Optional[str], getter=None) -> 
             fetched = _fetch_sofa_dynamic_standings(db, competition_key, getter=getter) or {}
     rows = unwrap_standings(fetched) if fetched else []
     if rows:
+        with _TABLE_LOCK:
+            _NEGATIVE_TABLES.pop((competition_key, True), None)
+            _NEGATIVE_TABLES.pop((competition_key, False), None)
         try:
             _store_standings(db, competition_key, fetched)
             db.commit()
         except Exception:
             db.rollback()
         return rows
+    if getter is None:
+        with _TABLE_LOCK:
+            _NEGATIVE_TABLES[(competition_key, live)] = time.monotonic() + (60 if live else 600)
+            while len(_NEGATIVE_TABLES) > 512:
+                _NEGATIVE_TABLES.popitem(last=False)
     if cached:
         return unwrap_standings(_snapshot_payload(cached))
     return []
+
+
+def load_standings(db: Session, competition_key: Optional[str], getter=None) -> List[Dict[str, Any]]:
+    """Coalesce refreshes; a concurrent reader retains the last good table."""
+    if not competition_key:
+        return []
+    if getter is not None:
+        return _load_standings(db, competition_key, getter=getter)
+    with _TABLE_LOCK:
+        if competition_key in _TABLE_INFLIGHT:
+            cached = _best_snapshot(db.query(SportsStandingSnapshot).filter_by(competition_id=competition_key).all())
+            return unwrap_standings(_snapshot_payload(cached)) if cached else []
+        _TABLE_INFLIGHT.add(competition_key)
+    try:
+        return _load_standings(db, competition_key)
+    finally:
+        with _TABLE_LOCK:
+            _TABLE_INFLIGHT.discard(competition_key)
+
+
+def standings_view(db: Session, competition_key: str, season: Optional[str] = None) -> Dict[str, Any]:
+    """Competition-only view. An explicit old season never gets today's table."""
+    competition = db.get(SportsCompetition, competition_key)
+    snapshots = db.query(SportsStandingSnapshot).filter_by(competition_id=competition_key).all()
+    newest = _best_snapshot(snapshots)
+    if season is None or (newest and str(newest.season or '') == season):
+        load_standings(db, competition_key)
+        snapshots = db.query(SportsStandingSnapshot).filter_by(competition_id=competition_key).all()
+    selected = _best_snapshot([s for s in snapshots if season is None or str(s.season or '') == season])
+    rows = unwrap_standings(_snapshot_payload(selected)) if selected else []
+    from collector.competition_presentation import attach_competition_metadata
+    sample = db.query(SportsEvent).filter_by(competition_id=competition_key, canonical_event_id=None, display_eligible=True).order_by(SportsEvent.start_time.desc()).first()
+    artwork = load_json(sample.extra_json, {}) if sample else {}
+    meta = attach_competition_metadata({'competition_key': competition_key, 'sport': competition.sport_id if competition else 'football',
+                                       'source_competition_name': competition.name if competition else '',
+                                       'country_id': competition.country_id if competition else None})
+    logo = (artwork or {}).get('competition_logo')
+    if not logo and selected:
+        source_meta = _snapshot_payload(selected)
+        parent_id = source_meta.get('source_parent_id') if isinstance(source_meta, dict) else None
+        if parent_id and str(parent_id).isdigit():
+            logo = f'https://images.fotmob.com/image_resources/logo/leaguelogo/{parent_id}.png'
+
+    return {
+        'rows': rows,
+        'competition': {'id': competition_key, 'name': (competition.name if competition else '') or meta.get('competition_name') or competition_key,
+                        'sport': competition.sport_id if competition else meta.get('sport'),
+                        'logo': logo, 'country_id': meta.get('country_id')},
+        'season': season if season is not None else (selected.season if selected else None),
+        'seasons': sorted({str(s.season) for s in snapshots if s.season and unwrap_standings(_snapshot_payload(s))}, reverse=True),
+        'updated_at': selected.captured_at.isoformat()+'Z' if selected and selected.captured_at else None,
+        'stale': not _fresh(selected),
+        'available': bool(rows),
+    }

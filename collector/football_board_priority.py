@@ -64,9 +64,12 @@ def changed_result_signature(raw: dict, rows: list, now: datetime) -> str | None
         differs |= stored_status != status or actual != supplied or hidden
         minute = (event.get('score') or {}).get('minute')
         old_minute = (load_json(row.score_json, {}) or {}).get('minute')
+        clock = (event.get('score') or {}).get('clock')
+        old_clock = (load_json(row.score_json, {}) or {}).get('clock')
         if (not hidden and stored_status == status == 'live' and actual == supplied
-                and minute not in (None, '') and str(minute) != str(old_minute)):
-            clock_changes.append((row.event_id, str(old_minute), str(minute)))
+                and ((minute not in (None, '') and str(minute) != str(old_minute))
+                     or (clock not in (None, '') and str(clock) != str(old_clock)))):
+            clock_changes.append((row.event_id, str(old_minute), str(minute), str(old_clock), str(clock)))
     if not candidates or not (differs or clock_changes):
         return None
     # Do not include fetch time: a new HTTP contact with identical evidence must

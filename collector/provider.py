@@ -1232,6 +1232,14 @@ class NinkoCollectedSportsDataProvider:
         finally:
             db.close()
 
+    def get_standings_view(self, competition_key: str, season: Optional[str] = None) -> Dict[str, Any]:
+        db = _session(self._session_factory)
+        try:
+            from collector.standings_enrich import standings_view
+            return standings_view(db, competition_key, season)
+        finally:
+            db.close()
+
     def get_team_form(self, team_id: str) -> Optional[Dict[str, Any]]:
         return None
 

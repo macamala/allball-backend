@@ -105,11 +105,13 @@ def _prefer_classification(current: Any, incoming: Any) -> Any:
 
 
 def _ttl(status: str, *, empty: bool) -> int:
+    value = (status or "").lower()
+    # A pre-kickoff empty answer is not a 15-minute statement that a live
+    # match has no lineup. HTTP failure backoff remains owned by collector.http.
+    if value in {"live", "inprogress", "halftime", "break"}:
+        return 30 if empty else TTL_LIVE
     if empty:
         return TTL_NEGATIVE
-    value = (status or "").lower()
-    if value in {"live", "inprogress"}:
-        return TTL_LIVE
     if value in {"finished", "complete"}:
         return TTL_FINISHED
     return TTL_SCHEDULED
@@ -131,7 +133,10 @@ def _fresh(extra: Dict[str, Any], status: str) -> bool:
         return False
     age = (datetime.utcnow() - at.replace(tzinfo=None)).total_seconds()
     empty = bool(extra.get("detail_empty") or extra.get("detail_negative"))
-    return age < _ttl(status, empty=empty)
+    previous_status = extra.get("detail_status_at_fetch")
+    if previous_status and previous_status != status and age >= 15:
+        return False
+    return 0 <= age < _ttl(status, empty=empty)
 
 
 def _player_name(value: Any) -> Optional[str]:
@@ -1516,6 +1521,7 @@ def enrich_event_row(db: Session, row: SportsEvent, getter=None) -> None:
         extra["wec_prologue_rev"] = 2
     if "letour-web" in extra["detail_families_tried"]:
         extra["letour_rank_rev"] = 3
+    extra["detail_status_at_fetch"] = str(row.status or "")
     extra["detail_fetched_at"] = datetime.utcnow().isoformat()
     extra["parser_rev"] = PARSER_REV
     if not detail:

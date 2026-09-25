@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+import re
 from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import datetime, timedelta, timezone
@@ -298,6 +299,11 @@ def match_to_event(match: Dict[str, Any], competition_id: str, *, source_league_
     score: Dict[str, Any] = {"home": home_score, "away": away_score}
     if minute not in (None, ""):
         score["minute"] = minute
+    # Native long time is elapsed time; short time is often an ordinal minute
+    # containing invisible direction marks (for example 11' vs 10:28).
+    clock = str(live_time.get("long") or "").strip()
+    if status == "live" and re.fullmatch(r"\d{1,3}:\d{2}", clock) and int(clock.rsplit(":", 1)[1]) < 60:
+        score["clock"] = clock
     league = match.get("_league") or {}
     source_league_id = source_league_id or str(league.get("id") or "")
     group_identity = {}
@@ -330,6 +336,7 @@ def match_to_event(match: Dict[str, Any], competition_id: str, *, source_league_
         "source_family": "fotmob",
         "sport": "football",
         "source_competition_context": dict(league),
+        "source_parent_competition_id": str(league.get("parentLeagueId") or league.get("primaryId") or league.get("id") or ""),
         "source_event_id": str(match.get("id") or ""),
         "source_competition_id": source_league_id,
         "source_competition_name": str(league.get("name") or ""),

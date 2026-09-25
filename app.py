@@ -843,11 +843,17 @@ def sports_data_attribution(db: Session = Depends(get_db)):
 
 
 @app.get("/sports-data/standings")
-def sports_data_standings(league: Optional[str] = Query(None)):
+def sports_data_standings(league: Optional[str] = Query(None), season: Optional[str] = Query(None, max_length=32)):
     provider = get_active_provider()
-    payload = empty_standings_payload(_resolve_league_key(league))
+    key = _resolve_league_key(league)
+    payload = empty_standings_payload(key)
     payload.update(provider.status())
-    payload["rows"] = provider.get_standings(_resolve_league_key(league))
+    view = getattr(provider, "get_standings_view", None)
+    if key and callable(view):
+        payload.update(view(key, season=season))
+    else:
+        # Legacy providers cannot silently substitute current rows for an old season.
+        payload["rows"] = provider.get_standings(key) if season is None else []
     return payload
 
 

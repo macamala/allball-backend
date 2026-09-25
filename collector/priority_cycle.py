@@ -93,4 +93,15 @@ def run_priority_cycle(db, *, owner: str) -> bool:
         logger.info("BOUNDED_DISCOVERY %s", {key: result.get(key) for key in (
             "jobs_processed", "events_changed", "duration_s", "stopped", "reason",
         )})
+    # Enrichment gets a bounded share only AFTER score lanes. Uses this owner's
+    # existing lease; it cannot create an independent collector or alter scores.
+    try:
+        from collector.football_enrichment_cycle import warm_current_football
+        enrichment = warm_current_football(db, owner=owner)
+        db.commit()
+        if not enrichment.get("skipped"):
+            logger.info("FOOTBALL_CURRENT_ENRICHMENT %s", enrichment)
+    except Exception:
+        db.rollback()
+        logger.exception("Current football detail/table warming failed; prior data retained")
     return active
