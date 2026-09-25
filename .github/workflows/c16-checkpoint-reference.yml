@@ -1,0 +1,27 @@
+name: C16 checkpoint reference correction
+on:
+  push:
+    branches: [audit/football-recovery-20260925-10]
+    paths: ['.github/workflows/c16-checkpoint-reference.yml']
+permissions:
+  contents: write
+jobs:
+  correct-reference:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('docs/checkpoints/NINKOSPORTS_CHECKPOINT_16_2026-09-25.md')
+          s=p.read_text();old='0aae28161a2da757d09a1fe6af3890ab7f8f61ae';new='66ced7389a1e8d23be879f3cf54b2e487edf0c4e'
+          assert s.count(old)==1
+          p.write_text(s.replace(old,new))
+          PY
+          git diff --check
+          git config user.name 'NinkoSports checkpoint records'
+          git config user.email '79318740+macamala@users.noreply.github.com'
+          git add docs/checkpoints/NINKOSPORTS_CHECKPOINT_16_2026-09-25.md
+          git commit -m 'Correct C16 final read preflight reference to verified commit66ced738'
+          git push origin HEAD:refs/heads/audit/football-recovery-20260925-10
