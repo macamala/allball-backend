@@ -1,0 +1,89 @@
+name: C15 live football coverage discovery
+on:
+  push:
+    branches: [audit/football-recovery-20260925-10]
+    paths: ['.github/workflows/c15-live-coverage-discovery.yml']
+permissions:
+  contents: read
+jobs:
+  discovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 0a73c89653d24ca4c84da43b91dae3bfd08f7030
+          path: backend
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: macamala/allball-frontend
+          ref: 5e65eca2a43939859e010182ba187f68ea74e3bc
+          path: frontend
+          persist-credentials: false
+      - run: |
+          mkdir -p /tmp/c15-discovery
+          git -C backend archive --format=tar.gz HEAD > /tmp/c15-discovery/backend.tar.gz
+          git -C frontend archive --format=tar.gz HEAD > /tmp/c15-discovery/frontend.tar.gz
+          python - <<'PY'
+          import json,time,urllib.request,concurrent.futures
+          from pathlib import Path
+          from datetime import datetime,timezone,timedelta
+          out=Path('/tmp/c15-discovery');api='https://allball-backend-production.up.railway.app'
+          def get(pair):
+            name,url=pair;t=time.monotonic()
+            try:
+              with urllib.request.urlopen(urllib.request.Request(url,headers={'Accept':'application/json'}),timeout=22) as r:d={'http':r.status,'payload':json.load(r)}
+            except Exception as e:d={'error':str(e)}
+            d.update(url=url,at=datetime.now(timezone.utc).isoformat(),seconds=time.monotonic()-t);(out/(name+'.json')).write_text(json.dumps(d,ensure_ascii=False,indent=2));return name,d
+          day=datetime.now(timezone.utc).strftime('%Y%m%d')
+          urls=[('public',api+'/sports-data/events?sport=football&unlimited=1&date_from=2026-09-24T14%3A00%3A00Z&date_to=2026-09-28T13%3A59%3A59Z'),('source','https://www.fotmob.com/api/data/matches?date='+day)]
+          with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:ds=dict(pool.map(get,urls))
+          rows=ds['public'].get('payload',{}).get('events',[])
+          targets=[e for e in rows if 'Bangladesh' in json.dumps([e.get('home'),e.get('away')]) and 'Malaysia' in json.dumps([e.get('home'),e.get('away')])]
+          native=[m for l in ds['source'].get('payload',{}).get('leagues',[]) for m in l.get('matches',[]) if 'Bangladesh' in json.dumps([m.get('home'),m.get('away')]) and 'Malaysia' in json.dumps([m.get('home'),m.get('away')])]
+          print('TARGETS',json.dumps(targets));print('NATIVE',json.dumps(native))
+          todo=[]
+          for e in targets[:3]:
+            todo += [('score-'+e['id'],api+'/sports-data/matches/'+e['id']+'/score'),('detail-'+e['id'],api+'/sports-data/matches/'+e['id'])]
+          for m in native[:2]:todo += [('native-detail-'+str(m['id']),'https://www.fotmob.com/api/data/matchDetails?matchId='+str(m['id']))]
+          with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:list(pool.map(get,todo))
+          (out/'targets.json').write_text(json.dumps({'public':targets,'native':native},ensure_ascii=False,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: c15-initial-live-and-source
+          path: /tmp/c15-discovery
+          retention-days: 30
+      - name: Compare live source and lightweight public score over two minutes
+        run: |
+          python - <<'PY'
+          import json,time,urllib.request,concurrent.futures
+          from pathlib import Path
+          from datetime import datetime,timezone
+          out=Path('/tmp/c15-timing');out.mkdir(exist_ok=True);targets=json.loads(Path('/tmp/c15-discovery/targets.json').read_text());api='https://allball-backend-production.up.railway.app';observations=[]
+          urls={'native':'https://www.fotmob.com/api/data/matches?date='+datetime.now(timezone.utc).strftime('%Y%m%d')}
+          urls.update({'score-'+e['id']:api+'/sports-data/matches/'+e['id']+'/score' for e in targets['public'][:3]})
+          def get(pair):
+            name,url=pair;t=time.monotonic()
+            try:
+              with urllib.request.urlopen(urllib.request.Request(url,headers={'Accept':'application/json'}),timeout=15) as r:d={'http':r.status,'payload':json.load(r)}
+            except Exception as e:d={'error':str(e)}
+            d.update(name=name,at=datetime.now(timezone.utc).isoformat(),seconds=time.monotonic()-t);return d
+          for n in range(7):
+            if n:time.sleep(20)
+            with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:snapshot=list(pool.map(get,urls.items()))
+            observations.append(snapshot)
+          (out/'timing.json').write_text(json.dumps(observations,ensure_ascii=False,indent=2))
+          for snapshot in observations:
+            for d in snapshot:
+              p=d.get('payload',{});target=[m for l in p.get('leagues',[]) for m in l.get('matches',[]) if 'Bangladesh' in json.dumps([m.get('home'),m.get('away')]) and 'Malaysia' in json.dumps([m.get('home'),m.get('away')])] if d['name']=='native' else p
+              print(d['at'],d['name'],d.get('http'),json.dumps(target))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: c15-live-timing
+          path: /tmp/c15-timing
+          retention-days: 30
