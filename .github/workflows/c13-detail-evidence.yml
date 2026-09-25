@@ -1,0 +1,38 @@
+name: C13 match centre evidence
+on:
+  push:
+    branches: [audit/football-recovery-20260925-10]
+    paths: ['.github/workflows/c13-detail-evidence.yml']
+permissions:
+  contents: read
+jobs:
+  evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: |
+          mkdir -p /tmp/c13-detail
+          python - <<'PY'
+          import json,urllib.request,concurrent.futures
+          from datetime import datetime,timezone
+          from pathlib import Path
+          out=Path('/tmp/c13-detail');api='https://allball-backend-production.up.railway.app'
+          urls={str(i):'https://www.fotmob.com/api/data/matchDetails?matchId='+str(i) for i in [5100971,6145904,6233017]}
+          urls.update({i:api+'/sports-data/matches/'+i for i in ['ninko-evt-8ea488bb6f0bcf5038b7','ninko-evt-bb4071086c3ea042f6e9','ninko-evt-86345b6cb47a7c4b8524','ninko-evt-d807549bf94203765dd7']})
+          def fetch(pair):
+            name,url=pair
+            try:
+              with urllib.request.urlopen(urllib.request.Request(url,headers={'Accept':'application/json'}),timeout=25) as r: data={'http':r.status,'fetched_at':datetime.now(timezone.utc).isoformat(),'payload':json.load(r),'url':url}
+            except Exception as e:data={'error':str(e),'url':url}
+            (out/(name+'.json')).write_text(json.dumps(data,ensure_ascii=False,indent=2));print(name,data.get('http'),data.get('error'))
+          with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:list(pool.map(fetch,urls.items()))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: c13-detail-evidence
+          path: /tmp/c13-detail
+          retention-days: 30
