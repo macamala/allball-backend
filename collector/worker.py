@@ -34,7 +34,7 @@ from collector.lock import (
     release_scheduler_lock,
 )
 
-STANDBY_SLEEP_SECONDS = 45
+STANDBY_SLEEP_SECONDS = 5  # Short overlap handoff; lease ownership checks are unchanged.
 RUN_ONCE_LOCK_RETRIES = 3
 _standby_logged = False
 _creators_collected = False
@@ -749,6 +749,13 @@ def _idle(interval: int) -> None:
 
 
 def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
+    from collector.worker_shutdown import graceful_shutdown
+    owner = owner_identity()
+    with graceful_shutdown(SessionLocal, owner):
+        _run_worker(once=once, interval_seconds=interval_seconds, owner=owner)
+
+
+def _run_worker(once: bool = True, interval_seconds: Optional[int] = None, *, owner: str) -> None:
     logging.basicConfig(level=logging.INFO)
     import faulthandler
     faulthandler.dump_traceback_later(60)  # One bounded startup-stall diagnostic.
@@ -766,7 +773,6 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
             interval = int(os.getenv("COLLECTOR_INTERVAL_SECONDS") or 20)
         else:
             interval = int(os.getenv("COLLECTOR_INTERVAL_SECONDS") or POLL_SECONDS["NEAR_LIVE"])
-    owner = owner_identity()
     standby_attempts = 0
     while True:
         if not collection_enabled() or (not scheduler_enabled() and not run_once_requested()):
@@ -1465,6 +1471,11 @@ def main(once: bool = True, interval_seconds: Optional[int] = None) -> None:
         except Exception:
             logger.exception("Collector cycle failed")
             db.rollback()
+        except BaseException:
+            # Signals unwind to the outer shutdown boundary. Never let the
+            # one-shot lease finalizer commit an interrupted observation.
+            db.rollback()
+            raise
         finally:
             if advisory:
                 try:
