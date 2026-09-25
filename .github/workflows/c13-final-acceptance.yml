@@ -1,0 +1,104 @@
+name: C13 final deployed acceptance
+on:
+  push:
+    branches: [audit/football-recovery-20260925-10]
+    paths: ['.github/workflows/c13-final-acceptance.yml']
+permissions:
+  contents: read
+jobs:
+  match-journey:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: |
+          python -m pip install playwright
+          python -m playwright install --with-deps chromium
+      - name: Strengthen existing acceptance with visible roster and team API checks
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('audit/checkpoint13_match_acceptance.py');s=p.read_text()
+          needle="                assert page.locator('.mc-pitch-player').count()==22"
+          assert s.count(needle)==1
+          s=s.replace(needle,needle+'''
+                          geometry=page.evaluate("""() => {const box=document.querySelector('.page-match').getBoundingClientRect();return {left:box.left,right:innerWidth-box.right,width:box.width,names:[...document.querySelectorAll('.mc-roster-player-button .mc-bench-name')].map(x=>({text:x.textContent,width:x.getBoundingClientRect().width,height:x.getBoundingClientRect().height})),crests:[...document.querySelectorAll('.mc-player .score-crest')].map(x=>x.getBoundingClientRect().width)};}""")
+                          row['geometry']=geometry
+                          assert len(geometry['names'])>=22 and all(x['width']>=80 and x['height']>=12 and x['text'].strip() for x in geometry['names'])
+                          assert all(abs(x-(48 if width>640 else 40))<1 for x in geometry['crests'])
+                          if width==1440:assert geometry['width']>=1050 and abs(geometry['left']-geometry['right'])<=2
+          '''.replace('                          ','                '))
+          needle='    with sync_playwright() as browser_api:'
+          assert s.count(needle)==1
+          s=s.replace(needle,'''
+              from urllib.parse import quote, urlencode
+              team=e['home'];team_key=str(team.get('id') or team['name'])
+              team_result=get(API+'/sports-data/teams/'+quote(team_key,safe='')+'?'+urlencode({'name':team['name'],'sport':'football','competition':e['competition_key']}),'team-profile')
+              assert team_result.get('available') is True and team_result['team']['name']==team['name']
+              result['team_profile']={'available':True,'name':team_result['team']['name'],'results':len(team_result.get('results') or [])}
+          '''.replace('              ','    ')+needle)
+          compile(s,str(p),'exec');p.write_text(s)
+          out=Path('/tmp/c13-public');out.mkdir(exist_ok=True);(out/'executed_acceptance.py').write_text(s)
+          PY
+      - run: python audit/checkpoint13_match_acceptance.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: c13-final-detail
+          path: /tmp/c13-public
+          retention-days: 30
+  preserve-scores-and-mobile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: macamala/allball-frontend
+          ref: 1889513abda991fd836f4e8dee08f2ef8da9c179
+          path: frontend
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: |
+          python -m pip install playwright
+          python -m playwright install --with-deps chromium
+      - name: Wait for real fixture links, require observed successful automatic updates
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('audit/screenshot_production_acceptance.py');s=p.read_text()
+          old=".score-row').first.wait_for("
+          assert s.count(old)==2
+          s=s.replace(old,".score-row-link').first.wait_for(")
+          needle="   REPORT['browser'][-1]['poll_responses']=requests[before:]"
+          assert s.count(needle)==1
+          s=s.replace(needle,needle+'''
+             successful=[r['url'] for r in requests[before:] if r['status']==200]
+             assert any('/sports-data/status-delta?' in u for u in successful),'No successful automatic status update observed'
+             assert any('/sports-data/events?' in u for u in successful),'No successful automatic full board refresh observed'
+          '''.replace('             ','   '))
+          compile(s,str(p),'exec');p.write_text(s)
+          out=Path('/tmp/screenshot-after');out.mkdir(exist_ok=True);(out/'executed_acceptance.py').write_text(s)
+          PY
+      - run: python audit/screenshot_production_acceptance.py
+      - name: Preserve mobile standings and group switching
+        if: always()
+        env:
+          MOBILE_QA_SITE: https://ninkosports.com
+          MOBILE_QA_OUT: /tmp/screenshot-after/standings
+        run: python frontend/audit/mobile_standings_browser.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: c13-final-preservation
+          path: /tmp/screenshot-after
+          retention-days: 30
