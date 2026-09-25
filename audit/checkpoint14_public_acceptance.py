@@ -37,10 +37,14 @@ with sync_playwright() as pw:
             page.goto(SITE,wait_until='domcontentloaded');page.locator('.page-home .hero-lead-link').wait_for(timeout=45000);page.wait_for_timeout(600)
             no_scores=page.locator('.page-home .score-row, .page-home .portal-rail, .page-home .live-scores-rail').count()==0 and not any('/sports-data/events' in r['url'] for r in network)
             report['ui'].append({'page':'home','width':width,'pass':no_scores and not page.evaluate('document.documentElement.scrollWidth>innerWidth+1') and not errors,'score_requests':network.copy()});page.screenshot(path=str(OUT/f'home-{width}.png'),full_page=False)
-            page.goto(SITE+'/live-scores?sport=football&date=2026-09-25',wait_until='domcontentloaded');page.locator('.score-centre-main .score-row-link').first.wait_for(timeout=45000)
+            page.goto(SITE+'/live-scores?sport=football&date=2026-09-25',wait_until='domcontentloaded')
+            # Skeleton uses div.score-row-link; require real data and actual anchor.
+            page.locator('.score-centre-main .score-comp-title').first.wait_for(timeout=45000)
+            page.locator('.score-centre-main a.score-row-link[href="/scores/event/ninko-evt-6d8bf3121dc158b647e1"]').wait_for(timeout=45000)
             heads=page.locator('.score-centre-main .score-comp-title').all_text_contents();indices=[i for i,x in enumerate(heads) if x.startswith('UEFA Nations League')]
             passed=bool(indices) and indices==list(range(min(indices),max(indices)+1)) and min(indices)==0
-            report['ui'].append({'page':'football-order','width':width,'pass':passed and not page.evaluate('document.documentElement.scrollWidth>innerWidth+1') and not errors,'headings':heads});page.screenshot(path=str(OUT/f'football-{width}.png'))
+            score_responses=[r for r in network if '/sports-data/events' in r['url'] and r['status']==200]
+            report['ui'].append({'page':'football-order','width':width,'pass':passed and bool(score_responses) and not page.evaluate('document.documentElement.scrollWidth>innerWidth+1') and not errors,'headings':heads,'successful_score_responses':score_responses,'fixture_ids':page.locator('.score-centre-main a.score-row-link').evaluate_all('(nodes)=>nodes.map(n=>n.getAttribute("href").split("/").pop())')});page.screenshot(path=str(OUT/f'football-{width}.png'))
             page.goto(SITE+'/players/825815?'+urlencode({'name':'Aidan Keena','event_id':MATCH}),wait_until='domcontentloaded');page.locator('.player-value-card').wait_for(timeout=45000)
             report['ui'].append({'page':'player','width':width,'pass':page.locator('.player-career li').count()>0 and page.locator('.player-season-grid dd').count()>0 and page.locator('.player-club-link').count()==1 and not page.evaluate('document.documentElement.scrollWidth>innerWidth+1') and not errors,'valuation_text':page.locator('.player-value-card').inner_text(),'club_text':page.locator('.player-club-link').inner_text(),'career_rows':page.locator('.player-career li').count()});page.screenshot(path=str(OUT/f'player-{width}.png'),full_page=True)
             report['bundle']=page.locator('script[src]').evaluate_all('(nodes)=>nodes.map(n=>n.src)')
