@@ -262,6 +262,25 @@ def hub(db, provider, key, *, group='', season='', getter=None):
     public = []
     by_mid = {}
     native_by_id = {r['_native_id']: r for r in native_rows}
+    # Stored native keys may normalize to the requested canonical competition.
+    # Use the already checked global identity lookup, never a name-only search.
+    # A matching record still must pass every visibility/source/group guard and
+    # the existing public competition resolver below before entering this view.
+    included = {row.event_id for row in rows}
+    for mid, candidates in known.items():
+        reference = native_by_id.get(mid)
+        for candidate in candidates:
+            if candidate.event_id in included or not reference:
+                continue
+            stored = {**(load_json(candidate.participants_json, {}) or {}),
+                      'start_time': isoformat(candidate.start_time)}
+            if not _pair_time(reference, stored):
+                continue
+            if len(rows) >= MAX_ROWS:
+                truncated = True
+                break
+            rows.append(candidate)
+            included.add(candidate.event_id)
     for row in rows:
         meta, slim = load_json(row.extra_json, {}) or {}, load_json(row.list_extra_json, {}) or {}
         if (row.canonical_event_id or row.display_eligible is False or automatic_promotion_blocked(row)

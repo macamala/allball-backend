@@ -6,7 +6,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 from collector.models import Base, SportsCompetition, SportsSourceCompetition, SportsEvent, SportsSource
-from collector.util import dump_json, load_json, isoformat
+from collector.util import dump_json, load_json, isoformat, parse_datetime
 from collector.football_history import parse_history, public_history
 from collector.competition_hub import hub, comparison, _fetch_native, _CACHE, _INFLIGHT
 
@@ -208,3 +208,23 @@ def test_partial_composite_parent_does_not_erase_existing_group_schedule(db):
     assert not out['table_views']
     archived = hub(db, Provider(), key, group='Group A', season='2025', getter=get_for(root))
     assert archived['events'] == []
+
+
+@pytest.mark.parametrize('hidden', [False, True])
+def test_native_storage_key_uses_verified_public_competition_resolver(db, hidden):
+    key, row, root = setup(db)
+    at = parse_datetime(root['fixtures']['allMatches'][1]['status']['utcTime'])
+    native = add_row(db, eid='native-stored-key', mid='102', key='different-native-key', at=at,
+                    display_eligible=not hidden, status='finished', score_json=dump_json({'home':2,'away':1}))
+    before=(native.event_id,native.competition_id,native.display_eligible,native.score_json)
+    class ResolvedProvider(Provider):
+        def _to_normalized(self, event, **kwargs):
+            result=super()._to_normalized(event, **kwargs)
+            if event.event_id=='native-stored-key':result['competition_key']=key
+            return result
+    out=hub(db,ResolvedProvider(),key,getter=get_for(root))
+    matches=[e for e in out['events'] if e.get('id')=='native-stored-key']
+    assert bool(matches) is (not hidden)
+    assert not any(e['key']=='reference:102' for e in out['events'])
+    if matches:assert matches[0]['score']=={'home':2,'away':1}
+    assert (native.event_id,native.competition_id,native.display_eligible,native.score_json)==before
