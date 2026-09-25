@@ -1,0 +1,55 @@
+name: Football changed-result priority gate
+on:
+  push:
+    branches: [fix/football-result-priority-20260925]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: python audit/apply_football_priority.py
+      - run: python -m pip install -r requirements.txt
+      - name: Full existing selection and new scheduling regressions
+        run: |
+          mkdir -p /tmp/priority-evidence
+          python -m compileall -q collector tests
+          python -m pytest -q $(cat audit/football_test_selection.txt) --disable-warnings --junitxml=/tmp/priority-evidence/tests.xml
+      - name: Preserve source proof and pinned local-test dependencies
+        if: always()
+        run: |
+          mkdir -p /tmp/priority-evidence
+          git add -N collector tests
+          git diff --binary > /tmp/priority-evidence/source.patch
+          python -m pip download --no-deps feedparser==6.0.11 sgmllib3k==1.0.0 -d /tmp/priority-evidence/deps
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: football-priority-regression-evidence
+          path: /tmp/priority-evidence
+          retention-days: 30
+  publish-tested-branch:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - run: |
+          python audit/apply_football_priority.py
+          git add collector tests audit/football_test_selection.txt
+          git config user.name 'NinkoSports regression checks'
+          git config user.email '79318740+macamala@users.noreply.github.com'
+          git commit -m 'Prioritize fresh changed football results without advancing unseen fixture cursors'
+          git push origin HEAD:fix/football-result-priority-20260925
+          echo "TESTED_SOURCE_COMMIT=$(git rev-parse HEAD)"
