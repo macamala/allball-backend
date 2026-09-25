@@ -38,3 +38,6 @@ tests/test_football_board_priority.py
 tests/test_football_source_roots.py
 
 tests/test_live_delta_screenshots.py
+
+tests/test_source_root_revalidation.py
+tests/test_image_asset_templates.py

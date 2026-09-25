@@ -37,6 +37,32 @@ def _metas(row):
     return values if all(isinstance(m, dict) for m in values) else None
 
 
+def _native_identity_proven(row, rich, event, leaf, sid):
+    """Resolve only automatic ambiguity backed by the same provider's IDs.
+
+    Historical source_event_ids can be inherited from another provider. Require
+    native ownership and both oriented participant IDs as well as the match and
+    exact competition leaf; a copied match ID alone is not fresh identity proof.
+    """
+    if (not fresh_evidence(event) or event.get('source_family') != 'fotmob'
+            or rich.get('source_family') != 'fotmob'
+            or id_for_family(rich, 'fotmob') != sid
+            or str(rich.get('source_group_id') or rich.get('source_competition_id') or '') != leaf):
+        return False
+    parts = load_json(row.participants_json, {}) or {}
+    if not isinstance(parts, dict):
+        return False
+    for side in ('home', 'away'):
+        stored, incoming = parts.get(side) or {}, event.get(side) or {}
+        if not isinstance(stored, dict) or not isinstance(incoming, dict):
+            return False
+        known, supplied = stored.get('id'), incoming.get('id')
+        if (known in (None, '') or supplied in (None, '') or isinstance(known, bool)
+                or isinstance(supplied, bool) or str(known) != str(supplied)):
+            return False
+    return True
+
+
 def _safe_root(row, event, leaf, sid, *, require_typed=True):
     metas = _metas(row)
     if (not metas or automatic_promotion_blocked(row) or row.sport_id != 'football'
@@ -46,7 +72,10 @@ def _safe_root(row, event, leaf, sid, *, require_typed=True):
         flags = meta.get('quality_flags') or []
         if (not isinstance(flags, list) or not all(isinstance(f, str) for f in flags) or set(flags)-AUTO_FLAGS or meta.get('collapsed_from')
                 or meta.get('provider_conflicts')
-                or str(meta.get('quarantine_disposition') or '') not in SAFE_DISPOSITIONS):
+                or (str(meta.get('quarantine_disposition') or '') not in SAFE_DISPOSITIONS
+                    and not (meta.get('quarantine_disposition') == 'AMBIGUOUS'
+                             and require_typed
+                             and _native_identity_proven(row, metas[0], event, leaf, sid)))):
             return False
         known = id_for_family(meta, 'fotmob')
         if known and known != sid:
@@ -104,8 +133,10 @@ def plan_source_roots(db, roots, event, *, public_peers=()):
         return None
     typed_ids = tuple(r.event_id for r in roots)
     roots = list(roots) + list(public_peers)
-    if not 2 <= len(roots) <= 4 or len({r.event_id for r in roots}) != len(roots):
+    if not 1 <= len(roots) <= 4 or len({r.event_id for r in roots}) != len(roots):
         return None
+    if len(roots) == 1 and roots[0].display_eligible is not False:
+        return None  # No promotion/link work for an already public singleton.
     node = event.get('source_competition_context') or {}
     sid, leaf = str(event.get('source_event_id') or ''), str(node.get('id') or '')
     target = str(event.get('competition_key') or '')
@@ -168,14 +199,14 @@ def _public_pair_rows(db, event):
 
 
 def plan_hidden_source_with_public_peer(db, roots, event):
-    """Keep an existing public ID when its exact same-league source root is hidden."""
+    """Revalidate a hidden exact source root, retaining a proven public peer ID."""
     if len(roots) != 1 or roots[0].display_eligible is not False or not fresh_evidence(event):
         return None
     rows = _public_pair_rows(db, event)
     if rows is None:
         return None
     peers = [r for r in rows if r.event_id != roots[0].event_id]
-    if not peers or any(r.competition_id != event.get('competition_key') for r in peers):
+    if any(r.competition_id != event.get('competition_key') for r in peers):
         return None
     return plan_source_roots(db, roots, event, public_peers=peers)
 

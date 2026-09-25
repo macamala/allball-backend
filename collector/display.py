@@ -81,6 +81,10 @@ def sanitize_side(
             return sanitize_participant_name(side, sport=sport, competition_country=competition_country)
         return side
     out = dict(side)
+    from collector.image_assets import image_asset_url
+    for key in ("logo", "image", "crest", "badge", "team_logo", "teamLogo", "logo_url", "logoUrl"):
+        if isinstance(out.get(key), str):
+            out[key] = image_asset_url(out[key])
     shown = sanitize_participant_name(
         str(out.get("display_name") or out.get("name") or ""),
         sport=sport,

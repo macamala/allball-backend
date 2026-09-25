@@ -13,6 +13,7 @@ from collector.adapters import FetchRequest, FetchResult
 from collector.event_quality import event_is_valid
 from collector.http import fetch_text, fetch_url
 from collector.util import slugify
+from collector.image_assets import image_asset_url
 
 
 def loc(value: Any) -> str:
@@ -36,11 +37,11 @@ def _asset_url(node: Any) -> str:
     ):
         value = node.get(key)
         if isinstance(value, str) and value.strip():
-            return value.strip()
+            return image_asset_url(value.strip())
         if isinstance(value, dict):
             nested = value.get("url") or value.get("href") or value.get("src") or value.get("default")
             if isinstance(nested, str) and nested.strip():
-                return nested.strip()
+                return image_asset_url(nested.strip())
     return ""
 
 
