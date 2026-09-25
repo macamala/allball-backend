@@ -1,0 +1,64 @@
+name: Checkpoint 7 exact source snapshot
+on:
+  push:
+    branches: [checkpoint/recovery-20260925-07]
+permissions:
+  contents: read
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: checkpoint
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: macamala/allball-backend
+          ref: 82f139f2dd915e13a8faebc1de941046d155fbf6
+          path: backend
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: macamala/allball-frontend
+          ref: d0db12fe066fba328e86e9e8a80b313c20d3d2df
+          path: frontend
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Preserve exact release overlays, patches and checksums
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, shutil, subprocess
+          from pathlib import Path
+          out=Path('/tmp/checkpoint7-source');out.mkdir()
+          manifest={'scope':'Changed-source overlays, not whole repositories or a database backup','releases':{},'files':{}}
+          specs={
+            'backend':('8a17ffa57a2227392d3ff1211fc630f22c2981fd','82f139f2dd915e13a8faebc1de941046d155fbf6',9),
+            'frontend':('93dd66e65231cb36967dcfe43e6355784ae3e8fd','d0db12fe066fba328e86e9e8a80b313c20d3d2df',10),
+          }
+          for repo,(base,head,count) in specs.items():
+            root=Path(repo)
+            def git(*args):return subprocess.check_output(['git','-C',str(root),*args])
+            assert git('rev-parse','HEAD').decode().strip()==head
+            names=git('diff','--name-only',base,head).decode().splitlines()
+            assert len(names)==count,(repo,names)
+            manifest['releases'][repo]={'base':base,'head':head,'changed_files':names}
+            for name in names:
+              src=root/name;dst=out/'source'/repo/name
+              assert src.is_file() and not src.is_symlink(),name
+              dst.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(src,dst)
+            patch=out/f'{repo}-complete.patch'
+            patch.write_bytes(git('diff','--binary',base,head))
+          shutil.copy2('checkpoint/docs/checkpoints/NINKOSPORTS_CHECKPOINT_7_2026-09-25.md',out/'CHECKPOINT_7.md')
+          for path in sorted(out.rglob('*')):
+            if path.is_file():manifest['files'][str(path.relative_to(out))]={'sha256':hashlib.sha256(path.read_bytes()).hexdigest(),'bytes':path.stat().st_size}
+          (out/'source-manifest.json').write_text(json.dumps(manifest,indent=2))
+          print(json.dumps({'releases':manifest['releases'],'file_count':len(manifest['files'])},indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: checkpoint7-exact-source-snapshot
+          path: /tmp/checkpoint7-source
+          retention-days: 30
