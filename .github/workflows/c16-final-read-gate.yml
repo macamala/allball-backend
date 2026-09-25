@@ -1,0 +1,101 @@
+name: C16 constant identity extraction gate
+on:
+  push:
+    branches: [fix/competition-canonical-keys-c16-20260925]
+    paths: ['audit/c16_constant_extraction.patch','.github/workflows/c16-final-read-gate.yml']
+permissions:
+  contents: write
+  actions: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: ephemeral-test-only
+          POSTGRES_DB: lookup_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 36129893421
+          name: c16-competition-source-evidence
+          path: /tmp/native-c16
+      - run: |
+          mkdir -p evidence
+          echo 'af7e8ef76170d7b56f200ed4d6ebcd5038ca9c0fb6b3c38f5e6df6372aa660df  audit/c16_constant_extraction.patch' | sha256sum -c
+          git apply --check audit/c16_constant_extraction.patch
+          git apply audit/c16_constant_extraction.patch
+          git diff d253c71a9f3d63909aaf3c40355aa345334be609 -- collector/competition_hub.py collector/football_history.py tests/test_c16_competition_hub.py > evidence/source.patch
+          echo '2bdabec07272b17f97f240dff38bf9adda8c7fffa9e1a67702af370d029e009b  evidence/source.patch' | sha256sum -c
+          python -m pip install -r requirements.txt pytest
+      - run: python -m pytest -q $(cat audit/football_test_selection.txt) tests/test_hidden_football_aliases.py tests/test_fotmob_match_centre.py tests/test_entity_profile_navigation.py tests/test_c14_live_player.py tests/test_canonical_detail.py tests/test_fiba_rich_detail.py tests/test_sofa_rich_detail.py tests/test_c15_live_tables.py tests/test_c15_parent_league_tables.py tests/test_worker_shutdown_handoff.py tests/test_c16_competition_hub.py tests/test_c16_identity_lookup.py --junitxml=evidence/tests.xml
+      - run: PYTHONPATH=. python audit/c16_native_replay.py /tmp/native-c16 evidence
+      - name: PostgreSQL-specific legacy identity and scale checks
+        run: |
+          python - <<'PY'
+          import json,time,secrets,subprocess
+          from pathlib import Path
+          from sqlalchemy import create_engine,text
+          from sqlalchemy.orm import Session
+          from collector.models import Base,SportsEvent
+          from collector.football_history import known_native_rows
+          from collector.source_ids import id_for_family
+          engine=create_engine('postgresql+psycopg2://test:ephemeral-test-only@127.0.0.1:5432/lookup_test');Base.metadata.create_all(engine)
+          report={'mode':'isolated synthetic PostgreSQL17, not production latency','legacy_cases':0}
+          metas=[{'source_event_ids':{'fotmob':'99'}},{'source_event_ids':{'fotmob':99}},{'source_event_ids':{'fotmob':'fotmob:99'}},{'source_event_ids':{'fotmob':'FOTMOB:99'}},{'source_event_ids':[{'fotmob':'99'}]},{'source_event_ids':['fotmob:99']},{'source_family':'fotmob','source_event_id':'99'},{'source_family':'fotmob','source_event_id':99},{'source_family':'fotmob','source_event_id':'fotmob:99'},{'unrelated':{'source_event_id':'88'},'source_event_ids':{'fotmob':'99'}},{'source_event_ids':{'fotmob':'99'},'unrelated':{'source_event_id':'88'}}]
+          with Session(engine) as db:
+            for i,meta in enumerate(metas):
+              row=SportsEvent(event_id='legacy-'+str(i),sport_id='football',competition_id='other-scope',event_family='team_match',display_eligible=False,extra_json=json.dumps(meta,indent='\t'))
+              db.add(row);db.flush();got=known_native_rows(db,['99']);assert row in got.get('99',[]),(meta,got)
+              assert row.display_eligible is False and id_for_family(meta,'fotmob')=='99'
+              db.delete(row);db.flush();report['legacy_cases']+=1
+            for i,meta in enumerate([{'source_family':'sofascore','source_event_id':'99'},{'source_event_ids':{'fotmob':'991'}},{'source_event_ids':['99']} ]):
+              db.add(SportsEvent(event_id='false-'+str(i),sport_id='football',competition_id='other',event_family='team_match',extra_json=json.dumps(meta)))
+            db.flush();assert known_native_rows(db,['99'])=={};db.rollback()
+          rows=[{'event_id':'scale-'+str(i),'sport_id':'football','competition_id':'scale-only','event_family':'team_match','display_eligible':i!=99,'status':'finished','extra_json':json.dumps({'source_event_ids':{'fotmob':str(5000000+i)},'rich_detail':secrets.token_hex(12000)})} for i in range(4000)]
+          with engine.begin() as conn:conn.execute(SportsEvent.__table__.insert(),rows)
+          mids=[str(5000000+i) for i in range(552)];report.update(rows=len(rows),metadata_bytes=sum(len(r['extra_json']) for r in rows),requested_ids=len(mids))
+          old={};exec(subprocess.check_output(['git','show','d253c71a9f3d63909aaf3c40355aa345334be609:collector/football_history.py']),old)
+          for label,fn in [('previous_union_regex',old['known_native_rows']),('constant_extraction',known_native_rows)]:
+            with Session(engine) as db:
+              db.execute(text("SET LOCAL statement_timeout='8000ms'"));start=time.monotonic()
+              try:
+                result=fn(db,mids);report[label+'_rows']=len(result)
+                assert len(result)==552 and result['5000099'][0].display_eligible is False
+              except Exception as e:
+                report[label+'_error']=str(e).split('\n')[0]
+                if label=='constant_extraction':raise
+              finally:report[label+'_seconds']=time.monotonic()-start;db.rollback()
+          Path('evidence/postgres-scale.json').write_text(json.dumps(report,indent=2));print(json.dumps(report))
+          assert report['constant_extraction_seconds']<8 and report['legacy_cases']==11
+          engine.dispose()
+          PY
+      - name: Publish tested isolated candidate only
+        run: |
+          git diff --check
+          git config user.name 'NinkoSports regression checks'
+          git config user.email '79318740+macamala@users.noreply.github.com'
+          git add collector/football_history.py
+          git commit -m 'Extract candidate native identities with a constant PostgreSQL expression independent of season size'
+          git push origin HEAD:refs/heads/fix/competition-canonical-keys-c16-20260925
+          git rev-parse HEAD > evidence/candidate.txt
+          sha256sum collector/competition_hub.py collector/football_history.py tests/test_c16_competition_hub.py > evidence/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: c16-final-read-gate
+          path: evidence
+          retention-days: 30
