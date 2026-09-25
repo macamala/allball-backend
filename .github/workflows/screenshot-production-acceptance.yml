@@ -26,7 +26,20 @@ jobs:
           python -m pip install playwright
           python -m playwright install --with-deps chromium
       - name: Actual public scores, alias identity and refresh
-        run: python audit/screenshot_production_acceptance.py
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('audit/screenshot_production_acceptance.py');s=p.read_text()
+          # Initial Sep26 check in run36095253012 observed only loading skeletons:
+          # those also have .score-row. Wait for real links; keep all assertions.
+          s=s.replace("main.locator('.score-row').first.wait_for", "main.locator('.score-row-link').first.wait_for")
+          s=s.replace("page.locator('.score-centre-main .score-row').first.wait_for", "page.locator('.score-centre-main .score-row-link').first.wait_for")
+          old="   REPORT['browser'][-1]['poll_responses']=requests[before:]"
+          new=old+"\n   assert any('/status-delta?' in r['url'] and r['status']==200 for r in requests[before:]), 'No actual delta poll'\n   assert any('/events?' in r['url'] and r['status']==200 for r in requests[before:]), 'No actual full refresh'"
+          assert old in s;s=s.replace(old,new)
+          p.write_text(s)
+          PY
+          python audit/screenshot_production_acceptance.py
       - name: Retain previously repaired mobile standings and group switching
         if: always()
         env:
