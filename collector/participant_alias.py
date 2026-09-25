@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from typing import Any, Dict, Iterable, Optional, Tuple
 
 from sqlalchemy.orm import Session
@@ -83,7 +84,17 @@ def token_abbreviation_equivalent(left_folded: str, right_folded: str) -> bool:
     return matched_abbrev
 
 
+def punctuation_identity_key(name: str) -> str:
+    """Literal name tokens, preserving short prefixes and squad qualifiers."""
+    text = unicodedata.normalize("NFKD", str(name or "")).casefold()
+    text = "".join(c for c in text if not unicodedata.combining(c))
+    return " ".join(re.sub(r"[^\w]+", " ", text).split())
+
+
 def names_equivalent(left: str, right: str) -> bool:
+    literal = punctuation_identity_key(left)
+    if literal and literal == punctuation_identity_key(right):
+        return True
     a = fold_for_identity(left)
     b = fold_for_identity(right)
     if not a or not b:

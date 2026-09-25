@@ -19,6 +19,7 @@ from collector.cache import flush_list_invalidations, note_list_invalidation
 from collector.collect import _consume_result
 from collector.flags import collection_enabled, scheduler_enabled, writes_enabled
 from collector.fotmob_crosswalk import _ensure_dynamic_fotmob_mapping, _fotmob_competition_identity, _fill_identity_assets
+from collector.football_fixture_linkage import LINKAGE_REVISION, choose_indexed_keeper, link_accepted_duplicates
 from collector.keeper_revalidation import _same_pair
 from collector.limits import is_rate_limited, record_hit
 from collector.lock import acquire_write_lock, lock_status, release_write_lock
@@ -61,7 +62,10 @@ def _select_day(db, days: list[str], now: datetime) -> tuple[str, SportsCollecto
         job = jobs.get(JOB_PREFIX + day)
         saved = _state(job)
         due = parse_datetime(saved.get("next_due_at")) if saved.get("policy_revision") == POLICY_REVISION else None
-        if due is None or due <= now:
+        upgrade_retry = bool(job and job.last_status == "partial" and not saved.get("error")
+                             and any(entry.get("linkage_revision") != LINKAGE_REVISION
+                                     for entry in (saved.get("deferred") or {}).values()))
+        if due is None or due <= now or upgrade_retry:
             eligible.append((job.last_run_at if job and job.last_run_at else datetime.min, pos, day, job))
     if not eligible:
         return None
@@ -75,10 +79,20 @@ def _root(db, row: SportsEvent) -> SportsEvent | None:
         if row.event_id in seen:
             return None
         seen.add(row.event_id)
-        extra = load_json(row.extra_json, {}) or {}
-        target = row.canonical_event_id or extra.get("canonical_event_id")
+        from collector.football_write_identity import _pointers, _manual, FootballIdentityConflict
+        try:
+            target = _pointers(row)
+        except FootballIdentityConflict:
+            return None
+        if _manual(row):
+            return row  # Caller retains the existing manual visibility policy.
         if not target:
-            return row
+            from collector.public_keeper import public_keeper_for_alias
+            resolved = public_keeper_for_alias(db, row)
+            if resolved is row:
+                return row
+            row = resolved
+            continue
         row = db.get(SportsEvent, target)
         if row is None:
             return None
@@ -182,9 +196,12 @@ def consume_board_match(db, raw: dict, source: SportsSource, identity: dict) -> 
         valid = [row for row in roots.values() if row.sport_id == "football"
                  and _same_pair(row, parsed) and kickoff and row.start_time
                  and abs((row.start_time - kickoff).total_seconds()) <= 180]
-        if len(valid) != 1 or len(roots) != 1:
+        if len(valid) == 1 and len(roots) == 1:
+            keeper = valid[0]
+        elif len(valid) == len(roots):
+            keeper = choose_indexed_keeper(valid, {**parsed, "competition_key": cid})
+        if keeper is None:
             return {"rejected": 1, "reason": "source_identity_conflict"}
-        keeper = valid[0]
         if automatic_promotion_blocked(keeper):
             return {"rejected": 1, "reason": "visibility_policy"}
         cid, reason = _legacy_target(db, keeper, parsed, cid, country, identity.get(sid, []))
@@ -214,7 +231,8 @@ def consume_board_match(db, raw: dict, source: SportsSource, identity: dict) -> 
         _apply_legacy_target(db, keeper, parsed, cid)
     result = _consume_result(db, source=source, mapping=mapping,
                              competition=db.get(SportsCompetition, cid), capability="results",
-                             result=FetchResult(ok=True, http_status=200, events=[parsed], parse_status="ok"))
+                             result=FetchResult(ok=True, http_status=200, events=[parsed], parse_status="ok"),
+                             verified_target_id=keeper.event_id if keeper is not None else None)
     if result.get("rejected"):
         if result.get("identity_conflicts") == result["rejected"]:
             return {"rejected": result["rejected"], "reason": "event_identity_conflict"}
@@ -223,6 +241,7 @@ def consume_board_match(db, raw: dict, source: SportsSource, identity: dict) -> 
     # old group badge with its actual parent badge, not arbitrary existing art.
     if keeper is not None:
         _fill_identity_assets(keeper, parsed)
+        link_accepted_duplicates(db, keeper, parsed)
     return {key: int(result.get(key) or 0) for key in ("written", "merged", "rejected", "skipped")}
 
 
@@ -258,7 +277,18 @@ def refresh_day(db, day: str, source: SportsSource, *, now: datetime, getter=Non
         end_budget()
     matches = {str(r.get("id") or r.get("matchId") or ""): r for r in matches}
     matches.pop("", None)
-    ordered = sorted((key, raw) for key, raw in matches.items() if key > after)
+    # Retry saved identity conflicts once under the new linkage policy, within
+    # the SAME request/page budget, without rewinding the discovery cursor.
+    for sid, entry in list(deferred.items()):
+        if sid not in matches and entry.get("linkage_revision") != LINKAGE_REVISION:
+            # Preserve unresolved IDs and their actual last-seen time. Absence
+            # is not fresh evidence and must not create an eager retry loop.
+            deferred[sid] = {**entry, "linkage_revision": LINKAGE_REVISION,
+                             "present_on_last_board": False, "last_presence_check_at": isoformat(now)}
+    retry_ids = {sid for sid, entry in deferred.items() if sid in matches
+                 and entry.get("linkage_revision") != LINKAGE_REVISION}
+    ordered = (sorted((sid, matches[sid]) for sid in retry_ids)
+               + sorted((key, raw) for key, raw in matches.items() if key > after and key not in retry_ids))
     index = _identity_index(db, day)
     totals = {"seen": len(matches), "processed": 0, "written": 0, "rejected": 0, "skipped": 0}
     reasons = defaultdict(int)
@@ -287,15 +317,23 @@ def refresh_day(db, day: str, source: SportsSource, *, now: datetime, getter=Non
             deferred[sid] = {"reason": reason, "attempts": int(previous.get("attempts") or 0) + 1,
                              "first_seen_at": previous.get("first_seen_at") or isoformat(now),
                              "last_seen_at": isoformat(now), "source_family": "fotmob",
-                             "source_event_id": sid}
+                             "source_event_id": sid, "linkage_revision": LINKAGE_REVISION}
         elif not result.get("rejected"):
             deferred.pop(sid, None)
+        elif sid in deferred:
+            # Keep a now-policy-blocked conflict visible, but do not endlessly
+            # promote it into the one-time upgrade retry lane.
+            previous = deferred[sid]
+            deferred[sid] = {**previous, "reason": reason or "rejected",
+                             "attempts": int(previous.get("attempts") or 0)+1,
+                             "last_seen_at": isoformat(now), "linkage_revision": LINKAGE_REVISION}
         totals["processed"] += 1
         for key in ("written", "rejected", "skipped"):
             totals[key] += int(result.get(key) or 0)
         if result.get("reason"):
             reasons[result["reason"]] += 1
-        after = sid
+        if sid not in retry_ids:
+            after = sid
     complete = not failed and totals["processed"] == len(ordered)
     date = datetime.strptime(day, "%Y%m%d").date()
     interval = (HOT_INTERVAL_SECONDS if date >= now.date()-timedelta(days=1) and date <= now.date()

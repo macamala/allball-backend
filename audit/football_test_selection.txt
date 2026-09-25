@@ -29,5 +29,7 @@ tests/test_scheduler_safety.py
 tests/test_pass3.py
 tests/test_pass5.py
 tests/test_football_legacy_classification.py
-
 tests/test_football_collision_routing.py
+tests/test_football_fixture_linkage.py
+tests/test_public_fixture_aliases.py
+tests/test_data_integrity.py

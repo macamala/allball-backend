@@ -372,6 +372,7 @@ def _consume_result(
     competition: SportsCompetition,
     capability: str,
     result: FetchResult,
+    verified_target_id: Optional[str] = None,
 ) -> Dict[str, int]:
     record_ingest(
         db,
@@ -476,7 +477,20 @@ def _consume_result(
                 incoming["source_family"] = raw["source_family"]
                 incoming["source_url"] = config.get("url")
                 incoming = reconcile_live_status(incoming)
-                existing = match_event(db, incoming, source_id=source.source_id)
+                if verified_target_id is not None:
+                    # The board already resolved exact source lineage. Do not
+                    # rematch it to a different legacy row with the same names.
+                    from collector.football_write_identity import _same_event
+                    from collector.maintenance_policy import automatic_promotion_blocked
+                    from collector.source_ids import id_for_family
+                    existing = db.get(SportsEvent, verified_target_id)
+                    if (existing is None or incoming.get("source_family") != "fotmob"
+                            or not _same_event(existing, incoming) or automatic_promotion_blocked(existing)
+                            or id_for_family(load_json(existing.extra_json, {}) or {}, "fotmob")
+                               not in (None, str(incoming.get("source_event_id") or ""))):
+                        raise FootballIdentityConflict("invalid_verified_football_target")
+                else:
+                    existing = match_event(db, incoming, source_id=source.source_id)
                 existing = football_write_target(db, incoming, existing)
                 from collector.keeper_revalidation import revalidate_current_keeper
 
