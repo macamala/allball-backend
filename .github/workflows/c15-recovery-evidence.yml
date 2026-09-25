@@ -1,0 +1,78 @@
+name: C15 recovery exact source and live evidence
+on:
+  push:
+    branches: [audit/football-recovery-20260925-10]
+    paths: ['.github/workflows/c15-recovery-evidence.yml']
+permissions:
+  contents: read
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: c7710745a2e1599eea045b6e760dec45887eb93d
+          path: backend
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: macamala/allball-frontend
+          ref: a8a1a28dbbc94e0dee72fd21c6a5a287fe1f5bad
+          path: frontend
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          path: audit-records
+          persist-credentials: false
+      - run: |
+          mkdir -p /tmp/c15-source
+          git -C backend archive --format=tar.gz HEAD > /tmp/c15-source/backend.tar.gz
+          git -C frontend archive --format=tar.gz HEAD > /tmp/c15-source/frontend.tar.gz
+          git -C audit-records archive --format=tar.gz HEAD audit .github/workflows docs/checkpoints > /tmp/c15-source/audit.tar.gz
+          git -C backend rev-parse HEAD > /tmp/c15-source/backend-sha.txt
+          git -C frontend rev-parse HEAD > /tmp/c15-source/frontend-sha.txt
+          cd /tmp/c15-source && sha256sum *.tar.gz > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: c15-recovered-exact-source
+          path: /tmp/c15-source
+          retention-days: 30
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - run: |
+          mkdir -p /tmp/c15-live-now
+          python - <<'PY'
+          import json,time,urllib.request,concurrent.futures
+          from pathlib import Path
+          from datetime import datetime,timezone
+          from urllib.parse import urlencode
+          out=Path('/tmp/c15-live-now');api='https://allball-backend-production.up.railway.app'
+          mid='ninko-evt-0f0c8b1216525d84d854'
+          def get(pair):
+            name,url=pair;start=time.monotonic();result={'url':url,'started_at':datetime.now(timezone.utc).isoformat()}
+            try:
+              with urllib.request.urlopen(urllib.request.Request(url,headers={'Accept':'application/json'}),timeout=20) as r:result.update(http=r.status,payload=json.load(r))
+            except Exception as e:result['error']=str(e)
+            result.update(at=datetime.now(timezone.utc).isoformat(),seconds=time.monotonic()-start)
+            (out/(name+'.json')).write_text(json.dumps(result,ensure_ascii=False,indent=2));return name,result
+          with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
+            list(pool.map(get,[('public-days',api+'/sports-data/events?'+urlencode({'sport':'football','unlimited':1,'date_from':'2026-09-24T14:00:00Z','date_to':'2026-09-28T13:59:59Z'})),('native-detail','https://www.fotmob.com/api/data/matchDetails?matchId=6232978'),('public-detail',api+'/sports-data/matches/'+mid)]))
+            summary=[]
+            for i in range(7):
+              sample=dict(pool.map(get,[(f'native-{i}','https://www.fotmob.com/api/data/matches?date=20260925'),(f'public-{i}',api+'/sports-data/matches/'+mid+'/score')]))
+              rows=[m for l in sample[f'native-{i}'].get('payload',{}).get('leagues',[]) for m in l.get('matches',[]) if str(m.get('id'))=='6232978']
+              pub=sample[f'public-{i}'].get('payload',{}).get('event') or {}
+              summary.append({'at':datetime.now(timezone.utc).isoformat(),'native':rows,'public':{k:pub.get(k) for k in ('id','status','score','score_observed_at','canonical_updated_at')},'http':[sample[f'native-{i}'].get('http'),sample[f'public-{i}'].get('http')]})
+              if i<6:time.sleep(10)
+          (out/'timing-summary.json').write_text(json.dumps(summary,ensure_ascii=False,indent=2))
+          print(json.dumps(summary,ensure_ascii=False))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: c15-recovered-live-evidence
+          path: /tmp/c15-live-now
+          retention-days: 30
