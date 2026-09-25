@@ -57,7 +57,7 @@ jobs:
           from pathlib import Path
           p=Path('audit/screenshot_production_acceptance.py');s=p.read_text()
           old=".score-row').first.wait_for(";assert s.count(old)==2
-          s=s.replace(old,".score-row-link').first.wait_for(")
+          s=s.replace(old,".score-row-link[href]').first.wait_for(")
           needle="   REPORT['browser'][-1]['poll_responses']=requests[before:]";assert s.count(needle)==1
           s=s.replace(needle,needle+"\n   successful=[r['url'] for r in requests[before:] if r['status']==200]\n   assert any('/sports-data/status-delta?' in u for u in successful)\n   assert any('/sports-data/events?' in u for u in successful)")
           compile(s,str(p),'exec');p.write_text(s)
