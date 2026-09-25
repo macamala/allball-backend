@@ -1,0 +1,96 @@
+name: C16 bounded competition read gate
+on:
+  push:
+    branches: [fix/competition-read-performance-c16-20260925]
+    paths: ['audit/c16_lookup_performance.patch', '.github/workflows/c16-read-performance-gate.yml']
+permissions:
+  contents: write
+  actions: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: ephemeral-test-only
+          POSTGRES_DB: lookup_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 36129893421
+          name: c16-competition-source-evidence
+          path: /tmp/native-c16
+      - run: |
+          mkdir -p evidence
+          python - <<'PY'
+          import hashlib
+          from pathlib import Path
+          patch=Path('audit/c16_lookup_performance.patch').read_bytes().replace(b'\n diff --git',b'\ndiff --git')
+          assert hashlib.sha256(patch).hexdigest()=='7c246ad9007c58da223f4e1a59ccf54b9baa1f9a8443dc5811b0d8c50423963f'
+          Path('evidence/reviewed.patch').write_bytes(patch)
+          PY
+          git apply --check evidence/reviewed.patch
+          git apply evidence/reviewed.patch
+          git add -N tests/test_c16_identity_lookup.py
+          git diff -- collector/football_history.py tests/test_c16_identity_lookup.py > evidence/source.patch
+          cmp evidence/reviewed.patch evidence/source.patch
+          python -m pip install -r requirements.txt pytest
+      - run: python -m pytest -q $(cat audit/football_test_selection.txt) tests/test_hidden_football_aliases.py tests/test_fotmob_match_centre.py tests/test_entity_profile_navigation.py tests/test_c14_live_player.py tests/test_canonical_detail.py tests/test_fiba_rich_detail.py tests/test_sofa_rich_detail.py tests/test_c15_live_tables.py tests/test_c15_parent_league_tables.py tests/test_worker_shutdown_handoff.py tests/test_c16_competition_hub.py tests/test_c16_identity_lookup.py --junitxml=evidence/tests.xml
+      - run: PYTHONPATH=. python audit/c16_native_replay.py /tmp/native-c16 evidence
+      - name: Isolated PostgreSQL scale and legacy restriction check
+        run: |
+          python - <<'PY'
+          import json,time,secrets,subprocess
+          from pathlib import Path
+          from sqlalchemy import create_engine,text
+          from sqlalchemy.orm import Session
+          from collector.models import Base,SportsEvent
+          from collector.football_history import known_native_rows
+          engine=create_engine('postgresql+psycopg2://test:ephemeral-test-only@127.0.0.1:5432/lookup_test');Base.metadata.create_all(engine)
+          rows=[{'event_id':'scale-'+str(i),'sport_id':'football','competition_id':'scale-only','event_family':'team_match','display_eligible':i!=99,'status':'finished','extra_json':json.dumps({'source_event_ids':{'fotmob':str(5000000+i)},'rich_detail':secrets.token_hex(12000)})} for i in range(4000)]
+          with engine.begin() as conn:conn.execute(SportsEvent.__table__.insert(),rows)
+          mids=[str(5000000+i) for i in range(552)];report={'mode':'isolated synthetic PostgreSQL scale test, not production latency','rows':len(rows),'metadata_bytes':sum(len(r['extra_json']) for r in rows),'requested_ids':len(mids)}
+          old={};exec(subprocess.check_output(['git','show','d9912fd619ff23d0702aa946ee03424f7fbbbc59:collector/football_history.py']),old)
+          with Session(engine) as db:
+            db.execute(text("SET LOCAL statement_timeout='5000ms'"));started=time.monotonic()
+            try:
+              previous=old['known_native_rows'](db,mids);report['old_rows']=len(previous)
+            except Exception as e:report['old_error']=str(e).split('\n')[0]
+            report['old_seconds']=time.monotonic()-started;db.rollback()
+          with Session(engine) as db:
+            db.execute(text("SET LOCAL statement_timeout='8000ms'"));started=time.monotonic();current=known_native_rows(db,mids)
+            report['new_seconds']=time.monotonic()-started;report['new_rows']=len(current)
+            assert len(current)==552 and current['5000099'][0].display_eligible is False
+            assert report['new_seconds']<8
+          Path('evidence/postgres-scale.json').write_text(json.dumps(report,indent=2));print(json.dumps(report))
+          engine.dispose()
+          PY
+      - name: Publish tested isolated candidate only
+        run: |
+          git diff --check
+          git config user.name 'NinkoSports regression checks'
+          git config user.email '79318740+macamala@users.noreply.github.com'
+          git add collector/football_history.py tests/test_c16_identity_lookup.py
+          git commit -m 'Bound full-season identity reads while retaining hidden and legacy source restrictions'
+          git push origin HEAD:refs/heads/fix/competition-read-performance-c16-20260925
+          git rev-parse HEAD > evidence/candidate.txt
+          sha256sum collector/football_history.py tests/test_c16_identity_lookup.py > evidence/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: c16-read-performance-gate
+          path: evidence
+          retention-days: 30
