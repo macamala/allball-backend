@@ -28,3 +28,4 @@ tests/test_http_observation_cache.py
 tests/test_scheduler_safety.py
 tests/test_pass3.py
 tests/test_pass5.py
+tests/test_football_legacy_classification.py

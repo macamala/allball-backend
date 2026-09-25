@@ -23,6 +23,8 @@ FOTMOB_LEAGUES: Dict[str, Dict[str, Any]] = {
     "germany-2-bundesliga": {"id": 146, "name": "2. Bundesliga", "ccode": "ger"},
     "germany-3-liga": {"id": 208, "name": "3. Liga", "ccode": "ger"},
     "fa-cup": {"id": 132, "name": "FA Cup", "ccode": "eng"},
+    "ireland-premier-division": {"id": 126, "name": "Premier Division", "ccode": "irl"},
+    "scotland-premiership": {"id": 64, "name": "Premiership", "ccode": "sco"},
     "mls": {"id": 130, "name": "MLS", "ccode": "usa"},
     "spain-copa-del-rey": {"id": 138, "name": "Copa del Rey", "ccode": "esp"},
     "sweden-allsvenskan": {"id": 67, "name": "Allsvenskan", "ccode": "swe"},

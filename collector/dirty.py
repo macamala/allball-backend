@@ -71,6 +71,17 @@ def event_unchanged(existing, incoming: Dict[str, Any]) -> bool:
         return False
     if stored != observation_signature(incoming):
         return False
+    # A previously accepted raw signature is not proof the physical canonical
+    # result stayed unchanged (maintenance/other sources may have changed it).
+    if getattr(existing, "sport_id", None) == "football":
+        from collector.live_state import canonical_status
+        if canonical_status(existing.status or "") != canonical_status(incoming.get("status") or ""):
+            return False
+        actual = load_json(existing.score_json, {}) or {}
+        supplied = incoming.get("score") or {}
+        if any(supplied.get(side) not in (None, "") and actual.get(side) != supplied.get(side)
+               for side in ("home", "away")):
+            return False
     if incoming.get("result_type") and extra.get("result_type") != incoming.get("result_type"):
         return False
     if incoming.get("walkover") and not extra.get("walkover"):

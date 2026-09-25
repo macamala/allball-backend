@@ -15,7 +15,7 @@ from typing import Any
 
 from collector.adapters import FetchResult
 from collector.adapters_fotmob import _load_boards, match_to_event
-from collector.cache import flush_list_invalidations
+from collector.cache import flush_list_invalidations, note_list_invalidation
 from collector.collect import _consume_result
 from collector.flags import collection_enabled, scheduler_enabled, writes_enabled
 from collector.fotmob_crosswalk import _ensure_dynamic_fotmob_mapping, _fotmob_competition_identity, _fill_identity_assets
@@ -30,6 +30,7 @@ from collector.util import dump_json, isoformat, load_json, parse_datetime
 
 logger = logging.getLogger(__name__)
 JOB_PREFIX = "football-board-refresh-v1:"
+POLICY_REVISION = 2
 MAX_EVENTS_PER_PAGE = 100
 PAGE_BUDGET_SECONDS = 8
 HOT_INTERVAL_SECONDS = 30
@@ -54,7 +55,8 @@ def _select_day(db, days: list[str], now: datetime) -> tuple[str, SportsCollecto
     eligible = []
     for pos, day in enumerate(days):
         job = jobs.get(JOB_PREFIX + day)
-        due = parse_datetime(_state(job).get("next_due_at"))
+        saved = _state(job)
+        due = parse_datetime(saved.get("next_due_at")) if saved.get("policy_revision") == POLICY_REVISION else None
         if due is None or due <= now:
             eligible.append((job.last_run_at if job and job.last_run_at else datetime.min, pos, day, job))
     if not eligible:
@@ -94,6 +96,67 @@ def _identity_index(db, day: str) -> dict[str, list[SportsEvent]]:
     return index
 
 
+def _legacy_target(db, keeper: SportsEvent, parsed: dict, target: str, country: str,
+                   observations: list[SportsEvent]) -> tuple[str, str | None]:
+    """Authorize only exact-ID, fresh, same-event legacy classification repair.
+
+    Known correct domestic canonical leagues remain canonical. Source-native
+    labels and provably foreign-country buckets can be repaired in place, never
+    by creating a replacement event or removing an existing alias.
+    """
+    from collector.competition_identity import canonical_country_matches, event_accepted_for_mapping
+    from collector.integrity import _fingerprint_for
+    old = str(keeper.competition_id or "")
+    if old == target or event_accepted_for_mapping({**parsed, "competition_key": old}, old)[0]:
+        return old, None
+    fetched = parse_datetime(parsed.get("source_fetch_time"))
+    sid = str(parsed.get("source_event_id") or "")
+    exact = any(id_for_family(load_json(row.extra_json, {}) or {}, "fotmob") == sid
+                for row in observations)
+    if (not exact or not fetched or not -30 <= (datetime.utcnow() - fetched).total_seconds() <= 300
+            or not event_accepted_for_mapping({**parsed, "competition_key": target}, target)[0]
+            or not (old.startswith("football-") or (country and not canonical_country_matches(old, country)))):
+        return old, "legacy_identity_unproven"
+    fp = _fingerprint_for(keeper, target)
+    collision = db.query(SportsEvent).filter(SportsEvent.fingerprint == fp,
+                                            SportsEvent.event_id != keeper.event_id).first()
+    if collision is not None:
+        return old, "legacy_fingerprint_conflict"
+    return target, None
+
+
+def _apply_legacy_target(db, keeper: SportsEvent, parsed: dict, target: str) -> None:
+    """Change classification only; scores and lifecycle stay in normal ingest."""
+    from collector.integrity import _fingerprint_for
+    from collector.maintenance_policy import sync_public_visibility
+    old = keeper.competition_id
+    if old == target:
+        return
+    extra = load_json(keeper.extra_json, {}) or {}
+    # Force re-evaluation after classification changes, even when the last raw
+    # observation signature matches a stale canonical row.
+    extra.pop("obs_signature", None)
+    history = extra.get("competition_identity_repairs") or []
+    history.append({"from": old, "to": target, "source_family": "fotmob",
+                    "source_event_id": parsed.get("source_event_id"),
+                    "source_fetch_time": parsed.get("source_fetch_time"),
+                    "source_context": parsed.get("source_competition_context")})
+    extra.update({"competition_identity_repairs": history[-8:],
+                  "canonical_competition_id": target, "public_competition_key": target,
+                  "source_competition_id": parsed.get("source_competition_id"),
+                  "source_competition_name": parsed.get("source_competition_name")})
+    keeper.fingerprint = _fingerprint_for(keeper, target)
+    keeper.competition_id = target
+    sync_public_visibility(keeper, extra, keeper.display_eligible is not False
+                           and extra.get("display_eligible") is not False)
+    # Match caches can span several date pages in one worker session.
+    db.info.pop("events_by_comp", None)
+    for cid in (old, target):
+        note_list_invalidation(db, sport="football", competition=cid, start_time=keeper.start_time)
+    db.flush()
+    logger.info("FOOTBALL_LEGACY_CLASSIFICATION event=%s old=%s new=%s", keeper.event_id, old, target)
+
+
 def consume_board_match(db, raw: dict, source: SportsSource, identity: dict) -> dict:
     """Route exact existing source identity to its keeper, otherwise normal ingest."""
     cid, league_id, name, country = _fotmob_competition_identity(raw)
@@ -120,9 +183,9 @@ def consume_board_match(db, raw: dict, source: SportsSource, identity: dict) -> 
         keeper = valid[0]
         if automatic_promotion_blocked(keeper):
             return {"rejected": 1, "reason": "visibility_policy"}
-        # Preserve canonical competition identity, aliases and source group ID.
-        # The normal event_accepted_for_mapping gate still has the final say.
-        cid = keeper.competition_id
+        cid, reason = _legacy_target(db, keeper, parsed, cid, country, identity.get(sid, []))
+        if reason:
+            return {"rejected": 1, "reason": reason}
     mapping = _ensure_dynamic_fotmob_mapping(db, competition_id=cid, league_id=league_id,
                                              league_name=name, ccode=country)
     if mapping is None or not mapping.enabled:
@@ -143,6 +206,8 @@ def consume_board_match(db, raw: dict, source: SportsSource, identity: dict) -> 
     from collector.competition_identity import event_accepted_for_mapping
     if not event_accepted_for_mapping(parsed, cid)[0]:
         return {"rejected": 1, "reason": "competition_acceptance"}
+    if keeper is not None:
+        _apply_legacy_target(db, keeper, parsed, cid)
     result = _consume_result(db, source=source, mapping=mapping,
                              competition=db.get(SportsCompetition, cid), capability="results",
                              result=FetchResult(ok=True, http_status=200, events=[parsed], parse_status="ok"))
@@ -164,7 +229,12 @@ def refresh_day(db, day: str, source: SportsSource, *, now: datetime, getter=Non
         db.add(job)
         db.flush()
     state = _state(job)
-    after = str(state.get("after_id") or "")
+    # New validation rules retry prior rejections; this resets only the cursor,
+    # never event rows, scores or canonical identities. Unversioned partial
+    # cursors from v1 are replayed safely through the idempotent ingestion gate.
+    after = str(state.get("after_id") or "") if state.get("policy_revision") == POLICY_REVISION else ""
+    if "policy_revision" not in state and state.get("complete"):
+        after = ""
     started = time.monotonic()
     record_hit(source.source_id)
     begin_budget(max_requests=1, max_seconds=6)
@@ -210,7 +280,7 @@ def refresh_day(db, day: str, source: SportsSource, *, now: datetime, getter=Non
                 else FUTURE_INTERVAL_SECONDS if date > now.date() else HISTORY_INTERVAL_SECONDS)
     # A partial page stays due but rotates behind dates that have never run.
     delay = 120 if failed else interval if complete else 0
-    state.update({"after_id": "" if complete else after, "complete": complete,
+    state.update({"policy_revision": POLICY_REVISION, "after_id": "" if complete else after, "complete": complete,
                   "next_due_at": isoformat(now + timedelta(seconds=delay)), "totals": totals,
                   "reasons": dict(reasons)})
     if not failed:

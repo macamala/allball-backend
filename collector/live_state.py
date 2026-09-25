@@ -267,15 +267,25 @@ def public_live_visible(event: Dict[str, Any], now: Optional[datetime] = None) -
     return True
 
 
+def _terminal_evidence_time(event: Dict[str, Any]) -> Optional[datetime]:
+    observed = observation_time(event)
+    if observed is None and event.get("source_family") == "fotmob":
+        # Match the volatile-result merge rule: FotMob date-board observations
+        # retain the actual response timestamp through cache hits. This is not
+        # a processing timestamp or inferred kickoff/score progression.
+        observed = parse_ts(event.get("source_fetch_time"))
+    return observed
+
+
 def _pick_authoritative_end(event: Dict[str, Any], counterparts: Iterable[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     best: Optional[Dict[str, Any]] = None
     best_ts = datetime.min.replace(tzinfo=timezone.utc)
-    own_ts = observation_or_min(event)
+    own_ts = _terminal_evidence_time(event) or best_ts
     for other in counterparts:
         status = canonical_status(other.get("status") or "")
         if status not in AUTHORITATIVE_END:
             continue
-        other_ts = observation_or_min(other)
+        other_ts = _terminal_evidence_time(other) or datetime.min.replace(tzinfo=timezone.utc)
         if other_ts < own_ts and other_ts != datetime.min.replace(tzinfo=timezone.utc) and own_ts != datetime.min.replace(
             tzinfo=timezone.utc
         ):
@@ -325,7 +335,7 @@ def reconcile_live_status(
                     merged_score[key] = value
             out["score"] = merged_score
         out["canonical_last_observed_at"] = (
-            (observation_time(winner) or observation_time(out) or current).isoformat().replace("+00:00", "Z")
+            (_terminal_evidence_time(winner) or _terminal_evidence_time(out) or current).isoformat().replace("+00:00", "Z")
         )
         return out
     if _status_conflict(out, others) and is_live(status):
