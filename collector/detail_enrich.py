@@ -510,7 +510,8 @@ def parse_fotmob_details(payload: Any) -> Dict[str, Any]:
             "shots": len(shots),
             "shots_on_target": sum(1 for shot in shots if isinstance(shot, dict) and shot.get("isOnTarget")),
         }
-    return out
+    from collector.fotmob_rich import complete_fotmob_detail
+    return complete_fotmob_detail(root, out)
 
 
 def _fiba_clean(value: Any) -> Any:
@@ -1254,7 +1255,14 @@ def fetch_family_detail(family: str, source_event_id: str, getter=None, sport: s
         result = _get(getter, FOTMOB_DETAILS.format(match_id=source_event_id))
         payload = result.payload if result.ok else None
         if isinstance(payload, dict):
+            # An explicit wrong match response is never usable.
+            supplied_id = str((payload.get("general") or {}).get("matchId") or "")
+            if supplied_id and supplied_id != str(source_event_id):
+                return {}
             out.update(parse_fotmob_details(payload))
+            from collector.fotmob_rich import verified_detail_identity
+            if verified_detail_identity(payload, source_event_id, (context or {}).get("_detail_identity")):
+                out["_verified_fotmob_detail"] = list(out)
         return out
     if family == "sofascore-web":
         from concurrent.futures import ThreadPoolExecutor
@@ -1440,6 +1448,10 @@ def enrich_event_row(db: Session, row: SportsEvent, getter=None) -> None:
         if len(rows) < 20:
             tried.discard("letour-web")
     ids = families_with_ids(extra)
+    from collector.fotmob_rich import refresh_due, REVISION as FOTMOB_DETAIL_REV
+    refresh_fotmob = row.sport_id == "football" and bool(ids.get("fotmob")) and refresh_due(extra)
+    if refresh_fotmob:
+        tried.discard("fotmob")
     pending = [fam for fam in DETAIL_FAMILIES if ids.get(fam) and fam not in tried]
     record = db.get(SportsEventDetail, row.event_id)
     missing_lineups = not (record and load_json(record.lineups_json)) and not extra.get("lineups_absent")
@@ -1456,8 +1468,13 @@ def enrich_event_row(db: Session, row: SportsEvent, getter=None) -> None:
     jobs = [(family, source_id) for family, source_id in ids.items() if family in DETAIL_FAMILIES]
     if str(row.status or "") not in {"finished", "complete"}:
         jobs = [item for item in jobs if item[0] != "leaguepedia-cargo"]
+    if row.sport_id == "football":
+        jobs.sort(key=lambda item: item[0] != "fotmob")
     detail: Dict[str, Any] = {}
     used = list(tried)
+    context = dict(extra)
+    context["_detail_identity"] = {**(load_json(row.participants_json, {}) or {}),
+                                  "start_time": row.start_time.isoformat() if row.start_time else None}
     def _detail_getter(url, headers=None):
         if headers:
             return fetch_url(url, headers=headers, timeout=12)
@@ -1468,18 +1485,23 @@ def enrich_event_row(db: Session, row: SportsEvent, getter=None) -> None:
 
     def _one(item):
         family, source_id = item
-        return family, fetch_family_detail(family, source_id, getter=getter, sport=str(row.sport_id or ""), context=extra)
+        return family, fetch_family_detail(family, source_id, getter=getter, sport=str(row.sport_id or ""), context=context)
 
     if len(jobs) == 1:
         family, source_id = jobs[0]
         if not (family in tried and _fresh(extra, row.status or "") and extra.get("detail_empty") is False):
-            _merge_detail(detail, fetch_family_detail(family, source_id, getter=getter, sport=str(row.sport_id or ""), context=extra))
+            _merge_detail(detail, fetch_family_detail(family, source_id, getter=getter, sport=str(row.sport_id or ""), context=context))
             used.append(family)
     else:
         with ThreadPoolExecutor(max_workers=min(3, len(jobs))) as pool:
             for family, part in pool.map(_one, jobs):
                 used.append(family)
                 _merge_detail(detail, part)
+    verified_fotmob = detail.pop("_verified_fotmob_detail", [])
+    if refresh_fotmob:
+        extra["fotmob_detail_checked_at"] = datetime.utcnow().isoformat()
+    if verified_fotmob:
+        extra["fotmob_detail_rev"] = FOTMOB_DETAIL_REV
     extra["detail_families_tried"] = list(dict.fromkeys(used))
     if "leaguepedia-cargo" in extra["detail_families_tried"]:
         extra["leaguepedia_checked_at"] = datetime.utcnow().isoformat()
@@ -1506,11 +1528,11 @@ def enrich_event_row(db: Session, row: SportsEvent, getter=None) -> None:
     if record is None:
         record = SportsEventDetail(event_id=row.event_id)
         db.add(record)
-    if detail.get("incidents") and not load_json(record.incidents_json):
+    if detail.get("incidents") and ("incidents" in verified_fotmob or not load_json(record.incidents_json)):
         record.incidents_json = dump_json(detail["incidents"])
-    if detail.get("statistics") and not load_json(record.statistics_json):
+    if detail.get("statistics") and ("statistics" in verified_fotmob or not load_json(record.statistics_json)):
         record.statistics_json = dump_json(detail["statistics"])
-    if detail.get("lineups") and not load_json(record.lineups_json):
+    if detail.get("lineups") and ("lineups" in verified_fotmob or not load_json(record.lineups_json)):
         record.lineups_json = dump_json(detail["lineups"])
     if detail.get("periods") and not extra.get("periods"):
         extra["periods"] = detail["periods"]
@@ -1518,13 +1540,15 @@ def enrich_event_row(db: Session, row: SportsEvent, getter=None) -> None:
         if detail.get(key) and not extra.get(key):
             extra[key] = detail[key]
     if detail.get("player_statistics"):
-        extra["player_statistics"] = extra.get("player_statistics") or detail["player_statistics"]
+        extra["player_statistics"] = detail["player_statistics"] if "player_statistics" in verified_fotmob else extra.get("player_statistics") or detail["player_statistics"]
     if detail.get("sport_detail"):
         current = extra.get("sport_detail") if isinstance(extra.get("sport_detail"), dict) else {}
         incoming = detail["sport_detail"] if isinstance(detail.get("sport_detail"), dict) else {}
         incoming_games = incoming.get("games") if isinstance(incoming.get("games"), list) else []
         current_games = current.get("games") if isinstance(current.get("games"), list) else []
-        if incoming_games and not current_games:
+        if "sport_detail" in verified_fotmob:
+            extra["sport_detail"] = {**current, **incoming}
+        elif incoming_games and not current_games:
             extra["sport_detail"] = {**current, **incoming}
         elif incoming_games and current_games and not any(
             isinstance(game, dict)

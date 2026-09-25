@@ -60,6 +60,7 @@ def canonicalize_timeline(raw: Any) -> List[Dict[str, Any]]:
                 "period": _text(item.get("period")),
                 "minute": item.get("minute"),
                 "stoppage": item.get("stoppage"),
+                **{key: item[key] for key in ("id", "player_id", "assist_id", "player_in_id", "player_out_id", "description") if item.get(key) is not None},
                 "player": _text(item.get("player") or item.get("name") or item.get("scorer")),
                 "assist": _text(item.get("assist") or item.get("secondary_player")),
                 "player_in": _text(item.get("player_in") or (item.get("in") if family == "substitution" else None)),
@@ -150,7 +151,10 @@ def canonicalize_lineups(raw: Any) -> Optional[Dict[str, Any]]:
                 or country.get("abbreviation")
                 or country.get("name")
             )
+        from collector.fotmob_rich import pitch_position
         player = {
+            "pitch_position": pitch_position(value.get("pitch_position")),
+            "position_id": value.get("position_id"),
             "id": value.get("id") or value.get("player_id") or value.get("playerId") or value.get("personId"),
             "name": name,
             "number": value.get("number") or value.get("shirtNumber") or value.get("jerseyNumber"),
