@@ -1,0 +1,43 @@
+name: C13 match centre backend gate
+on:
+  push:
+    branches: [fix/match-centre-c13-20260925]
+    paths: ['audit/c13_detail_integration.patch', '.github/workflows/c13-match-centre.yml']
+permissions:
+  contents: write
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: |
+          echo 'de4a2521b3ba4b88ce12f0bfc82645b0580251be20707292da4bc14f58571a64  audit/c13_detail_integration.patch' | sha256sum -c
+          git apply --check audit/c13_detail_integration.patch
+          git apply audit/c13_detail_integration.patch
+          mkdir -p evidence
+          git diff 50cad8107e23ee9e830f730b18c13a32f4ce7575 -- collector/canonical_detail.py collector/detail_enrich.py collector/fotmob_rich.py tests/test_fotmob_match_centre.py > evidence/source.patch
+          echo '990ad9ff18be4ac2811444fc46cb58ac8edfd3d868b3ca6cc90c38bd904aa9c2  evidence/source.patch' | sha256sum -c
+          python -m pip install -r requirements.txt pytest
+      - run: python -m pytest -q $(cat audit/football_test_selection.txt) tests/test_hidden_football_aliases.py tests/test_fotmob_match_centre.py tests/test_canonical_detail.py tests/test_sofa_rich_detail.py tests/test_fiba_rich_detail.py --junitxml=evidence/tests.xml
+      - name: Publish tested candidate to isolated branch only
+        run: |
+          git diff --check
+          git config user.name 'NinkoSports regression checks'
+          git config user.email '79318740+macamala@users.noreply.github.com'
+          git add collector/canonical_detail.py collector/detail_enrich.py
+          git commit -m 'Preserve native match timeline, substitutions, shots and lineup geometry with verified cached refresh'
+          git push origin HEAD:refs/heads/fix/match-centre-c13-20260925
+          git rev-parse HEAD > evidence/candidate.txt
+          sha256sum collector/canonical_detail.py collector/detail_enrich.py collector/fotmob_rich.py tests/test_fotmob_match_centre.py > evidence/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: c13-match-centre-backend
+          path: evidence
+          retention-days: 30
