@@ -16,7 +16,7 @@ from collector.models import SportsReadCache
 from collector.util import dump_json, load_json
 from sports_registry.cache_policy import policy_for
 
-LIST_CACHE_VERSION = "p0v30"
+LIST_CACHE_VERSION = "p0v31"
 LIST_PREFIX = f"events:{LIST_CACHE_VERSION}|"
 _DAY = re.compile(r"(\d{4}-\d{2}-\d{2})")
 

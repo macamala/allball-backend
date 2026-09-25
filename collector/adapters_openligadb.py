@@ -35,22 +35,18 @@ def _final_score(match: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _status(match: Dict[str, Any]) -> str:
-    if match.get("matchIsFinished"):
+    from collector.live_state import parse_ts
+    from datetime import timezone, timedelta
+    start = parse_ts(match.get("matchDateTimeUTC"))
+    if start is not None and start > datetime.now(timezone.utc) + timedelta(minutes=2):
+        return "scheduled"
+    if match.get("matchIsFinished") is True:
         return "finished"
-    goals = match.get("goals") or []
-    results = match.get("matchResults") or []
-    if goals:
+    if match.get("goals"):
         return "live"
-    for row in results:
-        if not isinstance(row, dict):
-            continue
-        name = str(row.get("resultName") or "").lower()
-        kind = str(row.get("resultTypeKind") or "").lower()
-        type_id = row.get("resultTypeId")
-        if "end" in name or "endergebnis" in name or "after90" in kind or type_id == 2:
-            return "finished"
-        if "half" in name or "halbzeit" in name or kind == "halftime":
-            return "break"
+    # OpenLigaDB pre-creates 0-0 HalfTime/After90Minutes rows days before
+    # kickoff. Those labels are result slots, not current live-phase flags.
+    # A goalless live phase needs an independent live-capable provider.
     return "scheduled"
 
 
@@ -70,12 +66,13 @@ def _to_event(match: Dict[str, Any], spec: Dict[str, Any]) -> Dict[str, Any]:
         start = f"{start}Z" if "+" not in str(start) else start
     shortcut = str(match.get("leagueShortcut") or spec.get("shortcut") or "")
     league_name = match.get("leagueName") or spec.get("name") or spec.get("competition_id")
+    status = _status(match)
     return {
         "id": f"openligadb:{match.get('matchID')}",
         "home": _team(match.get("team1")),
         "away": _team(match.get("team2")),
-        "status": _status(match),
-        "score": _final_score(match),
+        "status": status,
+        "score": _final_score(match) if status != "scheduled" else {"home": None, "away": None},
         "start_time": start,
         "venue": (match.get("location") or {}).get("locationStadium")
         if isinstance(match.get("location"), dict)
@@ -88,8 +85,8 @@ def _to_event(match: Dict[str, Any], spec: Dict[str, Any]) -> Dict[str, Any]:
         if isinstance(match.get("group"), dict)
         else None,
         "attendance": match.get("numberOfViewers"),
-        "periods": periods_from_openliga_results(match),
-        "incidents": incidents_from_openliga_goals(match),
+        "periods": periods_from_openliga_results(match) if status != "scheduled" else [],
+        "incidents": incidents_from_openliga_goals(match) if status != "scheduled" else [],
         "source_event_id": str(match.get("matchID") or ""),
         "source_event_ids": {"openligadb": str(match.get("matchID") or "")},
         "source_family": "openligadb",

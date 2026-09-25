@@ -320,6 +320,17 @@ def reconcile_live_status(
     others = list(counterparts or [])
     status = canonical_status(out.get("status") or "")
     out["status"] = status
+    start = parse_ts(out.get("start_time"))
+    if (out.get("sport") == "football" and (is_live(status) or status == "stale")
+            and start is not None and start > current + timedelta(minutes=2)
+            and out.get("start_precision") != "DATE_ONLY"):
+        out.update(status="scheduled", live=False, live_class=UNPROVEN_LIVE,
+                   status_reconciliation="active_status_before_verified_kickoff")
+        score = dict(out.get("score") or {})
+        for key in ("home", "away", "minute", "clock", "period", "ft_home", "ft_away", "aet_home", "aet_away"):
+            score[key] = None
+        out.update(score=score, periods=[], incidents=[])
+        return out
     winner = _pick_authoritative_end(out, others)
     if winner is not None:
         out["status"] = canonical_status(winner.get("status") or "finished")
@@ -344,6 +355,8 @@ def reconcile_live_status(
     candidate_live = is_live(status) or status == "stale"
     if not candidate_live:
         out["live"] = False
+        if out.get("live_class") == CONFIRMED_LIVE:
+            out["live_class"] = None
         return out
     if not has_live_source_evidence(out):
         out["status"] = "scheduled"

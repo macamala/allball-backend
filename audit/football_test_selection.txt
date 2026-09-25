@@ -36,3 +36,5 @@ tests/test_data_integrity.py
 
 tests/test_football_board_priority.py
 tests/test_football_source_roots.py
+
+tests/test_live_delta_screenshots.py

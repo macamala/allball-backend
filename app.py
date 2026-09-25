@@ -895,6 +895,9 @@ def sports_data_events(
     )
     payload["events"] = events
     payload["matches"] = events_to_legacy_matches(events)
+    # Complete means the date-bounded public DB snapshot, NOT upstream coverage.
+    payload["snapshot"] = {"complete": bool(date_from and date_to and not status and payload.get("connected")),
+                           "count": len(events), "date_from": date_from, "date_to": date_to}
     profile = getattr(provider, "_last_profile", None) or {}
     response = JSONResponse(payload)
     if profile:
@@ -960,11 +963,16 @@ def sports_data_live(
 def sports_data_status_delta(
     since: Optional[str] = Query(None),
     sport: Optional[str] = Query(None),
+    cursor: Optional[str] = Query(None),
 ):
     provider = get_active_provider()
     payload = empty_events_payload(sport, None, None)
     payload.update(provider.status())
-    payload["events"] = provider.get_status_delta(since=since, sport=sport)
+    page = getattr(provider, "get_status_delta_page", None)
+    if callable(page):
+        payload.update(page(since=since, sport=sport, cursor=cursor))
+    else:
+        payload["events"] = provider.get_status_delta(since=since, sport=sport)
     payload["generated_at"] = datetime.utcnow().isoformat() + "Z"
     return payload
 
