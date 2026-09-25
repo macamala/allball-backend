@@ -1,0 +1,86 @@
+name: C15 football detail and table gaps
+on:
+  push:
+    branches: [audit/football-recovery-20260925-10]
+    paths: ['.github/workflows/c15-football-gaps.yml']
+permissions:
+  contents: read
+jobs:
+  tables-and-coverage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - run: |
+          mkdir -p /tmp/c15-coverage
+          python - <<'PY'
+          import json,time,gzip,urllib.request,concurrent.futures
+          from pathlib import Path
+          from urllib.parse import urlencode
+          from datetime import datetime,timezone
+          out=Path('/tmp/c15-coverage');api='https://allball-backend-production.up.railway.app'
+          def get(name,url):
+            t=time.monotonic()
+            try:
+              with urllib.request.urlopen(urllib.request.Request(url,headers={'Accept':'application/json'}),timeout=12) as r:
+                b=r.read();b=gzip.decompress(b) if b[:2]==b'\x1f\x8b' else b;d={'http':r.status,'payload':json.loads(b)}
+            except Exception as e:d={'error':str(e)}
+            d.update(url=url,at=datetime.now(timezone.utc).isoformat(),seconds=time.monotonic()-t);(out/(name+'.json')).write_text(json.dumps(d,ensure_ascii=False,indent=2));return d
+          public=get('public',api+'/sports-data/events?sport=football&unlimited=1&date_from=2026-09-24T14%3A00%3A00Z&date_to=2026-09-28T13%3A59%3A59Z')
+          get('competitions',api+'/sports-data/competitions?sport=football')
+          probes=[('native-league-leaf','https://www.fotmob.com/api/data/leagues?id=943302'),('native-league-parent','https://www.fotmob.com/api/data/leagues?id=13287'),('native-table-leaf','https://data.fotmob.com/tables.ext.943302.fot.gz')]
+          with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:list(pool.map(lambda p:get(*p),probes))
+          grouped={}
+          for e in public.get('payload',{}).get('events',[]):grouped.setdefault(e['competition_key'],[]).append(e)
+          def inspect(pair):
+            key,events=pair;d=get('table-'+key,api+'/sports-data/standings?'+urlencode({'league':key}));rows=d.get('payload',{}).get('rows',[])
+            return {'competition':key,'name':events[0].get('competition_name'),'events':len(events),'list_table_flags':sum(bool(e.get('standings_available')) for e in events),'table_rows':len(rows),'groups':sorted(set(str(r.get('group')) for r in rows)),'http':d.get('http'),'error':d.get('error')}
+          with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:summary=list(pool.map(inspect,grouped.items()))
+          (out/'coverage.json').write_text(json.dumps(summary,ensure_ascii=False,indent=2));print('COMPETITIONS',len(summary),'WITH TABLE',sum(bool(x['table_rows']) for x in summary));print(json.dumps(summary))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: c15-football-coverage
+          path: /tmp/c15-coverage
+          retention-days: 30
+  actual-live-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: |
+          python -m pip install playwright
+          python -m playwright install --with-deps chromium
+      - run: |
+          mkdir -p /tmp/c15-live-browser
+          python - <<'PY'
+          import json,time
+          from pathlib import Path
+          from datetime import datetime,timezone
+          from playwright.sync_api import sync_playwright
+          out=Path('/tmp/c15-live-browser');report={'network':[],'errors':[],'samples':[]};eid='ninko-evt-0f0c8b1216525d84d854'
+          with sync_playwright() as p:
+            browser=p.chromium.launch();page=browser.new_page(viewport={'width':1440,'height':1000},timezone_id='Australia/Sydney')
+            page.on('pageerror',lambda e:report['errors'].append(str(e)))
+            def capture(r):
+              if '/sports-data/matches/'+eid not in r.url:return
+              row={'url':r.url,'http':r.status,'at':datetime.now(timezone.utc).isoformat()}
+              try:
+                data=r.json();e=data.get('event') or {};row.update({k:e.get(k) for k in ['id','score','status','score_observed_at','fotmob_detail_checked_at']});row['lineups']=bool(e.get('lineups'));row['statistics']=bool(e.get('statistics'))
+              except Exception as e:row['error']=str(e)
+              report['network'].append(row)
+            page.on('response',capture)
+            page.goto('https://ninkosports.com/scores/event/'+eid,wait_until='domcontentloaded');page.wait_for_selector('.mc-hero',timeout=45000)
+            for n in range(14):
+              if n:page.wait_for_timeout(5000)
+              report['samples'].append({'at':datetime.now(timezone.utc).isoformat(),'text':page.locator('main').inner_text(),'overflow':page.evaluate('document.documentElement.scrollWidth>innerWidth+1')})
+            for w in (1440,390,320):
+              page.set_viewport_size({'width':w,'height':1000});page.screenshot(path=str(out/f'live-{w}.png'))
+            browser.close()
+          (out/'browser.json').write_text(json.dumps(report,ensure_ascii=False,indent=2));print(json.dumps(report,ensure_ascii=False))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: c15-bangladesh-live-browser
+          path: /tmp/c15-live-browser
+          retention-days: 30
