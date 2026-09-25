@@ -1,0 +1,47 @@
+name: Recovered football exact-source verification
+on:
+  push:
+    branches: [audit/football-resume-20260925]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 8f8097fb992868a11c2fd1ccffe5823d0770b717
+          persist-credentials: false
+          path: source
+      - uses: actions/checkout@v4
+        with:
+          ref: f36ea7a1476d5c7f17a8ce67c6b10968cccd52dc
+          persist-credentials: false
+          path: audit-source
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Preserve tracked source only, excluding git credentials and runtime files
+        run: |
+          mkdir -p /tmp/resume-evidence
+          git -C source archive --format=tar.gz HEAD > /tmp/resume-evidence/backend-source.tar.gz
+          cp audit-source/audit/football_acceptance.py /tmp/resume-evidence/
+          python - <<'PY'
+          import hashlib,json
+          from pathlib import Path
+          expected={'audit/football_test_selection.txt':'d945e2719090aface8669ff2ded7c1defd6af6ea11d7af6ca23df12e26a3688c','collector/adapters_fotmob.py':'8da27d427907a85a1523a63d2132ea827c8261fea624c8b32a811ffe4d51ccb1','collector/dirty.py':'2d19f1edf956ab98a171f619efdbc932241382de6602cd50f9e92c9c58c01d04','collector/football_board_refresh.py':'7748984330f5d724c3814e253da9a88607eff2164e6b7b6fd0b1bf5510444e70','collector/live_state.py':'289a53266027d178aed1885ce9cdda7b85194bced26aa8f2a5eb6c78793ca5dd','tests/test_football_legacy_classification.py':'e3a2e0cb75fd1bf5dab7d02e77df21e9d473ff5b3fc483de8bb127f8f6ad7c75'}
+          actual={name:hashlib.sha256((Path('source')/name).read_bytes()).hexdigest() for name in expected}
+          assert actual==expected,(actual,expected)
+          Path('/tmp/resume-evidence/source-sha256.json').write_text(json.dumps(actual,indent=2))
+          PY
+      - run: python -m pip install -r source/requirements.txt
+      - name: Test committed candidate with no source patching
+        working-directory: source
+        run: python -m pytest -q $(cat audit/football_test_selection.txt) --disable-warnings --junitxml=/tmp/resume-evidence/tests.xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: recovered-football-exact-source
+          path: /tmp/resume-evidence
+          retention-days: 30
