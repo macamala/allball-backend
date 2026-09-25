@@ -1,0 +1,44 @@
+name: C13 entity navigation forward gate
+on:
+  push:
+    branches: [fix/entity-navigation-c13-20260925]
+    paths: ['audit/c13_entity_navigation.patch', '.github/workflows/c13-entity-navigation.yml']
+permissions:
+  contents: write
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: |
+          echo '82ec65057e7ad282c06e41c9ef6bfa7e15cc107a6026b52ed7240eccadf641ae  audit/c13_entity_navigation.patch' | sha256sum -c
+          git apply --check audit/c13_entity_navigation.patch
+          git apply audit/c13_entity_navigation.patch
+          git add -N tests/test_entity_profile_navigation.py
+          mkdir -p evidence
+          git diff 6252e64af7e06659909c402e36636a5de386b31b -- collector/entity_profiles.py tests/test_entity_profile_navigation.py > evidence/source.patch
+          cmp audit/c13_entity_navigation.patch evidence/source.patch
+          python -m pip install -r requirements.txt pytest
+      - run: python -m pytest -q $(cat audit/football_test_selection.txt) tests/test_hidden_football_aliases.py tests/test_fotmob_match_centre.py tests/test_canonical_detail.py tests/test_sofa_rich_detail.py tests/test_fiba_rich_detail.py tests/test_entity_profile_navigation.py --junitxml=evidence/tests.xml
+      - name: Publish tested candidate to isolated branch only
+        run: |
+          git diff --check
+          git config user.name 'NinkoSports regression checks'
+          git config user.email '79318740+macamala@users.noreply.github.com'
+          git add collector/entity_profiles.py tests/test_entity_profile_navigation.py
+          git commit -m 'Restore exact-name team and player profile navigation without weakening identity matching'
+          git push origin HEAD:refs/heads/fix/entity-navigation-c13-20260925
+          git rev-parse HEAD > evidence/candidate.txt
+          sha256sum collector/entity_profiles.py tests/test_entity_profile_navigation.py > evidence/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: c13-entity-navigation
+          path: evidence
+          retention-days: 30
