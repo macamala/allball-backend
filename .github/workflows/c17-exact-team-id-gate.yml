@@ -51,19 +51,30 @@ jobs:
           root=Path('/tmp/captured')
           raw=json.loads((root/'new-profile-team-6042.json').read_text())['payload']
           native=json.loads((root/'new-profile-native-team-6042.json').read_text())['payload']['details']
+          league=json.loads((root/'native-league-126.json').read_text())['payload']
           assert native['id']==6042 and native['gender']=='male'
-          engine=create_engine('sqlite:///:memory:');Base.metadata.create_all(engine)
+          assert league['details']['id']==126 and league['details']['gender']=='male'
+          engine=create_engine('sqlite:///:memory:');Base.metadata.create_all(engine);witnesses=[]
           with Session(engine) as db:
             records=raw['fixtures']+raw['results']
             for r in records:
-              db.add(SportsEvent(event_id=r['id'],fingerprint=r['id'],sport_id='football',competition_id=r['competition_key'],event_family='team_match',start_time=datetime.fromisoformat(r['start_time'].replace('Z','+00:00')).replace(tzinfo=None),status=r['status'],display_eligible=True,participants_json=dump_json({'home':r['home'],'away':r['away']}),score_json=dump_json(r['score']),extra_json='{}'))
-            db.commit()
+              # The public card intentionally omits stored provenance. Restore
+              # only what the independently captured exact native fixture proves.
+              matched=[m for m in league['fixtures']['allMatches'] if all(str(m[side]['id'])==str(r[side]['id']) for side in ('home','away')) and m['status']['utcTime']==r['start_time']]
+              meta={}
+              if matched:
+                assert len(matched)==1
+                assert matched[0]['status']['scoreStr']==f"{r['score']['home']} - {r['score']['away']}"
+                meta={'source_family':'fotmob','source_competition_id':str(league['details']['id']),'source_competition_name':league['details']['name']}
+                witnesses.append({'event_id':r['id'],'native_id':matched[0]['id'],'league_id':league['details']['id']})
+              db.add(SportsEvent(event_id=r['id'],fingerprint=r['id'],sport_id='football',competition_id=r['competition_key'],event_family='team_match',start_time=datetime.fromisoformat(r['start_time'].replace('Z','+00:00')).replace(tzinfo=None),status=r['status'],display_eligible=True,participants_json=dump_json({'home':r['home'],'away':r['away']}),score_json=dump_json(r['score']),extra_json=dump_json(meta)))
+            db.commit();assert witnesses==[{'event_id':'ninko-evt-8e5a5f6946d1e7930160','native_id':'5100970','league_id':126}]
             p=team_profile(db,entity_key='6042',name='Waterford FC',sport='football')
             assert p['available'] and p['football_gender']=='men' and p['name']==native['name']
             assert str(p['team']['id'])==p['entity_key']==str(native['id'])
             assert {r['id'] for r in p['fixtures']+p['results']}=={r['id'] for r in records}
             assert db.query(SportsEvent).count()==len(records)
-            Path('evidence/actual-waterford-replay.json').write_text(json.dumps({'before':raw,'after':p,'native':native},ensure_ascii=False,indent=2))
+            Path('evidence/actual-waterford-replay.json').write_text(json.dumps({'before':raw,'after':p,'native':native,'exact_fixture_witnesses':witnesses},ensure_ascii=False,indent=2))
           PY
       - name: Publish isolated tested branch only
         run: |
