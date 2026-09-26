@@ -58,18 +58,30 @@ def same_ungrouped_parent(row, event, scope, leaf, sid):
 
 
 def proven_womens_legacy_bucket(row, event, leaf, sid):
-    """Resolve a native women's event stored in a men's domestic bucket.
+    """Resolve a native women's event duplicated in a known non-women's bucket.
 
     Both exact oriented native participant IDs and the same leaf must prove that
     this is a classification error, not a men's event with a borrowed source ID.
+    Missing cached metadata for the old league never determines player gender;
+    the checked incoming native competition supplies the women's category.
     """
-    from collector.football_category import native_gender, canonical_gender
+    from collector.football_category import native_gender, native_info, label_category_conflict
+    from collector.matrix_guard import frozen_competition_sports
     from collector.competition_identity import canonical_country_matches
+    from collector.competition_presentation import metadata_for
+    node = event.get('source_competition_context') or {}
+    info = native_info(node) or {}
+    old = metadata_for(row.competition_id, 'football')
+    if (not isinstance(node, dict) or not node.get('ccode') or not info.get('country')
+            or old.get('scope_type') != 'DOMESTIC' or not old.get('country_code')):
+        return False
     rich = load_json(row.extra_json, {}) or {}
     return bool(
         native_gender(event.get('source_competition_context') or {}) == 'women'
-        and canonical_gender(row.competition_id) == 'men'
-        and canonical_country_matches(row.competition_id, event.get('country_id') or '')
+        and frozen_competition_sports().get(row.competition_id) == 'football'
+        and label_category_conflict('Women', row.competition_id)
+        and canonical_country_matches(row.competition_id, node['ccode'])
+        and canonical_country_matches(row.competition_id, info['country'])
         and str(rich.get('source_group_id') or rich.get('source_competition_id') or '') == leaf
         and owned_pair(row, event, sid)
     )
