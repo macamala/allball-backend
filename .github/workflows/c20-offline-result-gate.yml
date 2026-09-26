@@ -1,0 +1,124 @@
+name: C20 isolated result regression gate
+on:
+  push:
+    branches: [fix/football-result-queue-c20-20260926]
+    paths: ['.github/workflows/c20-offline-result-gate.yml']
+permissions:
+  contents: write
+  actions: read
+concurrency:
+  group: c20-results-${{ github.ref }}
+  cancel-in-progress: false
+defaults:
+  run:
+    shell: bash
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply checksum-pinned reviewed delta only in isolated branch
+        run: |
+          test "$GITHUB_REF" = refs/heads/fix/football-result-queue-c20-20260926
+          git merge-base --is-ancestor 9db4b7cd3b83aac57981cd2769fec089d7786b1f HEAD
+          mkdir evidence
+          python - <<'PY'
+          import hashlib,json,subprocess
+          from pathlib import Path
+          p=Path('audit/c20-runtime.patch');data=p.read_bytes()
+          # Correct three transport-only leading spaces at diff boundaries.
+          assert data.count(b'\n diff --git ')==3
+          data=data.replace(b'\n diff --git ',b'\ndiff --git ')
+          assert hashlib.sha256(data).hexdigest()=='44c2effbe4cf94ec39d606a7eed63f994a1897e6a94d7d14bc9bfc1c0dfc9551'
+          p.write_bytes(data)
+          subprocess.run(['git','apply','--check',str(p)],check=True)
+          subprocess.run(['git','apply',str(p)],check=True)
+          wanted={'collector/football_board_priority.py':'9874a633722c916a5ace0067b7ec969331344846bc476105f41f001d05f370e2','collector/football_board_refresh.py':'561511210931ba92249f60be45ea0f144514a2f12ebea22e61aaf6395001ba1d','collector/football_fixture_linkage.py':'e7ae89ea6fd037d707f39f9fa50220f4a225f4951db16c247da9c523381339b5','collector/football_source_roots.py':'fe6e7f9ddd06f275ef87bafd191837e132d98681499506467328260048c11ff4','collector/football_native_scope.py':'3bff60e212b23ed03f72a4e8923365ed24adada0d6bd19f7b1d35bed40937daa','tests/test_c20_native_scope.py':'46f29b72a5f0175f2013ece3afe2fb92448e7a55ed5e3327b4c29b0f4a2fda94','tests/test_c20_new_result_priority.py':'68ef1fd80efbabfa0eccb50397347bed739886777dadf67a677c375ac134c3f6','tests/test_c20_day_crawl_result_priority.py':'cfe4f928ae776ef133bf6dc4119688a4ae14e56c27df3050512205b4202407ab'}
+          for path,sha in wanted.items():assert hashlib.sha256(Path(path).read_bytes()).hexdigest()==sha,path
+          Path('evidence/expected-source.json').write_text(json.dumps(wanted,indent=2))
+          PY
+          git diff --check
+          git diff 9db4b7cd3b83aac57981cd2769fec089d7786b1f -- collector tests > evidence/reviewed-source.patch
+      - name: Real dependency-compatible test image, no runtime credentials
+        run: docker build --progress=plain -f deploy/news/Dockerfile -t c20-tests:isolated . 2>&1 | tee evidence/image-build.log
+      - name: Reproduce three defects on unchanged deployed source
+        run: |
+          mkdir /tmp/c20-baseline
+          git archive 9db4b7cd3b83aac57981cd2769fec089d7786b1f | tar -x -C /tmp/c20-baseline
+          cp tests/test_c20_native_scope.py tests/test_c20_day_crawl_result_priority.py /tmp/c20-baseline/tests/
+          set +e
+          docker run --rm --network none --user "$(id -u):$(id -g)" -v /tmp/c20-baseline:/work:ro -v "$PWD/evidence:/evidence" -w /work c20-tests:isolated python -m pytest -q -p no:cacheprovider tests/test_c20_native_scope.py::test_exact_native_conflicts_link_without_losing_results_or_old_ids tests/test_c20_day_crawl_result_priority.py::test_new_finished_result_reaches_real_ingestion_before_future_date_cursor --junitxml=/evidence/baseline.xml > evidence/baseline.log 2>&1
+          code=$?
+          set -e
+          test "$code" -eq 1
+          python - <<'PY'
+          import xml.etree.ElementTree as E
+          r=E.parse('evidence/baseline.xml');assert len(list(r.iter('testcase')))==3 and len(list(r.iter('failure')))==3 and not list(r.iter('error'))
+          PY
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 36224259466
+          artifact-ids: 10900226165
+          merge-multiple: true
+          path: /tmp/retained
+      - name: Full retained combined backend selection plus all C20 cases
+        run: |
+          cp /tmp/retained/test-selection.txt evidence/test-selection.txt
+          printf '%s\n' tests/test_c20_native_scope.py tests/test_c20_new_result_priority.py tests/test_c20_day_crawl_result_priority.py >> evidence/test-selection.txt
+          docker run --rm --network none --user "$(id -u):$(id -g)" -v "$PWD:/work:ro" -v "$PWD/evidence:/evidence" -w /work c20-tests:isolated python -m pytest -q -p no:cacheprovider $(cat evidence/test-selection.txt) --junitxml=/evidence/tests.xml 2>&1 | tee evidence/tests.log
+          python - <<'PY'
+          import json,xml.etree.ElementTree as E
+          from pathlib import Path
+          r=E.parse('evidence/tests.xml');s={k:len(list(r.iter(v))) for k,v in [('tests','testcase'),('failures','failure'),('errors','error'),('skipped','skipped')]}
+          Path('evidence/test-summary.json').write_text(json.dumps(s));print(s)
+          assert s['tests']>=1195 and not any(s[k] for k in ('failures','errors','skipped'))
+          PY
+          docker run --rm --network none c20-tests:isolated python -m pip freeze > evidence/pip-freeze.txt
+      - name: Publish tested source only to isolated candidate branch
+        run: |
+          git config user.name 'NinkoSports regression gate'
+          git config user.email '79318740+macamala@users.noreply.github.com'
+          git add collector/football_board_priority.py collector/football_board_refresh.py collector/football_fixture_linkage.py collector/football_source_roots.py audit/c20-runtime.patch
+          git commit -m 'Prioritize newly observed played results and resolve proven native parent and women bucket collisions'
+          git push origin HEAD:refs/heads/fix/football-result-queue-c20-20260926
+          git rev-parse HEAD > evidence/candidate-sha.txt
+          git archive --format=tar.gz HEAD > evidence/tested-source.tar.gz
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: c20-result-backend-evidence
+          path: evidence
+          retention-days: 30
+  retained-frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: macamala/allball-frontend
+          ref: 7183733e5eed7dae566aeaf1632fc757c547cc4c
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci
+      - run: |
+          mkdir evidence
+          npm test -- --reporter=default --reporter=junit --outputFile=evidence/frontend-tests.xml
+          node audit/c18_match_refresh_policy.mjs
+          node audit/c18_request_gate.mjs
+      - run: npm run build
+        env:
+          VITE_API_URL: https://allball-backend-production.up.railway.app
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: c20-retained-frontend-evidence
+          path: evidence
+          retention-days: 30
