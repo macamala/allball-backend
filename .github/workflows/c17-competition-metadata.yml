@@ -1,0 +1,52 @@
+name: C17 native competition identity evidence
+on:
+  push:
+    branches: [audit/football-categories-20260926-17]
+    paths: ['.github/workflows/c17-competition-metadata.yml']
+permissions:
+  contents: read
+  actions: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 36205878806
+          name: c17-exact-source-categories
+          path: /tmp/before
+      - run: |
+          mkdir -p /tmp/c17-native
+          python - <<'PY'
+          import json,time,urllib.request,concurrent.futures
+          from pathlib import Path
+          from datetime import datetime,timezone
+          base=Path('/tmp/before');out=Path('/tmp/c17-native');leagues={}
+          for f in base.glob('native-*.json'):
+            for l in json.loads(f.read_text()).get('payload',{}).get('leagues',[]):
+              pid=str(l.get('parentLeagueId') or l.get('primaryId') or l.get('id') or '')
+              if pid.isdigit():leagues.setdefault(pid,[]).append({'leaf':str(l.get('id')),'name':l.get('name'),'ccode':l.get('ccode')})
+          assert len(leagues)<=180
+          def get(pair):
+            key,url=pair;d={'url':url,'started_at':datetime.now(timezone.utc).isoformat()}
+            try:
+              with urllib.request.urlopen(urllib.request.Request(url,headers={'Accept':'application/json'}),timeout=12) as r:d.update(http=r.status,payload=json.load(r))
+            except Exception as e:d['error']=str(e)
+            d['at']=datetime.now(timezone.utc).isoformat();(out/(key+'.json')).write_text(json.dumps(d,ensure_ascii=False,indent=2));time.sleep(.15);return key,d
+          with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:results=dict(pool.map(get,[(pid,'https://www.fotmob.com/api/data/leagues?id='+pid) for pid in sorted(leagues)]))
+          report=[]
+          for pid,d in results.items():
+            p=d.get('payload');details=p.get('details') or {} if isinstance(p,dict) else {}
+            report.append({'parent_id':pid,'http':d.get('http'),'details':details,'boards':leagues[pid],'verified':str(details.get('id'))==pid,'table':bool(p.get('table')) if isinstance(p,dict) else False,'stats':list((p.get('stats') or {}).keys()) if isinstance(p,dict) and isinstance(p.get('stats'),dict) else []})
+          with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:extra=dict(pool.map(get,[(str(mid)+'-detail','https://www.fotmob.com/api/data/matchDetails?matchId='+str(mid)) for mid in (5105421,5977364)]))
+          (out/'metadata.json').write_text(json.dumps(report,ensure_ascii=False,indent=2));print(json.dumps({'parents':len(leagues),'verified':sum(r['verified'] for r in report),'female':sum(r['details'].get('gender')=='female' for r in report),'failed':[r['parent_id'] for r in report if not r['verified']]}))
+          PY
+          cd /tmp/c17-native && sha256sum *.json > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: c17-native-competition-identities
+          path: /tmp/c17-native
+          retention-days: 30
