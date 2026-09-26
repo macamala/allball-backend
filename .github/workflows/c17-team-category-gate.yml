@@ -1,0 +1,91 @@
+name: C17 club category regression gate
+on:
+  push:
+    branches: [fix/football-c17-team-categories]
+    paths: ['.github/workflows/c17-team-category-gate.yml']
+permissions:
+  contents: write
+  actions: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 36216190708
+          artifact-ids: 10897990765
+          merge-multiple: true
+          path: /tmp/captured
+      - name: Apply reviewed public profile category scope correction
+        run: |
+          mkdir evidence
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('collector/entity_profiles.py');s=p.read_text()
+          changes=[
+          ("    extra = load_json(row.extra_json, {}) or {}\n    return {", "    extra = load_json(row.extra_json, {}) or {}\n    from collector.football_category import category_for_event, public_category_projection\n    public_key = public_category_projection(extra, row.country_id) if row.sport_id == 'football' else None\n    return {"),
+          ('        "competition_key": row.competition_id,','        "competition_key": public_key or row.competition_id,\n        "football_gender": category_for_event(extra, row.competition_id) if row.sport_id == "football" else None,'),
+          ('        query = query.filter(SportsEvent.competition_id == competition)','        from collector.football_category import competition_scope_candidates\n        query = query.filter(competition_scope_candidates(db, competition))'),
+          ('    resolved_name = name\n\n    for row in rows:', '    resolved_name = name\n    from collector.team_category import football_profile_category, allowed_category\n    football_category = football_profile_category(rows, entity_key, name)\n\n    for row in rows:\n        if not allowed_category(row, football_category, entity_key):\n            continue\n        card = _event_card(row)\n        if competition and card["competition_key"] != competition:\n            continue'),
+          ('        cards.append(_event_card(row))\n        if row.competition_id and row.competition_id not in competition_ids:\n            competition_ids.append(row.competition_id)','        cards.append(card)\n        if card["competition_key"] and card["competition_key"] not in competition_ids:\n            competition_ids.append(card["competition_key"])'),
+          ('        "entity_key": entity_key,\n        "sport": sport or (cards[-1].get("sport") if cards else None),','        "entity_key": entity_key,\n        "football_gender": football_category or "unknown",\n        "sport": sport or (cards[-1].get("sport") if cards else None),')]
+          for old,new in changes:
+            assert s.count(old)==1,(old,s.count(old))
+            s=s.replace(old,new)
+          p.write_text(s)
+          PY
+          git diff --check
+          python -m pip install -r requirements.txt
+      - name: Complete retained regression selection
+        run: python -m pytest -q $(cat audit/football_test_selection.txt) tests/test_hidden_football_aliases.py tests/test_fotmob_match_centre.py tests/test_entity_profile_navigation.py tests/test_c14_live_player.py tests/test_canonical_detail.py tests/test_fiba_rich_detail.py tests/test_sofa_rich_detail.py tests/test_c15_live_tables.py tests/test_c15_parent_league_tables.py tests/test_worker_shutdown_handoff.py tests/test_c16_competition_hub.py tests/test_c16_identity_lookup.py tests/test_c17_categories_scorers.py tests/test_c17_review_regressions.py tests/test_c17_production_followup.py tests/test_c17_profile_dates.py tests/test_c17_team_categories.py --junitxml=evidence/tests.xml
+      - name: Real captured women's team history replay with no stored changes
+        run: |
+          PYTHONPATH=. python - <<'PY'
+          import json
+          from pathlib import Path
+          from sqlalchemy import create_engine
+          from sqlalchemy.orm import Session
+          from datetime import datetime
+          from collector.models import Base,SportsEvent
+          from collector.util import dump_json
+          from collector.entity_profiles import team_profile
+          raw=json.loads(Path('/tmp/captured/women-team.json').read_text())['payload']
+          source=json.loads(Path('/tmp/captured/native-team.json').read_text())['payload']['details']
+          assert source['gender']=='female' and source['id']==4500
+          engine=create_engine('sqlite:///:memory:');Base.metadata.create_all(engine)
+          with Session(engine) as db:
+            records=raw['fixtures']+raw['results']
+            for r in records:
+              db.add(SportsEvent(event_id=r['id'],fingerprint=r['id'],sport_id='football',competition_id=r['competition_key'],event_family='team_match',start_time=datetime.fromisoformat(r['start_time'].replace('Z','+00:00')).replace(tzinfo=None),status=r['status'],display_eligible=True,participants_json=dump_json({'home':r['home'],'away':r['away']}),score_json=dump_json(r['score']),extra_json='{}'))
+            db.commit();before=db.query(SportsEvent).count()
+            p=team_profile(db,entity_key='4500',name='Aalesund',sport='football')
+            assert p['available'] and p['football_gender']=='women' and p['name']==source['name']
+            assert p['competition_keys']==['football-nor-toppserien']
+            assert {r['id'] for r in p['fixtures']+p['results']}=={'ninko-evt-502d99d773c36f1850cd','ninko-evt-99b63e4a2de717c9139b'}
+            assert db.query(SportsEvent).count()==before==3
+            Path('evidence/real-team-replay.json').write_text(json.dumps({'native':source,'before':raw,'after':p,'stored_rows_unchanged':before},ensure_ascii=False,indent=2))
+          PY
+      - name: Publish tested isolated source only
+        run: |
+          git config user.name 'NinkoSports regression checks'
+          git config user.email '79318740+macamala@users.noreply.github.com'
+          git add collector/entity_profiles.py
+          git commit -m 'Separate exact club categories and preserve women public competition identity in team histories'
+          git push origin HEAD:refs/heads/fix/football-c17-team-categories
+          git rev-parse HEAD > evidence/candidate.txt
+          git diff 6a849ddbbaa0b7e3d4c44b4bb713978cf094a5e0 HEAD -- collector tests > evidence/source.patch
+          git diff --name-only 6a849ddbbaa0b7e3d4c44b4bb713978cf094a5e0 HEAD -- collector tests | xargs sha256sum > evidence/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: c17-team-category-gated
+          path: evidence
+          retention-days: 30
