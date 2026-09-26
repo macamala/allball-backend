@@ -26,7 +26,10 @@ def good_env():
             'NEWS_LEGACY_REPAIR_ACK':'1',
             'NEWS_AI_MAX_REQUESTS_PER_RUN':'2','NEWS_AI_MAX_REQUESTS_PER_DAY':'3',
             'NEWS_HISTORICAL_REPAIR_ENABLED':'0','NEWS_EXPANDED_FEEDS_ENABLED':'0',
-            'OPENAI_API_KEY':'FIXTURE_ONLY', 'NEWS_AI_LEDGER_PATH':'/news-data/budget.sqlite',
+            'NEWS_AI_PROVIDER_MODE':'xkiro_free','XKIRO_API_KEY':'FIXTURE_ONLY',
+            'NEWS_XKIRO_WRITER_MODEL':'qwen/qwen3.5-397b-a17b:free',
+            'NEWS_XKIRO_VALIDATOR_MODEL':'qwen/qwen3.5-397b-a17b:free',
+            'NEWS_AI_LEDGER_PATH':'/news-data/budget.sqlite',
             'RAILWAY_VOLUME_MOUNT_PATH':'/news-data'}
 
 
@@ -106,6 +109,25 @@ def test_missing_flags_do_not_inherit_dangerous_defaults(flag):
     env=good_env();del env[flag]
     assert f'must_be_explicitly_false:{flag}' in guard.runtime_errors(env)
 
+
+
+def test_free_news_runtime_rejects_non_free_or_implicit_paid_models():
+    env=good_env();env['NEWS_XKIRO_WRITER_MODEL']='qwen/qwen3.5-397b-a17b'
+    assert 'non_free_news_model_refused:NEWS_XKIRO_WRITER_MODEL' in guard.runtime_errors(env)
+    env=good_env();env['NEWS_XKIRO_VALIDATOR_MODEL']='paid/model'
+    assert 'non_free_news_model_refused:NEWS_XKIRO_VALIDATOR_MODEL' in guard.runtime_errors(env)
+
+
+def test_legacy_openai_requires_explicit_paid_opt_in():
+    env=good_env();env['NEWS_AI_PROVIDER_MODE']='openai_legacy';env['OPENAI_API_KEY']='FIXTURE_ONLY'
+    assert 'legacy_paid_ai_not_explicitly_allowed' in guard.runtime_errors(env)
+    env['NEWS_ALLOW_PAID_AI']='1'
+    assert 'legacy_paid_ai_not_explicitly_allowed' not in guard.runtime_errors(env)
+
+
+def test_unknown_news_ai_provider_mode_fails_closed():
+    env=good_env();env['NEWS_AI_PROVIDER_MODE']='auto'
+    assert 'unsupported_news_ai_provider_mode' in guard.runtime_errors(env)
 
 def test_enabled_guard_executes_only_existing_news_entrypoint(tmp_path,monkeypatch,capsys):
     root=artifact(tmp_path);calls=[];dirs=[]
