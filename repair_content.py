@@ -1,11 +1,15 @@
 """Repair existing public articles that stored publisher chrome.
 
-Never called from public GET. Re-extracts from source_url when salvage fails.
+Never called from public GET. Historical scanning is explicit opt-in; no raw source fallback.
 """
 
 from __future__ import annotations
 
 import logging
+import os
+
+from bot.news_policy import original_draft_reason
+from bot.news_budget import ai_budget_exhausted
 from typing import Optional
 
 from sqlalchemy.orm import Session
@@ -81,10 +85,8 @@ def repair_one(db: Session, article: Article, *, allow_fetch: bool = True) -> st
         return "clean"
     salvaged = _usable_prose(strip_site_chrome(raw) or raw, article.title)
     replacement = salvaged
-    source = (article.source_url or article.external_id or "").strip()
-    if not replacement and allow_fetch and source.startswith("http"):
-        extracted, _image = extract_from_url(source)
-        replacement = _usable_prose(extracted, article.title)
+    # Keep the legacy allow_fetch argument for callers, but never fetch/paste
+    # publisher prose. Unsalvageable existing copy is held rather than replaced.
     if replacement:
         _write_clean(db, article, replacement)
         return "repaired"
@@ -102,6 +104,9 @@ def repair_contaminated(
     from database import SessionLocal
 
     stats = {"scanned": 0, "detected": 0, "repaired": 0, "hidden": 0}
+    if os.getenv("NEWS_HISTORICAL_REPAIR_ENABLED") != "1":
+        stats["disabled"] = True
+        return stats
     own = db is None
     session = db or SessionLocal()
     try:
@@ -174,6 +179,8 @@ def repair_summary_one(db: Session, article: Article) -> str:
     from bot.rewrite_ai import openai_rate_limited
     from editorial import sanitize_body, sanitize_summary, sanitize_title
 
+    if ai_budget_exhausted():
+        return "skipped"
     stored = _stored_body(article)
     source = (article.source_url or article.external_id or "").strip()
     if not source.startswith("http"):
@@ -218,8 +225,6 @@ def repair_summary_one(db: Session, article: Article) -> str:
         return True
 
     if openai_rate_limited():
-        if is_substantial_source(extracted) and _store(extracted, used_ai=False, title=article.title):
-            return "rewritten"
         logger.info("summary-repair ai-limited slug=%s", article.slug)
         return "skipped"
     parsed, reason = _ai_story(
@@ -233,10 +238,8 @@ def repair_summary_one(db: Session, article: Article) -> str:
     title = (parsed or {}).get("title") or article.title
     if reason == "ok" and body:
         ok, _why = quality_check(title, body, article.sport, require_english=True)
-        if ok and _store(body, used_ai=True, title=title):
-            return "rewritten"
-    if is_substantial_source(extracted) and is_english_enough(extracted):
-        if _store(extracted, used_ai=False, title=article.title):
+        draft = {"title": title, "summary": (parsed or {}).get("summary") or body[:280], "body": body}
+        if ok and not original_draft_reason(draft, article.title or "", extracted) and _store(body, used_ai=True, title=title):
             return "rewritten"
     return "skipped"
 
@@ -252,6 +255,9 @@ def repair_summary_only(
     from database import SessionLocal
 
     stats = {"scanned": 0, "candidates": 0, "rewritten": 0, "skipped": 0}
+    if os.getenv("NEWS_HISTORICAL_REPAIR_ENABLED") != "1":
+        stats["disabled"] = True
+        return stats
     own = db is None
     session = db or SessionLocal()
     try:

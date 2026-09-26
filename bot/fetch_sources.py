@@ -1,7 +1,7 @@
 """Ingest RSS, classify independently, extract facts, write English NinkoSports copy."""
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 import feedparser
@@ -10,10 +10,14 @@ from sqlalchemy.orm import Session
 from database import SessionLocal
 from models import Article
 
+from .news_policy import fair_news_queue, freshness_reason, original_draft_reason
+from .news_budget import ai_budget_scope, configured_budget, ai_budget_exhausted
+from sports_registry.sports import SPORTS
 from .classify import classify_article
 from .dedupe import existing_by_url, existing_near_duplicate
 from .extract import extract_from_url, parse_feed_datetime, paragraphs_from_html
 from .feeds import enabled_feeds
+from .news_feed_http import read_news_feed
 from .media_url import collect_feed_image_candidates, pick_source_image, width_from_url
 from .quality import (
     enough_for_brief,
@@ -153,8 +157,8 @@ def _make_unique_slug(db: Session, base_slug: str, skip_article_id: Optional[int
 def _fetch_feed_entries(feed_cfg: Dict, max_articles: int) -> List[Dict]:
     url = feed_cfg["url"]
     logger.info("[fetch_sources] Fetching RSS kind=%s url=%s", feed_cfg.get("kind"), url)
-    feed = feedparser.parse(url)
-    entries = list(feed.entries or [])
+    feed = feedparser.parse(read_news_feed(url))
+    entries = list(feed.entries or []) if feed.version else []
     if not entries:
         logger.warning(
             "[fetch_sources] empty/unusable RSS for %s bozo=%s — fail closed",
@@ -170,7 +174,7 @@ def _fetch_feed_entries(feed_cfg: Dict, max_articles: int) -> List[Dict]:
         )
 
     items = []
-    for entry in entries[: max(1, max_articles)]:
+    for entry in entries[:100]:
         title = strip_truncation_markers(clean_text(entry.get("title") or ""))
         raw_summary = entry.get("summary") or entry.get("description") or ""
         parsed_summary = paragraphs_from_html(raw_summary)
@@ -191,11 +195,19 @@ def _fetch_feed_entries(feed_cfg: Dict, max_articles: int) -> List[Dict]:
                 "feed": feed_cfg,
             }
         )
-    return items
+    now = datetime.now(timezone.utc)
+    fresh = [item for item in items if not freshness_reason(item["published_at"], now)]
+    fresh.sort(key=lambda item: item["published_at"], reverse=True)
+    return fresh[:max(1, max_articles)]
 
 
 def _ingest_item(db: Session, item: Dict, use_ai: bool, max_ai_chars: int, ai_budget: int) -> tuple:
     """Returns (created_article_or_None, ai_used_bool)."""
+    # Budget absence is never permission to publish copied source prose.
+    if not use_ai or ai_budget <= 0 or openai_rate_limited():
+        return None, False
+    if freshness_reason(item.get("published_at"), datetime.now(timezone.utc)):
+        return None, False
     source_url = item["url"]
     if existing_by_url(db, source_url):
         return None, False
@@ -265,18 +277,15 @@ def _ingest_item(db: Session, item: Dict, use_ai: bool, max_ai_chars: int, ai_bu
             )
 
     if not used_ai:
-        if not is_english_enough(facts):
-            logger.info(
-                "[fetch_sources] skip non-English without usable AI: %s",
-                item["title"][:80],
-            )
-            return None, False
-        ok_en, reason_en = quality_check(
-            story_title, story_body, tags.sport, require_english=True
-        )
-        if not ok_en:
-            logger.info("[fetch_sources] skip english brief: %s", reason_en)
-            return None, False
+        logger.info("[fetch_sources] hold: no accepted original draft")
+        return None, False
+    draft_reason = original_draft_reason(
+        {"title": story_title, "summary": story_summary, "body": story_body},
+        item["title"], facts,
+    )
+    if draft_reason:
+        logger.info("[fetch_sources] hold original draft: %s", draft_reason)
+        return None, False
 
     from taxonomy_resolver import resolve_article_competition
 
@@ -373,7 +382,7 @@ def fetch_all_sports_headlines(
     return all_items[:hard_limit]
 
 
-def fetch_and_store_all_articles(
+def _fetch_and_store_all_articles(
     max_per_league: int = 3,
     hard_limit: Optional[int] = None,
     use_ai: bool = True,
@@ -397,12 +406,17 @@ def fetch_and_store_all_articles(
                 queued.extend(_fetch_feed_entries(feed, per_feed))
             except Exception as e:
                 logger.error("[fetch_sources] feed error %s: %s", feed.get("url"), e)
-        queued.sort(
-            key=lambda item: 0
-            if not is_english_enough(f"{item.get('title') or ''} {item.get('summary') or ''}")
-            else 1
-        )
+        def classify_candidate(item):
+            feed = item.get("feed") or {}
+            return classify_article(item["title"], item.get("summary") or "",
+                feed_kind=feed.get("kind", "mixed"), feed_sport=feed.get("sport"),
+                feed_league=feed.get("league"), feed_country=feed.get("country"))
+        queued, admission = fair_news_queue(queued, classify_candidate,
+            sport_order=[row["id"] for row in SPORTS if row["active"] and row["supports_news"]])
+        logger.info("[fetch_sources] eligible=%s rejected=%s", len(queued), admission)
         for item in queued:
+            if ai_budget <= 0 or openai_rate_limited() or ai_budget_exhausted():
+                break
             if hard_limit is not None and created >= hard_limit:
                 break
             allow_ai = use_ai and ai_budget > 0 and not openai_rate_limited()
@@ -426,3 +440,26 @@ def fetch_and_store_all_articles(
         return rewritten
     finally:
         db.close()
+
+
+
+def fetch_and_store_all_articles(max_per_league=3, hard_limit=None, use_ai=True,
+                                 max_ai_chars=6000, max_ai_articles=None):
+    """Original-only ingestion with explicit attempt budget and durable ledger.
+
+    No approved AI allowance means no feed/extraction/DB work. This does not
+    activate the worker, change its interval, or authorize historical repairs.
+    """
+    if not use_ai or not isinstance(max_ai_articles, int) or max_ai_articles <= 0:
+        return 0
+    budget = configured_budget(max_ai_articles)
+    from .rewrite_ai import OPENAI_API_KEY
+    if not OPENAI_API_KEY or not budget.can_start():
+        logger.warning("[fetch_sources] AI ledger/allowance missing; ingest not started")
+        return 0
+    with ai_budget_scope(budget):
+        result = _fetch_and_store_all_articles(max_per_league, hard_limit, use_ai,
+                                               max_ai_chars, max_ai_articles)
+    logger.info("[fetch_sources] AI attempts=%s limit=%s stop=%s", budget.attempts,
+                budget.max_requests, budget.blocked_reason)
+    return result

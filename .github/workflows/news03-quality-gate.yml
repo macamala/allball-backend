@@ -1,0 +1,87 @@
+name: News03 original-copy and multisport gates - NO DEPLOY
+on:
+  push:
+    branches: [news/coverage-originality-20260926-03]
+    paths:
+      - 'bot/news*.py'
+      - 'bot/feeds.py'
+      - 'bot/fetch_sources.py'
+      - 'bot/rewrite_ai.py'
+      - 'bot/pipeline.py'
+      - 'repair_content.py'
+      - 'tests/test_news03*.py'
+      - '.github/workflows/news03-quality-gate.yml'
+permissions:
+  contents: read
+concurrency:
+  group: news03-quality-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Record exact isolated source and untouched protected files
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/news/coverage-originality-20260926-03
+          mkdir -p evidence
+          git rev-parse HEAD > evidence/candidate-sha.txt
+          git diff --check 99cc5f0a1d0951e286c58bd1176d729141a28f02 HEAD
+          git diff --exit-code 99cc5f0a1d0951e286c58bd1176d729141a28f02 HEAD -- collector app.py models.py database.py public_read.py homepage_compose.py deploy bot/scheduler.py bot/extract.py requirements.txt
+          git archive --format=tar.gz HEAD > evidence/tested-source.tar.gz
+          python - <<'PY'
+          import json,hashlib,subprocess
+          from pathlib import Path
+          changed=subprocess.check_output(['git','diff','--name-only','99cc5f0a1d0951e286c58bd1176d729141a28f02','HEAD'],text=True).splitlines()
+          assert all(p.startswith(('bot/','tests/test_news03','audit/news03','.github/workflows/news03')) or p=='repair_content.py' for p in changed),changed
+          Path('evidence/source-SHA256.json').write_text(json.dumps({p:hashlib.sha256(Path(p).read_bytes()).hexdigest() for p in changed},indent=2))
+          PY
+      - name: Build existing isolated News recipe without changing deployment configuration
+        run: |
+          set -euo pipefail
+          docker build --progress=plain -f deploy/news/Dockerfile -t ninko-news03:gate . 2>&1 | tee evidence/image-build.log
+          docker image inspect ninko-news03:gate > evidence/image-inspect.json
+          docker run --rm --network none ninko-news03:gate python -m pip freeze > evidence/pip-freeze.txt
+          docker run --rm --network none ninko-news03:gate python deploy/news/preflight.py --check > evidence/preflight.json
+      - name: Retained football and News suite with network disabled
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          retained=Path('audit/football_test_selection.txt').read_text().split()
+          retained += '''tests/test_hidden_football_aliases.py tests/test_fotmob_match_centre.py tests/test_entity_profile_navigation.py tests/test_c14_live_player.py tests/test_canonical_detail.py tests/test_fiba_rich_detail.py tests/test_sofa_rich_detail.py tests/test_c15_live_tables.py tests/test_c15_parent_league_tables.py tests/test_worker_shutdown_handoff.py tests/test_c16_competition_hub.py tests/test_c16_identity_lookup.py tests/test_c17_categories_scorers.py tests/test_c17_review_regressions.py tests/test_c17_production_followup.py tests/test_c17_profile_dates.py tests/test_c17_team_categories.py tests/test_c17_exact_team_id.py tests/test_auth.py tests/test_editorial.py tests/test_rewrite_ai.py tests/test_public_read.py tests/test_taxonomy_resolver.py tests/test_taxonomy_leakage.py tests/test_news_feed_dates.py tests/test_news_deploy_contract.py tests/test_site_chrome.py tests/test_image_and_article_length.py'''.split()
+          retained += [str(p) for p in sorted(Path('tests').glob('test_news03*.py'))]
+          retained=list(dict.fromkeys(retained))
+          assert all(Path(p).is_file() for p in retained)
+          Path('evidence/test-selection.txt').write_text('\n'.join(retained)+'\n')
+          PY
+          docker run --rm --network none --user "$(id -u):$(id -g)" -v "$PWD:/work:ro" -v "$PWD/evidence:/evidence" -w /work ninko-news03:gate python -m pytest -q -p no:cacheprovider $(cat evidence/test-selection.txt) --junitxml=/evidence/tests.xml 2>&1 | tee evidence/tests.log
+      - name: Verify hashes and actual test totals
+        if: always()
+        run: |
+          python - <<'PY'
+          import json,hashlib,xml.etree.ElementTree as E
+          from pathlib import Path
+          expected=json.loads(Path('evidence/source-SHA256.json').read_text())
+          assert all(hashlib.sha256(Path(p).read_bytes()).hexdigest()==h for p,h in expected.items())
+          if Path('evidence/tests.xml').exists():
+              tree=E.parse('evidence/tests.xml')
+              counts={k:len(list(tree.iter(v))) for k,v in [('tests','testcase'),('failures','failure'),('errors','error'),('skipped','skipped')]}
+              Path('evidence/test-summary.json').write_text(json.dumps(counts,indent=2))
+              print('NEWS03_TEST_SUMMARY '+json.dumps(counts))
+              assert counts['tests']>=1119 and not any(counts[k] for k in ('failures','errors','skipped'))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: news03-originality-coverage-evidence
+          path: evidence
+          retention-days: 30
