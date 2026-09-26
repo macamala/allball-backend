@@ -1,0 +1,96 @@
+name: Combined C18 News backend offline gate
+on:
+  push:
+    branches: [integration/c18-news-20260926]
+    paths: ['.github/workflows/combined-offline-gate.yml']
+permissions:
+  contents: write
+concurrency:
+  group: combined-backend-${{ github.ref }}
+  cancel-in-progress: false
+defaults:
+  run:
+    shell: bash
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/checkout@v4
+        with:
+          ref: 0a4cbd967764247db2458a4f17642d99e2e65a22
+          path: saved-handoff
+          persist-credentials: false
+      - name: Restore reviewed C18 source into News02 descendant only
+        run: |
+          test "$GITHUB_REF" = refs/heads/integration/c18-news-20260926
+          git merge-base --is-ancestor 24714028a8e3a1e3b6ac679bd6db703beeddffea HEAD
+          mkdir evidence
+          python - <<'PY'
+          import hashlib,subprocess
+          from pathlib import Path
+          root=Path('saved-handoff/audit')
+          parts=b''.join((root/f'c18-handoff/backend.{n}.txt').read_bytes() for n in range(4))
+          review=(root/'c18-review/backend.patch.txt').read_bytes()
+          for name,data,want in [('original',parts,'954b4ec7ce3b2906c58de38476e043772766e8970656d04a87c0127544d3bd18'),('review',review,'b48b1507b626d14d43d4afbe833f45ac709de23ee855e789638c49e1e5a15329')]:
+            assert hashlib.sha256(data).hexdigest()==want,name
+            patch=Path('evidence/'+name+'.patch');patch.write_bytes(data)
+            subprocess.run(['git','apply','--check',str(patch)],check=True)
+            subprocess.run(['git','apply',str(patch)],check=True)
+          PY
+          git add collector/detail_enrich.py collector/football_detail_retry.py collector/football_enrichment_cycle.py collector/provider.py tests/test_c18_finished_detail_recovery.py tests/test_c18_recovery_review.py
+          git diff --cached --check
+          git diff --cached > evidence/c18-applied.patch
+          python - <<'PY'
+          import subprocess,json,hashlib
+          from pathlib import Path
+          changed=subprocess.check_output(['git','diff','--cached','--name-only'],text=True).splitlines()
+          assert len(changed)==6,changed
+          Path('evidence/applied-sha256.json').write_text(json.dumps({p:hashlib.sha256(Path(p).read_bytes()).hexdigest() for p in changed},indent=2))
+          PY
+      - name: Build existing reviewed News image; no production configuration
+        run: |
+          docker build --progress=plain -f deploy/news/Dockerfile -t combined-news:gate . 2>&1 | tee evidence/docker-build.log
+          docker run --rm --network none combined-news:gate python deploy/news/preflight.py --check > evidence/preflight.json
+          set +e
+          docker run --rm --network none combined-news:gate > evidence/default-start.json 2> evidence/default-start.stderr
+          code=$?
+          set -e
+          test "$code" -eq 78
+          docker run --rm --network none -e DATABASE_URL=sqlite:///:memory: combined-news:gate python -c 'import bot.scheduler,repair_content; print("NEWS_IMPORTS_OK; scheduler not executed")' > evidence/import-smoke.txt
+          docker run --rm --network none combined-news:gate python -m pip freeze > evidence/pip-freeze.txt
+      - name: Combined retained scores and News suite on the integrated working tree
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          paths=Path('audit/football_test_selection.txt').read_text().split()
+          paths+='''tests/test_hidden_football_aliases.py tests/test_fotmob_match_centre.py tests/test_entity_profile_navigation.py tests/test_c14_live_player.py tests/test_canonical_detail.py tests/test_fiba_rich_detail.py tests/test_sofa_rich_detail.py tests/test_c15_live_tables.py tests/test_c15_parent_league_tables.py tests/test_worker_shutdown_handoff.py tests/test_c16_competition_hub.py tests/test_c16_identity_lookup.py tests/test_c17_categories_scorers.py tests/test_c17_review_regressions.py tests/test_c17_production_followup.py tests/test_c17_profile_dates.py tests/test_c17_team_categories.py tests/test_c17_exact_team_id.py tests/test_auth.py tests/test_editorial.py tests/test_rewrite_ai.py tests/test_public_read.py tests/test_taxonomy_resolver.py tests/test_taxonomy_leakage.py tests/test_news_feed_dates.py tests/test_news_deploy_contract.py tests/test_c18_finished_detail_recovery.py tests/test_c18_recovery_review.py'''.split()
+          paths=list(dict.fromkeys(paths));assert all(Path(p).is_file() for p in paths)
+          Path('evidence/test-selection.txt').write_text('\n'.join(paths)+'\n')
+          PY
+          docker run --rm --network none --user "$(id -u):$(id -g)" -v "$PWD:/work:ro" -v "$PWD/evidence:/evidence" -w /work combined-news:gate python -m pytest -q -p no:cacheprovider $(cat evidence/test-selection.txt) --junitxml=/evidence/tests.xml 2>&1 | tee evidence/tests.log
+          python - <<'PY'
+          from pathlib import Path
+          import json,xml.etree.ElementTree as E
+          root=E.parse('evidence/tests.xml');result={k:len(list(root.iter(v))) for k,v in [('tests','testcase'),('failures','failure'),('errors','error'),('skipped','skipped')]}
+          Path('evidence/test-summary.json').write_text(json.dumps(result));print(result)
+          assert result['tests']>=1160 and not any(result[k] for k in ('failures','errors','skipped'))
+          PY
+      - name: Save tested isolated candidate, not production
+        run: |
+          git config user.name 'NinkoSports integration gate'
+          git config user.email '79318740+macamala@users.noreply.github.com'
+          git commit -m 'Integrate reviewed C18 post-match recovery with News02 while preserving C17 guards'
+          git push origin HEAD:refs/heads/integration/c18-news-20260926
+          git rev-parse HEAD > evidence/candidate-sha.txt
+          git diff cf192f22da637b9b54495cd5fc2ba238abbfbee3 HEAD -- bot collector deploy tests > evidence/integrated-runtime-tests.patch
+          git archive --format=tar.gz HEAD > evidence/tested-source.tar.gz
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: combined-backend-offline-evidence
+          path: evidence
+          retention-days: 30
