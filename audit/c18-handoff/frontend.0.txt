@@ -1,0 +1,213 @@
+diff --git a/audit/c18_match_refresh_policy.mjs b/audit/c18_match_refresh_policy.mjs
+new file mode 100644
+index 0000000..8a5c41c
+--- /dev/null
++++ b/audit/c18_match_refresh_policy.mjs
+@@ -0,0 +1,35 @@
++// Dependency-free executable checks of the exact production policy module.
++import assert from 'node:assert/strict';
++import test from 'node:test';
++import { matchDetailPollMs, FINAL_DETAIL_WINDOW_MS } from '../src/lib/matchRefresh.js';
++
++const now = Date.parse('2026-09-26T05:00:00Z');
++const base = { id: 'stable-id', sport: 'football', status: 'finished', start_time: '2026-09-25T23:00:00Z' };
++const cases = [
++  ['recent final remains refreshable', base, 60000],
++  ['live detail interval unchanged', { ...base, status: 'live' }, 30000],
++  ['halftime detail interval unchanged', { ...base, status: 'halftime' }, 30000],
++  ['scheduled detail interval unchanged', { ...base, status: 'scheduled' }, 30000],
++  ['missing event does not poll', null, 0],
++  ['missing identity does not poll', { ...base, id: '' }, 0],
++  ['other sports keep terminal policy', { ...base, sport: 'tennis' }, 0],
++  ['cancelled does not pretend to be played', { ...base, status: 'cancelled' }, 0],
++  ['awarded does not pretend to be played', { ...base, status: 'awarded' }, 0],
++  ['abandoned does not pretend to be played', { ...base, status: 'abandoned' }, 0],
++  ['walkover is not a played final', { ...base, status: 'walkover' }, 0],
++  ['old final eventually stops polling', { ...base, start_time: '2026-09-20T23:00:00Z' }, 0],
++  ['missing kickoff is not today', { ...base, start_time: null }, 0],
++  ['invalid kickoff is not today', { ...base, start_time: 'invalid' }, 0],
++  ['future terminal date is not interpolated', { ...base, start_time: '2026-09-27T23:00:00Z' }, 0],
++  ['offset timestamp denotes same instant', { ...base, start_time: '2026-09-26T09:00:00+10:00' }, 60000],
++  ['window is inclusive at boundary', { ...base, start_time: new Date(now-FINAL_DETAIL_WINDOW_MS).toISOString() }, 60000],
++  ['window expires without date fallback', { ...base, start_time: new Date(now-FINAL_DETAIL_WINDOW_MS-1).toISOString() }, 0],
++];
++for (const [name, event, expected] of cases) test(name, () => {
++  const before = structuredClone(event);
++  assert.equal(matchDetailPollMs(event, now), expected);
++  assert.deepEqual(event, before, 'Polling policy must not modify score, status or identity');
++});
++for (const status of ['FT', 'final', 'ended', 'aet', 'pen', 'complete']) test(`played final alias ${status}`, () => {
++  assert.equal(matchDetailPollMs({ ...base, status }, now), 60000);
++});
+diff --git a/src/lib/matchRefresh.js b/src/lib/matchRefresh.js
+new file mode 100644
+index 0000000..7fcd514
+--- /dev/null
++++ b/src/lib/matchRefresh.js
+@@ -0,0 +1,21 @@
++/** Detail reconciliation is separate from the fast live-score channel. */
++import { isFinishedStatus } from './sportsData.js';
++
++export const FINAL_DETAIL_WINDOW_MS = 72 * 60 * 60 * 1000;
++export const FINAL_DETAIL_POLL_MS = 60 * 1000;
++const PLAYED_FINALS = new Set(['finished', 'ft', 'final', 'ended', 'aet', 'pen', 'complete']);
++
++export function matchDetailPollMs(event, now = Date.now()) {
++  if (!event?.id) return 0;
++  const status = String(event.status || '').toLowerCase();
++  const played = PLAYED_FINALS.has(status);
++  if (!played && !isFinishedStatus(status)) return 30 * 1000;
++  // Cancelled/awarded/abandoned matches and other sports retain their current
++  // terminal policy. A missing/contradictory date is not guessed to be "today".
++  if (!played || event.sport !== 'football') return 0;
++  const kickoff = Date.parse(event.start_time || '');
++  const age = now - kickoff;
++  return Number.isFinite(kickoff) && Number.isFinite(now) && age >= 0 && age <= FINAL_DETAIL_WINDOW_MS
++    ? FINAL_DETAIL_POLL_MS
++    : 0;
++}
+diff --git a/src/pages/MatchFinalRecovery.test.jsx b/src/pages/MatchFinalRecovery.test.jsx
+new file mode 100644
+index 0000000..ff0ca78
+--- /dev/null
++++ b/src/pages/MatchFinalRecovery.test.jsx
+@@ -0,0 +1,76 @@
++import React from 'react';
++import { render, screen, waitFor, act, cleanup } from '@testing-library/react';
++import { MemoryRouter, Routes, Route } from 'react-router-dom';
++import { beforeEach, afterEach, it, expect, vi } from 'vitest';
++import { I18nProvider } from '../context/I18nContext.jsx';
++import { clearPublicCache } from '../api.js';
++import MatchPage from './MatchPage.jsx';
++
++const h = vi.hoisted(() => ({ polls: new Map() }));
++vi.mock('../hooks/useVisiblePoll.js', () => ({ default: (fn, ms) => { if (ms) h.polls.set(ms, fn); } }));
++vi.mock('../context/AuthContext.jsx', () => ({ useAuth: () => ({ favorites: {}, syncFavorites: vi.fn() }) }));
++const payload = (extra = {}) => ({
++  connected: true, id: 'recovery', event: {
++    id: 'recovery', sport: 'football', football_gender: 'women',
++    event_family: 'team_match', competition_key: 'football-test-women',
++    home: { name: 'Home Women' }, away: { name: 'Away Women' },
++    start_time: new Date(Date.now()-4*3600000).toISOString(),
++    status: 'finished', live: false, score: { home: 1, away: 0 }, ...extra,
++  },
++});
++const response = data => ({ ok: true, status: 200, json: async () => data, text: async () => JSON.stringify(data) });
++function mount() {
++  return render(<I18nProvider><MemoryRouter initialEntries={['/scores/event/recovery']}><Routes>
++    <Route path='/scores/event/:matchId' element={<MatchPage />} />
++  </Routes></MemoryRouter></I18nProvider>);
++}
++beforeEach(() => { clearPublicCache(); h.polls.clear(); });
++afterEach(() => { cleanup(); vi.restoreAllMocks(); });
++
++it('loads late statistics after FT without reopening the match or restarting the score clock', async () => {
++  let count = 0;
++  global.fetch = vi.fn(input => String(input).includes('/matches/recovery')
++    ? Promise.resolve(response(++count === 1 ? payload() : payload({ statistics: [{ label: 'Total shots', home: 6, away: 2 }] })))
++    : Promise.resolve(response({})));
++  mount(); await screen.findByText('Home Women');
++  expect(h.polls.has(60000)).toBe(true);
++  expect(h.polls.has(5000)).toBe(false);
++  expect(h.polls.has(15000)).toBe(false);
++  expect(screen.queryByRole('tab', { name: /statistics/i })).toBeNull();
++  await act(async () => h.polls.get(60000)());
++  await screen.findByRole('tab', { name: /statistics/i });
++  expect(document.querySelector('.mc-clock-block').textContent).toContain('FT');
++  expect(screen.queryByRole('timer')).toBeNull();
++});
++
++it('keeps the last good final detail on a transient failure then accepts the next successful refresh', async () => {
++  let count = 0;
++  global.fetch = vi.fn(input => {
++    if (!String(input).includes('/matches/recovery')) return Promise.resolve(response({}));
++    count += 1;
++    if (count === 2) return Promise.reject(new Error('temporary'));
++    return Promise.resolve(response(payload({ statistics: [{ label: 'Total shots', home: count === 1 ? 6 : 7, away: 2 }] })));
++  });
++  mount(); await screen.findByRole('tab', { name: /statistics/i });
++  await act(async () => h.polls.get(60000)());
++  expect(screen.getByRole('tab', { name: /statistics/i })).toBeTruthy();
++  expect(document.querySelector('.mc-clock-block').textContent).toContain('FT');
++  await act(async () => h.polls.get(60000)());
++  expect(count).toBe(3);
++  expect(screen.getByText('Home Women')).toBeTruthy();
++});
++
++it('does not overlap slow final-detail requests', async () => {
++  let resolve;
++  let count = 0;
++  global.fetch = vi.fn(input => {
++    if (!String(input).includes('/matches/recovery')) return Promise.resolve(response({}));
++    count += 1;
++    return count === 1 ? Promise.resolve(response(payload())) : new Promise(done => { resolve = () => done(response(payload())); });
++  });
++  mount(); await screen.findByText('Home Women');
++  await act(async () => { h.polls.get(60000)(); h.polls.get(60000)(); });
++  expect(count).toBe(2);
++  await act(async () => resolve());
++  await waitFor(() => expect(document.querySelector('.mc-clock-block').textContent).toContain('FT'));
++});
+diff --git a/src/pages/MatchPage.jsx b/src/pages/MatchPage.jsx
+index bd0956a..02a0f46 100644
+--- a/src/pages/MatchPage.jsx
++++ b/src/pages/MatchPage.jsx
+@@ -12,6 +12,7 @@ import { newerMatchEvent } from "../lib/matchClock.js";
+ import { matchPayloadMatches } from "../lib/matchDetail.js";
+ import MatchCentre from "../components/scores/MatchCentre.jsx";
+ import useVisiblePoll from "../hooks/useVisiblePoll.js";
++import { matchDetailPollMs } from "../lib/matchRefresh.js";
+ 
+ function payloadEventId(payload) {
+   return payload?.id || payload?.event?.id || payload?.header?.id || "";
+@@ -101,6 +102,7 @@ export default function MatchPage() {
+   const [loading, setLoading] = useState(true);
+   const requestSeq = useRef(0);
+   const scoreFlight = useRef(null);
++  const detailFlight = useRef(null);
+   const routeId = useRef({id: matchId, generation: 0});
+   if (routeId.current.id !== matchId) routeId.current = {id: matchId, generation: routeId.current.generation + 1};
+ 
+@@ -135,10 +137,13 @@ export default function MatchPage() {
+   }, [matchId]);
+ 
+   const refreshMatch = useCallback(() => {
++    const request = routeId.current;
++    if (detailFlight.current === request) return;
++    detailFlight.current = request;
+     const seq = ++requestSeq.current;
+-    getJSON(matchPath(matchId))
++    return getJSON(matchPath(matchId))
+       .then((payload) => {
+-        if (seq !== requestSeq.current) return;
++        if (routeId.current !== request || seq !== requestSeq.current) return;
+         if (!matchPayloadMatches(payload, matchId)) return;
+         setData((previous) => mergeMatchPayload(previous, payload));
+         setError(false);
+@@ -148,7 +153,8 @@ export default function MatchPage() {
+         // backend restart or network failure. The next visible poll retries.
+       })
+       .finally(() => {
+-        if (seq === requestSeq.current) setLoading(false);
++        if (detailFlight.current === request) detailFlight.current = null;
++        if (routeId.current === request && seq === requestSeq.current) setLoading(false);
+       });
+   }, [matchId]);
+ 
+@@ -178,13 +184,9 @@ export default function MatchPage() {
+   const title =
+     home && away ? `${home} vs ${away}` : event?.tournament || t("match.center");
+   const path = eventPath(matchId);
+-  const matchPollMs = event
+-    ? isConfirmedLive(event)
+-      ? 30000
+-      : isFinishedStatus(event.status)
+-        ? 0
+-        : 30000
+-    : 0;
++  // FT stops the fast score clock, not late-arriving lineups/statistics.
++  // Visibility gating stays in useVisiblePoll; one detail request at a time.
++  const matchPollMs = matchDetailPollMs(event);
+   useVisiblePoll(refreshMatch, matchPollMs);
+   useVisiblePoll(refreshScore, event && !isFinishedStatus(event.status) ? (isConfirmedLive(event) ? 5000 : 15000) : 0);
+ 
