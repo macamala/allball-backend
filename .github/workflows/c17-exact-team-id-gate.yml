@@ -1,0 +1,83 @@
+name: C17 exact club ID regression gate
+on:
+  push:
+    branches: [fix/football-c17-exact-team-id]
+    paths: ['.github/workflows/c17-exact-team-id-gate.yml']
+permissions:
+  contents: write
+  actions: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 36216806423
+          artifact-ids: 10897543733
+          merge-multiple: true
+          path: /tmp/captured
+      - name: Preserve observed exact ID only, never invent an ID for a name-only fallback
+        run: |
+          mkdir evidence
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('collector/entity_profiles.py');s=p.read_text();old='        identity = _merge_identity(identity, matched_side)\n';assert s.count(old)==1
+          new=old+'        if entity_key and str(matched_side.get("id") or "") == entity_key:\n            identity["id"] = matched_side["id"]\n'
+          p.write_text(s.replace(old,new))
+          PY
+          git diff --check
+          python -m pip install -r requirements.txt
+      - name: All retained football regression cases
+        run: python -m pytest -q $(cat audit/football_test_selection.txt) tests/test_hidden_football_aliases.py tests/test_fotmob_match_centre.py tests/test_entity_profile_navigation.py tests/test_c14_live_player.py tests/test_canonical_detail.py tests/test_fiba_rich_detail.py tests/test_sofa_rich_detail.py tests/test_c15_live_tables.py tests/test_c15_parent_league_tables.py tests/test_worker_shutdown_handoff.py tests/test_c16_competition_hub.py tests/test_c16_identity_lookup.py tests/test_c17_categories_scorers.py tests/test_c17_review_regressions.py tests/test_c17_production_followup.py tests/test_c17_profile_dates.py tests/test_c17_team_categories.py tests/test_c17_exact_team_id.py --junitxml=evidence/tests.xml
+      - name: Actual observed Waterford cross-provider identity replay
+        run: |
+          PYTHONPATH=. python - <<'PY'
+          import json
+          from pathlib import Path
+          from sqlalchemy import create_engine
+          from sqlalchemy.orm import Session
+          from datetime import datetime
+          from collector.models import Base,SportsEvent
+          from collector.util import dump_json
+          from collector.entity_profiles import team_profile
+          root=Path('/tmp/captured')
+          raw=json.loads((root/'new-profile-team-6042.json').read_text())['payload']
+          native=json.loads((root/'new-profile-native-team-6042.json').read_text())['payload']['details']
+          assert native['id']==6042 and native['gender']=='male'
+          engine=create_engine('sqlite:///:memory:');Base.metadata.create_all(engine)
+          with Session(engine) as db:
+            records=raw['fixtures']+raw['results']
+            for r in records:
+              db.add(SportsEvent(event_id=r['id'],fingerprint=r['id'],sport_id='football',competition_id=r['competition_key'],event_family='team_match',start_time=datetime.fromisoformat(r['start_time'].replace('Z','+00:00')).replace(tzinfo=None),status=r['status'],display_eligible=True,participants_json=dump_json({'home':r['home'],'away':r['away']}),score_json=dump_json(r['score']),extra_json='{}'))
+            db.commit()
+            p=team_profile(db,entity_key='6042',name='Waterford FC',sport='football')
+            assert p['available'] and p['football_gender']=='men' and p['name']==native['name']
+            assert str(p['team']['id'])==p['entity_key']==str(native['id'])
+            assert {r['id'] for r in p['fixtures']+p['results']}=={r['id'] for r in records}
+            assert db.query(SportsEvent).count()==len(records)
+            Path('evidence/actual-waterford-replay.json').write_text(json.dumps({'before':raw,'after':p,'native':native},ensure_ascii=False,indent=2))
+          PY
+      - name: Publish isolated tested branch only
+        run: |
+          git config user.name 'NinkoSports regression checks'
+          git config user.email '79318740+macamala@users.noreply.github.com'
+          git add collector/entity_profiles.py
+          git commit -m 'Keep exact observed club ID when merging verified same-category provider aliases'
+          git push origin HEAD:refs/heads/fix/football-c17-exact-team-id
+          git rev-parse HEAD > evidence/candidate.txt
+          git diff b221c579387704e12e8a000414d97102b28e9b6c HEAD -- collector tests > evidence/source.patch
+          git diff --name-only b221c579387704e12e8a000414d97102b28e9b6c HEAD -- collector tests | xargs sha256sum > evidence/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: c17-exact-team-id-gated
+          path: evidence
+          retention-days: 30
