@@ -1,0 +1,194 @@
+diff --git a/audit/c18_request_gate.mjs b/audit/c18_request_gate.mjs
+new file mode 100644
+index 0000000..da0513f
+--- /dev/null
++++ b/audit/c18_request_gate.mjs
+@@ -0,0 +1,36 @@
++import assert from 'node:assert/strict';
++import { createMatchRequestGate } from '../src/lib/matchRequestGate.js';
++let count = 0;
++function test(name, fn) { fn(); count++; console.log(`PASS ${name}`); }
++test('initial request excludes overlapping detail poll', () => {
++  const gate = createMatchRequestGate(), route = {id:'same', generation:0};
++  const initial = gate.begin(route); assert.ok(initial); assert.equal(gate.begin(route), null);
++  gate.finish(initial); assert.ok(gate.begin(route));
++});
++test('completion on an old route cannot unlock current route', () => {
++  const gate = createMatchRequestGate(), a={id:'a'}, b={id:'b'};
++  const first=gate.begin(a), second=gate.begin(b); assert.ok(second);
++  gate.finish(first); assert.equal(gate.begin(b),null); gate.finish(second); assert.ok(gate.begin(b));
++});
++test('StrictMode cleanup and remount do not share a release token', () => {
++  const gate=createMatchRequestGate(), route={id:'a'};
++  const first=gate.begin(route);gate.finish(first);
++  const second=gate.begin(route);gate.finish(first);assert.equal(gate.begin(route),null);
++  gate.finish(second);assert.ok(gate.begin(route));
++});
++test('A to B to A uses distinct route generations', () => {
++  const gate=createMatchRequestGate(), a0={id:'a',generation:0}, b={id:'b',generation:1}, a2={id:'a',generation:2};
++  const first=gate.begin(a0),second=gate.begin(b),third=gate.begin(a2);
++  assert.ok(first&&second&&third);gate.finish(first);gate.finish(second);assert.equal(gate.begin(a2),null);
++  gate.finish(third);assert.ok(gate.begin(a2));
++});
++test('release is idempotent and unknown release does nothing', () => {
++  const gate=createMatchRequestGate(),route={id:'a'};
++  const first=gate.begin(route);gate.finish({route});assert.equal(gate.begin(route),null);
++  gate.finish(first);gate.finish(first);assert.ok(gate.begin(route));
++});
++test('independent mounted pages have independent gates', () => {
++  const a=createMatchRequestGate(),b=createMatchRequestGate(),route={id:'a'};
++  assert.ok(a.begin(route));assert.ok(b.begin(route));assert.equal(a.begin(route),null);
++});
++console.log(JSON.stringify({suite:'detail request ownership',passed:count,failed:0}));
+diff --git a/src/lib/matchRequestGate.js b/src/lib/matchRequestGate.js
+new file mode 100644
+index 0000000..111199f
+--- /dev/null
++++ b/src/lib/matchRequestGate.js
+@@ -0,0 +1,16 @@
++/** Per-route in-flight ownership, shared by initial loading and detail polling. */
++export function createMatchRequestGate() {
++  let active = null;
++  return {
++    begin(route) {
++      if (active?.route === route) return null;
++      const token = { route };
++      active = token;
++      return token;
++    },
++    finish(token) {
++      // An older route or aborted StrictMode request cannot release a newer one.
++      if (active === token) active = null;
++    },
++  };
++}
+diff --git a/src/pages/MatchFinalRecovery.test.jsx b/src/pages/MatchFinalRecovery.test.jsx
+index ff0ca78..9b525ff 100644
+--- a/src/pages/MatchFinalRecovery.test.jsx
++++ b/src/pages/MatchFinalRecovery.test.jsx
+@@ -19,8 +19,8 @@ const payload = (extra = {}) => ({
+   },
+ });
+ const response = data => ({ ok: true, status: 200, json: async () => data, text: async () => JSON.stringify(data) });
+-function mount() {
+-  return render(<I18nProvider><MemoryRouter initialEntries={['/scores/event/recovery']}><Routes>
++function mount(preview = null) {
++  return render(<I18nProvider><MemoryRouter initialEntries={[preview ? { pathname: '/scores/event/recovery', state: { event: preview } } : '/scores/event/recovery']}><Routes>
+     <Route path='/scores/event/:matchId' element={<MatchPage />} />
+   </Routes></MemoryRouter></I18nProvider>);
+ }
+@@ -74,3 +74,40 @@ it('does not overlap slow final-detail requests', async () => {
+   await act(async () => resolve());
+   await waitFor(() => expect(document.querySelector('.mc-clock-block').textContent).toContain('FT'));
+ });
++
++
++it('does not overlap a visibility poll with the first request when a board preview is already visible', async () => {
++  let resolveInitial;
++  let count = 0;
++  const initial = payload();
++  global.fetch = vi.fn(input => {
++    if (!String(input).includes('/matches/recovery')) return Promise.resolve(response({}));
++    count += 1;
++    if (count === 1) return new Promise(done => { resolveInitial = () => done(response(initial)); });
++    return Promise.resolve(response(initial));
++  });
++  mount(initial.event);
++  await screen.findByText('Home Women');
++  expect(h.polls.has(60000)).toBe(true);
++  await act(async () => h.polls.get(60000)());
++  expect(count).toBe(1);
++  await act(async () => resolveInitial());
++  await act(async () => h.polls.get(60000)());
++  expect(count).toBe(2);
++});
++
++it('stops requests when the recovery window expires even without a successful re-render', async () => {
++  const initial = payload();
++  let count = 0;
++  global.fetch = vi.fn(input => {
++    if (!String(input).includes('/matches/recovery')) return Promise.resolve(response({}));
++    count += 1;
++    return count === 1 ? Promise.resolve(response(initial)) : Promise.reject(new Error('temporary'));
++  });
++  mount(); await screen.findByText('Home Women');
++  await act(async () => h.polls.get(60000)());
++  expect(count).toBe(2);
++  vi.spyOn(Date, 'now').mockReturnValue(Date.parse(initial.event.start_time) + 73 * 3600000);
++  await act(async () => h.polls.get(60000)());
++  expect(count).toBe(2);
++});
+diff --git a/src/pages/MatchPage.jsx b/src/pages/MatchPage.jsx
+index 02a0f46..c69d0aa 100644
+--- a/src/pages/MatchPage.jsx
++++ b/src/pages/MatchPage.jsx
+@@ -13,6 +13,7 @@ import { matchPayloadMatches } from "../lib/matchDetail.js";
+ import MatchCentre from "../components/scores/MatchCentre.jsx";
+ import useVisiblePoll from "../hooks/useVisiblePoll.js";
+ import { matchDetailPollMs } from "../lib/matchRefresh.js";
++import { createMatchRequestGate } from "../lib/matchRequestGate.js";
+ 
+ function payloadEventId(payload) {
+   return payload?.id || payload?.event?.id || payload?.header?.id || "";
+@@ -102,12 +103,17 @@ export default function MatchPage() {
+   const [loading, setLoading] = useState(true);
+   const requestSeq = useRef(0);
+   const scoreFlight = useRef(null);
+-  const detailFlight = useRef(null);
++  const detailGate = useRef(null);
++  const lastPollEvent = useRef(null);
++  if (!detailGate.current) detailGate.current = createMatchRequestGate();
+   const routeId = useRef({id: matchId, generation: 0});
+   if (routeId.current.id !== matchId) routeId.current = {id: matchId, generation: routeId.current.generation + 1};
+ 
+   useEffect(() => {
+     let cancelled = false;
++    const request = routeId.current;
++    const flight = detailGate.current.begin(request);
++    if (!flight) return undefined;
+     const seq = ++requestSeq.current;
+     const controller = typeof AbortController === "function" ? new AbortController() : null;
+     setData((prev) => (payloadEventId(prev) === matchId ? prev : null));
+@@ -128,18 +134,23 @@ export default function MatchPage() {
+         setData({ connected: false, id: matchId });
+       })
+       .finally(() => {
++        detailGate.current.finish(flight);
+         if (!cancelled && seq === requestSeq.current) setLoading(false);
+       });
+     return () => {
+       cancelled = true;
+       controller?.abort();
++      detailGate.current.finish(flight);
+     };
+   }, [matchId]);
+ 
+   const refreshMatch = useCallback(() => {
+     const request = routeId.current;
+-    if (detailFlight.current === request) return;
+-    detailFlight.current = request;
++    // Re-evaluate the deadline at the tick itself. Repeated transport failures
++    // may not cause a render, so a previously scheduled interval can outlive FT.
++    if (lastPollEvent.current?.id === matchId && matchDetailPollMs(lastPollEvent.current) === 0) return;
++    const flight = detailGate.current.begin(request);
++    if (!flight) return;
+     const seq = ++requestSeq.current;
+     return getJSON(matchPath(matchId))
+       .then((payload) => {
+@@ -153,7 +164,7 @@ export default function MatchPage() {
+         // backend restart or network failure. The next visible poll retries.
+       })
+       .finally(() => {
+-        if (detailFlight.current === request) detailFlight.current = null;
++        detailGate.current.finish(flight);
+         if (routeId.current === request && seq === requestSeq.current) setLoading(false);
+       });
+   }, [matchId]);
+@@ -179,6 +190,7 @@ export default function MatchPage() {
+     if (preview) return normalizeEvent(publicEventSafe(preview));
+     return null;
+   }, [data, preview, matchId]);
++  lastPollEvent.current = event;
+   const home = participantName(event?.home);
+   const away = participantName(event?.away);
+   const title =
