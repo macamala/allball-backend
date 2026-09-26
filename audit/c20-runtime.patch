@@ -1,0 +1,135 @@
+diff --git a/collector/football_board_priority.py b/collector/football_board_priority.py
+index b66bbdc..6c888b0 100644
+--- a/collector/football_board_priority.py
++++ b/collector/football_board_priority.py
+@@ -145,3 +145,52 @@ def conflict_evidence(roots: dict, event: dict) -> dict:
+     return {'root_count': len(roots), 'roots': out,
+             'incoming_competition': event.get('source_competition_context'),
+             'source_group_id': event.get('source_group_id')}
++
++
++def unseen_played_plan(matches: dict, index: dict, receipts: dict, now: datetime, cap: int, *, after="", exclude=()) -> dict[str, str]:
++    """Give new played IDs a bounded share before a long date cursor reaches them.
++
++    This schedules normal validation only. It does not establish that a global
++    row is absent, override a hidden record, or authorize a source-ID collision.
++    """
++    choices = []
++    for sid, raw in matches.items():
++        if index.get(sid) or not str(sid).isdigit() or sid <= after or sid in exclude:
++            continue
++        event = match_to_event(raw, '')
++        if not event:
++            continue
++        fetched = parse_datetime(event.get('source_fetch_time'))
++        kickoff = parse_datetime(event.get('start_time'))
++        status = canonical_status(event.get('status'))
++        supplied = tuple(_score((event.get('score') or {}).get(s)) for s in ('home', 'away'))
++        node = event.get('source_competition_context') or {}
++        if (not fetched or not kickoff or not -30 <= (now-fetched).total_seconds() <= 300
++                or not now-timedelta(hours=48) <= kickoff <= now
++                or status not in {'live','halftime','break','finished'} or None in supplied
++                or not str(node.get('id') or '').isdigit()
++                or str(event.get('source_event_id') or '') != str(sid)):
++            continue
++        proof = {'kind':'unseen_played','id':str(sid),'status':status,'score':supplied,
++                 'kickoff':kickoff.isoformat(),'league':node,
++                 'pair':[(event.get(s) or {}).get('id') for s in ('home','away')]}
++        signature = hashlib.sha256(json.dumps(proof,sort_keys=True,default=str).encode()).hexdigest()
++        old = receipts.get(sid) or {}
++        due = parse_datetime(old.get('next_due_at'))
++        if signature == old.get('signature') and due and due > now:
++            continue
++        last = parse_datetime(old.get('attempted_at')) or datetime.min
++        choices.append((last, status == 'finished', str(sid), signature))
++    return {sid:signature for _,_,sid,signature in sorted(choices)[:max(0,cap)]}
++
++
++def board_priority_plan(matches: dict, index: dict, receipts: dict, now: datetime, max_events: int, *, after="", immediate_ids=()) -> dict[str, str]:
++    """Keep both changed known results and new live/final results moving."""
++    cap = min(MAX_PRIORITY_EVENTS, max(0, max_events // 2))
++    known = priority_plan(matches, index, receipts, now, max_events)
++    if not cap:
++        return known
++    unseen = unseen_played_plan(matches, index, receipts, now, min(2, cap), after=after, exclude=immediate_ids)
++    new_slots = min(len(unseen), max(0,cap-1) if known else cap)
++    return {**dict(list(known.items())[:cap-new_slots]),
++            **dict(list(unseen.items())[:new_slots])}
+ diff --git a/collector/football_board_refresh.py b/collector/football_board_refresh.py
+index d2441ce..90fa6fc 100644
+--- a/collector/football_board_refresh.py
++++ b/collector/football_board_refresh.py
+@@ -22,7 +22,7 @@ from collector.flags import collection_enabled, scheduler_enabled, writes_enable
+ from collector.fotmob_crosswalk import _ensure_dynamic_fotmob_mapping, _fotmob_competition_identity, _fill_identity_assets
+ from collector.football_fixture_linkage import LINKAGE_REVISION, choose_indexed_keeper, link_accepted_duplicates
+ from collector.football_source_roots import plan_source_roots, plan_hidden_source_with_public_peer, apply_accepted_source_roots
+-from collector.football_board_priority import priority_plan, interleave_priority, record_priority_attempt, conflict_evidence
++from collector.football_board_priority import board_priority_plan as priority_plan, interleave_priority, record_priority_attempt, conflict_evidence
+ from collector.keeper_revalidation import _same_pair
+ from collector.limits import is_rate_limited, record_hit
+ from collector.lock import acquire_write_lock, lock_status, release_write_lock
+@@ -315,7 +315,11 @@ def refresh_day(db, day: str, source: SportsSource, *, now: datetime, getter=Non
+                + sorted((key, raw) for key, raw in matches.items() if key > after and key not in retry_ids))
+     index = _identity_index(db, day)
+     priority_receipts = dict(state.get("priority_receipts") or {})
+-    priorities = priority_plan(matches, index, priority_receipts, now, max_events)
++    # Do not spend a discovery-priority slot on a just-visited ID or on the
++    # first few coverage rows already about to be processed in this same page.
++    immediate_ids = {sid for sid, _ in ordered[:max(1, min(4, max_events // 2))]}
++    priorities = priority_plan(matches, index, priority_receipts, now, max_events,
++                               after=after, immediate_ids=immediate_ids)
+     ordered = interleave_priority(ordered, matches, priorities)
+     processed_ids = set()
+     exhausted = False
+ diff --git a/collector/football_fixture_linkage.py b/collector/football_fixture_linkage.py
+index bb28f44..6ee64d5 100644
+--- a/collector/football_fixture_linkage.py
++++ b/collector/football_fixture_linkage.py
+@@ -6,7 +6,7 @@ from collector.participant_alias import punctuation_identity_key
+ from collector.source_ids import as_family_map, id_for_family
+ from collector.util import load_json, parse_datetime
+ 
+-LINKAGE_REVISION = 4
++LINKAGE_REVISION = 5
+ 
+ 
+ def fresh_evidence(event):
+ diff --git a/collector/football_source_roots.py b/collector/football_source_roots.py
+index 63e5343..10988ee 100644
+--- a/collector/football_source_roots.py
++++ b/collector/football_source_roots.py
+@@ -9,6 +9,7 @@ from dataclasses import dataclass
+ from datetime import datetime, timedelta
+ import logging
+ 
++from collector.football_native_scope import same_ungrouped_parent, proven_womens_legacy_bucket
+ from collector.football_fixture_linkage import fresh_evidence
+ from collector.maintenance_policy import automatic_promotion_blocked, sync_public_visibility
+ from collector.models import SportsEvent
+@@ -92,14 +93,14 @@ def _safe_root(row, event, leaf, sid, *, require_typed=True):
+             or row.display_eligible is not True or any(m.get('display_eligible') is False for m in metas)):
+         return False
+     scope = str(rich.get('source_group_id') or rich.get('source_competition_id') or '')
+-    if require_typed and scope != leaf:
++    if require_typed and scope != leaf and not same_ungrouped_parent(row, event, scope, leaf, sid):
+         return False
+     for meta in metas:
+         # Source IDs belonging to another provider are not a contradictory
+         # FotMob league ID, but also cannot authorize the required rich proof.
+         if meta.get('source_family') == 'fotmob':
+             mscope = str(meta.get('source_group_id') or meta.get('source_competition_id') or '')
+-            if mscope and mscope != leaf:
++            if mscope and mscope != leaf and not same_ungrouped_parent(row, event, mscope, leaf, sid):
+                 return False
+     kickoff = parse_datetime(event.get('start_time'))
+     if not kickoff or not row.start_time or abs((row.start_time-kickoff).total_seconds()) > 60:
+@@ -158,7 +159,8 @@ def plan_source_roots(db, roots, event, *, public_peers=()):
+         if len(values) > 1:
+             return None
+     candidates = [r for r in roots if r.competition_id == target]
+-    if not candidates or any(r.competition_id != target and not r.competition_id.startswith('football-') for r in roots):
++    if not candidates or any(r.competition_id != target and not r.competition_id.startswith('football-')
++                             and not proven_womens_legacy_bucket(r, event, leaf, sid) for r in roots):
+         return None  # Never replace an independent known domestic competition.
+     maps = [as_family_map((_metas(r)[0]).get('source_event_ids')) for r in roots]
+     for i, left in enumerate(maps):
