@@ -27,9 +27,11 @@ from .quality import (
 )
 from .site_chrome import is_site_chrome_text, strip_site_chrome
 from .rewrite_ai import (
+    ai_available,
     openai_rate_limited,
     parse_ai_output,
     reset_openai_rate_limit,
+    validate_story_facts,
     write_ninkosports_story,
 )
 from .taxonomy import COMPETITIONS
@@ -107,6 +109,14 @@ def _ai_story(title: str, facts: str, sport: str, league: str, max_ai_chars: int
             )
             return None, "too-short"
         parsed["body"] = body
+    facts_ok, facts_reason = validate_story_facts(title, payload, parsed)
+    if not facts_ok:
+        logger.info(
+            "[fetch_sources] reject factual validation=%s title=%s",
+            facts_reason,
+            title[:80],
+        )
+        return None, facts_reason
     return parsed, "ok"
 
 
@@ -453,9 +463,8 @@ def fetch_and_store_all_articles(max_per_league=3, hard_limit=None, use_ai=True,
     if not use_ai or not isinstance(max_ai_articles, int) or max_ai_articles <= 0:
         return 0
     budget = configured_budget(max_ai_articles)
-    from .rewrite_ai import OPENAI_API_KEY
-    if not OPENAI_API_KEY or not budget.can_start():
-        logger.warning("[fetch_sources] AI ledger/allowance missing; ingest not started")
+    if not ai_available() or not budget.can_start():
+        logger.warning("[fetch_sources] permitted AI route/ledger/allowance missing; ingest not started")
         return 0
     with ai_budget_scope(budget):
         result = _fetch_and_store_all_articles(max_per_league, hard_limit, use_ai,
