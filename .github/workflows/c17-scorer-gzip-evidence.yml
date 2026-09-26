@@ -1,0 +1,44 @@
+name: C17 decoded native scorer evidence
+on:
+  push:
+    branches: [audit/football-categories-20260926-17]
+    paths: ['.github/workflows/c17-scorer-gzip-evidence.yml']
+permissions:
+  contents: read
+  actions: read
+jobs:
+  evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 36206900777
+          name: c17-native-scorer-evidence
+          path: /tmp/urls
+      - run: |
+          mkdir -p /tmp/c17-scorers
+          python - <<'PY'
+          import json,gzip,re,urllib.request,concurrent.futures
+          from pathlib import Path
+          from datetime import datetime,timezone
+          def get(path):
+            d=json.loads(path.read_text());url=d['url'];pid=str(d['league']['id'])
+            assert re.fullmatch(r'https://data\.fotmob\.com/stats/'+pid+r'/season/\d+(?:/(?:Apertura|Clausura))?/goals\.json',url)
+            d.pop('error',None);d['at']=datetime.now(timezone.utc).isoformat()
+            try:
+              with urllib.request.urlopen(urllib.request.Request(url,headers={'Accept':'application/json'}),timeout=15) as r:
+                raw=r.read(4000000);raw=gzip.decompress(raw) if raw[:2]==b'\x1f\x8b' else raw
+                d.update(http=r.status,payload=json.loads(raw))
+            except Exception as e:d['error']=str(e)
+            Path('/tmp/c17-scorers',path.name).write_text(json.dumps(d,ensure_ascii=False,indent=2))
+            return {'id':pid,'http':d.get('http'),'error':d.get('error'),'type':type(d.get('payload')).__name__}
+          with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:print(list(pool.map(get,Path('/tmp/urls').glob('*.json'))))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: c17-decoded-scorers
+          path: /tmp/c17-scorers
+          retention-days: 30
