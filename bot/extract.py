@@ -3,7 +3,7 @@
 import json
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from html.parser import HTMLParser
 from typing import List, Optional, Tuple
@@ -328,20 +328,37 @@ def paragraphs_from_html(html: str) -> str:
 
 
 def parse_feed_datetime(entry) -> Optional[datetime]:
+    """Keep publication ahead of modification, including Atom/ISO feed dates.
+
+    Explicit offsets and feedparser *_parsed tuples are normalized to UTC.
+    Naive source values remain naive; missing/invalid dates never become now.
+    The existing datetime storage contract is unchanged; no old row is rewritten.
+    """
+    getter = getattr(entry, "get", None)
+    if not callable(getter):
+        return None
     for attr in ("published", "updated", "created"):
-        raw = entry.get(attr) if hasattr(entry, "get") else None
-        if not raw:
-            continue
-        try:
-            return parsedate_to_datetime(raw)
-        except Exception:
-            continue
-    parsed = entry.get("published_parsed") if hasattr(entry, "get") else None
-    if parsed:
-        try:
-            return datetime(*parsed[:6])
-        except Exception:
-            return None
+        raw = getter(attr)
+        value = None
+        if isinstance(raw, str) and raw.strip():
+            raw = raw.strip()
+            try:
+                value = parsedate_to_datetime(raw)
+            except (TypeError, ValueError, OverflowError, IndexError):
+                try:
+                    value = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+                except (TypeError, ValueError, OverflowError):
+                    pass
+        if value is not None:
+            return value.astimezone(timezone.utc) if value.tzinfo is not None else value
+        # Check this field's parsed form BEFORE trying a later field. A valid
+        # published_parsed must never lose to an updated or created timestamp.
+        parsed = getter(f"{attr}_parsed")
+        if isinstance(parsed, (tuple, list)) and len(parsed) >= 6:
+            try:
+                return datetime(*parsed[:6], tzinfo=timezone.utc)
+            except (TypeError, ValueError, OverflowError):
+                continue
     return None
 
 
