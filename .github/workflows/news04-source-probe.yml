@@ -1,0 +1,37 @@
+name: News04 bounded source metadata - NO DEPLOY
+on:
+  push:
+    branches: [news/sources-identity-20260926-04]
+    paths: ['audit/news04_source_probe.py', '.github/workflows/news04-source-probe.yml']
+permissions:
+  contents: read
+concurrency:
+  group: news04-source-metadata
+  cancel-in-progress: false
+jobs:
+  source-metadata:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install only parser and HTTP dependencies
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/news/sources-identity-20260926-04
+          mkdir -p evidence/wheels
+          python -m pip install feedparser==6.0.11 httpx==0.28.1
+          python -m pip download --no-deps feedparser==6.0.11 sgmllib3k==1.0.0 -d evidence/wheels
+          git rev-parse HEAD > evidence/source-sha.txt
+      - name: Bounded source metadata and article-body checks only
+        run: PYTHONPATH=. python audit/news04_source_probe.py > evidence/source-probe.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: news04-source-metadata
+          path: evidence
+          retention-days: 30
