@@ -41,7 +41,7 @@ jobs:
             subprocess.run(['git','apply','--check',str(patch)],check=True)
             subprocess.run(['git','apply',str(patch)],check=True)
           PY
-          git add collector/detail_enrich.py collector/football_detail_retry.py collector/football_enrichment_cycle.py collector/provider.py tests/test_c18_finished_detail_recovery.py tests/test_c18_recovery_review.py
+          git add collector/detail_enrich.py collector/football_detail_retry.py collector/football_enrichment_cycle.py collector/provider.py tests/test_c18_finished_detail_recovery.py tests/test_c18_review_safety.py
           git diff --cached --check
           git diff --cached > evidence/c18-applied.patch
           python - <<'PY'
@@ -67,7 +67,7 @@ jobs:
           python - <<'PY'
           from pathlib import Path
           paths=Path('audit/football_test_selection.txt').read_text().split()
-          paths+='''tests/test_hidden_football_aliases.py tests/test_fotmob_match_centre.py tests/test_entity_profile_navigation.py tests/test_c14_live_player.py tests/test_canonical_detail.py tests/test_fiba_rich_detail.py tests/test_sofa_rich_detail.py tests/test_c15_live_tables.py tests/test_c15_parent_league_tables.py tests/test_worker_shutdown_handoff.py tests/test_c16_competition_hub.py tests/test_c16_identity_lookup.py tests/test_c17_categories_scorers.py tests/test_c17_review_regressions.py tests/test_c17_production_followup.py tests/test_c17_profile_dates.py tests/test_c17_team_categories.py tests/test_c17_exact_team_id.py tests/test_auth.py tests/test_editorial.py tests/test_rewrite_ai.py tests/test_public_read.py tests/test_taxonomy_resolver.py tests/test_taxonomy_leakage.py tests/test_news_feed_dates.py tests/test_news_deploy_contract.py tests/test_c18_finished_detail_recovery.py tests/test_c18_recovery_review.py'''.split()
+          paths+='''tests/test_hidden_football_aliases.py tests/test_fotmob_match_centre.py tests/test_entity_profile_navigation.py tests/test_c14_live_player.py tests/test_canonical_detail.py tests/test_fiba_rich_detail.py tests/test_sofa_rich_detail.py tests/test_c15_live_tables.py tests/test_c15_parent_league_tables.py tests/test_worker_shutdown_handoff.py tests/test_c16_competition_hub.py tests/test_c16_identity_lookup.py tests/test_c17_categories_scorers.py tests/test_c17_review_regressions.py tests/test_c17_production_followup.py tests/test_c17_profile_dates.py tests/test_c17_team_categories.py tests/test_c17_exact_team_id.py tests/test_auth.py tests/test_editorial.py tests/test_rewrite_ai.py tests/test_public_read.py tests/test_taxonomy_resolver.py tests/test_taxonomy_leakage.py tests/test_news_feed_dates.py tests/test_news_deploy_contract.py tests/test_c18_finished_detail_recovery.py tests/test_c18_review_safety.py'''.split()
           paths=list(dict.fromkeys(paths));assert all(Path(p).is_file() for p in paths)
           Path('evidence/test-selection.txt').write_text('\n'.join(paths)+'\n')
           PY
