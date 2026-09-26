@@ -1,0 +1,129 @@
+name: C17 real deployed acceptance
+on:
+  push:
+    branches: [audit/football-categories-20260926-17]
+    paths: ['.github/workflows/c17-production-acceptance.yml']
+permissions:
+  contents: read
+  actions: read
+jobs:
+  categories-and-scorers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 255f798cdbd8f33139d160aed60c37ef831ce4cf
+          path: runtime
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 36214428569
+          artifact-ids: 10896807899
+          merge-multiple: true
+          path: /tmp/c17-before
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 36205878806
+          artifact-ids: 10892589996
+          merge-multiple: true
+          path: /tmp/c17-source
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: |
+          python -m pip install -r runtime/requirements.txt playwright
+          python -m playwright install --with-deps chromium
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('audit/c17_public_acceptance.py');s=p.read_text();old="',label)";assert s.count(old)==1;s=s.replace(old,"',arg=label)");p.write_text(s)
+          out=Path('/tmp/c17-public');out.mkdir(exist_ok=True);(out/'executed_acceptance.py').write_text(s)
+          PY
+      - run: PYTHONPATH=runtime python audit/c17_public_acceptance.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: c17-production-categories-scorers
+          path: /tmp/c17-public
+          retention-days: 30
+  preserve-live-mobile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: macamala/allball-frontend
+          ref: 878bcc5dd06baee5cc9a1a2e0f18767ec186686c
+          path: frontend
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: |
+          python -m pip install playwright
+          python -m playwright install --with-deps chromium
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('audit/screenshot_production_acceptance.py');s=p.read_text()
+          old=".score-row').first.wait_for(";assert s.count(old)==2
+          s=s.replace(old,".score-row-link[href]').first.wait_for(")
+          needle="   REPORT['browser'][-1]['poll_responses']=requests[before:]";assert s.count(needle)==1
+          s=s.replace(needle,needle+"\n   successful=[r['url'] for r in requests[before:] if r['status']==200]\n   assert any('/sports-data/status-delta?' in u for u in successful)\n   assert any('/sports-data/events?' in u for u in successful)")
+          p.write_text(s);out=Path('/tmp/screenshot-after');out.mkdir(exist_ok=True);(out/'executed_acceptance.py').write_text(s)
+          PY
+      - run: python audit/screenshot_production_acceptance.py
+      - run: python frontend/audit/mobile_standings_browser.py
+        if: always()
+        env:
+          MOBILE_QA_SITE: https://ninkosports.com
+          MOBILE_QA_OUT: /tmp/screenshot-after/standings
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: c17-preserved-live-mobile
+          path: /tmp/screenshot-after
+          retention-days: 30
+  preserve-rich-home-player:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: macamala/allball-frontend
+          ref: 878bcc5dd06baee5cc9a1a2e0f18767ec186686c
+          path: frontend
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: |
+          python -m pip install playwright
+          python -m playwright install --with-deps chromium
+      - run: python audit/checkpoint13_match_acceptance.py
+      - run: python audit/checkpoint14_public_acceptance.py
+        if: always()
+      - run: python frontend/audit/c14_profile_browser.py
+        if: always()
+        env:
+          TARGET_SITE: https://ninkosports.com
+          PROFILE_OUT: /tmp/c17-retained-profiles
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: c17-preserved-rich-home-player
+          path: |
+            /tmp/c13-public
+            /tmp/c14-public
+            /tmp/c17-retained-profiles
+          retention-days: 30
