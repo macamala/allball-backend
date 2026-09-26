@@ -65,6 +65,10 @@ jobs:
             assert s.count(old)==1
             s=s.replace(old,new)
           p.write_text(s)
+          p=Path('collector/competition_identity.py');s=p.read_bytes()
+          block=b"    from collector.football_category import label_category_conflict\r\n    if _canonical_same_sport(competition_id, 'football') and label_category_conflict(label, competition_id):\r\n        return False\r\n"
+          assert s.count(block)==1
+          p.write_bytes(s.replace(block,block.replace(b'\r\n',b'\n')))
           PY
           git add -N collector/football_category.py collector/football_category_catalog.json collector/football_scorers.py tests/test_c17_categories_scorers.py audit/c17_native_replay.py
           git diff --check
