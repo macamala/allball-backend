@@ -1,0 +1,32 @@
+name: C17 women club identity read-only proof
+on:
+  push:
+    branches: [audit/football-categories-20260926-17]
+    paths: ['.github/workflows/c17-team-identity-probe.yml']
+permissions:
+  contents: read
+jobs:
+  read:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - run: |
+          mkdir evidence
+          python - <<'PY'
+          import json,urllib.request,concurrent.futures
+          from pathlib import Path
+          api='https://allball-backend-production.up.railway.app'
+          urls={'women-team':api+'/sports-data/teams/4500?sport=football&name=Aalesund','native-team':'https://www.fotmob.com/api/data/teams?id=4500'}
+          def get(pair):
+            k,u=pair
+            try:
+              with urllib.request.urlopen(u,timeout=35) as r:d={'http':r.status,'url':u,'payload':json.load(r)}
+            except Exception as e:d={'url':u,'error':str(e)}
+            Path('evidence/'+k+'.json').write_text(json.dumps(d,ensure_ascii=False));return k,d.get('http')
+          print(list(concurrent.futures.ThreadPoolExecutor(max_workers=2).map(get,urls.items())))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: c17-women-team-identity
+          path: evidence
+          retention-days: 30
