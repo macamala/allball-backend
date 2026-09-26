@@ -1,0 +1,130 @@
+name: C21 News03 C20 integration - NO DEPLOY
+on:
+  push:
+    branches: [integration/news03-c20-20260926-21]
+    paths: ['.github/workflows/c21-news03-integration.yml']
+permissions:
+  contents: write
+  actions: read
+concurrency:
+  group: c21-news03-${{ github.ref }}
+  cancel-in-progress: false
+defaults:
+  run:
+    shell: bash
+jobs:
+  combined-backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Integrate exact reviewed News delta; assert every other C20 file unchanged
+        run: |
+          set -euo pipefail
+          python audit/c21_integrate_news03.py
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 36227263924
+          artifact-ids: 10901415327
+          merge-multiple: true
+          path: /tmp/c20-retained
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 36225363508
+          artifact-ids: 10901105275
+          merge-multiple: true
+          path: /tmp/news03-retained
+      - name: Build unchanged News02 recipe from integrated source
+        run: |
+          set -euo pipefail
+          docker build --progress=plain -f deploy/news/Dockerfile -t ninko-c21:offline . 2>&1 | tee evidence/image-build.log
+          docker image inspect ninko-c21:offline > evidence/image-inspect.json
+          docker run --rm --network none ninko-c21:offline python -m pip freeze > evidence/pip-freeze.txt
+          docker run --rm --network none ninko-c21:offline python deploy/news/preflight.py --check > evidence/image-preflight.json
+      - name: Real image must refuse unconfigured startup before News execution
+        run: |
+          set -euo pipefail
+          set +e
+          docker run --rm --network none ninko-c21:offline > evidence/unconfigured-start.json 2>&1
+          status=$?
+          set -e
+          test "$status" -eq 78
+          docker run --rm --network none -e DATABASE_URL=sqlite:///:memory: ninko-c21:offline python -c 'import bot.scheduler,bot.pipeline,repair_content; assert bot.pipeline.run_pipeline()==0; print("NEWS_IMPORTS_NO_INGEST_OK")' > evidence/image-imports.txt
+      - name: Union of latest C20 and News03 suites plus new release boundary tests
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          paths=set(Path('/tmp/c20-retained/test-selection.txt').read_text().split())
+          paths.update(Path('/tmp/news03-retained/test-selection.txt').read_text().split())
+          paths.add('tests/test_c21_news03_release.py')
+          assert len(paths)==80,len(paths)
+          assert all(Path(p).is_file() for p in paths)
+          Path('evidence/test-selection.txt').write_text('\n'.join(sorted(paths))+'\n')
+          PY
+          docker run --rm --network none --user "$(id -u):$(id -g)" -v "$PWD:/work:ro" -v "$PWD/evidence:/evidence" -w /work ninko-c21:offline python -m pytest -q -p no:cacheprovider $(cat evidence/test-selection.txt) --junitxml=/evidence/tests.xml 2>&1 | tee evidence/tests.log
+      - name: Verify actual totals and exact source; save only isolated tested candidate
+        run: |
+          set -euo pipefail
+          python audit/c21_integrate_news03.py --verify
+          python - <<'PY'
+          import json,xml.etree.ElementTree as E
+          from pathlib import Path
+          root=E.parse('evidence/tests.xml')
+          counts={k:len(list(root.iter(v))) for k,v in [('tests','testcase'),('failures','failure'),('errors','error'),('skipped','skipped')]}
+          assert counts['tests']>=1316 and not any(counts[k] for k in ('failures','errors','skipped')),counts
+          Path('evidence/test-summary.json').write_text(json.dumps(counts,indent=2))
+          print(counts)
+          PY
+          git diff --check
+          git config user.name 'NinkoSports integration checks'
+          git config user.email '79318740+macamala@users.noreply.github.com'
+          git add bot/feeds.py bot/fetch_sources.py bot/news_budget.py bot/news_feed_http.py bot/news_policy.py bot/news_source_catalog.py bot/news_verified_feeds.py bot/pipeline.py bot/rewrite_ai.py repair_content.py tests/test_news03_budget.py tests/test_news03_http.py tests/test_news03_integration.py tests/test_news03_policy.py
+          git commit -m 'Prepare exact News03 delta on C20 with all existing Live Scores and News02 guards retained'
+          git push origin HEAD:refs/heads/integration/news03-c20-20260926-21
+          git rev-parse HEAD > evidence/candidate-sha.txt
+          git archive --format=tar.gz HEAD > evidence/tested-source.tar.gz
+          git diff ba0b70017fa2d96717ce4c4f8e40e2ac95ec3726 HEAD > evidence/integrated-source.patch
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: c21-combined-news03-backend
+          path: evidence
+          retention-days: 30
+  unchanged-frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: macamala/allball-frontend
+          ref: 7183733e5eed7dae566aeaf1632fc757c547cc4c
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci
+      - name: Retained frontend tests and polling policies
+        run: |
+          set -euo pipefail
+          mkdir evidence
+          git rev-parse HEAD > evidence/frontend-sha.txt
+          npm test -- --reporter=default --reporter=junit --outputFile=evidence/tests.xml
+          node audit/c18_match_refresh_policy.mjs > evidence/poll-policy.txt
+          node audit/c18_request_gate.mjs > evidence/request-ownership.txt
+      - name: Build unchanged production frontend; no deployment or public request
+        run: npm run build
+        env:
+          VITE_API_URL: https://allball-backend-production.up.railway.app
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: c21-unchanged-frontend
+          path: evidence
+          retention-days: 30
