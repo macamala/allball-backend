@@ -10,6 +10,7 @@ import math
 import re
 import threading
 import time
+from collector.profile_dates import profile_date
 
 _CACHE = OrderedDict()
 _LOCK = threading.RLock()
@@ -81,8 +82,8 @@ def parse_profile(root, player_id, name):
     career = []
     for row in history.get('teamEntries') or []:
         if not row.get('teamId') or not row.get('team'): continue
-        career.append({'team_id':str(row['teamId']), 'team':row['team'], 'start':(row.get('startDate') or '')[:10] or None,
-                       'end':(row.get('endDate') or '')[:10] or None, 'active':row.get('active') is True,
+        career.append({'team_id':str(row['teamId']), 'team':row['team'], 'start':profile_date(row.get('startDate')),
+                       'end':profile_date(row.get('endDate')), 'active':row.get('active') is True,
                        'appearances':_text(row.get('appearances')), 'goals':_text(row.get('goals')), 'assists':_text(row.get('assists')),
                        'transfer_type':_text((row.get('transferType') or {}).get('text')), 'uncertain':row.get('hasUncertainData') is True})
     if career: out['career'] = career[:40]
