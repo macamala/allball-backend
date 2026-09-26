@@ -1,0 +1,47 @@
+name: C17 verified scorer source shapes
+on:
+  push:
+    branches: [audit/football-categories-20260926-17]
+    paths: ['.github/workflows/c17-scorer-source.yml']
+permissions:
+  contents: read
+  actions: read
+jobs:
+  evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 36206124825
+          name: c17-native-competition-identities
+          path: /tmp/native
+      - run: |
+          mkdir -p /tmp/c17-scorers
+          python - <<'PY'
+          import json,re,urllib.request,concurrent.futures
+          from pathlib import Path
+          from datetime import datetime,timezone
+          out=Path('/tmp/c17-scorers');urls=[]
+          for pid in ('108','126','331','9906','230','9907'):
+            p=json.loads(Path('/tmp/native',pid+'.json').read_text())['payload']
+            assert str(p['details']['id'])==pid
+            for stat in p.get('stats',{}).get('players',[]):
+              if stat.get('name')=='goals':
+                url=stat.get('fetchAllUrl','');assert re.fullmatch(r'https://data\.fotmob\.com/stats/'+pid+r'/season/\d+/goals\.json',url)
+                urls.append((pid,url,p['details']));break
+          def get(item):
+            pid,url,details=item;d={'url':url,'league':details,'at':datetime.now(timezone.utc).isoformat()}
+            try:
+              with urllib.request.urlopen(urllib.request.Request(url,headers={'Accept':'application/json'}),timeout=15) as r:d.update(http=r.status,payload=json.load(r))
+            except Exception as e:d['error']=str(e)
+            (out/(pid+'.json')).write_text(json.dumps(d,ensure_ascii=False,indent=2));return {'parent':pid,'http':d.get('http'),'root_type':type(d.get('payload')).__name__}
+          with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:print(list(pool.map(get,urls)))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: c17-native-scorer-evidence
+          path: /tmp/c17-scorers
+          retention-days: 30
