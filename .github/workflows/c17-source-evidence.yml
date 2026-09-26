@@ -1,0 +1,60 @@
+name: C17 exact source and football categories
+on:
+  push:
+    branches: [audit/football-categories-20260926-17]
+    paths: ['.github/workflows/c17-source-evidence.yml']
+permissions:
+  contents: read
+jobs:
+  evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 52272139d4ecaffbe84cc4709e25c0b0ed3abb56
+          path: backend
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: macamala/allball-frontend
+          ref: 0b26a18f5a1d0a5b8ccc8adc57b8c9d5d17d2f13
+          path: frontend
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: audit/football-recovery-20260925-10
+          path: previous-audit
+          persist-credentials: false
+      - run: |
+          mkdir -p /tmp/c17-evidence
+          git -C backend archive --format=tar.gz HEAD > /tmp/c17-evidence/backend.tar.gz
+          git -C frontend archive --format=tar.gz HEAD > /tmp/c17-evidence/frontend.tar.gz
+          git -C previous-audit archive --format=tar.gz HEAD audit .github/workflows docs/checkpoints > /tmp/c17-evidence/audit.tar.gz
+          git -C backend rev-parse HEAD > /tmp/c17-evidence/backend-sha.txt
+          git -C frontend rev-parse HEAD > /tmp/c17-evidence/frontend-sha.txt
+          python - <<'PY'
+          import json,urllib.request,concurrent.futures
+          from pathlib import Path
+          from datetime import datetime,timezone
+          from urllib.parse import urlencode
+          out=Path('/tmp/c17-evidence');api='https://allball-backend-production.up.railway.app'
+          urls={'public-cohort':api+'/sports-data/events?'+urlencode({'sport':'football','unlimited':1,'date_from':'2026-09-24T14:00:00Z','date_to':'2026-09-28T13:59:59Z'}),'public-live':api+'/sports-data/live','toppserien-table':api+'/sports-data/standings?league=football-nor-toppserien','mexico-table':api+'/sports-data/standings?league=mexico-liga-mx'}
+          urls.update({'native-'+d:'https://www.fotmob.com/api/data/matches?date='+d for d in ('20260925','20260926','20260927','20260928')})
+          def get(pair):
+            name,url=pair;r={'url':url,'started_at':datetime.now(timezone.utc).isoformat()}
+            try:
+              with urllib.request.urlopen(urllib.request.Request(url,headers={'Accept':'application/json'}),timeout=30) as resp:r.update(http=resp.status,payload=json.load(resp))
+            except Exception as e:r['error']=str(e)
+            r['finished_at']=datetime.now(timezone.utc).isoformat()
+            (out/(name+'.json')).write_text(json.dumps(r,ensure_ascii=False,indent=2));return name,{k:v for k,v in r.items() if k!='payload'}
+          with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:summary=dict(pool.map(get,urls.items()))
+          print(json.dumps(summary,indent=2))
+          PY
+          cd /tmp/c17-evidence && sha256sum *.gz *.json > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: c17-exact-source-categories
+          path: /tmp/c17-evidence
+          retention-days: 30
