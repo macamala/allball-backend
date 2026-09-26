@@ -1,0 +1,126 @@
+name: C22 News startup safety - NO DEPLOY
+on:
+  push:
+    branches: [fix/news03-startup-c22-20260926]
+    paths: ['.github/workflows/c22-news-startup.yml']
+permissions:
+  contents: write
+  actions: read
+concurrency:
+  group: c22-news-startup-${{ github.ref }}
+  cancel-in-progress: false
+defaults:
+  run:
+    shell: bash
+jobs:
+  offline-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply only checksum-pinned News review and protect other source
+        run: |
+          set -euo pipefail
+          python audit/c22_apply_review.py --apply
+          git diff --check
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 36229950821
+          artifact-ids: 10901897318
+          merge-multiple: true
+          path: /tmp/c21-retained
+      - name: Build actual News image using unchanged allowlisted recipe
+        run: |
+          set -euo pipefail
+          docker build --progress=plain -f deploy/news/Dockerfile -t ninko-c22:offline . 2>&1 | tee evidence/image-build.log
+          docker image inspect ninko-c22:offline > evidence/image-inspect.json
+          docker run --rm --network none ninko-c22:offline python deploy/news/preflight.py --check > evidence/image-preflight.json
+          docker run --rm --network none ninko-c22:offline python -m pip freeze > evidence/pip-freeze.txt
+      - name: Reproduce five assertions on the unchanged C21 implementation
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/c22-candidate
+          for name in bot/scheduler.py bot/news_budget.py deploy/news/preflight.py; do
+            mkdir -p "/tmp/c22-candidate/$(dirname "$name")"
+            cp "$name" "/tmp/c22-candidate/$name"
+            git show "833d24c354fe326da64ed2a4a9478eaa3b56ea92:$name" > "$name"
+          done
+          restore() { for name in bot/scheduler.py bot/news_budget.py deploy/news/preflight.py; do cp "/tmp/c22-candidate/$name" "$name"; done; }
+          trap restore EXIT
+          set +e
+          docker run --rm --network none --user "$(id -u):$(id -g)" -v "$PWD:/work:ro" -v "$PWD/evidence:/evidence" -w /work ninko-c22:offline python -m pytest -q -p no:cacheprovider tests/test_c22_news_runtime.py::test_missing_explicit_limits_never_inherit_defaults tests/test_c22_news_runtime.py::test_legacy_ack_is_not_approval_of_missing_request_limits tests/test_c22_news_runtime.py::test_unconfigured_direct_scheduler_import_and_main_do_not_import_database tests/test_c22_news_scheduler.py::test_historical_off_scheduler_does_not_open_legacy_index_database --junitxml=/evidence/baseline.xml > evidence/baseline.log 2>&1
+          status=$?
+          set -e
+          test "$status" -eq 1
+          python - <<'PY'
+          import xml.etree.ElementTree as E,json
+          from pathlib import Path
+          tree=E.parse('evidence/baseline.xml')
+          report={key:len(list(tree.iter(tag))) for key,tag in [('tests','testcase'),('failures','failure'),('errors','error'),('skipped','skipped')]}
+          assert report=={'tests':5,'failures':5,'errors':0,'skipped':0},report
+          Path('evidence/baseline-summary.json').write_text(json.dumps(report,indent=2))
+          PY
+      - name: Full retained C21 and C22 regression selection with real dependencies
+        run: |
+          set -euo pipefail
+          python audit/c22_apply_review.py --verify
+          python - <<'PY'
+          from pathlib import Path
+          names=set(Path('/tmp/c21-retained/test-selection.txt').read_text().split())
+          names.update(['tests/test_c22_news_runtime.py','tests/test_c22_news_scheduler.py'])
+          assert len(names)==82,len(names)
+          assert all(Path(n).is_file() for n in names)
+          Path('evidence/test-selection.txt').write_text('\n'.join(sorted(names))+'\n')
+          PY
+          docker run --rm --network none --user "$(id -u):$(id -g)" -v "$PWD:/work:ro" -v "$PWD/evidence:/evidence" -w /work ninko-c22:offline python -m pytest -q -p no:cacheprovider $(cat evidence/test-selection.txt) --junitxml=/evidence/tests.xml 2>&1 | tee evidence/tests.log
+      - name: Actual default and direct scheduler entrypoints must refuse startup
+        run: |
+          set -euo pipefail
+          set +e
+          docker run --rm --network none ninko-c22:offline > evidence/default-start.json 2>&1
+          default_status=$?
+          docker run --rm --network none ninko-c22:offline python -m bot.scheduler > evidence/direct-start.txt 2>&1
+          direct_status=$?
+          set -e
+          test "$default_status" -eq 78
+          test "$direct_status" -eq 78
+      - name: Real CI bind mount survives two test containers without AI calls
+        run: |
+          set -euo pipefail
+          fixture=$(mktemp -d)
+          chmod 777 "$fixture"
+          for phase in first second; do
+            docker run --rm --network none --mount "type=bind,source=$fixture,target=/news-fixture" --mount "type=bind,source=$PWD/audit/c22_image_storage_probe.py,target=/probe.py,readonly" -e PYTHONPATH=/app -e NEWS_AI_LEDGER_PATH=/news-fixture/budget.sqlite -e RAILWAY_VOLUME_MOUNT_PATH=/news-fixture ninko-c22:offline python /probe.py "$phase" > "evidence/storage-$phase.json"
+          done
+          docker run --rm --network none --mount "type=bind,source=$PWD/audit/c22_image_storage_probe.py,target=/probe.py,readonly" -e PYTHONPATH=/app -e NEWS_AI_LEDGER_PATH=/news-fixture/budget.sqlite -e RAILWAY_VOLUME_MOUNT_PATH=/news-fixture ninko-c22:offline python /probe.py unmounted > evidence/storage-unmounted.json
+      - name: Save tested candidate to this isolated branch only
+        run: |
+          set -euo pipefail
+          python audit/c22_apply_review.py --verify
+          python - <<'PY'
+          import xml.etree.ElementTree as E,json
+          from pathlib import Path
+          root=E.parse('evidence/tests.xml')
+          report={key:len(list(root.iter(tag))) for key,tag in [('tests','testcase'),('failures','failure'),('errors','error'),('skipped','skipped')]}
+          assert report['tests']>=1390 and not any(report[k] for k in ('failures','errors','skipped')),report
+          Path('evidence/test-summary.json').write_text(json.dumps(report,indent=2))
+          print(report)
+          PY
+          git diff --check
+          git config user.name 'NinkoSports integration checks'
+          git config user.email '79318740+macamala@users.noreply.github.com'
+          git add bot/news_budget.py deploy/news/preflight.py tests/test_news_deploy_contract.py
+          git commit -m 'Require explicit News request caps and mounted ledger before starting guarded scheduler'
+          git push origin HEAD:refs/heads/fix/news03-startup-c22-20260926
+          git rev-parse HEAD > evidence/candidate-sha.txt
+          git archive --format=tar.gz HEAD > evidence/tested-source.tar.gz
+          git diff 833d24c354fe326da64ed2a4a9478eaa3b56ea92 HEAD > evidence/c22-source.patch
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: c22-news-startup-evidence
+          path: evidence
+          retention-days: 30
