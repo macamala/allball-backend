@@ -29,7 +29,7 @@ jobs:
             assert str(p['details']['id'])==pid
             for stat in p.get('stats',{}).get('players',[]):
               if stat.get('name')=='goals':
-                url=stat.get('fetchAllUrl','');assert re.fullmatch(r'https://data\.fotmob\.com/stats/'+pid+r'/season/\d+/goals\.json',url)
+                url=stat.get('fetchAllUrl','');assert re.fullmatch(r'https://data\.fotmob\.com/stats/'+pid+r'/season/\d+(?:/(?:Apertura|Clausura))?/goals\.json',url)
                 urls.append((pid,url,p['details']));break
           def get(item):
             pid,url,details=item;d={'url':url,'league':details,'at':datetime.now(timezone.utc).isoformat()}
