@@ -1,0 +1,74 @@
+name: C17 career date regression gate
+on:
+  push:
+    branches: [fix/football-c17-career-dates]
+    paths: ['.github/workflows/c17-career-date-gate.yml']
+permissions:
+  contents: write
+  actions: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 36215852994
+          artifact-ids: 10897885746
+          merge-multiple: true
+          path: /tmp/captured
+      - name: Apply reviewed two-field date correction
+        run: |
+          mkdir evidence
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('collector/player_enrichment.py');s=p.read_text()
+          for old,new in [('import time\n','import time\nfrom collector.profile_dates import profile_date\n'),("(row.get('startDate') or '')[:10] or None","profile_date(row.get('startDate'))"),("(row.get('endDate') or '')[:10] or None","profile_date(row.get('endDate'))")]:
+            assert s.count(old)==1
+            s=s.replace(old,new)
+          p.write_text(s)
+          PY
+          git diff --check
+          python -m pip install -r requirements.txt
+      - name: Complete retained regression selection
+        run: python -m pytest -q $(cat audit/football_test_selection.txt) tests/test_hidden_football_aliases.py tests/test_fotmob_match_centre.py tests/test_entity_profile_navigation.py tests/test_c14_live_player.py tests/test_canonical_detail.py tests/test_fiba_rich_detail.py tests/test_sofa_rich_detail.py tests/test_c15_live_tables.py tests/test_c15_parent_league_tables.py tests/test_worker_shutdown_handoff.py tests/test_c16_competition_hub.py tests/test_c16_identity_lookup.py tests/test_c17_categories_scorers.py tests/test_c17_review_regressions.py tests/test_c17_production_followup.py tests/test_c17_profile_dates.py --junitxml=evidence/tests.xml
+      - name: Actual captured women and men player source replay
+        run: |
+          PYTHONPATH=. python - <<'PY'
+          import json
+          from pathlib import Path
+          from collector.player_enrichment import parse_profile
+          out=[]
+          for pid,name,club in [('1090170','Katarina Dybvik Sunde','4500'),('1263510','Tom Lonergan','6042')]:
+            source=json.loads(Path('/tmp/captured/native-profile-'+pid+'.json').read_text())
+            assert source['http']==200
+            facts=parse_profile(source['payload'],pid,name)
+            assert facts['current_club']['id']==club and facts['birth_date'] and facts['career'] and facts['season_summary']
+            if pid=='1090170':
+              assert [(r['start'],r['end']) for r in facts['career']]==[('2025-01-01',None),('2021-03-01','2024-12-31'),(None,None)]
+            out.append({'id':pid,'name':name,'facts':facts})
+          Path('evidence/real-source-replay.json').write_text(json.dumps(out,ensure_ascii=False,indent=2))
+          PY
+      - name: Publish only the fully tested isolated candidate
+        run: |
+          git config user.name 'NinkoSports regression checks'
+          git config user.email '79318740+macamala@users.noreply.github.com'
+          git add collector/player_enrichment.py
+          git commit -m 'Preserve verified player facts when native career dates are Unix milliseconds'
+          git push origin HEAD:refs/heads/fix/football-c17-career-dates
+          git rev-parse HEAD > evidence/candidate.txt
+          git diff 6a849ddbbaa0b7e3d4c44b4bb713978cf094a5e0 HEAD -- collector tests > evidence/source.patch
+          git diff --name-only 6a849ddbbaa0b7e3d4c44b4bb713978cf094a5e0 HEAD -- collector tests | xargs sha256sum > evidence/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: c17-career-date-gated
+          path: evidence
+          retention-days: 30
