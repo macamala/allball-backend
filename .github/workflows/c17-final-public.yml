@@ -1,0 +1,125 @@
+name: C17B final real production acceptance
+on:
+  push:
+    branches: [audit/football-categories-20260926-17]
+    paths: ['.github/workflows/c17-final-public.yml']
+permissions:
+  contents: read
+  actions: read
+jobs:
+  categories-scorers-profiles:
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 6a849ddbbaa0b7e3d4c44b4bb713978cf094a5e0
+          path: runtime
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 36214428569
+          artifact-ids: 10896807899
+          merge-multiple: true
+          path: /tmp/c17-before
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 36205878806
+          artifact-ids: 10892589996
+          merge-multiple: true
+          path: /tmp/c17-source
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: |
+          python -m pip install -r runtime/requirements.txt playwright
+          python -m playwright install --with-deps chromium
+          python audit/c17_final_acceptance_prepare.py categories
+      - run: PYTHONPATH=runtime python audit/c17_public_acceptance.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: c17b-final-categories-scorers-profiles
+          path: /tmp/c17-public
+          retention-days: 30
+  retained-public:
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [live, rich]
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: macamala/allball-frontend
+          ref: 9a9d1cc996f746a63d4716043b849a7b12e57538
+          path: frontend
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 36205878806
+          artifact-ids: 10892589996
+          merge-multiple: true
+          path: /tmp/saved
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 36214428569
+          artifact-ids: 10896807899
+          merge-multiple: true
+          path: /tmp/c17-before
+      - name: Restore exact retained public checks
+        run: |
+          mkdir prior
+          tar -xzf /tmp/saved/audit.tar.gz -C prior
+          test -f prior/audit/screenshot_production_acceptance.py
+          test -f prior/audit/checkpoint13_match_acceptance.py
+          test -f prior/audit/checkpoint14_public_acceptance.py
+          python audit/c17_final_acceptance_prepare.py live
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: |
+          python -m pip install playwright
+          python -m playwright install --with-deps chromium
+      - name: Real live board polls and verified match statuses
+        if: matrix.suite == 'live'
+        run: python prior/audit/screenshot_production_acceptance.py
+      - name: Responsive standings
+        if: always() && matrix.suite == 'live'
+        run: python frontend/audit/mobile_standings_browser.py
+        env:
+          MOBILE_QA_SITE: https://ninkosports.com
+          MOBILE_QA_OUT: /tmp/screenshot-after/standings
+      - name: Real detailed match and navigation
+        if: matrix.suite == 'rich'
+        run: python prior/audit/checkpoint13_match_acceptance.py
+      - name: Home and verified existing players
+        if: always() && matrix.suite == 'rich'
+        run: python prior/audit/checkpoint14_public_acceptance.py
+      - name: Responsive existing player profile and club navigation
+        if: always() && matrix.suite == 'rich'
+        run: python frontend/audit/c14_profile_browser.py
+        env:
+          TARGET_SITE: https://ninkosports.com
+          PROFILE_OUT: /tmp/c17-retained-profiles
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: c17b-final-retained-${{ matrix.suite }}
+          path: |
+            /tmp/screenshot-after
+            /tmp/c13-public
+            /tmp/c14-public
+            /tmp/c17-retained-profiles
+          retention-days: 30
