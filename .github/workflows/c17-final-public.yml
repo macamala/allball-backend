@@ -1,4 +1,4 @@
-name: C17B final real production acceptance
+name: C17 final production identity acceptance
 on:
   push:
     branches: [audit/football-categories-20260926-17]
@@ -16,7 +16,7 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@v4
         with:
-          ref: 6a849ddbbaa0b7e3d4c44b4bb713978cf094a5e0
+          ref: b221c579387704e12e8a000414d97102b28e9b6c
           path: runtime
           persist-credentials: false
       - uses: actions/download-artifact@v4
@@ -40,11 +40,12 @@ jobs:
           python -m pip install -r runtime/requirements.txt playwright
           python -m playwright install --with-deps chromium
           python audit/c17_final_acceptance_prepare.py categories
+          python audit/c17_final_identity_acceptance_prepare.py
       - run: PYTHONPATH=runtime python audit/c17_public_acceptance.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: c17b-final-categories-scorers-profiles
+          name: c17-final-categories-scorers-profiles
           path: /tmp/c17-public
           retention-days: 30
   retained-public:
@@ -116,7 +117,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: c17b-final-retained-${{ matrix.suite }}
+          name: c17-final-retained-${{ matrix.suite }}
           path: |
             /tmp/screenshot-after
             /tmp/c13-public
