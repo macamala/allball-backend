@@ -23,7 +23,11 @@ def good_env():
             'RESULTS_SCHEDULER_ENABLED':'0','RESULTS_WRITE_ENABLED':'0',
             'DATABASE_URL':'postgresql://user:DO_NOT_LOG@db.example/news',
             'NEWS_FETCH_INTERVAL_MINUTES':'10','NEWS_MAX_AI_ARTICLES':'2',
-            'NEWS_LEGACY_REPAIR_ACK':'1'}
+            'NEWS_LEGACY_REPAIR_ACK':'1',
+            'NEWS_AI_MAX_REQUESTS_PER_RUN':'2','NEWS_AI_MAX_REQUESTS_PER_DAY':'3',
+            'NEWS_HISTORICAL_REPAIR_ENABLED':'0','NEWS_EXPANDED_FEEDS_ENABLED':'0',
+            'OPENAI_API_KEY':'FIXTURE_ONLY', 'NEWS_AI_LEDGER_PATH':'/news-data/budget.sqlite',
+            'RAILWAY_VOLUME_MOUNT_PATH':'/news-data'}
 
 
 def test_artifact_inspection_never_imports_backend_or_changes_env(tmp_path, monkeypatch):
@@ -106,6 +110,9 @@ def test_missing_flags_do_not_inherit_dangerous_defaults(flag):
 def test_enabled_guard_executes_only_existing_news_entrypoint(tmp_path,monkeypatch,capsys):
     root=artifact(tmp_path);calls=[];dirs=[]
     monkeypatch.setattr(guard.os,'chdir',lambda path:dirs.append(path))
+    # This remains an exec-target unit test; actual mounts have dedicated tests.
+    import news_runtime
+    monkeypatch.setattr(news_runtime,'storage_errors',lambda env:[])
     assert guard.main(['--run'],root=root,env=good_env(),finder=lambda n:object(),exec_fn=lambda *a:calls.append(a))==0
     assert calls==[(sys.executable,[sys.executable,'-m','bot.scheduler'])]
     assert dirs==[root] and 'DO_NOT_LOG' not in capsys.readouterr().out

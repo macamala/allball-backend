@@ -78,8 +78,11 @@ class AiRequestBudget:
 
 def configured_budget(max_articles):
     try:
-        requests = int(os.environ.get('NEWS_AI_MAX_REQUESTS_PER_RUN', str(max_articles)))
-        daily = int(os.environ.get('NEWS_AI_MAX_REQUESTS_PER_DAY', '40'))
+        from news_runtime import request_limits
+        limits = request_limits(os.environ)
+        if limits is None:
+            return AiRequestBudget(0)
+        requests, daily = limits
         return AiRequestBudget(requests, os.environ.get('NEWS_AI_LEDGER_PATH'), daily)
     except (TypeError, ValueError):
         return AiRequestBudget(0)

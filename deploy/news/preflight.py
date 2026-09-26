@@ -13,7 +13,7 @@ from urllib.parse import urlsplit
 ROOT = Path(__file__).resolve().parents[2]
 NEWS_SERVICE_ID = "be857be7-a029-4663-81c7-bcde75efc482"
 REQUIRED_FILES = (
-    "requirements.txt", "database.py", "models.py", "public_index.py",
+    "requirements.txt", "news_runtime.py", "database.py", "models.py", "public_index.py",
     "public_read.py", "editorial.py", "taxonomy_resolver.py", "repair_content.py",
     "bot/__init__.py", "bot/scheduler.py", "bot/fetch_sources.py", "bot/extract.py",
     "bot/feeds.py", "bot/rewrite_ai.py", "sports_registry/__init__.py",
@@ -82,6 +82,10 @@ def runtime_errors(env) -> list[str]:
             errors.append(f"missing_or_invalid_integer:{flag}")
     if env.get("NEWS_LEGACY_REPAIR_ACK") != "1":
         errors.append("legacy_repair_cost_and_write_review_required")
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    from news_runtime import configuration_errors
+    errors.extend(configuration_errors(env))
     return errors
 
 
@@ -96,6 +100,9 @@ def main(argv=None, *, root=None, env=None, finder=None, exec_fn=None) -> int:
     report = inspect_artifact(root, finder=finder or importlib.util.find_spec)
     if args.run:
         report["errors"].extend(runtime_errors(env))
+        if not report["errors"]:
+            from news_runtime import storage_errors
+            report["errors"].extend(storage_errors(env))
     report["ready_for_requested_mode"] = not report["errors"]
     print(json.dumps(report, sort_keys=True), flush=True)
     if report["errors"]:
