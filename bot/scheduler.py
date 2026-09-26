@@ -1,4 +1,7 @@
-"""Guarded News scheduling; importing this module performs no ingestion or DB work."""
+"""Guarded News scheduling; importing this module performs no ingestion or DB work.
+
+Policy: never mass-rewrite historical articles. Explicit maintenance is bounded.
+"""
 import logging
 import os
 
