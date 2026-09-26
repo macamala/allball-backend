@@ -1,0 +1,36 @@
+name: News04 additional source metadata - NO DEPLOY
+on:
+  push:
+    branches: [news/sources-identity-20260926-04]
+    paths: ['audit/news04_additional_sources.py', '.github/workflows/news04-additional-sources.yml']
+permissions:
+  contents: read
+concurrency:
+  group: news04-additional-metadata
+  cancel-in-progress: false
+jobs:
+  source-metadata:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install parser and HTTP dependencies
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/news/sources-identity-20260926-04
+          mkdir -p evidence
+          python -m pip install feedparser==6.0.11 httpx==0.28.1
+          git rev-parse HEAD > evidence/source-sha.txt
+      - name: New source metadata checks only
+        run: PYTHONPATH=. python audit/news04_additional_sources.py > evidence/source-probe.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: news04-additional-sources
+          path: evidence
+          retention-days: 30
