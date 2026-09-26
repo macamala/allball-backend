@@ -1,0 +1,66 @@
+name: C17 retained real public checks
+on:
+  push:
+    branches: [audit/football-categories-20260926-17]
+    paths: ['.github/workflows/c17-retained-public.yml']
+permissions:
+  contents: read
+  actions: read
+jobs:
+  retained-public:
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [live, rich]
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 36205878806
+          artifact-ids: 10892589996
+          merge-multiple: true
+          path: /tmp/saved
+      - name: Restore saved prior audit scripts, not runtime source
+        run: |
+          mkdir -p prior
+          tar -xzf /tmp/saved/audit.tar.gz -C prior
+          test -f prior/audit/checkpoint13_match_acceptance.py
+          test -f prior/audit/checkpoint14_public_acceptance.py
+          test -f prior/audit/screenshot_production_acceptance.py
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install browser and retain prior skeleton-versus-real-row correction
+        run: |
+          python -m pip install playwright
+          python -m playwright install --with-deps chromium
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('prior/audit/screenshot_production_acceptance.py');s=p.read_text()
+          old=".score-row').first.wait_for(";assert s.count(old)==2
+          s=s.replace(old,".score-row-link[href]').first.wait_for(")
+          needle="   REPORT['browser'][-1]['poll_responses']=requests[before:]";assert s.count(needle)==1
+          s=s.replace(needle,needle+"\n   successful=[r['url'] for r in requests[before:] if r['status']==200]\n   assert any('/sports-data/status-delta?' in u for u in successful)\n   assert any('/sports-data/events?' in u for u in successful)")
+          compile(s,str(p),'exec');p.write_text(s)
+          out=Path('/tmp/screenshot-after');out.mkdir(exist_ok=True);(out/'executed_acceptance.py').write_text(s)
+          PY
+      - name: Actual score guards, browser board and network polling
+        if: matrix.suite == 'live'
+        run: python prior/audit/screenshot_production_acceptance.py
+      - name: Actual detailed match and player navigation
+        if: matrix.suite == 'rich'
+        run: python prior/audit/checkpoint13_match_acceptance.py
+      - name: Actual home rail and player API regression
+        if: always() && matrix.suite == 'rich'
+        run: python prior/audit/checkpoint14_public_acceptance.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: c17-retained-public-${{ matrix.suite }}
+          path: |
+            /tmp/screenshot-after
+            /tmp/c13-public
+            /tmp/c14-public
+          retention-days: 30
