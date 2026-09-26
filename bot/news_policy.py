@@ -112,7 +112,9 @@ def original_draft_reason(draft, source_title, source_body):
     numbers = lambda text: set(re.findall(r'(?<!\w)\d+(?:[.,:/–-]\d+)*(?:%|\b)', text))
     if numbers(output) - numbers(source): return 'unsupported_number'
     folded_output = output.casefold()
-    for name in protected_proper_names(source):
+    # Writer input is intentionally bounded; do not require a name the model never saw.
+    protected_source = f'{source_title}\n{(source_body or "")[:6000]}'
+    for name in protected_proper_names(protected_source):
         if name.casefold() not in folded_output:
             return 'missing_or_changed_proper_name'
     tokens = lambda text: re.findall(r"[\w]+", text.lower())
