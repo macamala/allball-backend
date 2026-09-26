@@ -209,6 +209,8 @@ def team_profile(
         if matched_side is None:
             continue
         identity = _merge_identity(identity, matched_side)
+        if entity_key and str(matched_side.get("id") or "") == entity_key:
+            identity["id"] = matched_side["id"]
         if not resolved_name:
             resolved_name = _side_name(matched_side)
         cards.append(card)
