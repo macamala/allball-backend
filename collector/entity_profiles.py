@@ -43,10 +43,13 @@ def _side_logo(side: Any) -> str:
 def _event_card(row: SportsEvent) -> Dict[str, Any]:
     participants = load_json(row.participants_json, {}) or {}
     extra = load_json(row.extra_json, {}) or {}
+    from collector.football_category import category_for_event, public_category_projection
+    public_key = public_category_projection(extra, row.country_id) if row.sport_id == 'football' else None
     return {
         "id": row.event_id,
         "sport": row.sport_id,
-        "competition_key": row.competition_id,
+        "competition_key": public_key or row.competition_id,
+        "football_gender": category_for_event(extra, row.competition_id) if row.sport_id == "football" else None,
         "competition": (
             extra.get("public_competition_name")
             or extra.get("source_competition_name")
@@ -173,7 +176,8 @@ def team_profile(
     if sport:
         query = query.filter(SportsEvent.sport_id == sport)
     if competition:
-        query = query.filter(SportsEvent.competition_id == competition)
+        from collector.football_category import competition_scope_candidates
+        query = query.filter(competition_scope_candidates(db, competition))
     # Narrow before the limit so unrelated future fixtures cannot evict history.
     import json
     probes = [v for v in (entity_key, name) if v]
@@ -186,8 +190,15 @@ def team_profile(
     cards: List[Dict[str, Any]] = []
     competition_ids: List[str] = []
     resolved_name = name
+    from collector.team_category import football_profile_category, allowed_category
+    football_category = football_profile_category(rows, entity_key, name)
 
     for row in rows:
+        if not allowed_category(row, football_category, entity_key):
+            continue
+        card = _event_card(row)
+        if competition and card["competition_key"] != competition:
+            continue
         participants = load_json(row.participants_json, {}) or {}
         matched_side = None
         for key in ("home", "away", "participant_a", "participant_b"):
@@ -200,9 +211,9 @@ def team_profile(
         identity = _merge_identity(identity, matched_side)
         if not resolved_name:
             resolved_name = _side_name(matched_side)
-        cards.append(_event_card(row))
-        if row.competition_id and row.competition_id not in competition_ids:
-            competition_ids.append(row.competition_id)
+        cards.append(card)
+        if card["competition_key"] and card["competition_key"] not in competition_ids:
+            competition_ids.append(card["competition_key"])
 
     if not cards:
         return {
@@ -237,6 +248,7 @@ def team_profile(
     return {
         "available": True,
         "entity_key": entity_key,
+        "football_gender": football_category or "unknown",
         "sport": sport or (cards[-1].get("sport") if cards else None),
         "team": identity,
         "name": _side_name(identity) or resolved_name,
