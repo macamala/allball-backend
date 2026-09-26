@@ -315,6 +315,9 @@ def player_profile(
     player_key: str,
     name: Optional[str] = None,
     event_id: Optional[str] = None,
+    competition_key: Optional[str] = None,
+    season: str = '',
+    group: str = '',
 ) -> Dict[str, Any]:
     player_key = str(player_key or "").strip()
     name = str(name or "").strip()
@@ -377,6 +380,17 @@ def player_profile(
             if len(appearances) >= 20:
                 break
 
+    if not identity and competition_key and player_key.isdigit() and name and not group:
+        from collector.football_scorers import scorers
+        board = scorers(db, competition_key, season=season, group=group)
+        candidates = [r for r in board.get('rows') or [] if str(r.get('player_id')) == player_key]
+        if (board.get('available') and board.get('competition_key') == competition_key and
+                (not season or board.get('season') == season) and len(candidates) == 1 and
+                _names_equivalent(candidates[0].get('name') or '', name)):
+            scorer = candidates[0]
+            identity = {'id': player_key, 'name': scorer['name'], 'image': scorer.get('photo')}
+            profile_ref = {'family': 'fotmob', 'id': player_key}
+            # Do not misrepresent season totals as a recorded match performance.
     if identity and profile_ref:
         from collector.player_enrichment import enriched_profile
         identity.update(enriched_profile(profile_ref['id'], str(identity.get('name') or name)))

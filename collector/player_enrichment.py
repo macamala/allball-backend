@@ -95,7 +95,7 @@ def parse_profile(root, player_id, name):
 
 
 def enriched_profile(player_id, name, getter=None):
-    """Caller must establish a football native-lineup identity first."""
+    """Caller must establish a verified football lineup or scoped scorer identity first."""
     if not re.fullmatch(r'\d{1,10}', str(player_id or '')) or not name:
         return {}
     key=(str(player_id),name)

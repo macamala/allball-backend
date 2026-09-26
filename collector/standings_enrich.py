@@ -114,6 +114,29 @@ def fotmob_standings_context(db: Session, competition_key: Optional[str]) -> Opt
             "league_name": str(config.get("fotmob_league_name") or competition.name or "").strip(),
             "sport_id": "football",
         }
+    # A repaired public category may not have had its own mapping yet. Do not
+    # create one or override an explicitly disabled mapping from a GET request.
+    if db.query(SportsSourceCompetition).filter_by(competition_id=competition_key).first():
+        return None
+    from collector.football_category import competition_scope_candidates, public_category_projection
+    from collector.maintenance_policy import automatic_promotion_blocked
+    from collector.provider import _blocked_public_sources, _row_public_source_allowed
+    blocked, families = _blocked_public_sources(db)
+    rows = db.query(SportsEvent).filter(competition_scope_candidates(db, competition_key),
+        SportsEvent.sport_id == 'football', SportsEvent.canonical_event_id.is_(None),
+        SportsEvent.display_eligible.isnot(False),
+        SportsEvent.start_time >= datetime.utcnow()-timedelta(days=7),
+        SportsEvent.start_time <= datetime.utcnow()+timedelta(days=14)).order_by(SportsEvent.updated_at.desc()).limit(12).all()
+    for row in rows:
+        meta = load_json(row.extra_json, {}) or {}
+        slim = load_json(row.list_extra_json, {}) or {}
+        if (automatic_promotion_blocked(row) or meta.get('display_eligible') is False or slim.get('display_eligible') is False
+                or not _row_public_source_allowed(row, blocked, families)
+                or public_category_projection(meta) != competition_key):
+            continue
+        leaf = str(meta.get('source_group_id') or meta.get('source_competition_id') or '')
+        if leaf.isdigit():
+            return {'league_id': leaf, 'league_name': str(competition.name or ''), 'sport_id': 'football'}
     return None
 
 

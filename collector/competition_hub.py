@@ -97,12 +97,15 @@ def _fetch_native(db, key, season, getter):
         if isinstance(match, dict) and _numeric(match.get('id')):
             indexed.setdefault(str(match['id']), []).append(match)
     witness = False
-    candidates = db.query(SportsEvent).filter(SportsEvent.competition_id == key,
+    from collector.football_category import competition_scope_candidates, public_category_projection
+    candidates = db.query(SportsEvent).filter(competition_scope_candidates(db, key),
         SportsEvent.canonical_event_id.is_(None), SportsEvent.display_eligible.isnot(False),
         SportsEvent.start_time >= datetime.utcnow()-timedelta(days=7),
         SportsEvent.start_time <= datetime.utcnow()+timedelta(days=14)).order_by(SportsEvent.start_time).limit(80).all()
     for row in candidates:
         meta = load_json(row.extra_json, {}) or {}
+        if row.competition_id != key and public_category_projection(meta) != key:
+            continue
         slim = load_json(row.list_extra_json, {}) or {}
         if (automatic_promotion_blocked(row) or meta.get('display_eligible') is False
                 or slim.get('display_eligible') is False or not _row_public_source_allowed(row, blocked, blocked_families)):
@@ -253,7 +256,8 @@ def hub(db, provider, key, *, group='', season='', getter=None):
     blocked, families = _blocked_public_sources(db)
     # Preserve hidden/canonical metadata for source-supplement denial; public
     # payloads are still serialized through the existing canonical read policy.
-    rows = db.query(SportsEvent).filter(SportsEvent.competition_id == key, SportsEvent.sport_id == 'football').order_by(
+    from collector.football_category import competition_scope_candidates
+    rows = db.query(SportsEvent).filter(competition_scope_candidates(db, key), SportsEvent.sport_id == 'football').order_by(
         SportsEvent.start_time.desc(), SportsEvent.event_id).limit(MAX_ROWS+1).all()
     truncated = len(rows) > MAX_ROWS
     rows = rows[:MAX_ROWS]

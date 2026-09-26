@@ -1163,6 +1163,9 @@ def sports_data_player(
     player_key: str,
     name: Optional[str] = Query(None),
     event_id: Optional[str] = Query(None),
+    competition_key: Optional[str] = Query(None, max_length=120),
+    season: str = Query('', max_length=80),
+    group: str = Query('', max_length=120),
     db: Session = Depends(get_db),
 ):
     from collector.entity_profiles import player_profile
@@ -1172,6 +1175,9 @@ def sports_data_player(
         player_key=player_key,
         name=name,
         event_id=event_id,
+        competition_key=competition_key,
+        season=season,
+        group=group,
     )
 
 

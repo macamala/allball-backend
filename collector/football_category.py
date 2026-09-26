@@ -58,7 +58,7 @@ def category_for_event(extra, competition_key=''):
         supplied = native_gender(extra.get('source_competition_context') or extra)
         if supplied:
             return supplied
-    return label_gender(extra.get('source_competition_name') or '') or label_gender(competition_key) or 'unknown'
+    return label_gender(extra.get('source_competition_name') or '') or label_gender(competition_key) or canonical_gender(competition_key) or 'unknown'
 
 
 def public_category_projection(extra, country=''):
@@ -97,3 +97,45 @@ def womens_marker_pair(actual, expected, *, female=False):
         if punctuation_identity_key(clean(an)) != punctuation_identity_key(clean(bn)):
             return False
     return True
+
+
+@lru_cache(maxsize=256)
+def canonical_gender(competition_key):
+    """Alternate source IDs are not native IDs. Only an unambiguous, checked
+    public competition identity may supply its category across source families.
+    """
+    if not competition_key:
+        return None
+    from collector.fotmob_crosswalk import _fotmob_competition_identity
+    genders = set()
+    for info in _catalog().values():
+        if not info:
+            continue
+        context = {'id': info['parent'], 'name': info['name'], 'ccode': info['country']}
+        key = _fotmob_competition_identity({'_league': context})[0]
+        if key == competition_key:
+            genders.add(info['gender'])
+    return {'female': 'women', 'male': 'men'}.get(next(iter(genders))) if len(genders) == 1 else None
+
+
+def competition_scope_candidates(db, competition_key):
+    """Coarse SQL candidates for a public women's projection, NOT authorization.
+
+    Legacy matches can still have a men's stored key until their ordinary worker
+    update. Search the small list metadata for an exact competition label too.
+    Every cross-key row must subsequently pass checked native projection and
+    the existing visibility/source/season guards. No fuzzy names or DB writes.
+    """
+    from sqlalchemy import or_, and_
+    from collector.models import SportsCompetition, SportsEvent
+    direct = SportsEvent.competition_id == competition_key
+    competition = db.get(SportsCompetition, competition_key)
+    if (not competition or competition.sport_id != 'football' or
+            not (label_gender(competition.name) or canonical_gender(competition_key) == 'women')):
+        return direct
+    literal = re.escape(json.dumps(str(competition.name)))
+    pattern = r'"source_competition_name"\s*:\s*' + literal
+    slim = SportsEvent.list_extra_json
+    legacy = or_(slim.regexp_match(pattern),
+        and_(or_(slim.is_(None), slim == '', slim == '{}'), SportsEvent.extra_json.regexp_match(pattern)))
+    return or_(direct, legacy)

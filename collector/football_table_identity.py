@@ -24,8 +24,9 @@ def resolve_context(db, competition_key, context, getter):
     # IDs may be seasonal, not addressable league IDs. Use recent canonical
     # native evidence; never pull a table for an unrelated same-name league.
     now = datetime.utcnow()
+    from collector.football_category import competition_scope_candidates, public_category_projection
     candidates = db.query(SportsEvent).filter(
-        SportsEvent.competition_id == competition_key,
+        competition_scope_candidates(db, competition_key),
         SportsEvent.sport_id == 'football',
         SportsEvent.canonical_event_id.is_(None),
         SportsEvent.display_eligible.isnot(False),
@@ -35,6 +36,8 @@ def resolve_context(db, competition_key, context, getter):
     fallback = None
     for row in candidates:
         meta = load_json(row.extra_json, {}) or {}
+        if row.competition_id != competition_key and public_category_projection(meta) != competition_key:
+            continue
         if automatic_promotion_blocked(row) or any(
             (load_json(getattr(row, f, None), {}) or {}).get('display_eligible') is False
             for f in ('extra_json', 'list_extra_json')
