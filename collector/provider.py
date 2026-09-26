@@ -176,6 +176,7 @@ INTERNAL_EVENT_KEYS = {
     "status_inferred",
     "quality_flags",
     "detail_fetched_at",
+    "_football_detail_sync",
     "bbc_cricket_checked_at",
     "rich_id_checked_at",
     "letour_rank_rev",

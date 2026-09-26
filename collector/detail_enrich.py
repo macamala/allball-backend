@@ -121,22 +121,27 @@ def _source_id(extra: Dict[str, Any], family: str) -> Optional[str]:
     return id_for_family(extra, family)
 
 
-def _fresh(extra: Dict[str, Any], status: str) -> bool:
+def _fresh(extra: Dict[str, Any], status: str, *, sport=None, start_time=None, now=None) -> bool:
     if extra.get("parser_rev") != PARSER_REV:
         return False
     stamp = extra.get("detail_fetched_at")
     if not stamp:
         return False
-    try:
-        at = datetime.fromisoformat(str(stamp).replace("Z", ""))
-    except ValueError:
+    from collector.football_detail_retry import utc_naive
+    at = utc_naive(stamp)
+    current = utc_naive(now or datetime.utcnow())
+    if at is None or current is None:
         return False
-    age = (datetime.utcnow() - at.replace(tzinfo=None)).total_seconds()
+    age = (current - at).total_seconds()
     empty = bool(extra.get("detail_empty") or extra.get("detail_negative"))
     previous_status = extra.get("detail_status_at_fetch")
     if previous_status and previous_status != status and age >= 15:
         return False
-    return 0 <= age < _ttl(status, empty=empty)
+    ttl = _ttl(status, empty=empty)
+    if sport == "football":
+        from collector.football_detail_retry import capped_ttl
+        ttl = capped_ttl(extra, status, start_time, now=current, default=ttl)
+    return 0 <= age < ttl
 
 
 def _player_name(value: Any) -> Optional[str]:
@@ -1264,9 +1269,15 @@ def fetch_family_detail(family: str, source_event_id: str, getter=None, sport: s
             supplied_id = str((payload.get("general") or {}).get("matchId") or "")
             if supplied_id and supplied_id != str(source_event_id):
                 return {}
-            out.update(parse_fotmob_details(payload))
             from collector.fotmob_rich import verified_detail_identity
-            if verified_detail_identity(payload, source_event_id, (context or {}).get("_detail_identity")):
+            verified = verified_detail_identity(payload, source_event_id, (context or {}).get("_detail_identity"))
+            # A recovery read is not allowed to fill an empty cache with a
+            # different pair/kickoff either. Preserve direct parser-only use
+            # without stored context and the existing non-football behaviour.
+            if sport == "football" and context is not None and not verified:
+                return {}
+            out.update(parse_fotmob_details(payload))
+            if verified:
                 out["_verified_fotmob_detail"] = list(out)
             else:
                 out.pop("_football_history", None)
@@ -1285,7 +1296,14 @@ def fetch_family_detail(family: str, source_event_id: str, getter=None, sport: s
 
         def _fetch(item):
             kind, url = item
-            return kind, _get(getter, url)
+            try:
+                return kind, _get(getter, url)
+            except Exception as error:
+                if sport != "football":
+                    raise
+                # Components are independent responses; one timeout must not
+                # throw away other successful sections. No exception text.
+                return kind, FetchResult(ok=False, error=type(error).__name__)
 
         with ThreadPoolExecutor(max_workers=len(urls)) as pool:
             results = dict(pool.map(_fetch, urls.items()))
@@ -1466,7 +1484,8 @@ def enrich_event_row(db: Session, row: SportsEvent, getter=None) -> None:
         tried.discard("fotmob")
         tried.discard("sofascore-web")
         pending = [fam for fam in DETAIL_FAMILIES if ids.get(fam)]
-    if _fresh(extra, row.status or "") and not pending and not missing_lineups:
+    fresh = _fresh(extra, row.status or "", sport=row.sport_id, start_time=row.start_time)
+    if fresh and not pending and not missing_lineups:
         row.extra_json = dump_json(extra)
         return
     if not any(fam in DETAIL_FAMILIES for fam in ids):
@@ -1492,18 +1511,36 @@ def enrich_event_row(db: Session, row: SportsEvent, getter=None) -> None:
 
     def _one(item):
         family, source_id = item
-        return family, fetch_family_detail(family, source_id, getter=getter, sport=str(row.sport_id or ""), context=context)
+        try:
+            part = fetch_family_detail(family, source_id, getter=getter, sport=str(row.sport_id or ""), context=context)
+            return family, part, None
+        except Exception as error:
+            # A transport/parser failure must not roll back other families'
+            # good detail or leave this match permanently first in the queue.
+            # Database writes happen outside this narrowly scoped try block.
+            if row.sport_id != "football":
+                raise
+            return family, {}, type(error).__name__
 
+    errors = []
+    attempts = []
     if len(jobs) == 1:
         family, source_id = jobs[0]
-        if not (family in tried and _fresh(extra, row.status or "") and extra.get("detail_empty") is False):
-            _merge_detail(detail, fetch_family_detail(family, source_id, getter=getter, sport=str(row.sport_id or ""), context=context))
-            used.append(family)
+        if not (family in tried and fresh and extra.get("detail_empty") is False):
+            attempts.append(_one(jobs[0]))
     else:
         with ThreadPoolExecutor(max_workers=min(3, len(jobs))) as pool:
-            for family, part in pool.map(_one, jobs):
-                used.append(family)
-                _merge_detail(detail, part)
+            attempts.extend(pool.map(_one, jobs))
+    if not attempts:
+        # A cache hit is not a new upstream observation. Do not move its
+        # timestamp forward and accidentally postpone the next real retry.
+        row.extra_json = dump_json(extra)
+        return
+    for family, part, error_type in attempts:
+        used.append(family)
+        _merge_detail(detail, part)
+        if error_type:
+            errors.append(error_type)
     verified_fotmob = detail.pop("_verified_fotmob_detail", [])
     if refresh_fotmob:
         extra["fotmob_detail_checked_at"] = datetime.utcnow().isoformat()
@@ -1529,7 +1566,10 @@ def enrich_event_row(db: Session, row: SportsEvent, getter=None) -> None:
     if not detail:
         extra["detail_empty"] = True
         extra["detail_negative"] = True
-        extra["lineups_absent"] = True
+        extra["lineups_absent"] = not bool(record and load_json(record.lineups_json))
+        if row.sport_id == "football":
+            from collector.football_detail_retry import note_attempt
+            note_attempt(extra, record, errors=errors)
         row.extra_json = dump_json(extra)
         return
     record = db.get(SportsEventDetail, row.event_id)
@@ -1541,7 +1581,11 @@ def enrich_event_row(db: Session, row: SportsEvent, getter=None) -> None:
     if detail.get("statistics") and ("statistics" in verified_fotmob or not load_json(record.statistics_json)):
         record.statistics_json = dump_json(detail["statistics"])
     if detail.get("lineups") and ("lineups" in verified_fotmob or not load_json(record.lineups_json)):
-        record.lineups_json = dump_json(detail["lineups"])
+        lineups = detail["lineups"]
+        if row.sport_id == "football" and row.status in {"finished", "complete"}:
+            from collector.football_detail_retry import retain_final_lineup_sections
+            lineups = retain_final_lineup_sections(load_json(record.lineups_json), lineups)
+        record.lineups_json = dump_json(lineups)
     if detail.get("periods") and not extra.get("periods"):
         extra["periods"] = detail["periods"]
     for key in ("venue", "referee", "attendance"):
@@ -1597,6 +1641,9 @@ def enrich_event_row(db: Session, row: SportsEvent, getter=None) -> None:
     extra["detail_empty"] = False
     extra["detail_negative"] = False
     extra["lineups_absent"] = not bool(detail.get("lineups") or load_json(record.lineups_json))
+    if row.sport_id == "football":
+        from collector.football_detail_retry import note_attempt
+        note_attempt(extra, record, errors=errors, received=True)
     row.extra_json = dump_json(extra)
     from collector.list_extra import store_list_extra
 
