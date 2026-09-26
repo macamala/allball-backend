@@ -19,12 +19,21 @@ def case(db,source,kind):
     else:
         raw['_league']={'id':938777,'parentLeagueId':9907,'primaryId':9907,'name':'Liga F','ccode':'ESP','isGroup':False}
         sides=[('Athletic Club (W)',789880),('Atlético Madrid (W)',671936)]
+    if kind=='women-italy':
+        raw['id']=5977767
+        raw['_league']={'id':942146,'parentLeagueId':10178,'primaryId':10178,'name':'Serie A Femminile','ccode':'ITA','isGroup':False}
+        sides=[('Inter (W)',1184314),('Fiorentina (W)',856740)]
+    if kind=='women-germany':
+        raw['id']=6040018
+        raw['_league']={'id':10650,'primaryId':10650,'name':'DFB Pokal Frauen','ccode':'GER','isGroup':False}
+        sides=[('Blau-Gelb Marburg (W)',2061640),('RB Leipzig (W)',1513040)]
     for side,(name,tid) in zip(('home','away'),sides):
         raw[side].update(id=tid,name=name,longName=name,score=3 if side=='home' else 0)
     raw['status'].update(utcTime=isoformat(datetime.utcnow()-timedelta(hours=2)),finished=True,started=True,scoreStr='3 - 0',reason={'short':'FT'})
     out=consume_board_match(db,raw,source,{});db.commit();assert not out.get('rejected'),out
     keeper=db.query(SportsEvent).one();rich=load_json(keeper.extra_json)
     old='football-col-primera-a' if kind=='parent' else 'spain-la-liga'
+    old={'women-italy':'italy-serie-a','women-germany':'germany-dfb-pokal'}.get(kind,old)
     if not db.get(SportsCompetition,old):
         db.add(SportsCompetition(competition_id=old,sport_id='football',name='Earlier bucket',slug=old,event_model='team_match'))
     legacy=SportsEvent(event_id='legacy',fingerprint='legacy-fp',sport_id='football',competition_id=old,
@@ -39,7 +48,7 @@ def case(db,source,kind):
     return raw,keeper,legacy
 
 
-@pytest.mark.parametrize('kind',['parent','women'])
+@pytest.mark.parametrize('kind',['parent','women','women-italy','women-germany'])
 def test_exact_native_conflicts_link_without_losing_results_or_old_ids(setup,kind,monkeypatch):
     db,source=setup;raw,keeper,legacy=case(db,source,kind)
     before={r.event_id:r.fingerprint for r in (keeper,legacy)}
@@ -67,7 +76,8 @@ def test_exact_native_conflicts_link_without_losing_results_or_old_ids(setup,kin
  ('women','inherited-owner'),('women','wrong-team-id'),('women','bool-team-id'),
  ('women','different-country'),('women','different-leaf'),('women','manual'),
  ('women','slim-policy'),('women','contradictory-final'),('women','independent-tree'),
- ('women','unknown-quarantine'),('women','unknown-flag')])
+ ('women','unknown-quarantine'),('women','unknown-flag'),('women','unknown-canonical'),
+ ('women','missing-source-country'),('women','contradictory-source-country')])
 def test_native_scope_bridge_never_relaxes_unproven_identity_or_policy(setup,kind,unsafe):
     db,source=setup;raw,keeper,legacy=case(db,source,kind)
     row=keeper if kind=='parent' else legacy;meta=load_json(row.extra_json)
@@ -78,8 +88,11 @@ def test_native_scope_bridge_never_relaxes_unproven_identity_or_policy(setup,kin
     if unsafe in ('wrong-team-id','bool-team-id'):
         parts=load_json(row.participants_json);parts['home']['id']=True if unsafe=='bool-team-id' else '999999';row.participants_json=dump_json(parts)
     if unsafe=='different-parent':raw['_league']['parentLeagueId']=999
+    if unsafe=='missing-source-country':raw['_league'].pop('ccode',None)
+    if unsafe=='contradictory-source-country':raw['_league']['ccode']='GER'
     if unsafe=='wrong-context':meta['source_competition_context']['id']='other-league'
     if unsafe=='different-country':legacy.competition_id='england-premier-league'
+    if unsafe=='unknown-canonical':legacy.competition_id='unregistered-competition'
     if unsafe=='different-leaf':meta['source_competition_id']='938778'
     if unsafe=='manual':meta['manual_hidden']=True
     if unsafe=='independent-tree':meta['collapsed_from']=['existing-child']
