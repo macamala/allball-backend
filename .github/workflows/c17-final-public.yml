@@ -16,7 +16,7 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@v4
         with:
-          ref: b221c579387704e12e8a000414d97102b28e9b6c
+          ref: cf192f22da637b9b54495cd5fc2ba238abbfbee3
           path: runtime
           persist-credentials: false
       - uses: actions/download-artifact@v4
