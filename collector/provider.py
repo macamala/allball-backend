@@ -311,6 +311,7 @@ def _apply_source_competition_display(
 
 
 LIST_PUBLIC_KEYS = (
+    "football_gender",
     "score_observed_at",
     "group",
     "group_name",
@@ -781,6 +782,7 @@ def is_frozen_public_competition(event: Dict[str, Any]) -> bool:
 
 
 LIVE_PUBLIC_KEYS = (
+    "football_gender",
     "score_observed_at",
     "id",
     "sport",
@@ -1262,6 +1264,14 @@ class NinkoCollectedSportsDataProvider:
         finally:
             db.close()
 
+    def get_competition_scorers(self, key, *, group='', season=''):
+        from collector.football_scorers import scorers
+        db = _session(self._session_factory)
+        try:
+            return scorers(db, key, group=group, season=season)
+        finally:
+            db.close()
+
     def get_competition_comparison(self, key, match, *, group='', season=''):
         from collector.competition_hub import comparison
         db = _session(self._session_factory)
@@ -1459,6 +1469,12 @@ class NinkoCollectedSportsDataProvider:
             )
             if country_corrected:
                 corrected = country_corrected
+        if row.sport_id == 'football':
+            from collector.football_category import category_for_event, public_category_projection
+            payload['football_gender'] = category_for_event(extra, row.competition_id)
+            projection = public_category_projection(extra, row.country_id)
+            if projection:
+                corrected = projection
         if corrected is None:
             return None
         payload["competition_key"] = corrected

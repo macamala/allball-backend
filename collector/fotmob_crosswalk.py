@@ -113,9 +113,14 @@ def _fotmob_competition_identity(match: Dict[str, Any]) -> Tuple[Optional[str], 
             if parent_id is not None and str(parent_id) in known_ids:
                 known = known_ids[str(parent_id)]
                 break
+    from collector.football_category import native_gender, label_category_conflict
+    if known and native_gender(league) == 'women' and label_category_conflict('Women', known):
+        known = None
     if known:
         return known, league_id, league_name, ccode
     canonical = _canonical_fotmob_competition(league_name, ccode)
+    if canonical and native_gender(league) == 'women' and label_category_conflict('Women', canonical):
+        canonical = None
     if canonical:
         return canonical, league_id, league_name, ccode
     if not league_id or not league_name:

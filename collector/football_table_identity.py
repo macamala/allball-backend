@@ -47,7 +47,23 @@ def resolve_context(db, competition_key, context, getter):
         sides = [numeric((parts.get(s) or {}).get('id')) for s in ('home','away')]
         parent = numeric(meta.get('source_parent_competition_id'))
         row_leaf = numeric(meta.get('source_group_id') or meta.get('source_competition_id'))
-        if parent and row_leaf == leaf:
+        # A legacy mixed bucket may have a mapping left pointing at the other
+        # category. The accepted native row, not the first mapping, owns scope.
+        # Only checked native context resolving to THIS competition authorizes it.
+        from collector.football_category import native_info
+        from collector.fotmob_crosswalk import _fotmob_competition_identity
+        info = native_info(meta)
+        proved_scope = False
+        if info and meta.get('source_competition_name'):
+            native_key = _fotmob_competition_identity({'_league': {
+                'id': row_leaf, 'parentLeagueId': parent or info['parent'],
+                'name': meta['source_competition_name'], 'ccode': info['country']}})[0]
+            if native_key != competition_key:
+                continue
+            proved_scope = True
+        if parent and (row_leaf == leaf or (row_leaf and proved_scope)):
+            leaf = row_leaf
+            context = {**context, 'league_id': leaf}
             return {**context, 'parent_id': parent, 'leaf_id': leaf, 'teams': sides,
                     'match_id': mid, 'start_time': row.start_time.isoformat()}
         if fallback is None:

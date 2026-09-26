@@ -185,12 +185,10 @@ def verified_detail_identity(payload, source_id, identity):
     expected = parse_datetime(identity.get('start_time'))
     if not supplied or not expected or abs((supplied - expected).total_seconds()) > 60:
         return False
-    for key in ('home', 'away'):
-        actual = (general.get(key+'Team') or {}).get('name')
-        expected_name = (identity.get(key) or {}).get('name')
-        if not actual or not expected_name or punctuation_identity_key(actual) != punctuation_identity_key(expected_name):
-            return False
-    return True
+    from collector.football_category import native_gender, womens_marker_pair
+    actual = {s: general.get(s+'Team') or {} for s in ('home', 'away')}
+    female = native_gender({'id': general.get('leagueId'), 'parentLeagueId': general.get('parentLeagueId')}) == 'women'
+    return womens_marker_pair(actual, identity, female=female)
 
 
 def refresh_due(extra, now=None):

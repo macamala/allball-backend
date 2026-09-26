@@ -1,0 +1,875 @@
+{
+  "verified_at": "2026-09-26T00:48:00Z",
+  "source_template": "https://www.fotmob.com/api/data/leagues?id={id}",
+  "competitions": {
+    "10174": {
+      "gender": "female",
+      "name": "Kansallinen (Women)",
+      "country": "FIN",
+      "aliases": [
+        "942233"
+      ]
+    },
+    "10178": {
+      "gender": "female",
+      "name": "Serie A Femminile",
+      "country": "ITA",
+      "aliases": [
+        "942146"
+      ]
+    },
+    "10186": {
+      "gender": "female",
+      "name": "Kansallinen Liiga Qualification Group",
+      "country": "FIN",
+      "aliases": [
+        "10186"
+      ]
+    },
+    "10210": {
+      "gender": "female",
+      "name": "Women's Premier Division",
+      "country": "IRL",
+      "aliases": [
+        "10210"
+      ]
+    },
+    "10289": {
+      "gender": "female",
+      "name": "Eredivisie Vrouwen",
+      "country": "NED",
+      "aliases": [
+        "10289"
+      ]
+    },
+    "10307": {
+      "gender": "female",
+      "name": "FAI Women's Cup",
+      "country": "IRL",
+      "aliases": [
+        "10307"
+      ]
+    },
+    "10308": {
+      "gender": "female",
+      "name": "Elitettan",
+      "country": "SWE",
+      "aliases": [
+        "10308"
+      ]
+    },
+    "10369": {
+      "gender": "female",
+      "name": "Women's World Cup U20",
+      "country": "INT",
+      "aliases": [
+        "938405"
+      ]
+    },
+    "10437": {
+      "gender": "male",
+      "name": "EURO U-21 Qualification",
+      "country": "INT",
+      "aliases": [
+        "897723",
+        "897724",
+        "897725",
+        "897726",
+        "897727",
+        "897728",
+        "897729",
+        "897730"
+      ]
+    },
+    "10608": {
+      "gender": "male",
+      "name": "Africa Cup of Nations Qualification",
+      "country": "INT",
+      "aliases": [
+        "943876",
+        "943877",
+        "943878",
+        "943879",
+        "943880",
+        "943881",
+        "943883",
+        "943884",
+        "943885",
+        "943886",
+        "943887"
+      ]
+    },
+    "10650": {
+      "gender": "female",
+      "name": "DFB Pokal Frauen",
+      "country": "GER",
+      "aliases": [
+        "10650"
+      ]
+    },
+    "10699": {
+      "gender": "female",
+      "name": "USL Super League Women",
+      "country": "USA",
+      "aliases": [
+        "938854"
+      ]
+    },
+    "10791": {
+      "gender": "female",
+      "name": "SWPL 1",
+      "country": "SCO",
+      "aliases": [
+        "1000001595"
+      ]
+    },
+    "108": {
+      "gender": "male",
+      "name": "League One",
+      "country": "ENG",
+      "aliases": [
+        "938219"
+      ]
+    },
+    "10832": {
+      "gender": "male",
+      "name": "Supercopa Internacional",
+      "country": "ARG",
+      "aliases": [
+        "10832"
+      ]
+    },
+    "10872": {
+      "gender": "female",
+      "name": "Northern Super League",
+      "country": "CAN",
+      "aliases": [
+        "1000001210"
+      ]
+    },
+    "109": {
+      "gender": "male",
+      "name": "League Two",
+      "country": "ENG",
+      "aliases": [
+        "938220"
+      ]
+    },
+    "11017": {
+      "gender": "male",
+      "name": "QSL Cup",
+      "country": "QAT",
+      "aliases": [
+        "1000001445"
+      ]
+    },
+    "111": {
+      "gender": "male",
+      "name": "Eerste Divisie",
+      "country": "NED",
+      "aliases": [
+        "111"
+      ]
+    },
+    "11129": {
+      "gender": "female",
+      "name": "UEFA Women's Europa Cup",
+      "country": "INT",
+      "aliases": [
+        "1000001490"
+      ]
+    },
+    "114": {
+      "gender": "male",
+      "name": "Friendlies",
+      "country": "INT",
+      "aliases": [
+        "914609"
+      ]
+    },
+    "116": {
+      "gender": "male",
+      "name": "Cymru Premier",
+      "country": "WAL",
+      "aliases": [
+        "938776"
+      ]
+    },
+    "11646": {
+      "gender": "male",
+      "name": "Copa Paulista",
+      "country": "BRA",
+      "aliases": [
+        "1000001328"
+      ]
+    },
+    "117": {
+      "gender": "male",
+      "name": "National League",
+      "country": "ENG",
+      "aliases": [
+        "940355"
+      ]
+    },
+    "123": {
+      "gender": "male",
+      "name": "Championship",
+      "country": "SCO",
+      "aliases": [
+        "937668"
+      ]
+    },
+    "126": {
+      "gender": "male",
+      "name": "Premier Division",
+      "country": "IRL",
+      "aliases": [
+        "126"
+      ]
+    },
+    "128": {
+      "gender": "male",
+      "name": "Leumit League",
+      "country": "ISR",
+      "aliases": [
+        "938187"
+      ]
+    },
+    "129": {
+      "gender": "male",
+      "name": "Premiership",
+      "country": "NIR",
+      "aliases": [
+        "938371"
+      ]
+    },
+    "130": {
+      "gender": "male",
+      "name": "MLS",
+      "country": "USA",
+      "aliases": [
+        "913550"
+      ]
+    },
+    "13287": {
+      "gender": "male",
+      "name": "FIFA ASEAN Cup",
+      "country": "INT",
+      "aliases": [
+        "943302",
+        "943307",
+        "943311",
+        "943313"
+      ]
+    },
+    "140": {
+      "gender": "male",
+      "name": "LaLiga2",
+      "country": "ESP",
+      "aliases": [
+        "938653"
+      ]
+    },
+    "147": {
+      "gender": "male",
+      "name": "Serie C",
+      "country": "ITA",
+      "aliases": [
+        "942844",
+        "942846",
+        "942852"
+      ]
+    },
+    "161": {
+      "gender": "male",
+      "name": "Liga AUF Uruguaya",
+      "country": "URU",
+      "aliases": [
+        "942853"
+      ]
+    },
+    "169": {
+      "gender": "male",
+      "name": "Ettan",
+      "country": "SWE",
+      "aliases": [
+        "918043",
+        "918053"
+      ]
+    },
+    "179": {
+      "gender": "male",
+      "name": "Challenge Cup",
+      "country": "SCO",
+      "aliases": [
+        "941368"
+      ]
+    },
+    "186": {
+      "gender": "male",
+      "name": "Taca de Portugal",
+      "country": "POR",
+      "aliases": [
+        "186"
+      ]
+    },
+    "199": {
+      "gender": "male",
+      "name": "Division Profesional",
+      "country": "PAR",
+      "aliases": [
+        "1000001212"
+      ]
+    },
+    "204": {
+      "gender": "male",
+      "name": "2. divisjon",
+      "country": "NOR",
+      "aliases": [
+        "919789",
+        "919791"
+      ]
+    },
+    "205": {
+      "gender": "male",
+      "name": "Norsk Tipping-ligaen",
+      "country": "NOR",
+      "aliases": [
+        "919792",
+        "919793",
+        "919794",
+        "919795",
+        "919796",
+        "919797"
+      ]
+    },
+    "208": {
+      "gender": "male",
+      "name": "3. Liga",
+      "country": "GER",
+      "aliases": [
+        "208"
+      ]
+    },
+    "218": {
+      "gender": "male",
+      "name": "First Division",
+      "country": "IRL",
+      "aliases": [
+        "916016"
+      ]
+    },
+    "230": {
+      "gender": "male",
+      "name": "Liga MX",
+      "country": "MEX",
+      "aliases": [
+        "1000001644"
+      ]
+    },
+    "239": {
+      "gender": "male",
+      "name": "2. Division",
+      "country": "DEN",
+      "aliases": [
+        "938638"
+      ]
+    },
+    "240": {
+      "gender": "male",
+      "name": "3. Division",
+      "country": "DEN",
+      "aliases": [
+        "938639"
+      ]
+    },
+    "251": {
+      "gender": "male",
+      "name": "Ykkosliiga",
+      "country": "FIN",
+      "aliases": [
+        "1000001716"
+      ]
+    },
+    "256": {
+      "gender": "female",
+      "name": "A-Liga",
+      "country": "DEN",
+      "aliases": [
+        "939688"
+      ]
+    },
+    "274": {
+      "gender": "male",
+      "name": "Primera A",
+      "country": "COL",
+      "aliases": [
+        "1000001696"
+      ]
+    },
+    "329": {
+      "gender": "male",
+      "name": "Gulf Cup",
+      "country": "INT",
+      "aliases": [
+        "943992",
+        "943993"
+      ]
+    },
+    "331": {
+      "gender": "female",
+      "name": "Toppserien",
+      "country": "NOR",
+      "aliases": [
+        "916229"
+      ]
+    },
+    "332": {
+      "gender": "female",
+      "name": "1. Division Kvinner",
+      "country": "NOR",
+      "aliases": [
+        "921414"
+      ]
+    },
+    "333": {
+      "gender": "female",
+      "name": "NM Kvinner",
+      "country": "NOR",
+      "aliases": [
+        "333"
+      ]
+    },
+    "335": {
+      "gender": "male",
+      "name": "Primera Division",
+      "country": "SLV",
+      "aliases": [
+        "941466"
+      ]
+    },
+    "336": {
+      "gender": "male",
+      "name": "Liga Nacional",
+      "country": "GUA",
+      "aliases": [
+        "938628"
+      ]
+    },
+    "338": {
+      "gender": "male",
+      "name": "1. Division",
+      "country": "RUS",
+      "aliases": [
+        "938422"
+      ]
+    },
+    "489": {
+      "gender": "male",
+      "name": "Club Friendlies",
+      "country": "INT",
+      "aliases": [
+        "915708"
+      ]
+    },
+    "512": {
+      "gender": "male",
+      "name": "Regionalliga",
+      "country": "GER",
+      "aliases": [
+        "940449",
+        "940450",
+        "940451",
+        "940452",
+        "940469"
+      ]
+    },
+    "522": {
+      "gender": "male",
+      "name": "Premier League",
+      "country": "GHA",
+      "aliases": [
+        "522"
+      ]
+    },
+    "530": {
+      "gender": "male",
+      "name": "Botola Pro",
+      "country": "MAR",
+      "aliases": [
+        "530"
+      ]
+    },
+    "533": {
+      "gender": "male",
+      "name": "Professional Football League",
+      "country": "NGA",
+      "aliases": [
+        "943368"
+      ]
+    },
+    "8814": {
+      "gender": "male",
+      "name": "Serie B",
+      "country": "BRA",
+      "aliases": [
+        "1000001415"
+      ]
+    },
+    "8815": {
+      "gender": "male",
+      "name": "Super League 2",
+      "country": "GRE",
+      "aliases": [
+        "945430"
+      ]
+    },
+    "8870": {
+      "gender": "male",
+      "name": "Championship",
+      "country": "NZL",
+      "aliases": [
+        "948410"
+      ]
+    },
+    "8944": {
+      "gender": "male",
+      "name": "National North & South",
+      "country": "ENG",
+      "aliases": [
+        "940360",
+        "940374"
+      ]
+    },
+    "8965": {
+      "gender": "male",
+      "name": "Primera B Nacional",
+      "country": "ARG",
+      "aliases": [
+        "916553"
+      ]
+    },
+    "8968": {
+      "gender": "male",
+      "name": "Primera Federación",
+      "country": "ESP",
+      "aliases": [
+        "938778",
+        "938783"
+      ]
+    },
+    "8969": {
+      "gender": "male",
+      "name": "Ykkonen",
+      "country": "FIN",
+      "aliases": [
+        "945701",
+        "945702"
+      ]
+    },
+    "8970": {
+      "gender": "male",
+      "name": "Ligue 3",
+      "country": "FRA",
+      "aliases": [
+        "8970"
+      ]
+    },
+    "8971": {
+      "gender": "male",
+      "name": "Serie C",
+      "country": "BRA",
+      "aliases": [
+        "1000001178"
+      ]
+    },
+    "8972": {
+      "gender": "male",
+      "name": "USL Championship",
+      "country": "USA",
+      "aliases": [
+        "8972"
+      ]
+    },
+    "8974": {
+      "gender": "male",
+      "name": "J. League 2",
+      "country": "JPN",
+      "aliases": [
+        "938215"
+      ]
+    },
+    "8976": {
+      "gender": "male",
+      "name": "Liga de Expansión MX",
+      "country": "MEX",
+      "aliases": [
+        "939530"
+      ]
+    },
+    "9039": {
+      "gender": "male",
+      "name": "LPF",
+      "country": "PAN",
+      "aliases": [
+        "941168"
+      ]
+    },
+    "9080": {
+      "gender": "male",
+      "name": "K League 1",
+      "country": "KOR",
+      "aliases": [
+        "919356"
+      ]
+    },
+    "9089": {
+      "gender": "female",
+      "name": "Damallsvenskan",
+      "country": "SWE",
+      "aliases": [
+        "9089"
+      ]
+    },
+    "9091": {
+      "gender": "male",
+      "name": "Copa Chile",
+      "country": "CHI",
+      "aliases": [
+        "946196"
+      ]
+    },
+    "9096": {
+      "gender": "male",
+      "name": "Second Professional League",
+      "country": "BUL",
+      "aliases": [
+        "9096"
+      ]
+    },
+    "9122": {
+      "gender": "male",
+      "name": "Segunda Division",
+      "country": "URU",
+      "aliases": [
+        "922761"
+      ]
+    },
+    "9125": {
+      "gender": "male",
+      "name": "Primera B",
+      "country": "COL",
+      "aliases": [
+        "1000001589"
+      ]
+    },
+    "9126": {
+      "gender": "male",
+      "name": "Liga de Ascenso",
+      "country": "CHI",
+      "aliases": [
+        "1000001235"
+      ]
+    },
+    "9134": {
+      "gender": "female",
+      "name": "NWSL",
+      "country": "USA",
+      "aliases": [
+        "920228"
+      ]
+    },
+    "9136": {
+      "gender": "male",
+      "name": "J. League 3",
+      "country": "JPN",
+      "aliases": [
+        "9136"
+      ]
+    },
+    "9137": {
+      "gender": "male",
+      "name": "China League One",
+      "country": "CHN",
+      "aliases": [
+        "920267"
+      ]
+    },
+    "9138": {
+      "gender": "male",
+      "name": "Segunda Federación",
+      "country": "ESP",
+      "aliases": [
+        "938779",
+        "938792",
+        "938793",
+        "938794",
+        "938796"
+      ]
+    },
+    "9195": {
+      "gender": "male",
+      "name": "Tweede Divisie",
+      "country": "NED",
+      "aliases": [
+        "9195"
+      ]
+    },
+    "9213": {
+      "gender": "male",
+      "name": "Primera B Metropolitana & Torneo Federal A",
+      "country": "ARG",
+      "aliases": [
+        "916561"
+      ]
+    },
+    "9227": {
+      "gender": "female",
+      "name": "WSL",
+      "country": "ENG",
+      "aliases": [
+        "9227"
+      ]
+    },
+    "9294": {
+      "gender": "female",
+      "name": "WSL 2",
+      "country": "ENG",
+      "aliases": [
+        "1000001465"
+      ]
+    },
+    "9296": {
+      "gender": "male",
+      "name": "USL League One",
+      "country": "USA",
+      "aliases": [
+        "1000001712"
+      ]
+    },
+    "9305": {
+      "gender": "male",
+      "name": "Copa Argentina",
+      "country": "ARG",
+      "aliases": [
+        "1000001402"
+      ]
+    },
+    "9372": {
+      "gender": "male",
+      "name": "Azadegan League",
+      "country": "IRN",
+      "aliases": [
+        "9372"
+      ]
+    },
+    "9490": {
+      "gender": "male",
+      "name": "Copa Colombia",
+      "country": "COL",
+      "aliases": [
+        "938416"
+      ]
+    },
+    "9545": {
+      "gender": "male",
+      "name": "Highland / Lowland",
+      "country": "SCO",
+      "aliases": [
+        "1000001473",
+        "1000001474",
+        "1000001703"
+      ]
+    },
+    "9806": {
+      "gender": "male",
+      "name": "UEFA Nations League A",
+      "country": "INT",
+      "aliases": [
+        "920741",
+        "920742",
+        "920743",
+        "920744"
+      ]
+    },
+    "9807": {
+      "gender": "male",
+      "name": "UEFA Nations League B",
+      "country": "INT",
+      "aliases": [
+        "920745",
+        "920746",
+        "920747",
+        "920748"
+      ]
+    },
+    "9808": {
+      "gender": "male",
+      "name": "UEFA Nations League C",
+      "country": "INT",
+      "aliases": [
+        "920749",
+        "920750",
+        "920751",
+        "920752"
+      ]
+    },
+    "9809": {
+      "gender": "male",
+      "name": "UEFA Nations League D",
+      "country": "INT",
+      "aliases": [
+        "920753",
+        "920754"
+      ]
+    },
+    "9821": {
+      "gender": "male",
+      "name": "CONCACAF Nations League",
+      "country": "INT",
+      "aliases": [
+        "941120",
+        "941121",
+        "941122",
+        "941123",
+        "941124",
+        "941125",
+        "941126",
+        "941127",
+        "941128"
+      ]
+    },
+    "9833": {
+      "gender": "male",
+      "name": "Asian Games",
+      "country": "INT",
+      "aliases": [
+        "944026"
+      ]
+    },
+    "9906": {
+      "gender": "female",
+      "name": "Liga MX Femenil",
+      "country": "MEX",
+      "aliases": [
+        "942125"
+      ]
+    },
+    "9907": {
+      "gender": "female",
+      "name": "Liga F",
+      "country": "ESP",
+      "aliases": [
+        "938777"
+      ]
+    },
+    "9986": {
+      "gender": "male",
+      "name": "Premier League",
+      "country": "CAN",
+      "aliases": [
+        "1000001192"
+      ]
+    }
+  }
+}

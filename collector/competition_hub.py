@@ -35,12 +35,12 @@ def _numeric(value):
     return text if re.fullmatch(r'\d{1,12}', text) else None
 
 
-def _pair_time(native, canonical):
+def _pair_time(native, canonical, *, female=False):
     a, b = parse_datetime(native.get('start_time')), parse_datetime(canonical.get('start_time'))
     if not a or not b or abs((a-b).total_seconds()) > 60:
         return False
-    return all(punctuation_identity_key((native.get(s) or {}).get('name') or '') ==
-               punctuation_identity_key((canonical.get(s) or {}).get('name') or '') for s in ('home', 'away'))
+    from collector.football_category import womens_marker_pair
+    return womens_marker_pair(native, canonical, female=female)
 
 
 def _table_variant(root, venue):
@@ -121,7 +121,7 @@ def _fetch_native(db, key, season, getter):
         native_event = {**{s: match.get(s) or {} for s in ('home','away')},
                         'start_time': (match.get('status') or {}).get('utcTime')}
         stored_event = {**(load_json(row.participants_json, {}) or {}), 'start_time': isoformat(row.start_time)}
-        if not _pair_time(native_event, stored_event):
+        if not _pair_time(native_event, stored_event, female=details.get("gender") == "female"):
             continue
         candidate = {**context, 'match_id': mid, 'start_time': isoformat(row.start_time),
                      'teams': [str((match.get(s) or {}).get('id') or '') for s in ('home','away')]}
@@ -190,7 +190,9 @@ def _fetch_native(db, key, season, getter):
         # canonical competition view rather than filtering it to an empty page.
         return {}
     return {'events': rows, 'season': selected, 'table_views': {v: _table_variant(scoped, v) for v in ('home', 'away')},
-            'table_rows': table_rows, 'checked_at': isoformat(datetime.utcnow()), 'parent': context['parent_id']}
+            'table_rows': table_rows, 'checked_at': isoformat(datetime.utcnow()), 'parent': context['parent_id'],
+            '_scorer_specs': (root.get('stats') or {}).get('players') or [] if plain else [],
+            '_gender': details.get('gender')}
 
 
 def _native(db, key, season, getter=None):
@@ -274,7 +276,7 @@ def hub(db, provider, key, *, group='', season='', getter=None):
                 continue
             stored = {**(load_json(candidate.participants_json, {}) or {}),
                       'start_time': isoformat(candidate.start_time)}
-            if not _pair_time(reference, stored):
+            if not _pair_time(reference, stored, female=native.get('_gender') == 'female'):
                 continue
             if len(rows) >= MAX_ROWS:
                 truncated = True
@@ -296,7 +298,7 @@ def hub(db, provider, key, *, group='', season='', getter=None):
         mid = id_for_family(meta, 'fotmob')
         witness = native_by_id.get(mid)
         supplied_season = str(row.season or meta.get('source_season_name') or '')
-        if witness and _pair_time(witness, event):
+        if witness and _pair_time(witness, event, female=native.get('_gender') == 'female'):
             supplied_season = witness['season']
             event['round'] = event.get('round') or witness.get('round')
         desired_season = season or native.get('season')
@@ -315,7 +317,7 @@ def hub(db, provider, key, *, group='', season='', getter=None):
         # may NOT reappear through this read-only source supplement.
         if known.get(mid):
             continue
-        if any(_pair_time(event, p) for p in public):
+        if any(_pair_time(event, p, female=native.get('_gender') == 'female') for p in public):
             continue
         view = {k: v for k, v in event.items() if not k.startswith('_')}
         if native.get('stale') and view['status'] == 'in_progress':

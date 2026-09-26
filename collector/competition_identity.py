@@ -235,6 +235,9 @@ def label_matches_competition(label: str, competition_id: str) -> bool:
     blob = _blob(label)
     if not blob or not competition_id:
         return False
+    from collector.football_category import label_category_conflict
+    if _canonical_same_sport(competition_id, 'football') and label_category_conflict(label, competition_id):
+        return False
     spec = COMPETITION_LABELS.get(competition_id)
     if spec:
         for token in spec.get("deny") or []:

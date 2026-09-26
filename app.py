@@ -867,6 +867,14 @@ def sports_data_competition_hub(competition_key: str,
     return action(competition_key, group=group, season=season)
 
 
+@app.get("/sports-data/competitions/{competition_key}/scorers")
+def sports_data_competition_scorers(competition_key: str,
+    season: str = Query(default='', max_length=60), group: str = Query(default='', max_length=200)):
+    provider = get_active_provider()
+    action = getattr(provider, 'get_competition_scorers', None)
+    return action(competition_key, group=group, season=season) if action else {'available': False, 'rows': []}
+
+
 @app.get("/sports-data/competitions/{competition_key}/comparison")
 def sports_data_competition_comparison(competition_key: str,
         match: str = Query(..., min_length=1, max_length=160),

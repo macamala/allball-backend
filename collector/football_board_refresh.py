@@ -34,7 +34,7 @@ from collector.util import dump_json, isoformat, load_json, parse_datetime
 
 logger = logging.getLogger(__name__)
 JOB_PREFIX = "football-board-refresh-v1:"
-POLICY_REVISION = 3
+POLICY_REVISION = 4
 MAX_DEFERRED_IDENTITIES = 1000
 DEFERRED_REASONS = {"event_identity_conflict", "source_identity_conflict",
                     "broken_or_cyclic_lineage", "legacy_identity_unproven",
@@ -134,9 +134,13 @@ def _legacy_target(db, keeper: SportsEvent, parsed: dict, target: str, country: 
     sid = str(parsed.get("source_event_id") or "")
     exact = any(id_for_family(load_json(row.extra_json, {}) or {}, "fotmob") == sid
                 for row in observations)
+    from collector.football_category import native_gender, label_category_conflict
+    category_conflict = (native_gender(parsed.get('source_competition_context')) == 'women'
+                         and label_category_conflict('Women', old)
+                         and target.startswith('football-'))
     if (not exact or not fetched or not -30 <= (datetime.utcnow() - fetched).total_seconds() <= 300
             or not event_accepted_for_mapping({**parsed, "competition_key": target}, target)[0]
-            or not (old.startswith("football-") or (country and not canonical_country_matches(old, country)))):
+            or not (old.startswith("football-") or category_conflict or (country and not canonical_country_matches(old, country)))):
         return old, "legacy_identity_unproven"
     fp = _fingerprint_for(keeper, target)
     collision = db.query(SportsEvent).filter(SportsEvent.fingerprint == fp,
