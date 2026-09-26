@@ -45,8 +45,19 @@ def configuration_errors(env):
         errors.append('explicit_news_request_limits_required')
     elif 0 in request_limits(env):
         errors.append('news_request_allowance_disabled')
-    if not str(env.get('OPENAI_API_KEY') or '').strip():
-        errors.append('news_ai_key_missing')
+    mode = str(env.get('NEWS_AI_PROVIDER_MODE') or 'xkiro_free').strip().lower()
+    if mode == 'xkiro_free':
+        if not str(env.get('XKIRO_API_KEY') or '').strip():
+            errors.append('news_ai_key_missing')
+        for key in ('NEWS_XKIRO_WRITER_MODEL', 'NEWS_XKIRO_VALIDATOR_MODEL'):
+            model = str(env.get(key) or '').strip()
+            if model and (not model.endswith(':free') or not re.fullmatch(r'[A-Za-z0-9._/+:-]{3,160}:free', model)):
+                errors.append('non_free_news_model_refused:' + key)
+    elif mode == 'openai_legacy':
+        if env.get('NEWS_ALLOW_PAID_AI') != '1' or not str(env.get('OPENAI_API_KEY') or '').strip():
+            errors.append('legacy_paid_ai_not_explicitly_allowed')
+    else:
+        errors.append('unsupported_news_ai_provider_mode')
     for key in ('NEWS_HISTORICAL_REPAIR_ENABLED', 'NEWS_EXPANDED_FEEDS_ENABLED'):
         if env.get(key) not in ('0', '1'):
             errors.append('explicit_boolean_required:' + key)
