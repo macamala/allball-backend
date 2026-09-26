@@ -1,0 +1,175 @@
+diff --git a/collector/detail_enrich.py b/collector/detail_enrich.py
+index 07514fe..a79d652 100644
+--- a/collector/detail_enrich.py
++++ b/collector/detail_enrich.py
+@@ -121,22 +121,27 @@ def _source_id(extra: Dict[str, Any], family: str) -> Optional[str]:
+     return id_for_family(extra, family)
+ 
+ 
+-def _fresh(extra: Dict[str, Any], status: str) -> bool:
++def _fresh(extra: Dict[str, Any], status: str, *, sport=None, start_time=None, now=None) -> bool:
+     if extra.get("parser_rev") != PARSER_REV:
+         return False
+     stamp = extra.get("detail_fetched_at")
+     if not stamp:
+         return False
+-    try:
+-        at = datetime.fromisoformat(str(stamp).replace("Z", ""))
+-    except ValueError:
++    from collector.football_detail_retry import utc_naive
++    at = utc_naive(stamp)
++    current = utc_naive(now or datetime.utcnow())
++    if at is None or current is None:
+         return False
+-    age = (datetime.utcnow() - at.replace(tzinfo=None)).total_seconds()
++    age = (current - at).total_seconds()
+     empty = bool(extra.get("detail_empty") or extra.get("detail_negative"))
+     previous_status = extra.get("detail_status_at_fetch")
+     if previous_status and previous_status != status and age >= 15:
+         return False
+-    return 0 <= age < _ttl(status, empty=empty)
++    ttl = _ttl(status, empty=empty)
++    if sport == "football":
++        from collector.football_detail_retry import capped_ttl
++        ttl = capped_ttl(extra, status, start_time, now=current, default=ttl)
++    return 0 <= age < ttl
+ 
+ 
+ def _player_name(value: Any) -> Optional[str]:
+@@ -1466,7 +1471,8 @@ def enrich_event_row(db: Session, row: SportsEvent, getter=None) -> None:
+         tried.discard("fotmob")
+         tried.discard("sofascore-web")
+         pending = [fam for fam in DETAIL_FAMILIES if ids.get(fam)]
+-    if _fresh(extra, row.status or "") and not pending and not missing_lineups:
++    fresh = _fresh(extra, row.status or "", sport=row.sport_id, start_time=row.start_time)
++    if fresh and not pending and not missing_lineups:
+         row.extra_json = dump_json(extra)
+         return
+     if not any(fam in DETAIL_FAMILIES for fam in ids):
+@@ -1492,18 +1498,36 @@ def enrich_event_row(db: Session, row: SportsEvent, getter=None) -> None:
+ 
+     def _one(item):
+         family, source_id = item
+-        return family, fetch_family_detail(family, source_id, getter=getter, sport=str(row.sport_id or ""), context=context)
+-
++        try:
++            part = fetch_family_detail(family, source_id, getter=getter, sport=str(row.sport_id or ""), context=context)
++            return family, part, None
++        except Exception as error:
++            # A transport/parser failure must not roll back other families'
++            # good detail or leave this match permanently first in the queue.
++            # Database writes happen outside this narrowly scoped try block.
++            if row.sport_id != "football":
++                raise
++            return family, {}, type(error).__name__
++
++    errors = []
++    attempts = []
+     if len(jobs) == 1:
+         family, source_id = jobs[0]
+-        if not (family in tried and _fresh(extra, row.status or "") and extra.get("detail_empty") is False):
+-            _merge_detail(detail, fetch_family_detail(family, source_id, getter=getter, sport=str(row.sport_id or ""), context=context))
+-            used.append(family)
++        if not (family in tried and fresh and extra.get("detail_empty") is False):
++            attempts.append(_one(jobs[0]))
+     else:
+         with ThreadPoolExecutor(max_workers=min(3, len(jobs))) as pool:
+-            for family, part in pool.map(_one, jobs):
+-                used.append(family)
+-                _merge_detail(detail, part)
++            attempts.extend(pool.map(_one, jobs))
++    if not attempts:
++        # A cache hit is not a new upstream observation. Do not move its
++        # timestamp forward and accidentally postpone the next real retry.
++        row.extra_json = dump_json(extra)
++        return
++    for family, part, error_type in attempts:
++        used.append(family)
++        _merge_detail(detail, part)
++        if error_type:
++            errors.append(error_type)
+     verified_fotmob = detail.pop("_verified_fotmob_detail", [])
+     if refresh_fotmob:
+         extra["fotmob_detail_checked_at"] = datetime.utcnow().isoformat()
+@@ -1529,7 +1553,10 @@ def enrich_event_row(db: Session, row: SportsEvent, getter=None) -> None:
+     if not detail:
+         extra["detail_empty"] = True
+         extra["detail_negative"] = True
+-        extra["lineups_absent"] = True
++        extra["lineups_absent"] = not bool(record and load_json(record.lineups_json))
++        if row.sport_id == "football":
++            from collector.football_detail_retry import note_attempt
++            note_attempt(extra, record, errors=errors)
+         row.extra_json = dump_json(extra)
+         return
+     record = db.get(SportsEventDetail, row.event_id)
+@@ -1597,6 +1624,9 @@ def enrich_event_row(db: Session, row: SportsEvent, getter=None) -> None:
+     extra["detail_empty"] = False
+     extra["detail_negative"] = False
+     extra["lineups_absent"] = not bool(detail.get("lineups") or load_json(record.lineups_json))
++    if row.sport_id == "football":
++        from collector.football_detail_retry import note_attempt
++        note_attempt(extra, record, errors=errors, received=True)
+     row.extra_json = dump_json(extra)
+     from collector.list_extra import store_list_extra
+ 
+ diff --git a/collector/football_detail_retry.py b/collector/football_detail_retry.py
+new file mode 100644
+index 0000000..75dfdc4
+--- /dev/null
++++ b/collector/football_detail_retry.py
+@@ -0,0 +1,91 @@
++"""Bounded post-match repair policy; never a score or fixture authority.
++
++A final score does not imply that the upstream statistics/lineups are final.
++Recent finals are checked again for late-arriving detail. Older partial detail
++is retried on demand without treating an unavailable section as invented data.
++"""
++from datetime import datetime, timezone
++
++RECOVERY_HOURS = 72
++FINAL_REFRESH_SECONDS = 300
++LATE_FINAL_REFRESH_SECONDS = 900
++FAILED_REFRESH_SECONDS = 120
++HISTORICAL_PARTIAL_SECONDS = 3600
++STATE_KEY = '_football_detail_sync'
++STATE_REVISION = 1
++FINISHED_STATUSES = frozenset({'finished', 'complete'})
++
++
++def utc_naive(value):
++    """Parse only explicit timestamps; use naive UTC consistently with storage."""
++    if isinstance(value, datetime):
++        parsed = value
++    elif isinstance(value, str):
++        try:
++            parsed = datetime.fromisoformat(value.replace('Z', '+00:00'))
++        except ValueError:
++            return None
++    else:
++        return None
++    return parsed.astimezone(timezone.utc).replace(tzinfo=None) if parsed.tzinfo else parsed
++
++
++def capped_ttl(extra, status, start_time, *, now, default):
++    """Shorten only football FINAL detail TTLs, not live score polling.
++
++    The recovery window is measured from kickoff (a verified stored timestamp),
++    not an invented finish time. All recent finals get reconciliation even when
++    the first response included some detail. Transport failures have a separate
++    bounded negative interval; collector.http still owns its host backoff.
++    """
++    if str(status or '').lower() not in FINISHED_STATUSES:
++        return default
++    kickoff, current = utc_naive(start_time), utc_naive(now)
++    age_hours = (current-kickoff).total_seconds()/3600 if kickoff and current else None
++    if age_hours is None or age_hours < 0:
++        return min(default, LATE_FINAL_REFRESH_SECONDS)
++    if age_hours <= RECOVERY_HOURS:
++        if extra.get('detail_negative') or extra.get('detail_empty'):
++            return min(default, FAILED_REFRESH_SECONDS)
++        return min(default, FINAL_REFRESH_SECONDS if age_hours <= 24 else LATE_FINAL_REFRESH_SECONDS)
++    state = extra.get(STATE_KEY)
++    sections = state.get('sections') if isinstance(state, dict) else None
++    if isinstance(sections, dict):
++        partial = not all(sections.get(key) for key in ('incidents', 'statistics', 'home_starters', 'away_starters'))
