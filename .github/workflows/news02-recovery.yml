@@ -13,6 +13,9 @@ permissions:
 concurrency:
   group: news02-isolated-${{ github.ref }}
   cancel-in-progress: false
+defaults:
+  run:
+    shell: bash
 jobs:
   recovery:
     runs-on: ubuntu-latest
@@ -41,7 +44,14 @@ jobs:
         run: |
           docker build --progress=plain -f deploy/news/Dockerfile -t ninko-news02:gate . 2>&1 | tee evidence/docker-build.log
           docker image inspect ninko-news02:gate > evidence/image-inspect.json
-          docker image inspect python:3.12-slim-bookworm > evidence/base-image-inspect.json
+          python - <<'PYIMAGE'
+          import re,json
+          from pathlib import Path
+          log=Path('evidence/docker-build.log').read_text()
+          digests=set(re.findall(r'FROM docker.io/library/python:3\.12-slim-bookworm@sha256:([0-9a-f]{64})',log))
+          assert len(digests)==1,digests
+          Path('evidence/base-image-inspect.json').write_text(json.dumps({'reference':'python:3.12-slim-bookworm','actual_build_resolved_digest':'sha256:'+next(iter(digests)),'evidence':'BuildKit FROM line, not an assumed daemon tag'}))
+          PYIMAGE
           docker run --rm --network none ninko-news02:gate python -m pip freeze > evidence/pip-freeze.txt
       - name: Actual image preflight and fail-closed default, without network or secrets
         run: |
@@ -124,6 +134,7 @@ jobs:
               summary={k:len(list(tree.iter(v))) for k,v in [('tests','testcase'),('failures','failure'),('errors','error'),('skipped','skipped')]}
               Path('evidence/test-summary.json').write_text(json.dumps(summary,indent=2))
               print('NEWS02_TEST_SUMMARY '+json.dumps(summary))
+              assert summary['tests']>=1070 and not (summary['failures'] or summary['errors'] or summary['skipped']),summary
           PY
       - uses: actions/upload-artifact@v4
         if: always()
