@@ -1,0 +1,38 @@
+name: C17 fresh pre-release public snapshot
+on:
+  push:
+    branches: [audit/football-categories-20260926-17]
+    paths: ['.github/workflows/c17-fresh-baseline.yml']
+permissions:
+  contents: read
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Read public board and known competition witnesses
+        run: |
+          mkdir evidence
+          python - <<'PY'
+          import json,urllib.request,time,datetime,concurrent.futures
+          from pathlib import Path
+          api='https://allball-backend-production.up.railway.app'
+          urls={'cohort':api+'/sports-data/events?sport=football&unlimited=1&date_from=2026-09-24T14%3A00%3A00Z&date_to=2026-09-28T13%3A59%3A59Z','mexico':api+'/sports-data/competitions/mexico-liga-mx/hub','toppserien':api+'/sports-data/competitions/football-nor-toppserien/hub','toppserien-detail':api+'/sports-data/events/ninko-evt-20117688e59bd5e8ef68'}
+          def get(item):
+            name,url=item;t=time.monotonic();row={'url':url,'at':datetime.datetime.now(datetime.timezone.utc).isoformat()}
+            try:
+              with urllib.request.urlopen(urllib.request.Request(url,headers={'User-Agent':'NinkoSports-owned-site-QA/17'}),timeout=45) as r:row.update(http=r.status,payload=json.load(r))
+            except Exception as e:row['error']=str(e)
+            row['seconds']=time.monotonic()-t;Path('evidence/'+name+'.json').write_text(json.dumps(row,ensure_ascii=False));return name,row
+          out=dict(concurrent.futures.ThreadPoolExecutor(max_workers=2).map(get,urls.items()))
+          assert out['cohort'].get('http')==200,out['cohort']
+          events=out['cohort']['payload']['events'];assert len(events)>800
+          Path('evidence/ids.json').write_text(json.dumps(sorted(e['id'] for e in events)))
+          print('Fresh public football cohort:',len(events),'at',out['cohort']['at'])
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: c17-fresh-pre-release
+          path: evidence
+          retention-days: 30
