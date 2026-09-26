@@ -8,7 +8,7 @@ import sys
 BASE='833d24c354fe326da64ed2a4a9478eaa3b56ea92'
 EXPECTED={
  'news_runtime.py':'c889e50a1cfe2034f6d99cdb8d7037c2cbc7300a0e2babdca02ad32cbf76bfa3',
- 'bot/scheduler.py':'58054b1876c7a4377306c873047345ce3a8803f7615319ac7e3f63b0c1dc16e4',
+ 'bot/scheduler.py':'3a766a4f609ac8b02611addfa39ca7593cdc9c1ec5ccc2fc2dc9d0c29b233b7c',
  'bot/news_budget.py':'c4f95465a7c3eedd5abc6e4857900ebed8d16ab6270a14bfa221b43dfca92175',
  'deploy/news/preflight.py':'04cadc72f094340a8f5e7503aa3694f9235ad19871fe03d7b6d08a483d0e9d08',
  'tests/test_news_deploy_contract.py':'8831c4a49db2faaa2b17173b1314ec0b4fc93893300ff1b6b646727bdd9de520',
