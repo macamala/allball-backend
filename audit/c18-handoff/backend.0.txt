@@ -113,7 +113,7 @@ index 07514fe..a79d652 100644
      row.extra_json = dump_json(extra)
      from collector.list_extra import store_list_extra
  
- diff --git a/collector/football_detail_retry.py b/collector/football_detail_retry.py
+diff --git a/collector/football_detail_retry.py b/collector/football_detail_retry.py
 new file mode 100644
 index 0000000..75dfdc4
 --- /dev/null
