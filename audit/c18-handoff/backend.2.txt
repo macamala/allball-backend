@@ -1,0 +1,175 @@
+-    # Every second pass is a fair league slot even during continuous live play.
++    live_keys = sorted({row.competition_id for row in rows if row.status in LIVE_STATUSES})
++    # Preserve the existing fair table slot and shared time budget.
+     table_key = (live_keys[cycle//2 % len(live_keys)] if cycle % 2 == 0 and live_keys else (ordered[0] if ordered else None))
+     table_rows = 0
+     if table_key and time.monotonic() < deadline:
+@@ -87,9 +127,12 @@ def warm_current_football(db, *, owner, now=None, getter=None, budget_seconds=6)
+         if cycle % 2 or not live_keys:
+             state['after_competition'] = table_key
+     state['cycle'] = cycle+1
++    state['after_detail_event'] = cursor
+     job.last_run_at = now
+     job.last_status = 'ok'
+     job.last_error = dump_json(state)
+-    job.items_written = attempted
++    job.items_written = len(attempted)
+     db.flush()
+-    return {'detail_attempts': attempted, 'table_competition': table_key, 'table_rows': table_rows, 'candidates': len(rows)}
++    return {'detail_attempts': len(attempted), 'detail_event_ids': attempted,
++            'table_competition': table_key, 'table_rows': table_rows,
++            'candidates': len(rows)}
+diff --git a/collector/provider.py b/collector/provider.py
+index fbd446a..09e4cda 100644
+--- a/collector/provider.py
++++ b/collector/provider.py
+@@ -176,6 +176,7 @@ INTERNAL_EVENT_KEYS = {
+     "status_inferred",
+     "quality_flags",
+     "detail_fetched_at",
++    "_football_detail_sync",
+     "bbc_cricket_checked_at",
+     "rich_id_checked_at",
+     "letour_rank_rev",
+diff --git a/tests/test_c18_finished_detail_recovery.py b/tests/test_c18_finished_detail_recovery.py
+new file mode 100644
+index 0000000..6b1bc06
+--- /dev/null
++++ b/tests/test_c18_finished_detail_recovery.py
+@@ -0,0 +1,302 @@
++"""Post-match regressions: cached partial payloads, late data and fair retries.
++
++The fixture uses the existing verified FotMob structure. No production records
++or provider identities are created or changed by these tests.
++"""
++from copy import deepcopy
++from datetime import datetime, timedelta
++
++import pytest
++
++from collector.adapters import FetchResult
++from collector.detail_enrich import enrich_event_row, PARSER_REV
++from collector.fotmob_rich import REVISION
++from collector.models import SportsCollectorJob, SportsEvent, SportsEventDetail
++from collector.util import dump_json, load_json
++from tests.test_fotmob_match_centre import stored, source
++from tests.test_c15_live_tables import db
++
++
++def _recent(stored, *, minutes=6, full_record=False):
++    session, row, record = stored
++    row.start_time = datetime.utcnow() - timedelta(hours=4)
++    raw = source()
++    raw['general']['matchTimeUTCDate'] = row.start_time.isoformat() + 'Z'
++    meta = load_json(row.extra_json)
++    meta.update(detail_status_at_fetch='finished', detail_empty=False,
++                detail_negative=False, lineups_absent=not full_record,
++                fotmob_detail_rev=REVISION,
++                detail_fetched_at=(datetime.utcnow() - timedelta(minutes=minutes)).isoformat())
++    row.extra_json = dump_json(meta)
++    if not full_record:
++        record.incidents_json = record.statistics_json = record.lineups_json = None
++    session.commit()
++    return session, row, record, raw
++
++
++def _score_identity(row):
++    return (row.event_id, row.fingerprint, row.competition_id, row.canonical_event_id,
++            row.participants_json, row.start_time, row.score_json, row.status,
++            row.live, row.display_eligible)
++
++
++def test_finished_venue_only_response_does_not_freeze_later_core_details_for_a_week(stored):
++    session, row, record, raw = _recent(stored)
++    before = _score_identity(row)
++    calls = []
++    def getter(url):
++        calls.append(url)
++        return FetchResult(ok=True, payload=deepcopy(raw), http_status=200)
++    enrich_event_row(session, row, getter=getter)
++    session.commit()
++    assert len(calls) == 1
++    assert load_json(record.lineups_json)['away']['start'][0]['name'] == 'Scorer'
++    assert load_json(record.statistics_json)
++    assert load_json(record.incidents_json)
++    assert _score_identity(row) == before
++    enrich_event_row(session, row, getter=getter)
++    assert len(calls) == 1, 'Immediate repeat views must not hammer the source'
++
++
++def test_late_final_statistics_are_refreshed_even_when_some_lineups_already_exist(stored):
++    session, row, record, raw = _recent(stored, full_record=True)
++    before = _score_identity(row)
++    calls = []
++    enrich_event_row(session, row, getter=lambda url: calls.append(url) or FetchResult(ok=True, payload=raw))
++    assert len(calls) == 1
++    assert load_json(record.statistics_json) == [{'label': 'Total shots', 'home': 0, 'away': 3}]
++    assert _score_identity(row) == before
++
++
++def test_transient_final_failure_retains_all_previously_known_sections(stored):
++    session, row, record, raw = _recent(stored, full_record=True)
++    before = (record.incidents_json, record.statistics_json, record.lineups_json, _score_identity(row))
++    calls = []
++    def getter(url):
++        calls.append(url)
++        return FetchResult(ok=False, http_status=503, error='temporary upstream error')
++    enrich_event_row(session, row, getter=getter)
++    session.commit()
++    assert len(calls) == 1
++    assert (record.incidents_json, record.statistics_json, record.lineups_json, _score_identity(row)) == before
++    enrich_event_row(session, row, getter=getter)
++    assert len(calls) == 1
++
++
++def test_parser_or_transport_exception_becomes_bounded_retry_not_an_aborted_queue(stored):
++    session, row, record, raw = _recent(stored)
++    meta = load_json(row.extra_json)
++    meta['detail_fetched_at'] = (datetime.utcnow() - timedelta(days=8)).isoformat()
++    row.extra_json = dump_json(meta)
++    session.commit()
++    before = _score_identity(row)
++    calls = []
++    def getter(url):
++        calls.append(url)
++        raise TimeoutError('private diagnostic text must not be persisted')
++    enrich_event_row(session, row, getter=getter)
++    session.commit()
++    meta = load_json(row.extra_json)
++    assert len(calls) == 1 and meta['detail_negative'] is True
++    assert 'private diagnostic' not in row.extra_json
++    assert _score_identity(row) == before
++    enrich_event_row(session, row, getter=getter)
++    assert len(calls) == 1
++
++
++def _worker_setup(db, monkeypatch):
++    from collector.lock import acquire_scheduler_lock
++    monkeypatch.setattr('collector.football_enrichment_cycle.writes_enabled', lambda: True)
++    monkeypatch.setattr('collector.provider._blocked_public_sources', lambda _: (set(), set()))
++    monkeypatch.setattr('collector.provider._row_public_source_allowed', lambda *_: True)
++    monkeypatch.setattr('collector.standings_enrich.load_standings', lambda *a, **k: [])
++    acquire_scheduler_lock(db, owner='c18-test-owner')
++    db.commit()
++
++
++def _row(db, eid, *, hours=4, status='finished', family='fotmob', fresh=False):
++    meta = {'source_event_ids': {family: '100'}}
++    if fresh:
++        meta.update(parser_rev=PARSER_REV, detail_fetched_at=datetime.utcnow().isoformat(),
++                    detail_status_at_fetch=status, detail_empty=False, lineups_absent=False)
++    row = SportsEvent(event_id=eid, fingerprint=eid, sport_id='football',
++                      competition_id='league', event_family='team_match',
++                      start_time=datetime.utcnow()-timedelta(hours=hours), status=status,
++                      live=status=='live', display_eligible=True,
++                      participants_json=dump_json({'home': {'name': 'Home FC'}, 'away': {'name': 'Away FC'}}),
++                      score_json=dump_json({'home': 0, 'away': 1}), extra_json=dump_json(meta))
++    db.add(row)
++    db.commit()
++    return row
++
++
++@pytest.mark.parametrize('hours', [13, 25, 48, 71])
++def test_finished_match_does_not_leave_automatic_recovery_after_twelve_hours(db, monkeypatch, hours):
++    from collector.football_enrichment_cycle import warm_current_football
++    _worker_setup(db, monkeypatch)
