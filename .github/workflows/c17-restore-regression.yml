@@ -1,0 +1,104 @@
+name: C17 restored draft regression (no release)
+on:
+  push:
+    branches: [audit/football-categories-20260926-17]
+    paths: ['.github/workflows/c17-restore-regression.yml']
+permissions:
+  contents: read
+  actions: read
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: handoff
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 52272139d4ecaffbe84cc4709e25c0b0ed3abb56
+          path: backend
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Restore exact backend patch in isolated checkout
+        run: |
+          mkdir -p evidence
+          python - <<'PY'
+          import base64,gzip,hashlib,subprocess
+          from pathlib import Path
+          p=Path('handoff/audit/c17-handoff')
+          for side,count,want in [('backend',3,'cb4d62f05d88eac703ac4eb375ad3e1de514f55bf9b5130098414b5936996bb0'),('frontend',2,'b7f01962d89daefcf4f5657ffc277a94cfd6d8f07f576f5a9f8916dc9d39a67a')]:
+            data=gzip.decompress(base64.b64decode(''.join((p/f'{side}.{i}.b64').read_text().strip() for i in range(count)),validate=True))
+            assert hashlib.sha256(data).hexdigest()==want
+            Path(f'evidence/{side}.patch').write_bytes(data)
+          subprocess.run(['git','apply','--check','../evidence/backend.patch'],cwd='backend',check=True)
+          subprocess.run(['git','apply','../evidence/backend.patch'],cwd='backend',check=True)
+          PY
+          tar --exclude=.git -czf evidence/backend-restored.tar.gz -C backend .
+          sha256sum evidence/* > evidence/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: c17-restored-source-review
+          path: evidence
+          retention-days: 30
+      - name: Install actual runtime dependencies
+        working-directory: backend
+        run: python -m pip install -r requirements.txt
+      - name: All retained C16 and new C17 regression cases
+        working-directory: backend
+        run: python -m pytest -q $(cat audit/football_test_selection.txt) tests/test_hidden_football_aliases.py tests/test_fotmob_match_centre.py tests/test_entity_profile_navigation.py tests/test_c14_live_player.py tests/test_canonical_detail.py tests/test_fiba_rich_detail.py tests/test_sofa_rich_detail.py tests/test_c15_live_tables.py tests/test_c15_parent_league_tables.py tests/test_worker_shutdown_handoff.py tests/test_c16_competition_hub.py tests/test_c16_identity_lookup.py tests/test_c17_categories_scorers.py --junitxml=../evidence/backend-tests.xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: c17-restored-backend-tests
+          path: evidence/backend-tests.xml
+          retention-days: 30
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: handoff
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: macamala/allball-frontend
+          ref: 0b26a18f5a1d0a5b8ccc8adc57b8c9d5d17d2f13
+          path: frontend
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Restore exact frontend patch in isolated checkout
+        run: |
+          mkdir -p evidence
+          python - <<'PY'
+          import base64,gzip,hashlib,subprocess
+          from pathlib import Path
+          p=Path('handoff/audit/c17-handoff')
+          data=gzip.decompress(base64.b64decode(''.join((p/f'frontend.{i}.b64').read_text().strip() for i in range(2)),validate=True))
+          assert hashlib.sha256(data).hexdigest()=='b7f01962d89daefcf4f5657ffc277a94cfd6d8f07f576f5a9f8916dc9d39a67a'
+          Path('evidence/frontend.patch').write_bytes(data)
+          subprocess.run(['git','apply','--check','../evidence/frontend.patch'],cwd='frontend',check=True)
+          subprocess.run(['git','apply','../evidence/frontend.patch'],cwd='frontend',check=True)
+          PY
+      - run: npm ci
+        working-directory: frontend
+      - name: Complete frontend suite
+        working-directory: frontend
+        run: npm test -- --reporter=default --reporter=junit --outputFile=../evidence/frontend-tests.xml
+      - name: Production build
+        working-directory: frontend
+        env:
+          VITE_API_URL: https://allball-backend-production.up.railway.app
+        run: npm run build
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: c17-restored-frontend-tests
+          path: evidence
+          retention-days: 30
