@@ -55,7 +55,7 @@ index b66bbdc..6c888b0 100644
 +    new_slots = min(len(unseen), max(0,cap-1) if known else cap)
 +    return {**dict(list(known.items())[:cap-new_slots]),
 +            **dict(list(unseen.items())[:new_slots])}
- diff --git a/collector/football_board_refresh.py b/collector/football_board_refresh.py
+diff --git a/collector/football_board_refresh.py b/collector/football_board_refresh.py
 index d2441ce..90fa6fc 100644
 --- a/collector/football_board_refresh.py
 +++ b/collector/football_board_refresh.py
@@ -81,7 +81,7 @@ index d2441ce..90fa6fc 100644
      ordered = interleave_priority(ordered, matches, priorities)
      processed_ids = set()
      exhausted = False
- diff --git a/collector/football_fixture_linkage.py b/collector/football_fixture_linkage.py
+diff --git a/collector/football_fixture_linkage.py b/collector/football_fixture_linkage.py
 index bb28f44..6ee64d5 100644
 --- a/collector/football_fixture_linkage.py
 +++ b/collector/football_fixture_linkage.py
@@ -94,7 +94,7 @@ index bb28f44..6ee64d5 100644
  
  
  def fresh_evidence(event):
- diff --git a/collector/football_source_roots.py b/collector/football_source_roots.py
+diff --git a/collector/football_source_roots.py b/collector/football_source_roots.py
 index 63e5343..10988ee 100644
 --- a/collector/football_source_roots.py
 +++ b/collector/football_source_roots.py

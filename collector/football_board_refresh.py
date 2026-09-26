@@ -22,7 +22,7 @@ from collector.flags import collection_enabled, scheduler_enabled, writes_enable
 from collector.fotmob_crosswalk import _ensure_dynamic_fotmob_mapping, _fotmob_competition_identity, _fill_identity_assets
 from collector.football_fixture_linkage import LINKAGE_REVISION, choose_indexed_keeper, link_accepted_duplicates
 from collector.football_source_roots import plan_source_roots, plan_hidden_source_with_public_peer, apply_accepted_source_roots
-from collector.football_board_priority import priority_plan, interleave_priority, record_priority_attempt, conflict_evidence
+from collector.football_board_priority import board_priority_plan as priority_plan, interleave_priority, record_priority_attempt, conflict_evidence
 from collector.keeper_revalidation import _same_pair
 from collector.limits import is_rate_limited, record_hit
 from collector.lock import acquire_write_lock, lock_status, release_write_lock
@@ -315,7 +315,11 @@ def refresh_day(db, day: str, source: SportsSource, *, now: datetime, getter=Non
                + sorted((key, raw) for key, raw in matches.items() if key > after and key not in retry_ids))
     index = _identity_index(db, day)
     priority_receipts = dict(state.get("priority_receipts") or {})
-    priorities = priority_plan(matches, index, priority_receipts, now, max_events)
+    # Do not spend a discovery-priority slot on a just-visited ID or on the
+    # first few coverage rows already about to be processed in this same page.
+    immediate_ids = {sid for sid, _ in ordered[:max(1, min(4, max_events // 2))]}
+    priorities = priority_plan(matches, index, priority_receipts, now, max_events,
+                               after=after, immediate_ids=immediate_ids)
     ordered = interleave_priority(ordered, matches, priorities)
     processed_ids = set()
     exhausted = False

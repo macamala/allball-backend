@@ -145,3 +145,52 @@ def conflict_evidence(roots: dict, event: dict) -> dict:
     return {'root_count': len(roots), 'roots': out,
             'incoming_competition': event.get('source_competition_context'),
             'source_group_id': event.get('source_group_id')}
+
+
+def unseen_played_plan(matches: dict, index: dict, receipts: dict, now: datetime, cap: int, *, after="", exclude=()) -> dict[str, str]:
+    """Give new played IDs a bounded share before a long date cursor reaches them.
+
+    This schedules normal validation only. It does not establish that a global
+    row is absent, override a hidden record, or authorize a source-ID collision.
+    """
+    choices = []
+    for sid, raw in matches.items():
+        if index.get(sid) or not str(sid).isdigit() or sid <= after or sid in exclude:
+            continue
+        event = match_to_event(raw, '')
+        if not event:
+            continue
+        fetched = parse_datetime(event.get('source_fetch_time'))
+        kickoff = parse_datetime(event.get('start_time'))
+        status = canonical_status(event.get('status'))
+        supplied = tuple(_score((event.get('score') or {}).get(s)) for s in ('home', 'away'))
+        node = event.get('source_competition_context') or {}
+        if (not fetched or not kickoff or not -30 <= (now-fetched).total_seconds() <= 300
+                or not now-timedelta(hours=48) <= kickoff <= now
+                or status not in {'live','halftime','break','finished'} or None in supplied
+                or not str(node.get('id') or '').isdigit()
+                or str(event.get('source_event_id') or '') != str(sid)):
+            continue
+        proof = {'kind':'unseen_played','id':str(sid),'status':status,'score':supplied,
+                 'kickoff':kickoff.isoformat(),'league':node,
+                 'pair':[(event.get(s) or {}).get('id') for s in ('home','away')]}
+        signature = hashlib.sha256(json.dumps(proof,sort_keys=True,default=str).encode()).hexdigest()
+        old = receipts.get(sid) or {}
+        due = parse_datetime(old.get('next_due_at'))
+        if signature == old.get('signature') and due and due > now:
+            continue
+        last = parse_datetime(old.get('attempted_at')) or datetime.min
+        choices.append((last, status == 'finished', str(sid), signature))
+    return {sid:signature for _,_,sid,signature in sorted(choices)[:max(0,cap)]}
+
+
+def board_priority_plan(matches: dict, index: dict, receipts: dict, now: datetime, max_events: int, *, after="", immediate_ids=()) -> dict[str, str]:
+    """Keep both changed known results and new live/final results moving."""
+    cap = min(MAX_PRIORITY_EVENTS, max(0, max_events // 2))
+    known = priority_plan(matches, index, receipts, now, max_events)
+    if not cap:
+        return known
+    unseen = unseen_played_plan(matches, index, receipts, now, min(2, cap), after=after, exclude=immediate_ids)
+    new_slots = min(len(unseen), max(0,cap-1) if known else cap)
+    return {**dict(list(known.items())[:cap-new_slots]),
+            **dict(list(unseen.items())[:new_slots])}

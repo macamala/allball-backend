@@ -6,7 +6,7 @@ from collector.participant_alias import punctuation_identity_key
 from collector.source_ids import as_family_map, id_for_family
 from collector.util import load_json, parse_datetime
 
-LINKAGE_REVISION = 4
+LINKAGE_REVISION = 5
 
 
 def fresh_evidence(event):

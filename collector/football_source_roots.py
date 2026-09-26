@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 import logging
 
+from collector.football_native_scope import same_ungrouped_parent, proven_womens_legacy_bucket
 from collector.football_fixture_linkage import fresh_evidence
 from collector.maintenance_policy import automatic_promotion_blocked, sync_public_visibility
 from collector.models import SportsEvent
@@ -92,14 +93,14 @@ def _safe_root(row, event, leaf, sid, *, require_typed=True):
             or row.display_eligible is not True or any(m.get('display_eligible') is False for m in metas)):
         return False
     scope = str(rich.get('source_group_id') or rich.get('source_competition_id') or '')
-    if require_typed and scope != leaf:
+    if require_typed and scope != leaf and not same_ungrouped_parent(row, event, scope, leaf, sid):
         return False
     for meta in metas:
         # Source IDs belonging to another provider are not a contradictory
         # FotMob league ID, but also cannot authorize the required rich proof.
         if meta.get('source_family') == 'fotmob':
             mscope = str(meta.get('source_group_id') or meta.get('source_competition_id') or '')
-            if mscope and mscope != leaf:
+            if mscope and mscope != leaf and not same_ungrouped_parent(row, event, mscope, leaf, sid):
                 return False
     kickoff = parse_datetime(event.get('start_time'))
     if not kickoff or not row.start_time or abs((row.start_time-kickoff).total_seconds()) > 60:
@@ -158,7 +159,8 @@ def plan_source_roots(db, roots, event, *, public_peers=()):
         if len(values) > 1:
             return None
     candidates = [r for r in roots if r.competition_id == target]
-    if not candidates or any(r.competition_id != target and not r.competition_id.startswith('football-') for r in roots):
+    if not candidates or any(r.competition_id != target and not r.competition_id.startswith('football-')
+                             and not proven_womens_legacy_bucket(r, event, leaf, sid) for r in roots):
         return None  # Never replace an independent known domestic competition.
     maps = [as_family_map((_metas(r)[0]).get('source_event_ids')) for r in roots]
     for i, left in enumerate(maps):
