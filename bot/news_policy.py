@@ -6,6 +6,25 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 UTC = timezone.utc
 TRACKING = {'fbclid', 'gclid', 'mc_cid', 'mc_eid'}
+_NAME_START_STOP = {'The','This','That','These','Those','After','Before','With','When','While','But','And','For','From','Into','During'}
+_PROPER_NAME_RE = re.compile(
+    r"\\b(?:[A-Z][A-Za-zÀ-ÖØ-öø-ÿ'’.-]{1,})(?:\\s+(?:[A-Z][A-Za-zÀ-ÖØ-öø-ÿ'’.-]{1,}|de|da|del|di|la|le|van|von)){1,4}\\b"
+)
+
+
+def protected_proper_names(text):
+    """Conservative multi-word names that automated copy must preserve exactly."""
+    output = []
+    seen = set()
+    for match in _PROPER_NAME_RE.finditer(text or ''):
+        value = match.group(0).strip()
+        first = value.split()[0]
+        key = value.casefold()
+        if first in _NAME_START_STOP or key in seen:
+            continue
+        seen.add(key)
+        output.append(value)
+    return output
 
 
 def canonical_news_url(value):
@@ -92,6 +111,10 @@ def original_draft_reason(draft, source_title, source_body):
     if re.search(r'[“\"]([^”\"\n]{8,})[”\"]', output): return 'direct_quote_requires_review'
     numbers = lambda text: set(re.findall(r'(?<!\w)\d+(?:[.,:/–-]\d+)*(?:%|\b)', text))
     if numbers(output) - numbers(source): return 'unsupported_number'
+    folded_output = output.casefold()
+    for name in protected_proper_names(source):
+        if name.casefold() not in folded_output:
+            return 'missing_or_changed_proper_name'
     tokens = lambda text: re.findall(r"[\w]+", text.lower())
     src, dst = tokens(source_body), tokens(body)
     if len(dst) < 25: return 'insufficient_original_body'
