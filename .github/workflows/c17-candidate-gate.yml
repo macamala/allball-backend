@@ -1,0 +1,95 @@
+name: C17 reviewed backend candidate gate
+on:
+  push:
+    branches: [fix/football-categories-scorers-c17-20260926]
+    paths: ['.github/workflows/c17-candidate-gate.yml']
+permissions:
+  contents: write
+  actions: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 36213957560
+          artifact-ids: 10896607579
+          merge-multiple: true
+          path: /tmp/restored
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 36205878806
+          artifact-ids: 10892589996
+          merge-multiple: true
+          path: /tmp/source
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 36206124825
+          artifact-ids: 10892924813
+          merge-multiple: true
+          path: /tmp/native
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 36207063952
+          artifact-ids: 10894560682
+          merge-multiple: true
+          path: /tmp/scorers
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 36129893421
+          artifact-ids: 10861511746
+          merge-multiple: true
+          path: /tmp/native-c16
+      - name: Exact restore plus reviewed women's canonical-link correction
+        run: |
+          mkdir -p evidence
+          echo 'cb4d62f05d88eac703ac4eb375ad3e1de514f55bf9b5130098414b5936996bb0  /tmp/restored/backend.patch' | sha256sum -c
+          git apply --check /tmp/restored/backend.patch
+          git apply /tmp/restored/backend.patch
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('collector/competition_hub.py');s=p.read_text()
+          for old,new in [('_pair_time(reference, stored)',"_pair_time(reference, stored, female=native.get('_gender') == 'female')"),('_pair_time(witness, event)',"_pair_time(witness, event, female=native.get('_gender') == 'female')"),('_pair_time(event, p)',"_pair_time(event, p, female=native.get('_gender') == 'female')")]:
+            assert s.count(old)==1
+            s=s.replace(old,new)
+          p.write_text(s)
+          PY
+          git add -N collector/football_category.py collector/football_category_catalog.json collector/football_scorers.py tests/test_c17_categories_scorers.py audit/c17_native_replay.py
+          git diff --check
+          git diff 52272139d4ecaffbe84cc4709e25c0b0ed3abb56 -- app.py collector tests/test_c17_categories_scorers.py tests/test_c17_review_regressions.py audit/c17_native_replay.py > evidence/source.patch
+          python -m pip install -r requirements.txt
+      - name: Retained C16 plus reviewed C17 tests
+        run: python -m pytest -q $(cat audit/football_test_selection.txt) tests/test_hidden_football_aliases.py tests/test_fotmob_match_centre.py tests/test_entity_profile_navigation.py tests/test_c14_live_player.py tests/test_canonical_detail.py tests/test_fiba_rich_detail.py tests/test_sofa_rich_detail.py tests/test_c15_live_tables.py tests/test_c15_parent_league_tables.py tests/test_worker_shutdown_handoff.py tests/test_c16_competition_hub.py tests/test_c16_identity_lookup.py tests/test_c17_categories_scorers.py tests/test_c17_review_regressions.py --junitxml=evidence/tests.xml
+      - name: Retained competition and new native category/scorer replays
+        run: |
+          PYTHONPATH=. python audit/c16_native_replay.py /tmp/native-c16 evidence
+          PYTHONPATH=. python audit/c17_native_replay.py /tmp/source /tmp/native /tmp/scorers evidence
+      - name: Publish tested isolated branch only (never main)
+        run: |
+          git config user.name 'NinkoSports regression checks'
+          git config user.email '79318740+macamala@users.noreply.github.com'
+          git add app.py collector audit/c17_native_replay.py tests/test_c17_categories_scorers.py
+          git commit -m 'Separate football categories, retain women canonical season links and expose verified season scorers'
+          git push origin HEAD:refs/heads/fix/football-categories-scorers-c17-20260926
+          git rev-parse HEAD > evidence/candidate.txt
+          git diff --name-only 52272139d4ecaffbe84cc4709e25c0b0ed3abb56 HEAD | while read file; do sha256sum "$file"; done > evidence/SHA256SUMS
+          tar --exclude=.git --exclude=evidence -czf /tmp/backend-candidate.tar.gz .
+          cp /tmp/backend-candidate.tar.gz evidence/
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: c17-reviewed-backend-candidate
+          path: evidence
+          retention-days: 30
