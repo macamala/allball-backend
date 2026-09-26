@@ -9,11 +9,19 @@ from typing import Optional
 import httpx
 
 from .news_budget import reserve_ai_request
+from .free_ai_router import (
+    free_ai_available,
+    free_ai_rate_limited,
+    reset_free_ai_rate_limit,
+    validate_free_story,
+    write_free_story,
+)
 
 logger = logging.getLogger(__name__)
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
+AI_PROVIDER_MODE = (os.getenv("NEWS_AI_PROVIDER_MODE") or "xkiro_free").strip().lower()
 
 _rate_limited = False
 _hard_quota = False
@@ -32,6 +40,7 @@ Write an ORIGINAL news story from the provided facts.
 - Reconstruct readable paragraph structure: intro, context/details, reported statements or extra facts, further context, then the current situation, as the material supports.
 - Do not merge the story into one giant paragraph.
 - Do not invent scores, quotes, fees, injuries, statistics, dates, unnamed sources, or extra context.
+- Preserve proper names exactly as written in the source facts; never translate or rename teams, people, competitions or venues.
 - Do not pad with filler, speculation, or repeated sentences to hit a word count.
 - If the source facts are a substantial news article, write a proper multi-paragraph piece of about 350-700 words using only those facts.
 - If the source facts are a short breaking item, write a short accurate brief. Prefer short and true over long and guessed.
@@ -60,13 +69,25 @@ LENGTH_RETRY_HINT = (
 
 
 def reset_openai_rate_limit() -> None:
-    """Clear per-run RPM pauses. Do not clear a hard quota/billing lock."""
+    """Backward-compatible per-run reset for whichever News AI path is selected."""
     global _rate_limited
     _rate_limited = False
+    reset_free_ai_rate_limit()
 
 
 def openai_rate_limited() -> bool:
+    """Legacy function name retained for callers; reflects the selected AI route."""
+    if AI_PROVIDER_MODE == "xkiro_free":
+        return free_ai_rate_limited()
     return _rate_limited or _hard_quota
+
+
+def ai_available() -> bool:
+    if AI_PROVIDER_MODE == "xkiro_free":
+        return free_ai_available()
+    if AI_PROVIDER_MODE == "openai_legacy":
+        return os.getenv("NEWS_ALLOW_PAID_AI") == "1" and bool(OPENAI_API_KEY)
+    return False
 
 
 def _parse_openai_error(resp: httpx.Response) -> dict:
@@ -167,6 +188,30 @@ def _call_openai(prompt: str) -> Optional[str]:
     return None
 
 
+def _call_selected_ai(prompt: str) -> Optional[str]:
+    if AI_PROVIDER_MODE == "xkiro_free":
+        return write_free_story(SYSTEM_PROMPT, prompt)
+    if AI_PROVIDER_MODE == "openai_legacy" and os.getenv("NEWS_ALLOW_PAID_AI") == "1":
+        return _call_openai(prompt)
+    logger.warning("[rewrite_ai] no permitted AI provider route")
+    return None
+
+
+def validate_story_facts(source_title: str, source_facts: str, parsed: dict) -> tuple[bool, str]:
+    """Fail closed on free mode unless the second-pass fact checker approves."""
+    if AI_PROVIDER_MODE != "xkiro_free":
+        return True, "legacy-route"
+    if not isinstance(parsed, dict):
+        return False, "missing-draft"
+    return validate_free_story(
+        source_title,
+        source_facts,
+        parsed.get("title") or "",
+        parsed.get("summary") or "",
+        parsed.get("body") or "",
+    )
+
+
 def write_ninkosports_story(
     title: str,
     facts: str,
@@ -191,7 +236,7 @@ def write_ninkosports_story(
     )
     if retry_for_length:
         prompt = f"{LENGTH_RETRY_HINT}\n\n{prompt}"
-    return _call_openai(prompt)
+    return _call_selected_ai(prompt)
 
 
 def parse_ai_output(ai_text: str) -> dict:
