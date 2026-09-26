@@ -105,7 +105,7 @@ jobs:
           from pathlib import Path
           root=E.parse('evidence/tests.xml')
           report={key:len(list(root.iter(tag))) for key,tag in [('tests','testcase'),('failures','failure'),('errors','error'),('skipped','skipped')]}
-          assert report['tests']>=1390 and not any(report[k] for k in ('failures','errors','skipped')),report
+          assert report=={'tests':1395,'failures':0,'errors':0,'skipped':0},report
           Path('evidence/test-summary.json').write_text(json.dumps(report,indent=2))
           print(report)
           PY
