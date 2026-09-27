@@ -20,6 +20,7 @@ on:
       - "deploy/news/preflight.py"
       - "tests/test_news*.py"
       - "tests/test_c22_news*.py"
+      - "tests/test_classify.py"
   workflow_dispatch:
 
 jobs:
