@@ -85,7 +85,14 @@ def source_article_facts(
     return "", "none"
 
 
-def _ai_story(title: str, facts: str, sport: str, league: str, max_ai_chars: int) -> tuple:
+def _ai_story(
+    title: str,
+    facts: str,
+    sport: str,
+    league: str,
+    max_ai_chars: int,
+    trusted_context: str = "",
+) -> tuple:
     """Returns (parsed_dict_or_None, reason). reason is ok|empty|too-short."""
     payload = facts[: max(1, max_ai_chars)]
     raw = write_ninkosports_story(title=title, facts=payload, sport=sport, league=league)
@@ -110,7 +117,9 @@ def _ai_story(title: str, facts: str, sport: str, league: str, max_ai_chars: int
             )
             return None, "too-short"
         parsed["body"] = body
-    facts_ok, facts_reason = validate_story_facts(title, payload, parsed)
+    facts_ok, facts_reason = validate_story_facts(
+        title, payload, parsed, trusted_context=trusted_context
+    )
     if not facts_ok:
         logger.info(
             "[fetch_sources] reject factual validation=%s title=%s",
@@ -262,12 +271,23 @@ def _ingest_item(db: Session, item: Dict, use_ai: bool, max_ai_chars: int, ai_bu
     story_summary = facts[:400]
     used_ai = False
     if use_ai and ai_budget > 0 and not openai_rate_limited():
+        trusted_feed = (
+            feed.get("kind") == "league"
+            and feed.get("sport")
+            and feed.get("sport") == tags.sport
+        )
+        trusted_context = (
+            f"VERIFIED DEDICATED FEED SPORT: {tags.sport}. "
+            f"VERIFIED COMPETITION HINT: {tags.league or 'unspecified'}."
+            if trusted_feed else ""
+        )
         parsed, rewrite_reason = _ai_story(
             title=item["title"],
             facts=facts,
             sport=tags.sport or "sports",
             league=tags.league or "",
             max_ai_chars=max_ai_chars,
+            trusted_context=trusted_context,
         )
         if rewrite_reason == "too-short":
             logger.info(
@@ -301,7 +321,7 @@ def _ingest_item(db: Session, item: Dict, use_ai: bool, max_ai_chars: int, ai_bu
         logger.info("[fetch_sources] hold original draft: %s", draft_reason)
         return None, False
 
-    from taxonomy_resolver import resolve_article_competition
+    from taxonomy_resolver import TaxonomyResolution, resolve_article_competition
 
     class _Probe:
         pass
@@ -314,6 +334,30 @@ def _ingest_item(db: Session, item: Dict, use_ai: bool, max_ai_chars: int, ai_bu
     probe.sport = tags.sport
     probe.league = tags.league
     resolved = resolve_article_competition(probe)
+    trusted_feed = (
+        feed.get("kind") == "league"
+        and feed.get("sport")
+        and feed.get("sport") == tags.sport
+    )
+    if resolved.sport and tags.sport and resolved.sport != tags.sport:
+        logger.info(
+            "[fetch_sources] hold taxonomy conflict resolved=%s classified=%s title=%s",
+            resolved.sport, tags.sport, item["title"][:80],
+        )
+        return None, False
+    if not resolved.sport and trusted_feed:
+        competition = None
+        competition_confidence = 0.0
+        if feed.get("league") and tags.league == feed.get("league"):
+            competition = tags.league
+            competition_confidence = 0.86
+        resolved = TaxonomyResolution(
+            sport=tags.sport,
+            competition=competition,
+            sport_confidence=0.90,
+            competition_confidence=competition_confidence,
+            evidence=["trusted-dedicated-feed-sport"],
+        )
     stamp_sport = resolved.sport
     stamp_league = resolved.public_competition
 
