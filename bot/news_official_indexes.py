@@ -37,6 +37,18 @@ HTML_INDEXES = (
         "paths": ("/media-center/news/",),
     },
     {
+        "id": "ea-sports-fc-news",
+        "sport": "ea-sports-fc",
+        "publisher": "EA SPORTS FC",
+        "url": "https://www.ea.com/games/ea-sports-fc/news",
+        "host": "www.ea.com",
+        "paths": (
+            "/games/ea-sports-fc/news/",
+            "/games/ea-sports-fc/fc-27/news/",
+            "/games/ea-sports-fc/fc-26/news/",
+        ),
+    },
+    {
         "id": "valorant-esports",
         "sport": "valorant",
         "publisher": "VALORANT Esports",
