@@ -5,7 +5,8 @@ from bot.news_policy import original_draft_reason, protected_proper_names
 
 
 def test_free_ai_route_requires_key_and_explicit_free_model_ids(monkeypatch):
-    monkeypatch.setattr(free_ai, '_zero_price_free_model', lambda model: True)
+    monkeypatch.setattr(free_ai, '_free_catalog_model', lambda model: True)
+    monkeypatch.setattr(free_ai, '_free_tokens_available', lambda: True)
     monkeypatch.delenv('XKIRO_API_KEY', raising=False)
     assert not free_ai.free_ai_available()
 
@@ -19,31 +20,48 @@ def test_free_ai_route_requires_key_and_explicit_free_model_ids(monkeypatch):
 
 
 
-def test_free_model_requires_live_free_tier_and_zero_pricing(monkeypatch):
+def test_free_model_requires_live_free_access_tier(monkeypatch):
     model='qwen/qwen3.5-397b-a17b:free'
     monkeypatch.setattr(free_ai, '_catalog_rows', lambda: [{
         'id': model,
         'access_tier': 'free',
-        'pricing': {'currency': 'USD', 'unit': 'per_1m_tokens', 'input': 0, 'output': '0.000000'},
+        'pricing': {'input': 99, 'output': 99},
     }])
-    assert free_ai._zero_price_free_model(model)
+    assert free_ai._free_catalog_model(model)
 
     monkeypatch.setattr(free_ai, '_catalog_rows', lambda: [{
         'id': model,
         'access_tier': 'paid',
-        'pricing': {'input': 0, 'output': 0},
     }])
-    assert not free_ai._zero_price_free_model(model)
+    assert not free_ai._free_catalog_model(model)
 
     monkeypatch.setattr(free_ai, '_catalog_rows', lambda: [{
         'id': model,
         'access_tier': 'free',
-        'pricing': {'input': 0, 'output': 0.001},
+        'pay_as_you_go': True,
     }])
-    assert not free_ai._zero_price_free_model(model)
+    assert not free_ai._free_catalog_model(model)
 
     monkeypatch.setattr(free_ai, '_catalog_rows', lambda: None)
-    assert not free_ai._zero_price_free_model(model)
+    assert not free_ai._free_catalog_model(model)
+
+
+def test_free_token_counter_fails_closed_at_zero(monkeypatch):
+    class Response:
+        status_code=200
+        def json(self):
+            return {'free_tokens': {'remaining': 0}}
+    class Client:
+        def __init__(self,*args,**kwargs): pass
+        def __enter__(self): return self
+        def __exit__(self,*args): pass
+        def get(self,*args,**kwargs): return Response()
+
+    free_ai._usage_cache.update(at=0.0, remaining=None, verified=False)
+    monkeypatch.setenv('XKIRO_API_KEY','fixture-key')
+    monkeypatch.setattr(free_ai.httpx,'Client',Client)
+    assert not free_ai._free_tokens_available()
+
 
 def test_free_validator_fails_closed_on_bad_or_unsupported_output(monkeypatch):
     monkeypatch.setenv('NEWS_XKIRO_VALIDATOR_MODEL', 'qwen/qwen3.5-397b-a17b:free')
