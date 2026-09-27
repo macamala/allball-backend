@@ -82,7 +82,7 @@ def prepare_ingest(monkeypatch,draft=DRAFT):
     monkeypatch.setattr(ingest,'existing_near_duplicate',lambda *a:None)
     monkeypatch.setattr(ingest,'_source_on_ai_cooldown',lambda *a:False)
     monkeypatch.setattr(ingest,'_hold_ai_source',lambda *a,**k:None)
-    monkeypatch.setattr(ingest,'extract_from_url',lambda url:(FACTS,None))
+    monkeypatch.setattr(ingest,'extract_from_url',lambda url:(FACTS,'https://example.test/hero.jpg'))
     monkeypatch.setattr(ingest,'classify_article',lambda *a,**k:SimpleNamespace(sport='football',league=None,country=None))
     monkeypatch.setattr(ingest,'_ai_story',lambda **k:(draft,'ok' if draft else 'empty'))
     return {'title':'Football cup format announced','url':'https://example.test/cup',
@@ -193,3 +193,20 @@ def test_missing_ledger_does_not_start_feed_or_db_work(monkeypatch):
     monkeypatch.delenv('NEWS_AI_LEDGER_PATH',raising=False)
     monkeypatch.setattr(ingest,'_fetch_and_store_all_articles',lambda *a:pytest.fail('ingestion began'))
     assert ingest.fetch_and_store_all_articles(max_ai_articles=2)==0
+
+
+def test_missing_image_stops_before_ai_writer(monkeypatch):
+    item=prepare_ingest(monkeypatch)
+    monkeypatch.setattr(ingest,'extract_from_url',lambda url:(FACTS,None))
+    monkeypatch.setattr(ingest,'_ai_story',lambda **kw:pytest.fail('writer must not run without image'))
+    holds=[]
+    monkeypatch.setattr(ingest,'_hold_ai_source',lambda url,reason:holds.append((url,reason)))
+    assert ingest._ingest_item(Mock(),item,True,6000,1)==(None,False)
+    assert holds[-1]==(item['url'],'missing-publishable-image')
+
+
+def test_logo_image_stops_before_ai_writer(monkeypatch):
+    item=prepare_ingest(monkeypatch)
+    monkeypatch.setattr(ingest,'extract_from_url',lambda url:(FACTS,'https://example.test/team-logo.svg'))
+    monkeypatch.setattr(ingest,'_ai_story',lambda **kw:pytest.fail('writer must not run for logo-only hero'))
+    assert ingest._ingest_item(Mock(),item,True,6000,1)==(None,False)
