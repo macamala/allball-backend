@@ -156,4 +156,3 @@ def test_ski_weltmeisterin_story_is_winter_sports():
         feed_kind="mixed",
     )
     assert result.sport == "winter-sports"
-
