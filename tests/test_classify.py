@@ -130,3 +130,30 @@ def test_muay_thai_stays_unclassified_without_registry_sport():
         feed_kind="mixed",
     )
     assert result.sport is None
+
+def test_santiago_gimenez_porto_story_is_football():
+    result = classify_article(
+        "Santiago Gimenez corre por fora no México",
+        "O avançado continua ligado ao mercado do FC Porto.",
+        feed_kind="mixed",
+    )
+    assert result.sport == "football"
+
+
+def test_arouca_story_is_football():
+    result = classify_article(
+        "Base bem cimentada do Arouca sustenta arranque de alto nível",
+        "O clube português começou a época com uma base estável.",
+        feed_kind="mixed",
+    )
+    assert result.sport == "football"
+
+
+def test_ski_weltmeisterin_story_is_winter_sports():
+    result = classify_article(
+        "Neue Chefin in der Stadt: Ex-Ski-Weltmeisterin ist kurz nach Hochzeit Mama geworden",
+        "Die frühere Ski-Weltmeisterin spricht über ihr neues Familienleben.",
+        feed_kind="mixed",
+    )
+    assert result.sport == "winter-sports"
+
