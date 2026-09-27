@@ -13,7 +13,7 @@ from database import SessionLocal
 from models import Article
 from editorial import news_image_is_publishable, pick_article_image, score_image_candidate
 
-from .news_policy import fair_news_queue, freshness_reason, non_article_news_reason, original_draft_reason
+from .news_policy import fair_news_queue, freshness_reason, non_article_news_reason, original_draft_reason, source_path_sport_hint
 from .news_learning import (
     learned_rule_violation_reason,
     mark_auto_corrected,
@@ -25,7 +25,7 @@ from .news_learning import (
 )
 from .news_budget import active_ai_budget, ai_budget_scope, configured_budget, ai_budget_exhausted
 from sports_registry.sports import SPORTS
-from .classify import classify_article
+from .classify import Classification, classify_article
 from .dedupe import existing_by_url, existing_near_duplicate
 from .extract import extract_from_url, parse_feed_datetime, paragraphs_from_html
 from .feeds import enabled_feeds
@@ -442,14 +442,7 @@ def _ingest_item(
         return None, False
 
     feed = item.get("feed") or {}
-    tags = classify_article(
-        item["title"],
-        facts,
-        feed_kind=feed.get("kind") or "mixed",
-        feed_sport=feed.get("sport"),
-        feed_league=feed.get("league"),
-        feed_country=feed.get("country"),
-    )
+    tags = _classify_item(item, facts)
     ok, reason = quality_check(item["title"], facts, tags.sport, require_english=False)
     if not ok:
         logger.info("[fetch_sources] skip quality=%s title=%s", reason, item["title"][:80])
@@ -705,17 +698,33 @@ def fetch_all_sports_headlines(
     return all_items[:hard_limit]
 
 
-def _classify_candidate(item):
+def _classify_item(item, evidence):
     feed = item.get("feed") or {}
-    evidence = item.get("_classification_text") or item.get("summary") or ""
-    return classify_article(
+    tags = classify_article(
         item["title"],
-        evidence,
+        evidence or "",
         feed_kind=feed.get("kind", "mixed"),
         feed_sport=feed.get("sport"),
         feed_league=feed.get("league"),
         feed_country=feed.get("country"),
     )
+    if tags.sport is not None:
+        return tags
+    hinted = source_path_sport_hint(item.get("url"))
+    if not hinted:
+        return tags
+    return Classification(
+        sport=hinted,
+        league=None,
+        country=feed.get("country"),
+        confidence="medium",
+        reason="trusted-source-path",
+    )
+
+
+def _classify_candidate(item):
+    evidence = item.get("_classification_text") or item.get("summary") or ""
+    return _classify_item(item, evidence)
 
 
 def _enrich_unknown_candidates(items, limit=12):
