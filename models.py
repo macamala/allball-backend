@@ -279,3 +279,72 @@ class SocialIdentity(Base):
     provider_user_id = Column(String(200), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=True)
+
+
+class NewsIncident(Base):
+    """Audit trail for News problems found before or after publication.
+
+    Automated findings are not treated as learned truth. Human/staff confirmation
+    is stored explicitly and only confirmed incidents may influence writer trust.
+    """
+
+    __tablename__ = "news_incidents"
+    __table_args__ = (
+        Index("ix_news_incident_status", "status", "created_at"),
+        Index("ix_news_incident_article", "article_id", "status"),
+        Index("ix_news_incident_writer", "writer_provider", "writer_model", "confirmed"),
+        Index("ix_news_incident_source", "source_host", "created_at"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    article_id = Column(Integer, ForeignKey("articles.id"), nullable=True, index=True)
+    source_url = Column(String(500), nullable=True)
+    source_host = Column(String(255), nullable=True)
+    sport = Column(String(50), nullable=True)
+    phase = Column(String(30), default="prepublish")
+    reason_code = Column(String(160), nullable=False)
+    severity = Column(String(20), default="block")
+    writer_provider = Column(String(80), nullable=True)
+    writer_model = Column(String(120), nullable=True)
+    draft_excerpt = Column(Text, nullable=True)
+    details_json = Column(Text, nullable=True)
+    status = Column(String(20), default="open")  # open | auto_corrected | resolved | dismissed
+    confirmed = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    resolved_at = Column(DateTime, nullable=True)
+    resolution_note = Column(Text, nullable=True)
+    confirmed_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+
+
+class NewsCorrectionRule(Base):
+    """Human-confirmed correction memory used by the News publication gate.
+
+    Runtime supports exact phrase replacement and blocked phrases only. Regex or
+    arbitrary executable rules are intentionally not stored.
+    """
+
+    __tablename__ = "news_correction_rules"
+    __table_args__ = (
+        Index("ix_news_rule_active_scope", "active", "sport", "source_host"),
+        UniqueConstraint(
+            "rule_type",
+            "bad_value",
+            "replacement",
+            "sport",
+            "source_host",
+            name="uq_news_correction_rule",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    rule_type = Column(String(40), nullable=False)  # exact_replace | block_phrase
+    bad_value = Column(String(300), nullable=False)
+    replacement = Column(String(300), nullable=True)
+    sport = Column(String(50), nullable=True)
+    source_host = Column(String(255), nullable=True)
+    active = Column(Boolean, default=True)
+    confirmed_count = Column(Integer, default=1)
+    created_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=True)
+    note = Column(Text, nullable=True)
