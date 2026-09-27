@@ -31,6 +31,7 @@ def good_env():
             'NEWS_AI_PROVIDER_MODE':'xkiro_free','XKIRO_API_KEY':'FIXTURE_ONLY',
             'NEWS_XKIRO_WRITER_MODEL':'qwen/qwen3.5-397b-a17b:free',
             'NEWS_XKIRO_VALIDATOR_MODEL':'qwen/qwen3.5-397b-a17b:free',
+            'NEWS_ACCOUNTING_BACKEND':'file',
             'NEWS_AI_LEDGER_PATH':'/news-data/budget.sqlite',
             'RAILWAY_VOLUME_MOUNT_PATH':'/news-data'}
 
