@@ -567,6 +567,15 @@ def _fetch_and_store_all_articles(
         for item in queued:
             if ai_budget <= 0 or openai_rate_limited() or ai_budget_exhausted():
                 break
+            active_budget = active_ai_budget()
+            if (
+                os.getenv("NEWS_TRANSLATIONS_ENABLED") == "1"
+                and int(os.getenv("NEWS_TRANSLATIONS_PER_CYCLE", "0") or "0") > 0
+                and active_budget is not None
+                and (active_budget.max_requests - active_budget.attempts) < 2
+            ):
+                logger.info("[fetch_sources] preserving final AI request for translation")
+                break
             if hard_limit is not None and created >= hard_limit:
                 break
             allow_ai = use_ai and ai_budget > 0 and not openai_rate_limited()
