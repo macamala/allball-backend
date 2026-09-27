@@ -35,6 +35,7 @@ from .news_writer_router import (
     writer_rate_limited as openai_rate_limited,
     write_ninkosports_story,
     writer_policy_scope,
+    configured_writer_identities,
 )
 from .taxonomy import COMPETITIONS
 from .textutil import clean_text, looks_like_garbage, strip_truncation_markers
@@ -337,6 +338,7 @@ def _ingest_item(db: Session, item: Dict, use_ai: bool, max_ai_chars: int, ai_bu
                     correction_reason=lock_reason,
                     deprioritize_writers={(provider, model)},
                 )
+            retry_provider, retry_model = writer_identity()
             if retry_reason == "ok" and retry_parsed:
                 if isinstance(db, Session):
                     retry_parsed, retry_block, retry_rules = apply_confirmed_rules(
@@ -350,12 +352,24 @@ def _ingest_item(db: Session, item: Dict, use_ai: bool, max_ai_chars: int, ai_bu
                 )
                 if not retry_lock:
                     parsed = retry_parsed
+                    provider, model = retry_provider, retry_model
                     if incident is not None:
                         mark_auto_corrected(
                             db, incident,
                             note="corrective rewrite passed deterministic fact lock",
                         )
                 else:
+                    if isinstance(db, Session):
+                        record_incident(
+                            db,
+                            reason_code=retry_lock,
+                            source_url=source_url,
+                            sport=tags.sport,
+                            phase="prepublish-retry",
+                            draft=retry_parsed,
+                            writer_provider=retry_provider,
+                            writer_model=retry_model,
+                        )
                     logger.warning(
                         "[fetch_sources] fact lock held after retry reason=%s title=%s",
                         retry_lock, item["title"][:80],
@@ -572,9 +586,8 @@ def fetch_and_store_all_articles(max_per_league=3, hard_limit=None, use_ai=True,
     if not use_ai or not isinstance(max_ai_articles, int) or max_ai_articles <= 0:
         return 0
     budget = configured_budget(max_ai_articles)
-    from .rewrite_ai import OPENAI_API_KEY
-    if not OPENAI_API_KEY or not budget.can_start():
-        logger.warning("[fetch_sources] AI ledger/allowance missing; ingest not started")
+    if not configured_writer_identities() or not budget.can_start():
+        logger.warning("[fetch_sources] writer/ledger/allowance missing; ingest not started")
         return 0
     with ai_budget_scope(budget):
         result = _fetch_and_store_all_articles(max_per_league, hard_limit, use_ai,
