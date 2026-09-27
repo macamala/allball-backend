@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 import pytest
-from bot.news_policy import canonical_news_url, fair_news_queue, freshness_reason, original_draft_reason, source_path_sport_hint
+from bot.news_policy import canonical_news_url, fair_news_queue, freshness_reason, non_article_news_reason, original_draft_reason, source_path_sport_hint
 from sports_registry.sports import SPORTS
 
 NOW = datetime(2026, 9, 26, 6, tzinfo=timezone.utc)
@@ -164,3 +164,29 @@ def test_trusted_source_path_sport_hints(url, sport):
 )
 def test_source_path_hint_requires_exact_trusted_host_and_path(url):
     assert source_path_sport_hint(url) is None
+
+
+@pytest.mark.parametrize(
+    "url,reason",
+    [
+        (
+            "https://www.record.pt/jogo-da-vida/detalhe/queda-em-direto-debora-monteiro",
+            "non_sports_lifestyle_section",
+        ),
+        (
+            "https://www.record.pt/fora-de-campo/detalhe/centeno-politica",
+            "non_sports_off_field_section",
+        ),
+    ],
+)
+def test_record_non_sports_sections_are_rejected_before_classification(url, reason):
+    row={"title":"Publisher lifestyle item","url":url}
+    assert non_article_news_reason(row)==reason
+
+
+def test_record_sport_sections_are_not_blocked_by_section_filter():
+    row={
+        "title":"Francisco Cabral vence em Hangzhou",
+        "url":"https://www.record.pt/modalidades/tenis/detalhe/francisco-cabral",
+    }
+    assert non_article_news_reason(row) is None
