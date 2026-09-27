@@ -26,7 +26,7 @@ def good_env():
             'NEWS_LEGACY_REPAIR_ACK':'1',
             'NEWS_AI_MAX_REQUESTS_PER_RUN':'2','NEWS_AI_MAX_REQUESTS_PER_DAY':'3',
             'NEWS_HISTORICAL_REPAIR_ENABLED':'0','NEWS_EXPANDED_FEEDS_ENABLED':'0',
-            'NEWS_DATA_NEWS_ENABLED':'0','NEWS_TRANSLATIONS_ENABLED':'0',
+            'NEWS_TRANSLATIONS_ENABLED':'0',
             'NEWS_TRANSLATIONS_PER_CYCLE':'0',
             'NEWS_AI_PROVIDER_MODE':'xkiro_free','XKIRO_API_KEY':'FIXTURE_ONLY',
             'NEWS_XKIRO_WRITER_MODEL':'qwen/qwen3.5-397b-a17b:free',
@@ -133,26 +133,27 @@ def test_unknown_news_ai_provider_mode_fails_closed():
     assert 'unsupported_news_ai_provider_mode' in guard.runtime_errors(env)
 
 
-def test_postgres_data_only_runtime_does_not_require_ai_entitlement():
+def test_removed_result_news_flag_cannot_create_a_news_lane():
     env=good_env()
     env['NEWS_ACCOUNTING_BACKEND']='postgres'
     env['NEWS_MAX_AI_ARTICLES']='0'
-    env['NEWS_DATA_NEWS_ENABLED']='1'
     env['NEWS_TRANSLATIONS_ENABLED']='0'
     env['NEWS_TRANSLATIONS_PER_CYCLE']='0'
+    env['NEWS_HISTORICAL_REPAIR_ENABLED']='0'
+    env['NEWS_DATA_NEWS_ENABLED']='1'  # legacy variable may still exist in Railway
     env.pop('XKIRO_API_KEY',None)
     env.pop('NEWS_AI_MAX_REQUESTS_PER_RUN',None)
     env.pop('NEWS_AI_MAX_REQUESTS_PER_DAY',None)
     env.pop('NEWS_AI_LEDGER_PATH',None)
     env.pop('RAILWAY_VOLUME_MOUNT_PATH',None)
+    assert guard.runtime_errors(env) == ['no_news_lane_enabled']
+
+
+def test_removed_result_news_flag_is_not_a_runtime_contract():
+    env=good_env()
     assert guard.runtime_errors(env) == []
-
-
-def test_data_news_flag_must_be_explicit_boolean():
-    env=good_env();del env['NEWS_DATA_NEWS_ENABLED']
-    assert 'explicit_boolean_required:NEWS_DATA_NEWS_ENABLED' in guard.runtime_errors(env)
-    env=good_env();env['NEWS_DATA_NEWS_ENABLED']='true'
-    assert 'explicit_boolean_required:NEWS_DATA_NEWS_ENABLED' in guard.runtime_errors(env)
+    env['NEWS_DATA_NEWS_ENABLED']='true'
+    assert guard.runtime_errors(env) == []
 
 
 def test_translation_lane_requires_explicit_flag_and_bounded_count():
