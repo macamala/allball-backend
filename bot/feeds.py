@@ -29,7 +29,7 @@ FEEDS: List[Feed] = [
     {'url': 'https://www.record.pt/rss', 'kind': 'mixed', 'enabled': True, 'note': 'Portuguese general sport; classify independently'},
     {'url': 'https://isport.blesk.cz/rss', 'kind': 'mixed', 'enabled': True, 'note': 'Czech general sport; classify independently'},
     {'url': 'https://www.novosti.rs/rss/sport', 'kind': 'mixed', 'enabled': True, 'note': 'Serbian general sport firehose; never stamp SuperLiga'},
-    {'url': 'https://www.talkbasket.net/feed', 'kind': 'mixed', 'enabled': True, 'note': 'NBA + EuroLeague mix; classify independently'},
+    {'url': 'https://www.talkbasket.net/feed', 'kind': 'disabled', 'enabled': False, 'note': 'Runtime robots 403; ESPN basketball feeds remain active'},
     {'url': 'https://www.getfootballnewsfrance.com/feed/', 'kind': 'disabled', 'enabled': False, 'note': 'Extract returns HTTP 403; skip until a usable source exists'},
     {'url': 'https://www.blick.ch/sport/rss.xml', 'kind': 'mixed', 'enabled': True},
     {'url': 'https://www.espn.com/espn/rss/soccer/news', 'kind': 'league', 'sport': 'football', 'enabled': True, 'note': 'Global football-only feed; sport hint only, never league stamp'},
