@@ -148,7 +148,7 @@ def _latest_missing(db: Session, limit: int) -> list[Article]:
             ArticleTaxonomyResolution.resolver_version == RESOLVER_VERSION,
             ArticleTaxonomyResolution.public_ok.is_(True),
         )
-        .order_by(Article.ai_generated.desc(), Article.published_at.desc(), Article.id.desc())
+        .order_by(Article.ai_generated.desc(), Article.id.desc())
         .limit(max(10, min(limit * 30, 120)))
         .all()
     )
