@@ -13,7 +13,7 @@ from database import SessionLocal
 from models import Article
 from editorial import news_image_is_publishable, pick_article_image
 
-from .news_policy import fair_news_queue, freshness_reason, original_draft_reason
+from .news_policy import fair_news_queue, freshness_reason, non_article_news_reason, original_draft_reason
 from .news_learning import (
     learned_rule_violation_reason,
     mark_auto_corrected,
@@ -691,18 +691,38 @@ def _classify_candidate(item):
     )
 
 
-def _enrich_unknown_candidates(items, limit=8):
-    """Bounded source-body enrichment for mixed-feed headlines with no sport."""
-    enriched = 0
+def _enrich_unknown_candidates(items, limit=12):
+    """Bounded source-body enrichment for useful mixed-feed headlines with no sport.
+
+    Reject non-article products first, then spend the small extraction allowance
+    on candidates whose feed already supplies a sport hint. This avoids wasting
+    discovery work on podcasts/scorecards while leaving final classification
+    dependent on article evidence.
+    """
+    pending = []
     for candidate in items:
-        if enriched >= max(0, int(limit)):
-            break
+        if non_article_news_reason(candidate):
+            continue
         try:
             candidate_tags = _classify_candidate(candidate)
         except Exception:
             continue
         if candidate_tags.sport is not None or not candidate.get("url"):
             continue
+        feed = candidate.get("feed") or {}
+        pending.append(candidate)
+
+    pending.sort(
+        key=lambda candidate: (
+            1 if (candidate.get("feed") or {}).get("sport") else 0,
+            1 if candidate.get("image_candidates") or candidate.get("image") else 0,
+            candidate.get("published_at") or datetime.min.replace(tzinfo=timezone.utc),
+        ),
+        reverse=True,
+    )
+
+    enriched = 0
+    for candidate in pending[: max(0, int(limit))]:
         try:
             extracted, extracted_image = extract_from_url(candidate["url"])
         except Exception:
@@ -751,7 +771,7 @@ def _fetch_and_store_all_articles(
         # actual article body is unambiguous. Enrich only a small bounded set
         # before fair-queue admission. This spends no AI requests, and the same
         # extracted body is reused later by _ingest_item.
-        enriched_unknown = _enrich_unknown_candidates(queued, limit=8)
+        enriched_unknown = _enrich_unknown_candidates(queued, limit=12)
         if enriched_unknown:
             logger.info(
                 "[fetch_sources] enriched unknown-sport candidates=%s",
