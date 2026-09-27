@@ -24,8 +24,8 @@ from .news_policy import protected_proper_names
 logger = logging.getLogger(__name__)
 
 LANGUAGES = ("sr", "es", "de", "fr", "it", "pt")
-TRANSLATION_PROVIDER = "xkiro-free-v13"
-# v13 also canonicalizes English numeric ordinals before cross-language validation.
+TRANSLATION_PROVIDER = "xkiro-free-v14"
+# v14 protects both proper names and numeric values with reversible tokens.
 CYRILLIC_RE = re.compile(r"[\u0400-\u04FF]")
 NUMBER_RE = re.compile(r"(?<!\w)\d+(?:[.,:/–-]\d+)*(?:st|nd|rd|th|%|\b)", re.I)
 
@@ -46,21 +46,18 @@ FACTUAL RULES:
 - Copy every LOCKED NAME TOKEN exactly wherever it appears. Never translate,
   transliterate, split, alter or drop a token. The server restores the original
   proper name after translation.
-- Preserve every numeric VALUE exactly, including scores, minutes, percentages,
-  dates and statistics. Locale punctuation may change naturally (for example
-  100,023 -> 100.023 or 4.52 -> 4,52), but the numeric value must not change.
-- Numeric English ordinals must remain numeric: 16th may become 16. where natural,
-  but never spell a locked numeral as a word or turn a word-number into digits.
-- Every value listed under LOCKED NUMERIC VALUES must appear in EVERY language.
-  Never omit a listed age, score, count, ranking, date, percentage or statistic.
-- Do NOT introduce any numeral that is not listed under LOCKED NUMERIC VALUES.
-  If the source says "one" as a word, keep it as a word; never convert it into "1".
+- Numeric source values are represented by LOCKED NUMBER TOKENS.
+- Copy every LOCKED NUMBER TOKEN exactly wherever it appears. Never translate,
+  spell out, alter, split or drop a number token. The server restores the exact
+  canonical numeric value after translation.
+- Do not invent any numeral. If the source expresses a number as a word, keep it
+  as a word rather than converting it into digits.
 - Serbian must be natural Serbian LATIN script only, never Cyrillic.
 - Serbian should sound like a passionate sports columnist from the Balkans,
   not like a literal machine translation.
 
 Return JSON only.
-Preferred schema: one flat object with exactly these 18 string fields:
+Preferred schema: one flat object with exactly all of these string fields:
 sr_title,sr_summary,sr_body,es_title,es_summary,es_body,
 de_title,de_summary,de_body,fr_title,fr_summary,fr_body,
 it_title,it_summary,it_body,pt_title,pt_summary,pt_body.
@@ -175,6 +172,54 @@ def _restore_protected_names(
                 continue
             for token, name in locks:
                 value = value.replace(token, name)
+            restored_row[field] = value
+        restored[language] = restored_row
+    return restored
+
+
+def _token_letters(index: int) -> str:
+    value = index + 1
+    output = ""
+    while value:
+        value, remainder = divmod(value - 1, 26)
+        output = chr(ord("A") + remainder) + output
+    return output
+
+
+def _mask_protected_numbers(source: Dict[str, str]):
+    """Replace every source numeral with a digit-free immutable token."""
+    masked = dict(source)
+    token_by_value: Dict[str, str] = {}
+    locks: list[tuple[str, str]] = []
+
+    def replace(match):
+        canonical = _canonical_number(match.group(0))
+        token = token_by_value.get(canonical)
+        if token is None:
+            token = f"__NINKONUM_{_token_letters(len(token_by_value))}__"
+            token_by_value[canonical] = token
+            locks.append((token, canonical))
+        return token
+
+    for field in ("title", "summary", "body"):
+        masked[field] = NUMBER_RE.sub(replace, masked.get(field) or "")
+    return masked, locks
+
+
+def _restore_protected_numbers(
+    payload: Dict[str, Dict[str, str]],
+    locks: list[tuple[str, str]],
+) -> Dict[str, Dict[str, str]]:
+    restored: Dict[str, Dict[str, str]] = {}
+    for language, row in payload.items():
+        restored_row = {}
+        for field in ("title", "summary", "body"):
+            value = row.get(field)
+            if not isinstance(value, str):
+                restored_row[field] = value
+                continue
+            for token, canonical in locks:
+                value = value.replace(token, canonical)
             restored_row[field] = value
         restored[language] = restored_row
     return restored
@@ -411,21 +456,17 @@ def translate_article_payload(article: Article) -> Optional[Dict[str, Dict[str, 
         if len(name.split()) >= 2
     ]
     masked_source, name_locks = _mask_protected_names(source, locked_names)
+    masked_source, number_locks = _mask_protected_numbers(masked_source)
     locked_block = "\n".join(f"- {token}" for token, _name in name_locks) or "- none"
-    locked_numbers = sorted(
-        _numbers("\n".join(source.values())),
-        key=lambda value: (len(value), value),
-    )
-    number_block = "\n".join(f"- {value}" for value in locked_numbers) or "- none"
+    number_block = "\n".join(f"- {token}" for token, _value in number_locks) or "- none"
     prompt = (
         "LOCKED NAME TOKENS — copy every token VERBATIM wherever it appears. "
         "Do not translate, transliterate, split, alter or drop these tokens; "
         "the server restores the exact proper names after translation:\n"
         + locked_block
-        + "\n\nLOCKED NUMERIC VALUES — these are the ONLY numerals allowed in the translation. "
-          "Every value below must appear in EVERY language; do not omit any value and "
-          "do not create any additional numeral. Locale punctuation may change only "
-          "when the numeric value stays identical:\n"
+        + "\n\nLOCKED NUMBER TOKENS — copy every token VERBATIM wherever it appears. "
+          "Do not spell it out, omit it, alter it or replace it with another number; "
+          "the server restores the canonical numeric value after translation:\n"
         + number_block
         + "\n\nENGLISH TITLE:\n" + masked_source["title"][:1000]
         + "\n\nENGLISH SUMMARY:\n" + masked_source["summary"][:1600]
@@ -447,7 +488,8 @@ def translate_article_payload(article: Article) -> Optional[Dict[str, Dict[str, 
             sorted(payload.keys())[:24] if isinstance(payload, dict) else [],
         )
         return None
-    restored = _restore_protected_names(normalized, name_locks)
+    restored = _restore_protected_numbers(normalized, number_locks)
+    restored = _restore_protected_names(restored, name_locks)
     return _validate(source, restored)
 
 
