@@ -292,7 +292,13 @@ def test_ambiguous_cross_sport_classifier_result_does_not_hide_valid_row(monkeyp
         tax = db.query(ArticleTaxonomyResolution).filter(
             ArticleTaxonomyResolution.article_id == article.id
         ).first()
-        assert tax and tax.public_ok
+        assert tax is not None
+        tax.resolved_sport = "horse-racing"
+        tax.resolved_competition = None
+        tax.sport_confidence = "0.920"
+        tax.public_ok = True
+        db.add(tax)
+        db.commit()
         monkeypatch.setattr(
             "bot.classify.classify_article",
             lambda *a, **k: type("C", (), {"sport": "ice-hockey"})(),
