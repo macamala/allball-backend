@@ -354,19 +354,18 @@ def repair_recent_sport_mislabels(
     limit: int = 600,
     max_age_hours: int = 168,
 ) -> int:
-    """Hide recent public rows whose own copy clearly proves a different sport.
+    """Correct recent public sport mislabels when two independent resolvers agree.
 
-    Feed/source hints are intentionally excluded. A row is changed only when an
-    independent text classification returns a concrete sport that conflicts
-    with the cached public sport. Ambiguous/unclassified rows are left alone.
+    Feed/source hints are excluded. A conflicting row is reassigned only when:
+    1) the independent ingest classifier names a different sport,
+    2) that sport has a distinctive headline marker, and
+    3) the public taxonomy resolver independently agrees at publish confidence.
+    If the third check fails, the suspect row is hidden instead of guessing.
     """
     from bot.classify import classify_article
+    from bot.taxonomy import SPORT_ALIASES
 
     cutoff = datetime.utcnow() - timedelta(hours=max(1, int(max_age_hours)))
-    # First pass is title-only. The final mismatch rule already requires a
-    # distinctive alias for the independently detected sport in the headline,
-    # so loading hundreds of large article bodies before checking that condition
-    # is unnecessary and can stall the News worker on a remote database.
     rows = (
         db.query(
             ArticleTaxonomyResolution,
@@ -390,8 +389,6 @@ def repair_recent_sport_mislabels(
         .limit(max(1, min(int(limit), 1200)))
         .all()
     )
-
-    from bot.taxonomy import SPORT_ALIASES
 
     alias_owners: dict[str, set[str]] = {}
     for candidate_sport, aliases in SPORT_ALIASES.items():
@@ -427,53 +424,81 @@ def repair_recent_sport_mislabels(
     if not candidates:
         return 0
 
-    bodies = {
-        int(article_id): (ai_content or content or summary or "")
-        for article_id, ai_content, content, summary in (
-            db.query(
-                Article.id,
-                Article.ai_content,
-                Article.content,
-                Article.summary,
-            )
+    articles = {
+        int(article.id): article
+        for article in (
+            db.query(Article)
             .filter(Article.id.in_(list(candidates)))
             .all()
         )
     }
 
+    corrected = 0
     hidden = 0
     for article_id, (tax, title, possible) in candidates.items():
+        article = articles.get(article_id)
+        if article is None:
+            continue
+        body = article.ai_content or article.content or article.summary or ""
         independent = classify_article(
             title,
-            bodies.get(article_id, ""),
+            body,
             feed_kind="mixed",
             feed_sport=None,
             feed_league=None,
             feed_country=None,
         )
-        if (
+        if not (
             independent.sport
             and independent.sport in possible
             and tax.resolved_sport
             and independent.sport != tax.resolved_sport
             and _distinctive_title_sport_support(title, independent.sport)
         ):
-            logger.warning(
-                "[public_index] hide sport mismatch article=%s cached=%s independent=%s title=%s",
-                article_id,
-                tax.resolved_sport,
-                independent.sport,
-                title[:100],
-            )
-            tax.public_ok = False
-            db.add(tax)
-            hidden += 1
-    if hidden:
+            continue
+
+        cached_sport = str(tax.resolved_sport or "")
+        resolved = resolve_article_competition(article)
+        if (
+            resolved.sport == independent.sport
+            and resolved.sport_confidence >= MIN_SPORT_CONFIDENCE
+            and news_image_is_publishable(article.image_url)
+        ):
+            persist_public_article(db, article, resolved, commit=False)
+            if tax.public_ok and tax.resolved_sport == independent.sport:
+                corrected += 1
+                logger.warning(
+                    "[public_index] corrected sport mismatch article=%s cached=%s corrected=%s title=%s",
+                    article_id,
+                    cached_sport,
+                    independent.sport,
+                    title[:100],
+                )
+                continue
+
+        logger.warning(
+            "[public_index] hide sport mismatch article=%s cached=%s independent=%s title=%s",
+            article_id,
+            cached_sport,
+            independent.sport,
+            title[:100],
+        )
+        tax.public_ok = False
+        db.add(tax)
+        hidden += 1
+
+    changed = corrected + hidden
+    if changed:
         try:
             db.commit()
         except Exception:
             db.rollback()
             logger.exception("recent News sport-mislabel repair failed")
             return 0
-        logger.info("[public_index] hid recent sport-mislabel rows=%s", hidden)
-    return hidden
+        logger.info(
+            "[public_index] sport-mislabel repair corrected=%s hidden=%s",
+            corrected,
+            hidden,
+        )
+    return changed
+
