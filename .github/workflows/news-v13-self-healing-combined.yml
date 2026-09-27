@@ -7,6 +7,7 @@ on:
       - news/official-gap-sources-20260927
       - news/availability-fairness-20260927
       - news/required-images-20260927
+      - news/gap-source-fallbacks-20260927
     paths:
       - ".github/workflows/news-v13-self-healing-combined.yml"
   workflow_dispatch:
@@ -102,7 +103,7 @@ jobs:
           Path('evidence/test-selection.txt').write_text('\n'.join(sorted(paths))+'\n')
           PY
       - name: Candidate boundary note
-        run: echo "Final candidate adds fail-closed official Table Tennis, Water Polo, Field Hockey and Snooker discovery to the existing image-required, deduped, breadth-aware self-healing News pipeline, with retained Live Scores boundaries."
+        run: echo "Final candidate replaces known robots-blocked niche indexes with bounded free fallbacks for Rocket League, Table Tennis, Field Hockey and Futsal while preserving image-required, deduped, breadth-aware News and retained Live Scores boundaries."
       - name: Run retained Live Scores plus current News suite offline
         run: |
           set -euo pipefail
