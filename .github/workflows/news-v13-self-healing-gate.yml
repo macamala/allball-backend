@@ -40,6 +40,7 @@ jobs:
         run: |
           pytest -q -p no:cacheprovider \
             tests/test_news_self_healing_v13.py \
+            tests/test_news14_publish_guards.py \
             tests/test_news_data_news.py \
             tests/test_news03_integration.py \
             tests/test_news_free_ai.py \
