@@ -7,8 +7,12 @@ from bot import news_feed_http as net
 def setup(monkeypatch, handler):
     net._ROBOTS_CACHE.clear()
     monkeypatch.setattr(net.socket, 'getaddrinfo', lambda *a, **k: [(socket.AF_INET, socket.SOCK_STREAM, 6, '', ('93.184.216.34',443))])
-    client = httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=False)
-    monkeypatch.setattr(net.httpx, 'Client', lambda **kw: client)
+    transport = httpx.MockTransport(handler)
+    monkeypatch.setattr(
+        net.httpx,
+        'Client',
+        lambda **kw: httpx.Client(transport=transport, follow_redirects=False),
+    )
 
 
 def test_reuses_verified_robots_policy_for_same_host(monkeypatch):
