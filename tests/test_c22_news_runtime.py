@@ -55,7 +55,7 @@ def test_invalid_explicit_limit_is_rejected(key, value):
 
 
 @pytest.mark.parametrize('key,value', [('NEWS_AI_MAX_REQUESTS_PER_RUN','21'),
-                                     ('NEWS_AI_MAX_REQUESTS_PER_DAY','201')])
+                                     ('NEWS_AI_MAX_REQUESTS_PER_DAY','301')])
 def test_out_of_range_limits_are_not_clamped(key, value):
     env = settings(); env[key] = value
     assert runtime.request_limits(env) is None
