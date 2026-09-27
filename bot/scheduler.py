@@ -16,6 +16,44 @@ def _start_errors():
     return errors or storage_errors(os.environ)
 
 
+
+def _run_zero_ai_public_repairs():
+    """Keep public News clean even when the writer allowance is exhausted."""
+    from database import SessionLocal
+    from public_cache import bump_public_cache
+    from public_index import (
+        recent_public_sport_inventory,
+        repair_recent_duplicate_news,
+        repair_recent_sport_mislabels,
+        repair_recent_unresolved,
+    )
+
+    db = SessionLocal()
+    try:
+        mislabels = repair_recent_sport_mislabels(db, limit=600, max_age_hours=168)
+        repaired = repair_recent_unresolved(db, limit=24)
+        duplicates = repair_recent_duplicate_news(db, limit=600, max_age_hours=168)
+        inventory = recent_public_sport_inventory(db, max_age_hours=72)
+    except Exception as exc:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        logger.error('News zero-AI repair failed: %s', type(exc).__name__)
+        return {}
+    finally:
+        db.close()
+    if mislabels or repaired or duplicates:
+        bump_public_cache()
+    logger.info(
+        'News zero-AI repair: mislabels=%s unresolved=%s duplicates=%s inventory=%s',
+        mislabels,
+        repaired,
+        duplicates,
+        inventory,
+    )
+    return inventory
+
 def _run_cycle():
     """Called under news_owner. Every tick rechecks flags before importing DB code."""
     errors = _start_errors()
@@ -32,6 +70,7 @@ def _run_cycle():
 
     if maximum <= 0 or not budget.can_start():
         reason = 'article_limit_disabled' if maximum <= 0 else (budget.blocked_reason or 'allowance_or_ledger_unavailable')
+        _run_zero_ai_public_repairs()
         logger.info('News AI lane held: %s', reason)
         return 0
 
