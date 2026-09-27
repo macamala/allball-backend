@@ -128,6 +128,21 @@ def non_sports_personal_life_reason(item):
     return "non_sports_personal_life"
 
 
+def candidate_readiness_score(item):
+    """Cheap admission-readiness hint; never grants publication permission."""
+    score = 0
+    if str((item or {}).get("_extracted") or "").strip():
+        score += 4
+    if str((item or {}).get("_extracted_image") or "").strip():
+        score += 3
+    elif (item or {}).get("image_candidates") or (item or {}).get("image"):
+        score += 2
+    feed = (item or {}).get("feed") or {}
+    if feed.get("kind") == "league" and feed.get("sport"):
+        score += 1
+    return score
+
+
 def queue_priority_score(item, now):
     """Blend editorial value with freshness without altering admission."""
     score = newsworthiness_score(item)
@@ -207,6 +222,7 @@ def fair_news_queue(
                 key=lambda sport: (
                     0 if sport in underfilled else 1,
                     inventory[sport],
+                    -max(candidate_readiness_score(item) for item in buckets[sport]),
                     -max(queue_priority_score(item, now) for item in buckets[sport]),
                     rotation_rank[sport],
                 ),
@@ -218,6 +234,7 @@ def fair_news_queue(
                 order,
                 key=lambda sport: (
                     inventory[sport],
+                    -max(candidate_readiness_score(item) for item in buckets[sport]),
                     -max(queue_priority_score(item, now) for item in buckets[sport]),
                     rotation_rank[sport],
                 ),
@@ -227,6 +244,7 @@ def fair_news_queue(
             sorted(
                 buckets[sport],
                 key=lambda item: (
+                    candidate_readiness_score(item),
                     queue_priority_score(item, now),
                     publication_time(item['published_at']),
                 ),
