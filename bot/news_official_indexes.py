@@ -269,7 +269,7 @@ def _anchor_candidates(cfg: Dict) -> List[tuple[str, str]]:
         text = clean_text(title)
         if required and text and not any(marker in text.lower() for marker in required):
             continue
-        if not text or text.lower() in {"read more", "news", "latest", "image"}:
+        if text and text.lower() in {"read more", "news", "latest", "image"}:
             continue
         seen.add(url)
         output.append((url, text))
