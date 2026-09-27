@@ -96,6 +96,7 @@ def fact_lock_reason(
     source_body: str,
     *,
     expected_sport: Optional[str] = None,
+    expected_league: Optional[str] = None,
 ) -> Optional[str]:
     """Return a stable reason code when the draft introduces unsupported facts.
 
@@ -137,6 +138,17 @@ def fact_lock_reason(
             return "unsupported_claim_family:" + family
 
     if expected_sport:
-        tags = extract_entities(extra=output)
-        _ = tags  # reserved for future sport-specific entity locks
+        from .classify import classify_article
+        classified = classify_article(output.split("\n", 1)[0], output, feed_kind="mixed")
+        if not classified.sport:
+            return "draft_sport_unrecognized"
+        if classified.sport != expected_sport:
+            return "draft_sport_mismatch:" + str(classified.sport)[:50]
+        if (
+            expected_league
+            and classified.league
+            and classified.confidence in {"high", "medium"}
+            and classified.league != expected_league
+        ):
+            return "draft_competition_mismatch:" + str(classified.league)[:100]
     return None
