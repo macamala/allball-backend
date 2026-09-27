@@ -96,7 +96,11 @@ def configuration_reason(env=None) -> Optional[str]:
     raw = str(env.get("NEWS_WRITER_ORDER") or "").strip()
     if raw:
         names = [item.strip().lower() for item in raw.split(",") if item.strip()]
-        if not names or any(name not in _ALLOWED for name in names):
+        if (
+            not names
+            or any(name not in _ALLOWED for name in names)
+            or len(set(names)) != len(names)
+        ):
             return "invalid_news_writer_order"
     return None if configured_writer_identities(env) else "news_ai_key_missing"
 
