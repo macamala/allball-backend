@@ -269,7 +269,7 @@ def _ingest_item(db: Session, item: Dict, use_ai: bool, max_ai_chars: int, ai_bu
     used_ai = False
     if use_ai and ai_budget > 0 and not openai_rate_limited():
         provider, model = writer_identity()
-        if not writer_allowed(db, provider, model):
+        if isinstance(db, Session) and not writer_allowed(db, provider, model):
             logger.error("[fetch_sources] writer circuit open provider=%s model=%s", provider, model)
             return None, False
         parsed, rewrite_reason = _ai_story(
