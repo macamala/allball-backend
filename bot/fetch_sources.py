@@ -18,7 +18,8 @@ from sports_registry.sports import SPORTS
 from .classify import classify_article
 from .dedupe import existing_by_url, existing_near_duplicate
 from .extract import extract_from_url, parse_feed_datetime, paragraphs_from_html
-from .feeds import enabled_feeds
+from .news_sources import enabled_sources
+from .news_html_discovery import discover_official_html
 from .news_feed_http import read_news_feed
 from .media_url import collect_feed_image_candidates, pick_source_image, width_from_url
 from .quality import (
@@ -205,6 +206,19 @@ def _fetch_feed_entries(feed_cfg: Dict, max_articles: int) -> List[Dict]:
     fresh = [item for item in items if not freshness_reason(item["published_at"], now)]
     fresh.sort(key=lambda item: item["published_at"], reverse=True)
     return fresh[:max(1, max_articles)]
+
+
+def _fetch_source_entries(source_cfg: Dict, max_articles: int) -> List[Dict]:
+    """One discovery interface for RSS and first-party HTML sources."""
+    representation = source_cfg.get("representation") or "rss"
+    if representation == "official_html":
+        logger.info(
+            "[fetch_sources] Fetching official HTML sport=%s url=%s",
+            source_cfg.get("sport"),
+            source_cfg.get("url"),
+        )
+        return discover_official_html(source_cfg, max_articles)
+    return _fetch_feed_entries(source_cfg, max_articles)
 
 
 def _ingest_item(db: Session, item: Dict, use_ai: bool, max_ai_chars: int, ai_budget: int) -> tuple:
@@ -428,12 +442,12 @@ def fetch_all_sports_headlines(
     max_per_league: int = 3,
     hard_limit: int = 20,
 ) -> List[Dict]:
-    """Lightweight RSS list for legacy pipeline.py; does not write DB."""
+    """Lightweight unified source list for legacy pipeline.py; does not write DB."""
     all_items: List[Dict] = []
-    for feed in enabled_feeds():
+    for feed in enabled_sources():
         if len(all_items) >= hard_limit:
             break
-        for item in _fetch_feed_entries(feed, max_per_league):
+        for item in _fetch_source_entries(feed, max_per_league):
             tags = classify_article(item["title"], item.get("summary") or "", feed.get("kind", "mixed"))
             all_items.append(
                 {
@@ -471,11 +485,16 @@ def _fetch_and_store_all_articles(
     try:
         per_feed = max(1, max_per_league)
         queued = []
-        for feed in enabled_feeds():
+        for feed in enabled_sources():
             try:
-                queued.extend(_fetch_feed_entries(feed, per_feed))
+                queued.extend(_fetch_source_entries(feed, per_feed))
             except Exception as e:
-                logger.error("[fetch_sources] feed error %s: %s", feed.get("url"), e)
+                logger.error(
+                    "[fetch_sources] source error representation=%s url=%s type=%s",
+                    feed.get("representation") or "rss",
+                    feed.get("url"),
+                    type(e).__name__,
+                )
         def classify_candidate(item):
             feed = item.get("feed") or {}
             return classify_article(item["title"], item.get("summary") or "",
