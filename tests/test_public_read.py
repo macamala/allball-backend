@@ -455,3 +455,97 @@ def test_articles_endpoint_uses_same_72h_window_as_public_inventory():
         assert old.id not in ids
         detail=client.get(f"/articles/{old.slug}")
         assert detail.status_code == 200
+
+
+def test_recent_image_repair_refreshes_dead_hero_from_source(monkeypatch):
+    from models import ArticleTaxonomyResolution
+    from public_index import repair_recent_news_images
+
+    old_url="https://example.com/dead-hero.jpg"
+    new_url="https://example.com/fresh-hero.jpg"
+    article=_make(
+        slug="image-repair-refresh",
+        title="Arsenal prepare for Premier League match after training update",
+        image_url=old_url,
+        external_id="https://example.com/image-repair-refresh",
+    )
+
+    monkeypatch.setattr(
+        "bot.news_image_http.probe_news_images",
+        lambda urls, **kw: {
+            url: ((url != old_url), "ok" if url != old_url else "http_403")
+            for url in urls
+        },
+    )
+    monkeypatch.setattr(
+        "bot.news_image_http.news_image_is_reachable",
+        lambda url: url == new_url,
+    )
+    monkeypatch.setattr(
+        "bot.extract.extract_from_url",
+        lambda url, timeout=12.0: ("", new_url),
+    )
+
+    db=SessionLocal()
+    try:
+        assert repair_recent_news_images(db,limit=100,max_age_hours=72,recover_limit=8) >= 1
+        db.refresh(article)
+        tax=db.query(ArticleTaxonomyResolution).filter(
+            ArticleTaxonomyResolution.article_id==article.id
+        ).first()
+        assert article.image_url == new_url
+        assert tax is not None and tax.public_ok is True
+        visible={row.id for row,_ in fetch_public(db,sport="football",limit=200,max_age_hours=72)}
+        assert article.id in visible
+    finally:
+        db.close()
+
+
+def test_recent_image_repair_hides_every_dead_hero_without_replacement(monkeypatch):
+    from models import ArticleTaxonomyResolution
+    from public_index import repair_recent_news_images
+
+    urls={
+        "https://example.com/dead-one.jpg",
+        "https://example.com/dead-two.jpg",
+    }
+    articles=[
+        _make(
+            slug="image-repair-dead-one",
+            title="Arsenal prepare for Premier League match after squad update",
+            image_url="https://example.com/dead-one.jpg",
+            external_id="https://example.com/image-repair-dead-one",
+        ),
+        _make(
+            slug="image-repair-dead-two",
+            title="Liverpool prepare for Premier League match after squad update",
+            image_url="https://example.com/dead-two.jpg",
+            external_id="https://example.com/image-repair-dead-two",
+        ),
+    ]
+    monkeypatch.setattr(
+        "bot.news_image_http.probe_news_images",
+        lambda requested, **kw: {
+            url: ((url not in urls), "ok" if url not in urls else "http_404")
+            for url in requested
+        },
+    )
+    monkeypatch.setattr(
+        "bot.extract.extract_from_url",
+        lambda url, timeout=12.0: ("", None),
+    )
+
+    db=SessionLocal()
+    try:
+        assert repair_recent_news_images(db,limit=200,max_age_hours=72,recover_limit=1) >= 2
+        for article in articles:
+            db.refresh(article)
+            tax=db.query(ArticleTaxonomyResolution).filter(
+                ArticleTaxonomyResolution.article_id==article.id
+            ).first()
+            assert article.image_url is None
+            assert tax is not None and tax.public_ok is False
+        visible={row.id for row,_ in fetch_public(db,sport="football",limit=300,max_age_hours=72)}
+        assert not ({article.id for article in articles} & visible)
+    finally:
+        db.close()
