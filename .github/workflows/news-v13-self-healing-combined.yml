@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - integration/news-v13-self-healing-20260927
+      - news/official-gap-sources-20260927
       - news/availability-fairness-20260927
       - news/required-images-20260927
     paths:
@@ -101,7 +102,7 @@ jobs:
           Path('evidence/test-selection.txt').write_text('\n'.join(sorted(paths))+'\n')
           PY
       - name: Candidate boundary note
-        run: echo "Final candidate includes mandatory hero images, strict public detail eligibility, cross-source dedupe, recent public inventory counts, prequeue cooldown filtering, admission-ready underfilled-sport fairness, breadth-before-correction recovery, feed-scope poisoning protection, word-bounded cross-sport repair, racing taxonomy restoration, official-source fallbacks, factual self-healing, and retained Live Scores boundaries."
+        run: echo "Final candidate adds fail-closed official Table Tennis, Water Polo, Field Hockey and Snooker discovery to the existing image-required, deduped, breadth-aware self-healing News pipeline, with retained Live Scores boundaries."
       - name: Run retained Live Scores plus current News suite offline
         run: |
           set -euo pipefail
