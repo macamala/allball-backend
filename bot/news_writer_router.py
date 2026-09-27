@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 _PROVIDER_ORDER = ("groq", "cloudflare", "openai")
 _ALLOWED = set(_PROVIDER_ORDER)
 _UNAVAILABLE: set[str] = set()
+_REJECTIONS: dict[tuple[str, str], int] = {}
 _POLICY: ContextVar[Optional[Callable[[str, str], bool]]] = ContextVar(
     "news_writer_policy", default=None
 )
@@ -244,8 +245,24 @@ def _openai(cfg: dict, prompt: str) -> Optional[str]:
     return openai_writer._call_openai(prompt)
 
 
+def note_writer_rejection(
+    provider: str,
+    model: str,
+    *,
+    threshold: int = 3,
+) -> int:
+    """Short-lived circuit for deterministic rejects; never persistent learning."""
+    identity = (provider or "unknown", model or "unknown")
+    count = int(_REJECTIONS.get(identity, 0)) + 1
+    _REJECTIONS[identity] = count
+    if count >= max(1, threshold) and provider in _ALLOWED:
+        _UNAVAILABLE.add(provider)
+    return count
+
+
 def reset_writer_state() -> None:
     _UNAVAILABLE.clear()
+    _REJECTIONS.clear()
     _LAST.set(("unknown", "unknown"))
     openai_writer.reset_openai_rate_limit()
 
