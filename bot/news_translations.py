@@ -49,6 +49,8 @@ FACTUAL RULES:
 - Preserve every numeric VALUE exactly, including scores, minutes, percentages,
   dates and statistics. Locale punctuation may change naturally (for example
   100,023 -> 100.023 or 4.52 -> 4,52), but the numeric value must not change.
+- Numeric English ordinals must remain numeric: 16th may become 16. where natural,
+  but never spell a locked numeral as a word or turn a word-number into digits.
 - Every value listed under LOCKED NUMERIC VALUES must appear in EVERY language.
   Never omit a listed age, score, count, ranking, date, percentage or statistic.
 - Do NOT introduce any numeral that is not listed under LOCKED NUMERIC VALUES.
