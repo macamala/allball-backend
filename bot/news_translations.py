@@ -24,10 +24,10 @@ from .news_policy import protected_proper_names
 logger = logging.getLogger(__name__)
 
 LANGUAGES = ("sr", "es", "de", "fr", "it", "pt")
-TRANSLATION_PROVIDER = "xkiro-free-v12"
-# Release marker: v12 protects exact proper names with reversible translation tokens.
+TRANSLATION_PROVIDER = "xkiro-free-v13"
+# v13 also canonicalizes English numeric ordinals before cross-language validation.
 CYRILLIC_RE = re.compile(r"[\u0400-\u04FF]")
-NUMBER_RE = re.compile(r"(?<!\w)\d+(?:[.,:/–-]\d+)*(?:%|\b)")
+NUMBER_RE = re.compile(r"(?<!\w)\d+(?:[.,:/–-]\d+)*(?:st|nd|rd|th|%|\b)", re.I)
 
 _SYSTEM = """You are the NinkoSports literary translation desk.
 Translate the supplied English sports article faithfully and completely.
@@ -49,6 +49,8 @@ FACTUAL RULES:
 - Preserve every numeric VALUE exactly, including scores, minutes, percentages,
   dates and statistics. Locale punctuation may change naturally (for example
   100,023 -> 100.023 or 4.52 -> 4,52), but the numeric value must not change.
+- Numeric English ordinals must remain numeric: 16th may become 16. where natural,
+  but never spell a locked numeral as a word or turn a word-number into digits.
 - Every value listed under LOCKED NUMERIC VALUES must appear in EVERY language.
   Never omit a listed age, score, count, ranking, date, percentage or statistic.
 - Do NOT introduce any numeral that is not listed under LOCKED NUMERIC VALUES.
@@ -76,6 +78,9 @@ def _canonical_number(token: str) -> str:
         .replace("—", "-")
         .replace("−", "-")
     )
+    ordinal = re.fullmatch(r"(\d+(?:[.,:/–-]\d+)*)(?:st|nd|rd|th)", token, re.I)
+    if ordinal:
+        token = ordinal.group(1)
     suffix = "%" if token.endswith("%") else ""
     core = token[:-1] if suffix else token
 
