@@ -328,3 +328,27 @@ def test_unreachable_image_stops_before_ai_writer(monkeypatch):
     monkeypatch.setattr(ingest,"_hold_ai_source",lambda url,reason:holds.append((url,reason)))
     assert ingest._ingest_item(Mock(),item,True,6000,1)==(None,False)
     assert holds[-1][1]=="missing-or-unreachable-publishable-image"
+
+
+def test_source_path_sport_hint_resolves_only_unclassified_text():
+    item={
+        "title":"Four men down - but Australia still beat South Africa",
+        "url":"https://www.bbc.co.uk/sport/rugby-union/articles/cx05r4gg209ro",
+        "summary":"Australia overcame South Africa after playing short-handed.",
+        "feed":{"kind":"mixed","sport":"rugby","publisher":"BBC Sport"},
+    }
+    tags=ingest._classify_item(item,item["summary"])
+    assert tags.sport=="rugby"
+    assert tags.reason=="trusted-source-path"
+
+
+def test_textual_sport_evidence_beats_conflicting_source_path():
+    item={
+        "title":"NBA: Lakers beat Celtics after LeBron triple-double",
+        "url":"https://www.bbc.co.uk/sport/rugby-union/articles/conflict-fixture",
+        "summary":"The basketball game ended after LeBron recorded a triple-double in the NBA.",
+        "feed":{"kind":"mixed","sport":"rugby","publisher":"BBC Sport"},
+    }
+    tags=ingest._classify_item(item,item["summary"])
+    assert tags.sport=="basketball"
+    assert tags.reason!="trusted-source-path"
