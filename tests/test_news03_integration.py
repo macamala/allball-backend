@@ -210,3 +210,12 @@ def test_logo_image_stops_before_ai_writer(monkeypatch):
     monkeypatch.setattr(ingest,'extract_from_url',lambda url:(FACTS,'https://example.test/team-logo.svg'))
     monkeypatch.setattr(ingest,'_ai_story',lambda **kw:pytest.fail('writer must not run for logo-only hero'))
     assert ingest._ingest_item(Mock(),item,True,6000,1)==(None,False)
+
+
+
+def test_expanded_bbc_feeds_are_discovery_only_for_sport_taxonomy():
+    bbc = [row for row in VERIFIED_RSS if row.get("publisher") == "BBC Sport"]
+    assert bbc
+    assert all(row.get("kind") == "mixed" for row in bbc)
+    assert any(row.get("sport") == "ice-hockey" for row in bbc)
+    assert any(row.get("sport") == "american-football" for row in bbc)
