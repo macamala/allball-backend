@@ -69,6 +69,9 @@ def public_query(db: Session, *, cards: bool = True):
         .filter(
             ArticleTaxonomyResolution.resolver_version == RESOLVER_VERSION,
             ArticleTaxonomyResolution.public_ok == True,
+            Article.image_url.isnot(None),
+            Article.image_url != "",
+            ArticleTaxonomyResolution.hero_media_kind.in_(("EDITORIAL_PHOTO", "UNKNOWN")),
         )
     )
     if cards:
