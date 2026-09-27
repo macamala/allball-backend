@@ -28,7 +28,7 @@ def _run_cycle():
         logger.info('News cycle held: allowance_or_ledger_unavailable')
         return 0
     from bot.fetch_sources import fetch_and_store_all_articles
-    from bot.rewrite_ai import reset_openai_rate_limit
+    from bot.news_writer_router import reset_writer_state
     from public_cache import bump_public_cache
 
     historical = os.environ['NEWS_HISTORICAL_REPAIR_ENABLED'] == '1'
@@ -36,7 +36,7 @@ def _run_cycle():
     try:
         # Historical retries and new articles share this one actual-request cap.
         with ai_budget_scope(budget):
-            reset_openai_rate_limit()
+            reset_writer_state()
             if historical:
                 from repair_content import repair_summary_only
                 repair_summary_only(max_pages=1, max_rewrite=maximum)
