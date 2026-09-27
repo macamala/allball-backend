@@ -50,7 +50,11 @@ from .textutil import clean_text, looks_like_garbage, strip_truncation_markers, 
 
 logger = logging.getLogger(__name__)
 
-from .news_source_holds import hold_source as _hold_ai_source, source_on_cooldown as _source_on_ai_cooldown
+from .news_source_holds import (
+    held_source_urls as _held_ai_source_urls,
+    hold_source as _hold_ai_source,
+    source_on_cooldown as _source_on_ai_cooldown,
+)
 
 
 # Public filter catalog (human labels included for the API).
@@ -736,6 +740,22 @@ def _fetch_and_store_all_articles(
             logger.info(
                 "[fetch_sources] enriched unknown-sport candidates=%s",
                 enriched_unknown,
+            )
+
+        held_urls = _held_ai_source_urls(
+            [candidate.get("url") for candidate in queued if candidate.get("url")]
+        )
+        if held_urls:
+            before = len(queued)
+            queued = [
+                candidate
+                for candidate in queued
+                if candidate.get("url") not in held_urls
+            ]
+            logger.info(
+                "[fetch_sources] prequeue cooldown-filtered=%s remaining=%s",
+                before - len(queued),
+                len(queued),
             )
 
         unknown_samples = []
