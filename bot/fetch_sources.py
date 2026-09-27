@@ -758,9 +758,29 @@ def _fetch_and_store_all_articles(
         if unknown_samples:
             logger.info("[fetch_sources] unknown_sport_samples=%s", unknown_samples)
 
-        queued, admission = fair_news_queue(queued, _classify_candidate,
-            sport_order=[row["id"] for row in SPORTS if row["active"] and row["supports_news"]])
-        logger.info("[fetch_sources] eligible=%s rejected=%s", len(queued), admission)
+        from public_index import recent_public_sport_inventory, repair_recent_duplicate_news
+
+        # Clean legacy visible duplicates before measuring coverage debt. This is
+        # zero-AI and bounded; it never deletes the underlying article.
+        repair_recent_duplicate_news(db, limit=600, max_age_hours=168)
+        sport_inventory = recent_public_sport_inventory(db, max_age_hours=72)
+        queued, admission = fair_news_queue(
+            queued,
+            _classify_candidate,
+            sport_order=[
+                row["id"]
+                for row in SPORTS
+                if row["active"] and row["supports_news"]
+            ],
+            sport_inventory=sport_inventory,
+            coverage_floor=6,
+        )
+        logger.info(
+            "[fetch_sources] eligible=%s rejected=%s current_sport_inventory=%s",
+            len(queued),
+            admission,
+            sport_inventory,
+        )
         for item in queued:
             if ai_budget <= 0 or openai_rate_limited() or ai_budget_exhausted():
                 break
