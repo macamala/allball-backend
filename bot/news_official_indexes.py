@@ -104,6 +104,42 @@ HTML_INDEXES = (
         ),
     },
     {
+        "id": "ittf-table-tennis-news",
+        "sport": "table-tennis",
+        "publisher": "ITTF",
+        "url": "https://www.ittf.com/news/",
+        "host": "www.ittf.com",
+        "paths": ("/2026/",),
+    },
+    {
+        "id": "world-aquatics-water-polo",
+        "sport": "water-polo",
+        "publisher": "World Aquatics",
+        "url": "https://www.worldaquatics.com/news",
+        "host": "www.worldaquatics.com",
+        "paths": ("/news/",),
+        "keywords": ("water polo", "waterpolo", "wp4"),
+        "hydrate_keywords_only": True,
+    },
+    {
+        "id": "fih-field-hockey-news",
+        "sport": "field-hockey",
+        "publisher": "FIH",
+        "url": "https://www.fih.hockey/news",
+        "host": "www.fih.hockey",
+        "paths": ("/news/", "/events/"),
+        "keywords": ("hockey", "fih"),
+        "hydrate_keywords_only": True,
+    },
+    {
+        "id": "wst-snooker-news",
+        "sport": "snooker",
+        "publisher": "World Snooker Tour",
+        "url": "https://www.wst.tv/news/",
+        "host": "www.wst.tv",
+        "paths": ("/news/",),
+    },
+    {
         "id": "world-athletics-news",
         "sport": "athletics",
         "publisher": "World Athletics",
@@ -282,7 +318,12 @@ def _anchor_candidates(cfg: Dict) -> List[tuple[str, str]]:
         if not url or url in seen:
             continue
         text = clean_text(title)
-        if required and text and not any(marker in text.lower() for marker in required):
+        if (
+            required
+            and not cfg.get("hydrate_keywords_only")
+            and text
+            and not any(marker in text.lower() for marker in required)
+        ):
             continue
         if text and text.lower() in {"read more", "news", "latest", "image"}:
             continue
