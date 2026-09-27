@@ -274,3 +274,75 @@ def repair_recent_duplicate_news(
             return 0
         logger.info("[public_index] hid recent duplicate News rows=%s", hidden)
     return hidden
+
+
+
+def repair_recent_sport_mislabels(
+    db: Session,
+    *,
+    limit: int = 600,
+    max_age_hours: int = 168,
+) -> int:
+    """Hide recent public rows whose own copy clearly proves a different sport.
+
+    Feed/source hints are intentionally excluded. A row is changed only when an
+    independent text classification returns a concrete sport that conflicts
+    with the cached public sport. Ambiguous/unclassified rows are left alone.
+    """
+    from bot.classify import classify_article
+
+    cutoff = datetime.utcnow() - timedelta(hours=max(1, int(max_age_hours)))
+    rows = (
+        db.query(Article, ArticleTaxonomyResolution)
+        .join(
+            ArticleTaxonomyResolution,
+            ArticleTaxonomyResolution.article_id == Article.id,
+        )
+        .filter(
+            ArticleTaxonomyResolution.resolver_version == RESOLVER_VERSION,
+            ArticleTaxonomyResolution.public_ok.is_(True),
+            ArticleTaxonomyResolution.resolved_sport.isnot(None),
+            func.coalesce(Article.published_at, Article.created_at) >= cutoff,
+        )
+        .order_by(
+            func.coalesce(Article.published_at, Article.created_at).desc(),
+            Article.id.desc(),
+        )
+        .limit(max(1, min(int(limit), 1200)))
+        .all()
+    )
+    hidden = 0
+    for article, tax in rows:
+        text = article.ai_content or article.content or article.summary or ""
+        independent = classify_article(
+            article.title or "",
+            text,
+            feed_kind="mixed",
+            feed_sport=None,
+            feed_league=None,
+            feed_country=None,
+        )
+        if (
+            independent.sport
+            and tax.resolved_sport
+            and independent.sport != tax.resolved_sport
+        ):
+            logger.warning(
+                "[public_index] hide sport mismatch article=%s cached=%s independent=%s title=%s",
+                article.id,
+                tax.resolved_sport,
+                independent.sport,
+                (article.title or "")[:100],
+            )
+            tax.public_ok = False
+            db.add(tax)
+            hidden += 1
+    if hidden:
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("recent News sport-mislabel repair failed")
+            return 0
+        logger.info("[public_index] hid recent sport-mislabel rows=%s", hidden)
+    return hidden
