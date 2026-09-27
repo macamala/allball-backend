@@ -12,6 +12,7 @@ import stat
 
 REQUEST_LIMITS = {'NEWS_AI_MAX_REQUESTS_PER_RUN': 20,
                   'NEWS_AI_MAX_REQUESTS_PER_DAY': 200}
+WRITER_NAMES = ("groq", "cloudflare", "openai")
 
 
 def request_limits(env):
@@ -39,14 +40,33 @@ def _absolute_path(value):
     return path
 
 
+def writer_configuration_error(env):
+    raw = str(env.get("NEWS_WRITER_ORDER") or "").strip()
+    names = [part.strip().lower() for part in raw.split(",") if part.strip()] if raw else list(WRITER_NAMES)
+    if not names or any(name not in WRITER_NAMES for name in names) or len(set(names)) != len(names):
+        return "invalid_news_writer_order"
+    for name in names:
+        if name == "groq" and str(env.get("GROQ_API_KEY") or "").strip():
+            return None
+        if name == "cloudflare":
+            token = str(env.get("CLOUDFLARE_API_TOKEN") or "").strip()
+            account = str(env.get("CLOUDFLARE_ACCOUNT_ID") or "").strip()
+            if token and re.fullmatch(r"[A-Fa-f0-9]{32}", account):
+                return None
+        if name == "openai" and str(env.get("OPENAI_API_KEY") or "").strip():
+            return None
+    return "news_ai_key_missing"
+
+
 def configuration_errors(env):
     errors = []
     if request_limits(env) is None:
         errors.append('explicit_news_request_limits_required')
     elif 0 in request_limits(env):
         errors.append('news_request_allowance_disabled')
-    if not str(env.get('OPENAI_API_KEY') or '').strip():
-        errors.append('news_ai_key_missing')
+    writer_error = writer_configuration_error(env)
+    if writer_error:
+        errors.append(writer_error)
     for key in ('NEWS_HISTORICAL_REPAIR_ENABLED', 'NEWS_EXPANDED_FEEDS_ENABLED'):
         if env.get(key) not in ('0', '1'):
             errors.append('explicit_boolean_required:' + key)
