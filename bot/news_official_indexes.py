@@ -1,9 +1,10 @@
 """Bounded discovery from official sports-news index pages and sitemaps.
 
-This is discovery only, not a licence claim. Every source is an allowlisted
-first-party sports/esports site. Index and article reads reuse the robots-aware
-public News transport, reject cross-host links, and fail closed on missing
-explicit publication timestamps or missing article prose.
+This is discovery only, not a licence claim. Sources are allowlisted first-party
+sports/esports sites or an official competition partner explicitly connected by
+the sport's own site. Index and article reads reuse the robots-aware public News
+transport, reject cross-host links, and fail closed on missing explicit
+publication timestamps or missing article prose.
 """
 from __future__ import annotations
 
@@ -74,6 +75,25 @@ HTML_INDEXES = (
         "host": "www.rocketleague.com",
         "paths": ("/news/",),
         "exclude_paths": ("/news/tag/",),
+    },
+    {
+        # Rocket League's own news host currently fails our robots-aware
+        # transport closed. BLAST.tv is linked from the official RLCS experience;
+        # keep this partner fallback narrowly title-filtered so unrelated BLAST
+        # esports articles can never inherit Rocket League taxonomy.
+        "id": "rocket-league-blast-partner",
+        "sport": "rocket-league",
+        "publisher": "BLAST.tv",
+        "url": "https://blast.tv/rl/news",
+        "host": "blast.tv",
+        "paths": ("/rl/news/",),
+        "keywords": (
+            "rocket league",
+            "rlcs",
+            "world championship",
+            "fort worth",
+            "paris major",
+        ),
     },
     {
         # The public page is JS-heavy in some clients. If no ordinary anchors
