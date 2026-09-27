@@ -12,7 +12,7 @@ import stat
 from urllib.parse import urlsplit
 
 REQUEST_LIMITS = {'NEWS_AI_MAX_REQUESTS_PER_RUN': 20,
-                  'NEWS_AI_MAX_REQUESTS_PER_DAY': 200}
+                  'NEWS_AI_MAX_REQUESTS_PER_DAY': 300}
 
 
 def request_limits(env):
