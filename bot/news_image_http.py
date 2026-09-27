@@ -83,6 +83,7 @@ def probe_news_image(url: str, *, client=None) -> tuple[bool, str]:
             follow_redirects=False,
             headers={
                 "User-Agent": USER_AGENT,
+                "Referer": "https://ninkosports.com/",
                 "Accept": "image/avif,image/webp,image/*,*/*;q=0.5",
                 "Range": f"bytes=0-{MAX_SNIFF_BYTES - 1}",
             },
