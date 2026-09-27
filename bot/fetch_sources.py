@@ -806,7 +806,7 @@ def _fetch_and_store_all_articles(
         repair_started = time.monotonic()
         mislabels = repair_recent_sport_mislabels(db, limit=600, max_age_hours=168)
         after_mislabels = time.monotonic()
-        repaired = repair_recent_unresolved(db, limit=50)
+        repaired = repair_recent_unresolved(db, limit=24)
         after_unresolved = time.monotonic()
         duplicates = repair_recent_duplicate_news(db, limit=600, max_age_hours=168)
         after_dedupe = time.monotonic()
