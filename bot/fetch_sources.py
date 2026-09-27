@@ -2,6 +2,7 @@
 
 import logging
 import os
+import time
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
@@ -39,6 +40,34 @@ from .taxonomy import COMPETITIONS
 from .textutil import clean_text, looks_like_garbage, strip_truncation_markers
 
 logger = logging.getLogger(__name__)
+
+_AI_REJECT_COOLDOWN = {}
+_AI_REJECT_COOLDOWN_SECONDS = 2 * 60 * 60
+_AI_REJECT_COOLDOWN_MAX = 1000
+
+
+def _source_on_ai_cooldown(url: str) -> bool:
+    now = time.monotonic()
+    expiry = _AI_REJECT_COOLDOWN.get(url)
+    if expiry is None:
+        return False
+    if expiry <= now:
+        _AI_REJECT_COOLDOWN.pop(url, None)
+        return False
+    return True
+
+
+def _hold_ai_source(url: str) -> None:
+    now = time.monotonic()
+    if len(_AI_REJECT_COOLDOWN) >= _AI_REJECT_COOLDOWN_MAX:
+        expired = [key for key, expiry in _AI_REJECT_COOLDOWN.items() if expiry <= now]
+        for key in expired[:250]:
+            _AI_REJECT_COOLDOWN.pop(key, None)
+        if len(_AI_REJECT_COOLDOWN) >= _AI_REJECT_COOLDOWN_MAX:
+            oldest = min(_AI_REJECT_COOLDOWN, key=_AI_REJECT_COOLDOWN.get)
+            _AI_REJECT_COOLDOWN.pop(oldest, None)
+    _AI_REJECT_COOLDOWN[url] = now + _AI_REJECT_COOLDOWN_SECONDS
+
 
 # Public filter catalog (human labels included for the API).
 LEAGUE_CONFIG: List[Dict] = [
@@ -117,6 +146,22 @@ def _ai_story(
             )
             return None, "too-short"
         parsed["body"] = body
+    deterministic_reason = original_draft_reason(
+        {
+            "title": parsed.get("title") or title,
+            "summary": parsed.get("summary") or body[:280],
+            "body": body,
+        },
+        title,
+        payload,
+    )
+    if deterministic_reason:
+        logger.info(
+            "[fetch_sources] reject deterministic=%s before validator title=%s",
+            deterministic_reason,
+            title[:80],
+        )
+        return None, deterministic_reason
     facts_ok, facts_reason = validate_story_facts(
         title, payload, parsed, trusted_context=trusted_context
     )
@@ -245,6 +290,10 @@ def _ingest_item(db: Session, item: Dict, use_ai: bool, max_ai_chars: int, ai_bu
     if existing_by_url(db, source_url):
         return None, False
 
+    if _source_on_ai_cooldown(source_url):
+        logger.info("[fetch_sources] skip AI cooldown: %s", item["title"][:80])
+        return None, False
+
     published_at = item.get("published_at")
     if existing_near_duplicate(db, item["title"], published_at):
         logger.info("[fetch_sources] skip near-duplicate title: %s", item["title"][:80])
@@ -324,6 +373,7 @@ def _ingest_item(db: Session, item: Dict, use_ai: bool, max_ai_chars: int, ai_bu
             )
 
     if not used_ai:
+        _hold_ai_source(source_url)
         logger.info("[fetch_sources] hold: no accepted original draft")
         return None, False
     draft_reason = original_draft_reason(
@@ -331,6 +381,7 @@ def _ingest_item(db: Session, item: Dict, use_ai: bool, max_ai_chars: int, ai_bu
         item["title"], facts,
     )
     if draft_reason:
+        _hold_ai_source(source_url)
         logger.info("[fetch_sources] hold original draft: %s", draft_reason)
         return None, False
 
@@ -353,6 +404,7 @@ def _ingest_item(db: Session, item: Dict, use_ai: bool, max_ai_chars: int, ai_bu
         and feed.get("sport") == tags.sport
     )
     if resolved.sport and tags.sport and resolved.sport != tags.sport:
+        _hold_ai_source(source_url)
         logger.info(
             "[fetch_sources] hold taxonomy conflict resolved=%s classified=%s title=%s",
             resolved.sport, tags.sport, item["title"][:80],
