@@ -104,6 +104,45 @@ HTML_INDEXES = (
         ),
     },
     {
+        "id": "world-athletics-news",
+        "sport": "athletics",
+        "publisher": "World Athletics",
+        "url": "https://worldathletics.org/news",
+        "host": "worldathletics.org",
+        "paths": ("/news/",),
+    },
+    {
+        "id": "fifa-futsal-news",
+        "sport": "futsal",
+        "publisher": "FIFA",
+        "url": "https://inside.fifa.com/organisation/news",
+        "host": "inside.fifa.com",
+        "paths": ("/organisation/news/",),
+        "keywords": ("futsal",),
+    },
+    {
+        "id": "blast-counter-strike-news",
+        "sport": "counter-strike",
+        "publisher": "BLAST.tv",
+        "url": "https://blast.tv/cs",
+        "host": "blast.tv",
+        "paths": ("/cs/news/",),
+    },
+    {
+        "id": "world-netball-news",
+        "sport": "netball",
+        "publisher": "World Netball",
+        "url": "https://netball.sport/news/",
+        "host": "netball.sport",
+        "paths": ("/",),
+        "exclude_paths": (
+            "/news/", "/inside-world-netball/", "/events/", "/about/",
+            "/members/", "/contact/", "/privacy/", "/category/", "/tag/",
+        ),
+        "keywords": ("netball", "nwc2027", "silver ferns", "diamonds"),
+        "max_age_hours": 120,
+    },
+    {
         # The public page is JS-heavy in some clients. If no ordinary anchors
         # are present this source simply yields zero rows; it never falls back
         # to a third-party scraper.
@@ -141,6 +180,11 @@ SITEMAPS = (
 
 MAX_INDEX_BYTES = 2_000_000
 MAX_LINKS_PER_SOURCE = 8
+EMBEDDED_URL_RE = re.compile(
+    r'''(?:"(?:url|href|canonicalUrl|canonical_url)"\s*:\s*|href\s*=\s*)["']([^"'<>\\]+)["']''',
+    re.IGNORECASE,
+)
+ABSOLUTE_URL_RE = re.compile(r'''https://[^"'<>\\\s]+''', re.IGNORECASE)
 
 
 class _AnchorParser(HTMLParser):
@@ -213,12 +257,17 @@ def _anchor_candidates(cfg: Dict) -> List[tuple[str, str]]:
     output: List[tuple[str, str]] = []
     seen = set()
     required = tuple(str(x).lower() for x in cfg.get("keywords", ()))
-    for href, title in parser.links:
+    discovered = list(parser.links)
+    for match in EMBEDDED_URL_RE.findall(html):
+        discovered.append((match.replace("\\/","/"), ""))
+    for match in ABSOLUTE_URL_RE.findall(html):
+        discovered.append((match.replace("\\/","/"), ""))
+    for href, title in discovered:
         url = _same_host_url(cfg["url"], href, cfg["host"], cfg)
         if not url or url in seen:
             continue
         text = clean_text(title)
-        if required and not any(marker in text.lower() for marker in required):
+        if required and text and not any(marker in text.lower() for marker in required):
             continue
         if not text or text.lower() in {"read more", "news", "latest", "image"}:
             continue
@@ -287,12 +336,20 @@ def _hydrate(cfg: Dict, url: str, fallback_title: str) -> Optional[Dict]:
         return None
 
     published_at = page_published_at_from_html(html)
-    if published_at is None or freshness_reason(published_at, datetime.now(timezone.utc)):
+    max_age = max(24, min(int(cfg.get("max_age_hours") or 72), 168))
+    if published_at is None or freshness_reason(
+        published_at, datetime.now(timezone.utc), max_age_hours=max_age
+    ):
         return None
     title = page_title_from_html(html) or fallback_title
     body = article_text_from_html(html)
     if not title or not body:
         return None
+    required = tuple(str(x).lower() for x in cfg.get("keywords", ()))
+    if required:
+        evidence = f"{title} {body[:1600]}".lower()
+        if not any(marker in evidence for marker in required):
+            return None
     image = None
     try:
         from editorial import pick_article_image
