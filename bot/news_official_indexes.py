@@ -32,7 +32,7 @@ HTML_INDEXES = (
         "id": "ihf-handball",
         "sport": "handball",
         "publisher": "IHF",
-        "url": "https://www.ihf.info/media-center/news",
+        "url": "https://www.ihf.info/media-center-home",
         "host": "www.ihf.info",
         "paths": ("/media-center/news/",),
     },
