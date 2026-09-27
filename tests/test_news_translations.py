@@ -1,4 +1,5 @@
 import copy
+import json
 
 import bot.news_translations as translations
 
@@ -72,3 +73,46 @@ def test_long_article_is_held_instead_of_partially_translated(monkeypatch):
     monkeypatch.setattr(translations, 'free_json_completion', lambda *args, **kwargs: called.append(True))
     assert translations.translate_article_payload(article) is None
     assert called == []
+
+def test_translation_masks_and_restores_exact_protected_name(monkeypatch):
+    article=type('ArticleFixture', (), {
+        'id':22002,
+        'title':'Alcaraz lifts Laver Cup after a dramatic contest',
+        'summary':'Laver Cup stays with Europe after a narrow finish.',
+        'ai_content':(
+            'Alcaraz carried the final passage of the contest with patience and nerve as Laver Cup '
+            'remained the centre of the story. Europe found its finish after a long sporting afternoon, '
+            'and the article keeps its warmth without adding any new event, statistic, quote or claim.'
+        ),
+        'content':None,
+    })()
+    seen={}
+    token='__NINKONAME_A__'
+
+    def fake_completion(system, prompt, **kwargs):
+        seen['prompt']=prompt
+        body=(
+            f'Alcaraz carried the final passage of the contest with patience and nerve as {token} '
+            'remained the centre of the story. Europe found its finish after a long sporting afternoon, '
+            'and the article keeps its warmth without adding any new event, statistic, quote or claim.'
+        )
+        payload={
+            language:{
+                'title':f'Alcaraz lifts {token} after a dramatic contest',
+                'summary':f'{token} stays with Europe after a narrow finish.',
+                'body':body,
+            }
+            for language in translations.LANGUAGES
+        }
+        return json.dumps(payload)
+
+    monkeypatch.setattr(translations, 'free_json_completion', fake_completion)
+    result=translations.translate_article_payload(article)
+
+    assert result
+    assert token in seen['prompt']
+    assert 'Laver Cup' not in seen['prompt']
+    for language in translations.LANGUAGES:
+        combined='\n'.join(result[language].values())
+        assert 'Laver Cup' in combined
+        assert token not in combined
