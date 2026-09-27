@@ -8,17 +8,6 @@ import os
 logger = logging.getLogger(__name__)
 
 
-def _run_data_lane():
-    if os.environ.get('NEWS_DATA_NEWS_ENABLED') != '1':
-        return 0
-    try:
-        from bot.data_news import ingest_result_briefs
-        return ingest_result_briefs(days=2, max_groups=40)
-    except Exception as exc:
-        logger.error('News data lane failed: %s', type(exc).__name__)
-        return 0
-
-
 def _start_errors():
     from deploy.news.preflight import runtime_errors
     from news_runtime import storage_errors
@@ -38,13 +27,11 @@ def _run_cycle():
     from public_cache import bump_public_cache
 
     historical = os.environ['NEWS_HISTORICAL_REPAIR_ENABLED'] == '1'
-    rewritten = indexed = data_briefs = translated_rows = 0
+    rewritten = indexed = translated_rows = 0
 
     if maximum <= 0 or not budget.can_start():
-        data_briefs = _run_data_lane()
-        logger.info('News AI lane held: allowance_or_ledger_unavailable data_briefs=%s',
-                    data_briefs)
-        return data_briefs
+        logger.info('News AI lane held: allowance_or_ledger_unavailable')
+        return 0
 
     from bot.fetch_sources import fetch_and_store_all_articles
     from bot.rewrite_ai import reset_openai_rate_limit
@@ -86,32 +73,14 @@ def _run_cycle():
                 repair_contaminated(max_pages=1)
         if rewritten or historical:
             bump_public_cache()
-        data_briefs = _run_data_lane()
         logger.info(
-            'News cycle finished: ai_articles=%s data_briefs=%s translated_rows=%s indexed=%s attempts=%s stop=%s history=%s',
-            rewritten, data_briefs, translated_rows, indexed, budget.attempts,
+            'News cycle finished: ai_articles=%s translated_rows=%s indexed=%s attempts=%s stop=%s history=%s',
+            rewritten, translated_rows, indexed, budget.attempts,
             budget.blocked_reason, historical,
         )
-        return rewritten + data_briefs
+        return rewritten
     except Exception as exc:
-        # Source/AI failure must not suppress zero-AI result news.
         logger.error('News AI cycle failed: %s', type(exc).__name__)
-        data_briefs = _run_data_lane()
-        return data_briefs
-
-
-def data_job():
-    """Frequent zero-AI result-news refresh with the same single-owner guard."""
-    from news_runtime import NewsOwnerUnavailable, news_owner
-    errors = _start_errors()
-    if errors:
-        logger.error('News data job held: %s', ','.join(errors))
-        return 0
-    try:
-        with news_owner():
-            return _run_data_lane()
-    except NewsOwnerUnavailable as exc:
-        logger.info('News data job skipped: %s', exc)
         return 0
 
 
@@ -131,26 +100,16 @@ def job():
 
 
 def main():
-    """Direct invocation schedules only guarded per-cycle jobs."""
+    """Run only the independent NinkoSports News pipeline."""
     errors = _start_errors()
     if errors:
         logger.error('News startup refused: %s', ','.join(errors))
         return 78
-    if os.environ.get('NEWS_DATA_NEWS_ENABLED') != '1':
-        try:
-            from bot.data_news import retire_result_briefs
-            retire_result_briefs()
-        except Exception as exc:
-            logger.error('Legacy result-news retirement failed: %s', type(exc).__name__)
 
     from apscheduler.schedulers.blocking import BlockingScheduler
     interval = int(os.environ['NEWS_FETCH_INTERVAL_MINUTES'])
-    data_interval = max(5, int(os.environ.get('NEWS_DATA_INTERVAL_MINUTES', '10')))
     scheduler = BlockingScheduler()
-    logger.info(
-        'Starting guarded News scheduler AI=%s min data=%s min',
-        interval, data_interval,
-    )
+    logger.info('Starting NinkoSports News scheduler every %s minutes', interval)
     try:
         job()
         scheduler.add_job(
@@ -160,14 +119,6 @@ def main():
             max_instances=1,
             coalesce=True,
         )
-        if os.environ.get('NEWS_DATA_NEWS_ENABLED') == '1':
-            scheduler.add_job(
-                data_job,
-                'interval',
-                minutes=data_interval,
-                max_instances=1,
-                coalesce=True,
-            )
         scheduler.start()
     finally:
         if scheduler.running:
