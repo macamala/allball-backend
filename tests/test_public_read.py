@@ -362,3 +362,39 @@ def test_mislabel_repair_still_hides_distinctive_wrong_sport():
         assert tax.public_ok is False
     finally:
         db.close()
+
+
+def test_afl_club_headline_repairs_wrong_basketball_public_label():
+    from models import ArticleTaxonomyResolution
+    from public_index import repair_recent_sport_mislabels
+
+    article=_make(
+        slug="gold-coast-st-kilda-afl-repair",
+        title="Gold Coast surges into top four with dominant win over St Kilda",
+        content=(
+            "Gold Coast controlled the contest after half-time and pulled clear of "
+            "St Kilda. The Suns maintained pressure around the ground and finished "
+            "strongly while the Saints were unable to close the margin."
+        ),
+        sport="australian-rules",
+        league=None,
+        external_id="https://example.com/gold-coast-st-kilda-afl-repair",
+    )
+    db=SessionLocal()
+    try:
+        tax=db.query(ArticleTaxonomyResolution).filter(
+            ArticleTaxonomyResolution.article_id==article.id
+        ).first()
+        assert tax is not None
+        tax.resolved_sport="basketball"
+        tax.resolved_competition=None
+        tax.sport_confidence="0.920"
+        tax.public_ok=True
+        db.add(tax)
+        db.commit()
+
+        assert repair_recent_sport_mislabels(db,limit=100,max_age_hours=168) >= 1
+        db.refresh(tax)
+        assert tax.public_ok is False
+    finally:
+        db.close()
