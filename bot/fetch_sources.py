@@ -762,13 +762,14 @@ def _fetch_and_store_all_articles(
             recent_public_sport_inventory,
             repair_recent_duplicate_news,
             repair_recent_sport_mislabels,
+            repair_recent_unresolved,
         )
 
-        # Clean legacy visible duplicates and clear cross-sport feed poisoning
-        # before measuring coverage debt. Both repairs are zero-AI, bounded and
-        # never delete the underlying article.
-        repair_recent_duplicate_news(db, limit=600, max_age_hours=168)
+        # Self-heal taxonomy first, re-evaluate valid held rows, and run dedupe
+        # last so no re-index can resurrect a duplicate. Zero AI is spent here.
         repair_recent_sport_mislabels(db, limit=600, max_age_hours=168)
+        repair_recent_unresolved(db, limit=50)
+        repair_recent_duplicate_news(db, limit=600, max_age_hours=168)
         sport_inventory = recent_public_sport_inventory(db, max_age_hours=72)
         queued, admission = fair_news_queue(
             queued,
