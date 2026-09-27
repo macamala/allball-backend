@@ -136,6 +136,13 @@ def main():
     if errors:
         logger.error('News startup refused: %s', ','.join(errors))
         return 78
+    if os.environ.get('NEWS_DATA_NEWS_ENABLED') != '1':
+        try:
+            from bot.data_news import retire_result_briefs
+            retire_result_briefs()
+        except Exception as exc:
+            logger.error('Legacy result-news retirement failed: %s', type(exc).__name__)
+
     from apscheduler.schedulers.blocking import BlockingScheduler
     interval = int(os.environ['NEWS_FETCH_INTERVAL_MINUTES'])
     data_interval = max(5, int(os.environ.get('NEWS_DATA_INTERVAL_MINUTES', '10')))
