@@ -5,7 +5,7 @@ from difflib import SequenceMatcher
 import re
 from typing import Optional
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 
 from models import Article
 from .textutil import normalize_title
@@ -29,6 +29,7 @@ def existing_by_url(db: Session, source_url: str) -> Optional[Article]:
         return None
     recent = (
         db.query(Article)
+        .options(load_only(Article.id, Article.source_url, Article.external_id))
         .filter(Article.source_url.isnot(None))
         .order_by(Article.id.desc())
         .limit(500)
@@ -110,7 +111,7 @@ def existing_near_duplicate(
     if published_at:
         window_start = published_at - timedelta(hours=48)
 
-    query = db.query(Article)
+    query = db.query(Article).options(load_only(Article.id, Article.title, Article.created_at))
     if window_start:
         query = query.filter(Article.created_at >= window_start - timedelta(days=2))
     recent = query.order_by(Article.created_at.desc()).limit(400).all()
