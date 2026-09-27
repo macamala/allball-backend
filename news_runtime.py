@@ -59,9 +59,13 @@ def configuration_errors(env):
     else:
         errors.append('unsupported_news_ai_provider_mode')
     for key in ('NEWS_HISTORICAL_REPAIR_ENABLED', 'NEWS_EXPANDED_FEEDS_ENABLED',
-                'NEWS_DATA_NEWS_ENABLED'):
+                'NEWS_DATA_NEWS_ENABLED', 'NEWS_TRANSLATIONS_ENABLED'):
         if env.get(key) not in ('0', '1'):
             errors.append('explicit_boolean_required:' + key)
+    per_cycle = str(env.get('NEWS_TRANSLATIONS_PER_CYCLE') or '').strip()
+    if (not per_cycle.isascii() or not per_cycle.isdigit()
+            or not 0 <= int(per_cycle) <= 3):
+        errors.append('missing_or_invalid_integer:NEWS_TRANSLATIONS_PER_CYCLE')
     ledger = _absolute_path(env.get('NEWS_AI_LEDGER_PATH'))
     mount = _absolute_path(env.get('RAILWAY_VOLUME_MOUNT_PATH'))
     if ledger is None or mount is None:
