@@ -10,6 +10,22 @@ from typing import Dict, List
 
 # Distinctive phrases only. Shared words like "hockey" or "open" are avoided.
 EXTRA_SPORT_ALIASES: Dict[str, List[str]] = {
+    "football": [
+        "kv kortrijk",
+        "lommel",
+        "francisco moura",
+        "gabri martínez",
+        "gabri martinez",
+        "hugo gambor",
+        "hložek",
+        "hlozek",
+        "coufal",
+        "karabec",
+        "paunović",
+        "paunovic",
+        "nati-noten",
+        "bazunu",
+    ],
     "rugby-league": [
         "rugby league",
         " nrl ",
@@ -19,7 +35,7 @@ EXTRA_SPORT_ALIASES: Dict[str, List[str]] = {
         "wakefield trinity",
     ],
     "futsal": ["futsal"],
-    "water-polo": ["water polo"],
+    "water-polo": ["water polo", "partizan na primorac", "primorac kotor"],
     "field-hockey": ["field hockey"],
     "australian-rules": ["australian rules", " afl ", "aussie rules"],
     "netball": ["netball"],
@@ -33,6 +49,8 @@ EXTRA_SPORT_ALIASES: Dict[str, List[str]] = {
     "athletics": [" athletics ", "track and field", "world athletics"],
     "swimming": [" swimming ", "world aquatics"],
     "winter-sports": ["winter sports", "alpine skiing", "figure skating"],
+    "ice-hockey": ["ice hockey", "ambri", "ambrì", "extraliga"],
+    "volleyball": ["volleyball", "eurovolley"],
     "esports": ["esports", "e-sports"],
     "ea-sports-fc": ["ea sports fc", "efootball"],
     "counter-strike": ["counter-strike", "counter strike"],
