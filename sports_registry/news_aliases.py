@@ -40,7 +40,7 @@ EXTRA_SPORT_ALIASES: Dict[str, List[str]] = {
         "ana nogueira",
         "racing power",
     ],
-    "basketball": ["nba rank"],
+    "basketball": ["nba rank", "aba liga", "aba lige", "aba league"],
     "boxing": ["radivoje kalajdžić", "radivoje kalajdzic", "srbin u londonu prebio britanca"],
     "handball": ["rukometašice", "rukometasice", "trifej makedonije", "ohridu"],
     "rugby-league": [
@@ -51,7 +51,7 @@ EXTRA_SPORT_ALIASES: Dict[str, List[str]] = {
         "wigan warriors",
         "wakefield trinity",
     ],
-    "futsal": ["futsal"],
+    "futsal": ["futsal", "joão matos", "joao matos"],
     "water-polo": ["water polo", "vaterpolo", "vaterpolisti", "partizan na primorac", "primorac kotor", "kotoranima"],
     "field-hockey": ["field hockey"],
     "australian-rules": ["australian rules", " afl ", "aussie rules"],
