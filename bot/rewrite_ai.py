@@ -3,6 +3,7 @@
 import logging
 import os
 import random
+import re
 import time
 from typing import Optional
 
@@ -31,7 +32,7 @@ Write an ORIGINAL news story from the provided facts.
 - Preserve supported facts, context, reported statements and developments from the source.
 - Reconstruct readable paragraph structure: intro, context/details, reported statements or extra facts, further context, then the current situation, as the material supports.
 - Do not merge the story into one giant paragraph.
-- Do not invent scores, quotes, fees, injuries, statistics, dates, unnamed sources, or extra context.
+- Do not invent scores, quotes, fees, injuries, statistics, dates, unnamed sources, or extra context.\n- Every named person/team/competition, number, calendar reference, result, transfer, injury or disciplinary claim in the draft must be explicitly supported by the supplied source facts. If uncertain, omit it.
 - Do not pad with filler, speculation, or repeated sentences to hit a word count.
 - If the source facts are a substantial news article, write a proper multi-paragraph piece of about 350-700 words using only those facts.
 - If the source facts are a short breaking item, write a short accurate brief. Prefer short and true over long and guessed.
@@ -51,6 +52,12 @@ Line 3: one-sentence summary
 Line 4: blank
 Then the article body as multiple paragraphs separated by blank lines.
 """
+
+FACT_RETRY_HINT = (
+    "The previous draft failed NinkoSports automated fact-lock validation. "
+    "Rewrite from the verified source facts only. Remove the unsupported detail "
+    "instead of guessing, generalising, or replacing it with another new fact."
+)
 
 LENGTH_RETRY_HINT = (
     "The previous draft was only a short summary of a substantial source article. "
@@ -173,6 +180,7 @@ def write_ninkosports_story(
     sport: str = "sports",
     league: str = "",
     retry_for_length: bool = False,
+    correction_reason: str = "",
 ) -> Optional[str]:
     if openai_rate_limited():
         return None
@@ -191,6 +199,9 @@ def write_ninkosports_story(
     )
     if retry_for_length:
         prompt = f"{LENGTH_RETRY_HINT}\n\n{prompt}"
+    if correction_reason:
+        safe_reason = re.sub(r"[^a-zA-Z0-9:_-]", "", correction_reason)[:120]
+        prompt = f"{FACT_RETRY_HINT}\nFACT_LOCK_FAILURE: {safe_reason}\n\n{prompt}"
     return _call_openai(prompt)
 
 
