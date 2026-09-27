@@ -239,3 +239,18 @@ def test_rollstuhl_marathon_marker_is_athletics():
         feed_kind="mixed",
     )
     assert result.sport == "athletics"
+
+
+def test_distinctive_football_coaches_from_live_unknown_samples():
+    first=classify_article(
+        "A ida para a Noruega, o convite de Carlos Queiroz e a ligação à FIFA",
+        "Hugo Pereira detalha o percurso profissional no futebol.",
+        feed_kind="mixed",
+    )
+    second=classify_article(
+        "Jorge Jesus vem com uma ambição sem limites para a Seleção",
+        "O treinador falou sobre a equipa nacional e o próximo ciclo.",
+        feed_kind="mixed",
+    )
+    assert first.sport=="football"
+    assert second.sport=="football"
