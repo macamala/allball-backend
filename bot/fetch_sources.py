@@ -834,6 +834,8 @@ def _fetch_and_store_all_articles(
         for candidate in queued:
             if len(unknown_samples) >= 10:
                 break
+            if non_article_news_reason(candidate):
+                continue
             try:
                 candidate_tags = _classify_candidate(candidate)
             except Exception:
