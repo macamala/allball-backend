@@ -44,9 +44,17 @@ _ROWS = [
     ('ea-sports-fc', 'Electronic Arts', 'https://news.ea.com/rss/pressrelease.aspx', 2, True),
 ]
 VERIFIED_RSS = [
-    {'url': url, 'kind': 'mixed', 'sport': sport, 'enabled': True,
-     'publisher': publisher, 'metadata_observed_at': _OBSERVED[group],
-     'metadata_state': 'RSS_METADATA_FRESH' if fresh else 'RSS_METADATA_STALE_OR_UNDATED',
-     'reuse_rights': 'NOT_VERIFIED'}
+    {
+        'url': url,
+        # Dedicated sport feeds may hint the sport only when article evidence
+        # itself is silent. EA press releases are cross-product and stay mixed.
+        'kind': 'mixed' if publisher == 'Electronic Arts' else 'league',
+        'sport': sport,
+        'enabled': True,
+        'publisher': publisher,
+        'metadata_observed_at': _OBSERVED[group],
+        'metadata_state': 'RSS_METADATA_FRESH' if fresh else 'RSS_METADATA_STALE_OR_UNDATED',
+        'reuse_rights': 'NOT_VERIFIED',
+    }
     for sport, publisher, url, group, fresh in _ROWS
 ]
