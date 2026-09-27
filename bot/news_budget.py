@@ -1,9 +1,9 @@
 """Explicit actual-request budget. No money cap or account-wide guarantee.
 
-A durable local SQLite ledger is required before actual News AI requests. The
-release owner must mount its directory on persistent storage; this code cannot
-prove Railway volume persistence. Missing/unwritable ledger fails closed.
-Reservations are charged before HTTP and never refunded on timeout/rejection.
+Production may use the existing Postgres database for durable request accounting;
+the original SQLite ledger remains as an offline/legacy backend. Reservations are
+charged before HTTP and never refunded on timeout/rejection. Both backends fail
+closed when accounting cannot be verified.
 """
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -76,14 +76,123 @@ class AiRequestBudget:
             return True
 
 
+class PostgresAiRequestBudget:
+    def __init__(self, max_requests, dsn, daily_limit=40, clock=None, connect_fn=None):
+        if type(max_requests) is not int or not 0 <= max_requests <= 20:
+            raise ValueError('max_requests must be 0..20')
+        if type(daily_limit) is not int or not 0 <= daily_limit <= 200:
+            raise ValueError('daily_limit must be 0..200')
+        self.max_requests = max_requests
+        self.daily_limit = daily_limit
+        self.dsn = dsn
+        self.clock = clock or (lambda: datetime.now(timezone.utc))
+        self.connect_fn = connect_fn
+        self.attempts = 0
+        self.blocked_reason = None
+        self._lock = Lock()
+
+    def _connect(self):
+        if self.connect_fn is not None:
+            return self.connect_fn(self.dsn)
+        import psycopg2
+        return psycopg2.connect(
+            self.dsn,
+            connect_timeout=5,
+            application_name='ninkosports-news-budget',
+        )
+
+    def can_start(self):
+        if not self.max_requests or not self.daily_limit or not self.dsn:
+            return False
+        connection = cursor = None
+        try:
+            connection = self._connect()
+            connection.autocommit = True
+            cursor = connection.cursor()
+            cursor.execute("SELECT to_regclass('public.news_ai_requests')")
+            exists = cursor.fetchone()
+            if not exists or exists[0] is None:
+                return True
+            day = self.clock().astimezone(timezone.utc).date().isoformat()
+            cursor.execute('SELECT attempts FROM news_ai_requests WHERE day=%s', (day,))
+            row = cursor.fetchone()
+            return not row or int(row[0]) < self.daily_limit
+        except Exception:
+            return False
+        finally:
+            if cursor is not None:
+                try: cursor.close()
+                except Exception: pass
+            if connection is not None:
+                try: connection.close()
+                except Exception: pass
+
+    def reserve(self):
+        with self._lock:
+            if self.attempts >= self.max_requests:
+                self.blocked_reason = 'cycle_request_limit'
+                return False
+            if not self.dsn:
+                self.blocked_reason = 'durable_ledger_required'
+                return False
+            connection = cursor = None
+            try:
+                connection = self._connect()
+                cursor = connection.cursor()
+                try:
+                    cursor.execute("SET LOCAL lock_timeout = '3s'")
+                    cursor.execute("SET LOCAL statement_timeout = '8s'")
+                except Exception:
+                    connection.rollback()
+                    cursor.close()
+                    cursor = connection.cursor()
+                cursor.execute(
+                    'CREATE TABLE IF NOT EXISTS news_ai_requests ('
+                    'day DATE PRIMARY KEY, attempts INTEGER NOT NULL CHECK (attempts >= 0))'
+                )
+                day = self.clock().astimezone(timezone.utc).date().isoformat()
+                cursor.execute(
+                    'INSERT INTO news_ai_requests(day,attempts) VALUES (%s,1) '
+                    'ON CONFLICT(day) DO UPDATE SET attempts=news_ai_requests.attempts+1 '
+                    'WHERE news_ai_requests.attempts < %s RETURNING attempts',
+                    (day, self.daily_limit),
+                )
+                row = cursor.fetchone()
+                if row is None:
+                    connection.rollback()
+                    self.blocked_reason = 'daily_request_limit'
+                    return False
+                connection.commit()
+            except Exception:
+                if connection is not None:
+                    try: connection.rollback()
+                    except Exception: pass
+                self.blocked_reason = 'ledger_unavailable'
+                return False
+            finally:
+                if cursor is not None:
+                    try: cursor.close()
+                    except Exception: pass
+                if connection is not None:
+                    try: connection.close()
+                    except Exception: pass
+            self.attempts += 1
+            return True
+
+
 def configured_budget(max_articles):
     try:
-        from news_runtime import request_limits
+        from news_runtime import accounting_backend, postgres_dsn, request_limits
         limits = request_limits(os.environ)
         if limits is None:
             return AiRequestBudget(0)
         requests, daily = limits
-        return AiRequestBudget(requests, os.environ.get('NEWS_AI_LEDGER_PATH'), daily)
+        backend = accounting_backend(os.environ)
+        if backend == 'postgres':
+            return PostgresAiRequestBudget(requests, postgres_dsn(os.environ), daily)
+        if backend == 'file':
+            return AiRequestBudget(requests, os.environ.get('NEWS_AI_LEDGER_PATH'), daily)
+        return AiRequestBudget(0)
     except (TypeError, ValueError):
         return AiRequestBudget(0)
 
