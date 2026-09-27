@@ -2,6 +2,7 @@
 
 import logging
 import os
+import time
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
@@ -802,10 +803,25 @@ def _fetch_and_store_all_articles(
 
         # Self-heal taxonomy first, re-evaluate valid held rows, and run dedupe
         # last so no re-index can resurrect a duplicate. Zero AI is spent here.
-        repair_recent_sport_mislabels(db, limit=600, max_age_hours=168)
-        repair_recent_unresolved(db, limit=50)
-        repair_recent_duplicate_news(db, limit=600, max_age_hours=168)
+        repair_started = time.monotonic()
+        mislabels = repair_recent_sport_mislabels(db, limit=600, max_age_hours=168)
+        after_mislabels = time.monotonic()
+        repaired = repair_recent_unresolved(db, limit=50)
+        after_unresolved = time.monotonic()
+        duplicates = repair_recent_duplicate_news(db, limit=600, max_age_hours=168)
+        after_dedupe = time.monotonic()
         sport_inventory = recent_public_sport_inventory(db, max_age_hours=72)
+        logger.info(
+            "[fetch_sources] repair phases mislabels=%s %.3fs unresolved=%s %.3fs "
+            "duplicates=%s %.3fs inventory=%.3fs",
+            mislabels,
+            after_mislabels - repair_started,
+            repaired,
+            after_unresolved - after_mislabels,
+            duplicates,
+            after_dedupe - after_unresolved,
+            time.monotonic() - after_dedupe,
+        )
         queued, admission = fair_news_queue(
             queued,
             _classify_candidate,
