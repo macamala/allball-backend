@@ -83,6 +83,16 @@ def classify_article(
     )
     tennis_context = _score_aliases(title_text, SPORT_ALIASES.get("tennis", [])) >= 2
     motorsport_context = _score_aliases(title_text, SPORT_ALIASES.get("motorsport", [])) >= 2
+    # Explicit sport-name evidence must beat generic football tournament phrases
+    # such as "World Cup" or "Champions League" in niche-sport headlines.
+    niche_context = next(
+        (
+            candidate
+            for candidate in ("field-hockey", "water-polo", "futsal")
+            if _score_aliases(title_text, SPORT_ALIASES.get(candidate, [])) > 0
+        ),
+        None,
+    )
 
     if basketball_context:
         sport_scores["football"] = max(0, sport_scores.get("football", 0) - 3)
@@ -91,6 +101,10 @@ def classify_article(
         sport_scores["basketball"] = min(sport_scores.get("basketball", 0), 1)
     if motorsport_context and not basketball_context:
         pass
+    if niche_context:
+        sport_scores["football"] = 0
+        if niche_context == "field-hockey":
+            sport_scores["ice-hockey"] = 0
     if any(token in text for token in (" golf ", " pga ", "birdie", "bogey", "fairway")) and "us open" in text:
         sport_scores["tennis"] = 0
 
