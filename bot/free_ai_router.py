@@ -39,6 +39,29 @@ def _free_model(env_name: str, default: str) -> Optional[str]:
     return model
 
 
+def _catalog_rows() -> Optional[list]:
+    now = time.monotonic()
+    cached = _catalog_cache.get("rows")
+    if isinstance(cached, list) and now - float(_catalog_cache.get("at") or 0) < 60:
+        return cached
+    try:
+        with httpx.Client(timeout=httpx.Timeout(12, connect=5), follow_redirects=False) as client:
+            response = client.get(_XKIRO_MODELS_ENDPOINT, headers={"Accept": "application/json"})
+        if response.status_code != 200:
+            return None
+        payload = response.json()
+        rows = payload.get("data") if isinstance(payload, dict) else None
+        if not isinstance(rows, list):
+            return None
+        rows = [row for row in rows if isinstance(row, dict)]
+        _catalog_cache["at"] = now
+        _catalog_cache["rows"] = rows
+        return rows
+    except Exception as exc:
+        logger.warning("[free_ai] xKiro model catalog unavailable: %s", type(exc).__name__)
+        return None
+
+
 def _free_catalog_model(model: str) -> bool:
     if not _MODEL_RE.fullmatch(model):
         return False
