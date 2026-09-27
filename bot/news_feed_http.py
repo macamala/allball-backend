@@ -9,6 +9,31 @@ import httpx
 
 USER_AGENT = 'NinkoSportsNewsBot/1.0 (+https://ninkosports.com)'
 MAX_BYTES = 2_000_000
+_ROBOTS_TTL_SECONDS = 10 * 60
+_ROBOTS_CACHE = {}
+
+
+def _robots_cache_key(parts):
+    return f"{parts.scheme}://{parts.netloc}".lower()
+
+
+def _robots_for(client, parts, deadline):
+    key = _robots_cache_key(parts)
+    now = time.monotonic()
+    cached = _ROBOTS_CACHE.get(key)
+    if cached and cached[0] > now:
+        return cached[1]
+
+    robots_url = f'{parts.scheme}://{parts.netloc}/robots.txt'
+    status, _, robots_body = _read(client, robots_url, deadline)
+    robots = None
+    if status == 200:
+        robots = RobotFileParser()
+        robots.parse(robots_body.decode('utf-8', 'replace').splitlines())
+    elif status not in (404, 410):
+        raise ValueError('feed_robots_unverified')
+    _ROBOTS_CACHE[key] = (now + _ROBOTS_TTL_SECONDS, robots)
+    return robots
 
 
 def validate_public_url(url):
@@ -54,19 +79,12 @@ def read_news_feed(url):
     """
     validate_public_url(url)
     parts = urlsplit(url)
-    robots_url = f'{parts.scheme}://{parts.netloc}/robots.txt'
     deadline = time.monotonic() + 20
     with httpx.Client(timeout=8, follow_redirects=False,
                       headers={'User-Agent': USER_AGENT}) as client:
-        status, _, robots_body = _read(client, robots_url, deadline)
-        robots = None
-        if status == 200:
-            robots = RobotFileParser()
-            robots.parse(robots_body.decode('utf-8', 'replace').splitlines())
-            if not robots.can_fetch(USER_AGENT, url):
-                raise ValueError('feed_robots_disallowed')
-        elif status not in (404, 410):
-            raise ValueError('feed_robots_unverified')
+        robots = _robots_for(client, parts, deadline)
+        if robots is not None and not robots.can_fetch(USER_AGENT, url):
+            raise ValueError('feed_robots_disallowed')
         status, final_url, body = _read(client, url, deadline,
             (lambda target: robots.can_fetch(USER_AGENT, target)) if robots else None)
         if robots and not robots.can_fetch(USER_AGENT, final_url):
