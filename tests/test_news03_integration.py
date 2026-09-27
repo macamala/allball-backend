@@ -219,3 +219,14 @@ def test_expanded_bbc_feeds_are_discovery_only_for_sport_taxonomy():
     assert all(row.get("kind") == "mixed" for row in bbc)
     assert any(row.get("sport") == "ice-hockey" for row in bbc)
     assert any(row.get("sport") == "american-football" for row in bbc)
+
+
+
+def test_repair_order_keeps_dedupe_as_final_guard():
+    import inspect
+    source = inspect.getsource(ingest._fetch_and_store_all_articles)
+    mislabel = source.index("repair_recent_sport_mislabels")
+    unresolved = source.index("repair_recent_unresolved", mislabel)
+    dedupe = source.index("repair_recent_duplicate_news", unresolved)
+    inventory = source.index("recent_public_sport_inventory", dedupe)
+    assert mislabel < unresolved < dedupe < inventory
