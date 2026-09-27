@@ -1,6 +1,16 @@
 name: News05 self-healing gate
 
 on:
+  push:
+    branches:
+      - news/source-coverage-20260927-05
+    paths:
+      - "bot/**"
+      - "models.py"
+      - "public_index.py"
+      - "news_feedback_api.py"
+      - "sports_registry/news_aliases.py"
+      - "tests/test_news05_*.py"
   workflow_dispatch:
 
 jobs:
