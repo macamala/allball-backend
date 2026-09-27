@@ -91,8 +91,8 @@ def _run_cycle():
         return rewritten + data_briefs
     except Exception as exc:
         # Exception strings can contain a credential-bearing DB/source URL.
-        logger.error('News cycle failed: %s', type(exc).__name__)
-        return 0
+        logger.error('News AI cycle failed: %s data_briefs=%s', type(exc).__name__, data_briefs)
+        return data_briefs
 
 
 def job():
