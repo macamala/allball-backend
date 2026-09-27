@@ -108,25 +108,24 @@ def test_disabled_budget_does_not_invalidate_public_cache(monkeypatch,tmp_path):
     assert 'cache' not in calls
 
 
-def test_main_holds_owner_during_scheduler_shutdown(monkeypatch,tmp_path):
-    from news_runtime import NewsOwnerUnavailable, news_owner
+def test_main_releases_cycle_owner_before_scheduler_shutdown(monkeypatch,tmp_path):
+    from news_runtime import news_owner
     scheduler,calls,_,_,env=cycle(monkeypatch,tmp_path)
     state=[]
     class Blocking:
         running=False
-        def add_job(self,*a,**kw):
+        def add_job(self,func,*a,**kw):
+            assert func is scheduler.job
             assert kw['max_instances']==1 and kw['coalesce'] is True
         def start(self):
             self.running=True
             raise KeyboardInterrupt()
         def shutdown(self,wait):
             assert wait is True
-            with pytest.raises(NewsOwnerUnavailable):
-                with news_owner(env['NEWS_AI_LEDGER_PATH']): pass
-            self.running=False;state.append('shutdown_with_owner')
-    # A scheduler test double, not a dependency substitute for the full image.
+            # Per-cycle ownership is already released once the job returns.
+            with news_owner(env['NEWS_AI_LEDGER_PATH']): pass
+            self.running=False;state.append('shutdown_after_cycle')
     fake=types.ModuleType('apscheduler.schedulers.blocking');fake.BlockingScheduler=Blocking
     monkeypatch.setitem(sys.modules,'apscheduler.schedulers.blocking',fake)
     with pytest.raises(KeyboardInterrupt): scheduler.main()
-    assert state==['shutdown_with_owner']
-    with news_owner(env['NEWS_AI_LEDGER_PATH']): pass
+    assert state==['shutdown_after_cycle']
