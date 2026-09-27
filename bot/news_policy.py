@@ -42,6 +42,57 @@ def canonical_news_url(value):
         return None
 
 
+_SOURCE_PATH_SPORTS = (
+    ("www.bbc.co.uk", "/sport/football/", "football"),
+    ("www.bbc.co.uk", "/sport/tennis/", "tennis"),
+    ("www.bbc.co.uk", "/sport/formula1/", "motorsport"),
+    ("www.bbc.co.uk", "/sport/rugby-union/", "rugby"),
+    ("www.bbc.co.uk", "/sport/rugby-league/", "rugby-league"),
+    ("www.bbc.co.uk", "/sport/cricket/", "cricket"),
+    ("www.bbc.co.uk", "/sport/basketball/", "basketball"),
+    ("www.bbc.co.uk", "/sport/american-football/", "american-football"),
+    ("www.bbc.co.uk", "/sport/ice-hockey/", "ice-hockey"),
+    ("www.bbc.co.uk", "/sport/baseball/", "baseball"),
+    ("www.bbc.co.uk", "/sport/mixed-martial-arts/", "mma"),
+    ("www.bbc.co.uk", "/sport/boxing/", "boxing"),
+    ("www.bbc.co.uk", "/sport/golf/", "golf"),
+    ("www.bbc.co.uk", "/sport/cycling/", "cycling"),
+    ("www.bbc.co.uk", "/sport/athletics/", "athletics"),
+    ("www.bbc.co.uk", "/sport/swimming/", "swimming"),
+    ("www.bbc.co.uk", "/sport/snooker/", "snooker"),
+    ("www.bbc.co.uk", "/sport/darts/", "darts"),
+    ("www.bbc.co.uk", "/sport/badminton/", "badminton"),
+    ("www.bbc.co.uk", "/sport/hockey/", "field-hockey"),
+    ("www.bbc.co.uk", "/sport/table-tennis/", "table-tennis"),
+    ("www.bbc.co.uk", "/sport/water-polo/", "water-polo"),
+    ("www.record.pt", "/modalidades/tenis/", "tennis"),
+    ("www.record.pt", "/futebol/", "football"),
+    ("www.novosti.rs", "/sport/fudbal/", "football"),
+    ("www.blick.ch", "/sport/fussball/", "football"),
+    ("www.blick.ch", "/sport/motorsport/", "motorsport"),
+)
+
+
+def source_path_sport_hint(url):
+    """Conservative publisher-owned URL-path sport evidence.
+
+    This is only a fallback when article text classification is unresolved. A
+    strong textual sport classification always wins over the publisher path.
+    """
+    if not isinstance(url, str) or not url.strip():
+        return None
+    try:
+        parts = urlsplit(url.strip())
+    except ValueError:
+        return None
+    host = (parts.hostname or "").lower()
+    path = (parts.path or "/").lower()
+    for expected_host, prefix, sport in _SOURCE_PATH_SPORTS:
+        if host == expected_host and path.startswith(prefix):
+            return sport
+    return None
+
+
 def publication_time(stamp):
     # Deliberately do not convert timezone-naive metadata to invented UTC.
     if not isinstance(stamp, datetime) or stamp.tzinfo is None: return None
