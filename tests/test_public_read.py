@@ -407,3 +407,51 @@ def test_afl_club_headline_repairs_wrong_basketball_public_label():
         assert tax.public_ok is True
     finally:
         db.close()
+
+
+def test_public_feed_freshness_window_excludes_archive_rows():
+    from datetime import timedelta
+
+    fresh=_make(
+        slug="fresh-window-football",
+        external_id="https://example.com/fresh-window-football",
+        published_at=datetime.utcnow()-timedelta(hours=6),
+    )
+    old=_make(
+        slug="old-window-football",
+        external_id="https://example.com/old-window-football",
+        published_at=datetime.utcnow()-timedelta(days=10),
+    )
+    db=SessionLocal()
+    try:
+        pairs=fetch_public(db,sport="football",limit=200,max_age_hours=72)
+        ids={row.id for row,_ in pairs}
+        assert fresh.id in ids
+        assert old.id not in ids
+        # Archive/detail access remains available through the unbounded base query.
+        archive_ids={row.id for row,_ in fetch_public(db,sport="football",limit=200)}
+        assert old.id in archive_ids
+    finally:
+        db.close()
+
+
+def test_articles_endpoint_uses_same_72h_window_as_public_inventory():
+    from datetime import timedelta
+
+    fresh=_make(
+        slug="api-fresh-window-football",
+        external_id="https://example.com/api-fresh-window-football",
+        published_at=datetime.utcnow()-timedelta(hours=4),
+    )
+    old=_make(
+        slug="api-old-window-football",
+        external_id="https://example.com/api-old-window-football",
+        published_at=datetime.utcnow()-timedelta(days=9),
+    )
+    with TestClient(app) as client:
+        rows=client.get("/articles?sport=football&limit=100").json()
+        ids={row["id"] for row in rows}
+        assert fresh.id in ids
+        assert old.id not in ids
+        detail=client.get(f"/articles/{old.slug}")
+        assert detail.status_code == 200
