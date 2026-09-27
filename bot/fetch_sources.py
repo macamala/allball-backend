@@ -413,6 +413,7 @@ def _ingest_item(db: Session, item: Dict, use_ai: bool, max_ai_chars: int, ai_bu
     probe.sport = tags.sport
     probe.league = tags.league
     resolved = resolve_article_competition(probe)
+    rewritten_sport = resolved.sport
     resolved, taxonomy_reason = _reconcile_public_taxonomy(tags, resolved, feed)
     if taxonomy_reason:
         _hold_ai_source(source_url, taxonomy_reason)
@@ -420,7 +421,7 @@ def _ingest_item(db: Session, item: Dict, use_ai: bool, max_ai_chars: int, ai_bu
             "[fetch_sources] hold taxonomy reason=%s classified=%s rewritten=%s title=%s",
             taxonomy_reason,
             tags.sport or "unknown",
-            getattr(probe, "sport", None) or "unknown",
+            rewritten_sport or "unknown",
             item["title"][:80],
         )
         return None, False
