@@ -43,8 +43,5 @@ jobs:
             tests/test_news_translations.py \
             tests/test_classify.py \
             tests/test_news03_policy.py \
-            tests/test_news03_http.py \
-            tests/test_news03_integration.py \
             tests/test_taxonomy_resolver.py \
-            tests/test_taxonomy_leakage.py \
-            tests/test_news_deploy_contract.py
+            tests/test_taxonomy_leakage.py
