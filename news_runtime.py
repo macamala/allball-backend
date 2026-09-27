@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import re
 import stat
+from urllib.parse import urlsplit
 
 REQUEST_LIMITS = {'NEWS_AI_MAX_REQUESTS_PER_RUN': 20,
                   'NEWS_AI_MAX_REQUESTS_PER_DAY': 200}
@@ -37,6 +38,24 @@ def _absolute_path(value):
             or value.startswith('//')):
         return None
     return path
+
+
+def accounting_backend(env):
+    value = str(env.get('NEWS_ACCOUNTING_BACKEND') or '').strip().lower()
+    return value if value in {'file', 'postgres'} else None
+
+
+def postgres_dsn(env):
+    value = str(env.get('DATABASE_URL') or '').strip()
+    if value.startswith('postgresql+psycopg2://'):
+        value = 'postgresql://' + value[len('postgresql+psycopg2://'):]
+    try:
+        parsed = urlsplit(value)
+    except ValueError:
+        return None
+    if parsed.scheme not in {'postgres', 'postgresql'} or not parsed.hostname or not parsed.path.strip('/'):
+        return None
+    return value
 
 
 def configuration_errors(env):
@@ -85,12 +104,18 @@ def configuration_errors(env):
         else:
             errors.append('unsupported_news_ai_provider_mode')
 
-    ledger = _absolute_path(env.get('NEWS_AI_LEDGER_PATH'))
-    mount = _absolute_path(env.get('RAILWAY_VOLUME_MOUNT_PATH'))
-    if ledger is None or mount is None:
-        errors.append('absolute_news_ledger_and_volume_paths_required')
-    elif ledger == mount or not ledger.is_relative_to(mount):
-        errors.append('news_ledger_outside_volume')
+    backend = accounting_backend(env)
+    if backend is None:
+        errors.append('explicit_news_accounting_backend_required')
+    elif backend == 'file':
+        ledger = _absolute_path(env.get('NEWS_AI_LEDGER_PATH'))
+        mount = _absolute_path(env.get('RAILWAY_VOLUME_MOUNT_PATH'))
+        if ledger is None or mount is None:
+            errors.append('absolute_news_ledger_and_volume_paths_required')
+        elif ledger == mount or not ledger.is_relative_to(mount):
+            errors.append('news_ledger_outside_volume')
+    elif postgres_dsn(env) is None:
+        errors.append('news_postgres_accounting_configuration_invalid')
     return errors
 
 
@@ -101,6 +126,11 @@ def storage_errors(env, *, mountinfo=None):
     Bind mounts are read from mountinfo because ismount misses same-device binds.
     A read-only/ephemeral filesystem or an unverified nested mount fails closed.
     """
+    backend = accounting_backend(env)
+    if backend == 'postgres':
+        return [] if postgres_dsn(env) is not None else ['news_postgres_accounting_configuration_invalid']
+    if backend != 'file':
+        return ['news_accounting_backend_unverified']
     ledger = _absolute_path(env.get('NEWS_AI_LEDGER_PATH'))
     mount = _absolute_path(env.get('RAILWAY_VOLUME_MOUNT_PATH'))
     if ledger is None or mount is None or ledger == mount or not ledger.is_relative_to(mount):
@@ -154,12 +184,7 @@ class NewsOwnerUnavailable(RuntimeError):
 
 
 @contextmanager
-def news_owner(ledger_path):
-    """One cooperating scheduler per shared ledger file, not a multihost cap.
-
-    Never unlink the lock file: unlinking can let another process lock a different
-    inode. Closing the descriptor releases ownership even after exceptions.
-    """
+def _file_news_owner(ledger_path):
     path = _absolute_path(ledger_path)
     if path is None or not path.parent.is_dir() or path.parent.resolve() != path.parent:
         raise NewsOwnerUnavailable('news_owner_path_unverified')
@@ -183,3 +208,68 @@ def news_owner(ledger_path):
         yield
     finally:
         os.close(fd)
+
+
+@contextmanager
+def _postgres_news_owner(env):
+    dsn = postgres_dsn(env)
+    if not dsn:
+        raise NewsOwnerUnavailable('news_owner_postgres_unavailable')
+    connection = cursor = None
+    try:
+        import psycopg2
+        connection = psycopg2.connect(
+            dsn,
+            connect_timeout=5,
+            application_name='ninkosports-news-owner',
+            keepalives=1,
+            keepalives_idle=30,
+            keepalives_interval=10,
+            keepalives_count=3,
+        )
+        connection.autocommit = True
+        cursor = connection.cursor()
+        cursor.execute('SELECT pg_try_advisory_lock(%s, %s)', (240927, 1))
+        row = cursor.fetchone()
+        if not row or row[0] is not True:
+            raise NewsOwnerUnavailable('news_owner_lock_unavailable')
+        yield
+    except NewsOwnerUnavailable:
+        raise
+    except Exception:
+        raise NewsOwnerUnavailable('news_owner_postgres_unavailable') from None
+    finally:
+        if cursor is not None:
+            try:
+                cursor.execute('SELECT pg_advisory_unlock(%s, %s)', (240927, 1))
+            except Exception:
+                pass
+            try:
+                cursor.close()
+            except Exception:
+                pass
+        if connection is not None:
+            try:
+                connection.close()
+            except Exception:
+                pass
+
+
+@contextmanager
+def news_owner(ledger_path=None):
+    """One News write owner per cycle; file mode remains for offline fixtures."""
+    if ledger_path is not None:
+        with _file_news_owner(ledger_path):
+            yield
+        return
+    backend = accounting_backend(os.environ)
+    if backend == 'file':
+        with _file_news_owner(os.environ.get('NEWS_AI_LEDGER_PATH')):
+            yield
+        return
+    if backend == 'postgres':
+        with _postgres_news_owner(os.environ):
+            yield
+        return
+    raise NewsOwnerUnavailable('news_owner_backend_unverified')
+
