@@ -96,7 +96,7 @@ jobs:
           Path('evidence/test-selection.txt').write_text('\n'.join(sorted(paths))+'\n')
           PY
       - name: Candidate boundary note
-        run: echo "Final candidate includes explicit no-invention prompt and reusable robots mock-client regression."
+        run: echo "Final candidate includes current factual-length contract, explicit no-invention prompt, translation reserve, and non-recursive robots-cache regression."
       - name: Run retained Live Scores plus current News suite offline
         run: |
           set -euo pipefail
