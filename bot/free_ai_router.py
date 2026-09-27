@@ -139,6 +139,7 @@ def _completion(
     max_tokens: int,
     json_mode: bool = False,
     temperature: float = 0.1,
+    timeout_seconds: float = 95.0,
 ) -> Optional[str]:
     """One actual xKiro request. No retry and no paid fallback."""
     global _rate_limited
@@ -172,7 +173,11 @@ def _completion(
         payload["response_format"] = {"type": "json_object"}
 
     try:
-        with httpx.Client(timeout=httpx.Timeout(95, connect=8), follow_redirects=False) as client:
+        timeout_seconds = max(15.0, min(float(timeout_seconds), 240.0))
+        with httpx.Client(
+            timeout=httpx.Timeout(timeout_seconds, connect=8),
+            follow_redirects=False,
+        ) as client:
             response = client.post(
                 _XKIRO_ENDPOINT,
                 headers={
@@ -230,6 +235,7 @@ def free_json_completion(system_prompt: str, prompt: str, *, max_tokens: int = 5
         max_tokens=max_tokens,
         json_mode=True,
         temperature=0.15,
+        timeout_seconds=180.0,
     )
 
 
