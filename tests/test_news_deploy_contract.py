@@ -133,6 +133,21 @@ def test_unknown_news_ai_provider_mode_fails_closed():
     assert 'unsupported_news_ai_provider_mode' in guard.runtime_errors(env)
 
 
+def test_postgres_data_only_runtime_does_not_require_ai_entitlement():
+    env=good_env()
+    env['NEWS_ACCOUNTING_BACKEND']='postgres'
+    env['NEWS_MAX_AI_ARTICLES']='0'
+    env['NEWS_DATA_NEWS_ENABLED']='1'
+    env['NEWS_TRANSLATIONS_ENABLED']='0'
+    env['NEWS_TRANSLATIONS_PER_CYCLE']='0'
+    env.pop('XKIRO_API_KEY',None)
+    env.pop('NEWS_AI_MAX_REQUESTS_PER_RUN',None)
+    env.pop('NEWS_AI_MAX_REQUESTS_PER_DAY',None)
+    env.pop('NEWS_AI_LEDGER_PATH',None)
+    env.pop('RAILWAY_VOLUME_MOUNT_PATH',None)
+    assert guard.runtime_errors(env) == []
+
+
 def test_data_news_flag_must_be_explicit_boolean():
     env=good_env();del env['NEWS_DATA_NEWS_ENABLED']
     assert 'explicit_boolean_required:NEWS_DATA_NEWS_ENABLED' in guard.runtime_errors(env)
