@@ -219,21 +219,9 @@ def test_public_article_strips_contamination_and_hides_source():
     )
     with TestClient(app) as client:
         res = client.get("/articles/editorial-odegaard-dirty")
-        assert res.status_code == 200
-        body = res.json()
-        blob = " ".join(
-            [
-                body.get("title") or "",
-                body.get("content") or "",
-                " ".join(block.get("text") or "" for block in body.get("blocks") or []),
-            ]
-        )
-        assert "source_url" not in body
-        assert "https://example.com/hidden-source" not in str(body)
-        assert "Menu ESPN" not in blob
-        assert "<![CDATA" not in blob
-        assert "[+" not in blob
-        assert "winning goal" in blob or "Ødegaard" in blob or "Odegaard" in blob
+        # Contaminated legacy rows are no longer publicly addressable. Public
+        # News must pass the same stored quality/image contract as list pages.
+        assert res.status_code == 404
 
 
 def test_featured_excludes_contaminated_and_weak_hero():
@@ -349,10 +337,11 @@ def test_article_with_no_media_and_legacy_image_only():
         external_id="https://example.com/editorial-legacy-image",
     )
     with TestClient(app) as client:
-        empty = client.get("/articles/editorial-no-media").json()
-        assert empty["media"] == []
-        assert empty["image_url"] is None
-        legacy = client.get("/articles/editorial-legacy-image").json()
+        empty = client.get("/articles/editorial-no-media")
+        assert empty.status_code == 404
+        legacy_response = client.get("/articles/editorial-legacy-image")
+        assert legacy_response.status_code == 200
+        legacy = legacy_response.json()
         assert len(legacy["media"]) == 1
         assert legacy["media"][0]["is_hero"] is True
         assert legacy["image_url"] == "https://example.com/only-hero.jpg"
