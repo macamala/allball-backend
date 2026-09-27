@@ -103,6 +103,25 @@ def source_article_facts(
     return "", "none"
 
 
+def _correction_retry_allowed() -> bool:
+    """Conservatively preserve one request for translations when that lane is on."""
+    budget = active_ai_budget()
+    if budget is None:
+        # Isolated unit callers do not own a live request ledger.
+        return True
+    if getattr(budget, "blocked_reason", None):
+        return False
+    translation_reserve = 0
+    if os.getenv("NEWS_TRANSLATIONS_ENABLED") == "1":
+        try:
+            translation_reserve = 1 if int(os.getenv("NEWS_TRANSLATIONS_PER_CYCLE", "0")) > 0 else 0
+        except ValueError:
+            translation_reserve = 1
+    source_ceiling = max(0, int(budget.max_requests) - translation_reserve)
+    # A full correction may consume writer + semantic-validator requests.
+    return int(budget.attempts) + 2 <= source_ceiling
+
+
 def _ai_story(
     title: str,
     facts: str,
@@ -432,6 +451,7 @@ def _ingest_item(db: Session, item: Dict, use_ai: bool, max_ai_chars: int, ai_bu
                 rewrite_reason not in {"empty", "too-short"}
                 and not openai_rate_limited()
                 and not ai_budget_exhausted()
+                and _correction_retry_allowed()
             ):
                 retry_parsed, retry_reason = _ai_story(
                     title=item["title"],
