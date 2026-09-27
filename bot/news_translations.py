@@ -73,6 +73,12 @@ def _validate(source: Dict[str, str], payload: object) -> Optional[Dict[str, Dic
     source_combined = "\n".join(source.values())
     source_numbers = _numbers(source_combined)
     protected = protected_proper_names(source_combined)
+    source_name_words = {
+        token.casefold()
+        for name in protected
+        for token in re.findall(r"[A-Za-zÀ-ÖØ-öø-ÿ'’.-]{2,}", name)
+        if token.casefold() not in {"de", "da", "del", "di", "la", "le", "van", "von"}
+    }
     source_words = max(1, _word_count(source.get("body") or ""))
 
     cleaned: Dict[str, Dict[str, str]] = {}
@@ -91,8 +97,13 @@ def _validate(source: Dict[str, str], payload: object) -> Optional[Dict[str, Dic
             return _translation_reject("external-link", language)
         if _numbers(combined) != source_numbers:
             return _translation_reject("numbers-changed", language)
-        folded = combined.casefold()
-        if any(name.casefold() not in folded for name in protected):
+        translated_name_words = {
+            token.casefold()
+            for name in protected_proper_names(combined)
+            for token in re.findall(r"[A-Za-zÀ-ÖØ-öø-ÿ'’.-]{2,}", name)
+            if token.casefold() not in {"de", "da", "del", "di", "la", "le", "van", "von"}
+        }
+        if translated_name_words - source_name_words:
             return _translation_reject("proper-name-changed", language)
         if _word_count(body) < max(25, int(source_words * 0.50)):
             return _translation_reject("body-too-short", language)
