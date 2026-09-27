@@ -70,3 +70,9 @@ def test_image_probe_cache_avoids_repeat_request():
     client=Client([Response()])
     assert images.probe_news_image("https://cdn.example/photo",client=client)[0] is True
     assert images.probe_news_image("https://cdn.example/photo",client=Client([]))[0] is True
+
+
+def test_image_probe_rejects_empty_image_mime_response():
+    client=Client([Response(status=200,content_type="image/jpeg",body=b"")])
+    ok,reason=images.probe_news_image("https://cdn.example/empty.jpg",client=client)
+    assert ok is False and reason=="empty_image_response"
