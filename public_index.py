@@ -107,6 +107,54 @@ def index_missing(db: Session, limit: int = 400) -> int:
     return counted
 
 
+def repair_recent_unresolved(db: Session, limit: int = 24) -> int:
+    """Re-evaluate only recent AI articles already held from public News by taxonomy.
+
+    This is bounded, zero-AI and never rewrites article copy. It exists so a
+    newly added safe sport marker can rescue recent valid stories without
+    enabling historical mass repair.
+    """
+    rows = (
+        db.query(Article)
+        .join(
+            ArticleTaxonomyResolution,
+            ArticleTaxonomyResolution.article_id == Article.id,
+        )
+        .filter(
+            Article.ai_generated.is_(True),
+            ArticleTaxonomyResolution.resolver_version == RESOLVER_VERSION,
+            ArticleTaxonomyResolution.public_ok.is_(False),
+        )
+        .order_by(Article.id.desc())
+        .limit(max(1, min(int(limit), 50)))
+        .all()
+    )
+    repaired = 0
+    for article in rows:
+        before = load_cached_resolution(db, article)
+        if before is not None and before.public_ok:
+            continue
+        resolved = resolve_article_competition(article)
+        persist_public_article(db, article, resolved, commit=False)
+        cached = (
+            db.query(ArticleTaxonomyResolution)
+            .filter(ArticleTaxonomyResolution.article_id == article.id)
+            .first()
+        )
+        if cached is not None and cached.public_ok:
+            repaired += 1
+    if rows:
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("recent unresolved News repair failed")
+            return 0
+    if repaired:
+        logger.info("[public_index] repaired recent unresolved articles=%s", repaired)
+    return repaired
+
+
 def load_cached_resolution(db: Session, article: Article):
     if not getattr(article, "id", None):
         return None
