@@ -230,3 +230,11 @@ def test_repair_order_keeps_dedupe_as_final_guard():
     dedupe = source.index("repair_recent_duplicate_news", unresolved)
     inventory = source.index("recent_public_sport_inventory", dedupe)
     assert mislabel < unresolved < dedupe < inventory
+
+
+def test_prequeue_cooldown_filter_runs_before_fair_queue():
+    import inspect
+    source=inspect.getsource(ingest._fetch_and_store_all_articles)
+    batch=source.index("_held_ai_source_urls")
+    queue=source.index("fair_news_queue", batch)
+    assert batch < queue
