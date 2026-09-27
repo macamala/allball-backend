@@ -212,3 +212,30 @@ def test_generic_suns_and_saints_do_not_force_afl():
         feed_kind="mixed",
     )
     assert result.sport is None
+
+
+def test_portuguese_goalkeeper_marker_is_football():
+    result = classify_article(
+        "Guarda-redes explode em direção ao camarote depois do jogo",
+        "O guarda-redes reagiu depois da partida e falou com a equipa.",
+        feed_kind="mixed",
+    )
+    assert result.sport == "football"
+
+
+def test_oktagon_marker_is_mma():
+    result = classify_article(
+        "Kozmova životní výhra v Oktagonu",
+        "The fighter won his latest Oktagon bout after a difficult contest.",
+        feed_kind="mixed",
+    )
+    assert result.sport == "mma"
+
+
+def test_rollstuhl_marathon_marker_is_athletics():
+    result = classify_article(
+        "Rollstuhl-Marathon: Doppelsieg in Berlin",
+        "The wheelchair marathon finished with two strong performances in Berlin.",
+        feed_kind="mixed",
+    )
+    assert result.sport == "athletics"
