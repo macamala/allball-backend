@@ -139,7 +139,7 @@ def _completion(
             {"role": "system", "content": system},
             {"role": "user", "content": user},
         ],
-        "max_tokens": max(256, min(int(max_tokens), 6000)),
+        "max_tokens": max(256, min(int(max_tokens), 9000)),
         "reasoning_effort": "none",
         "temperature": 0.2,
         "stream": False,
