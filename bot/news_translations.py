@@ -23,7 +23,7 @@ from .news_policy import protected_proper_names
 logger = logging.getLogger(__name__)
 
 LANGUAGES = ("sr", "es", "de", "fr", "it", "pt")
-TRANSLATION_PROVIDER = "xkiro-free-v3"
+TRANSLATION_PROVIDER = "xkiro-free-v4"
 CYRILLIC_RE = re.compile(r"[\u0400-\u04FF]")
 NUMBER_RE = re.compile(r"(?<!\w)\d+(?:[.,:/–-]\d+)*(?:%|\b)")
 
@@ -159,6 +159,34 @@ def _validate(source: Dict[str, str], payload: object) -> Optional[Dict[str, Dic
     return cleaned
 
 
+def _decode_json_payload(raw: str):
+    import json
+
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    text = raw.strip().lstrip("\ufeff")
+    if text.startswith("```"):
+        text = re.sub(r"^\s*```(?:json)?\s*", "", text, count=1, flags=re.I)
+        text = re.sub(r"\s*```\s*$", "", text, count=1)
+    try:
+        return json.loads(text)
+    except (TypeError, ValueError):
+        pass
+
+    # Some OpenAI-compatible models occasionally wrap a valid JSON object in
+    # harmless prose despite response_format. Extract one complete object only;
+    # never attempt to repair or guess truncated JSON.
+    start = text.find("{")
+    end = text.rfind("}")
+    if start >= 0 and end > start:
+        candidate = text[start : end + 1]
+        try:
+            return json.loads(candidate)
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
 def translate_article_payload(article: Article) -> Optional[Dict[str, Dict[str, str]]]:
     source = {
         "title": str(article.title or "").strip(),
@@ -175,12 +203,11 @@ def translate_article_payload(article: Article) -> Optional[Dict[str, Dict[str, 
     )
     raw = free_json_completion(_SYSTEM, prompt, max_tokens=9000)
     if not raw:
+        logger.info("[translations] response unavailable article=%s", article.id)
         return None
-    import json
-
-    try:
-        payload = json.loads(raw)
-    except (TypeError, ValueError):
+    payload = _decode_json_payload(raw)
+    if payload is None:
+        logger.info("[translations] invalid JSON response article=%s", article.id)
         return None
     return _validate(source, payload)
 
