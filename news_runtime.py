@@ -58,7 +58,8 @@ def configuration_errors(env):
             errors.append('legacy_paid_ai_not_explicitly_allowed')
     else:
         errors.append('unsupported_news_ai_provider_mode')
-    for key in ('NEWS_HISTORICAL_REPAIR_ENABLED', 'NEWS_EXPANDED_FEEDS_ENABLED'):
+    for key in ('NEWS_HISTORICAL_REPAIR_ENABLED', 'NEWS_EXPANDED_FEEDS_ENABLED',
+                'NEWS_DATA_NEWS_ENABLED'):
         if env.get(key) not in ('0', '1'):
             errors.append('explicit_boolean_required:' + key)
     ledger = _absolute_path(env.get('NEWS_AI_LEDGER_PATH'))
