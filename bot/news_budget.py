@@ -97,6 +97,10 @@ def ai_budget_scope(budget):
     finally: _ACTIVE.reset(token)
 
 
+def active_ai_budget():
+    return _ACTIVE.get()
+
+
 def reserve_ai_request():
     budget = _ACTIVE.get()
     return bool(budget is not None and budget.reserve())
