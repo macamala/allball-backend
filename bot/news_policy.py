@@ -2,6 +2,7 @@
 from collections import defaultdict, deque
 from datetime import date, datetime, timedelta, timezone
 import re
+from difflib import SequenceMatcher
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 UTC = timezone.utc
@@ -164,6 +165,17 @@ def original_draft_reason(draft, source_title, source_body):
     # Do not rewrite a source quote into an invented quote. For this automated
     # path use paraphrase with necessary in-sentence attribution instead.
     if re.search(r'[“\"]([^”\"\n]{8,})[”\"]', output): return 'direct_quote_requires_review'
+    source_title_norm = " ".join(re.findall(r"[\w]+", source_title.casefold()))
+    draft_title_norm = " ".join(re.findall(r"[\w]+", title.casefold()))
+    source_title_words = source_title_norm.split()
+    if len(source_title_words) >= 5 and draft_title_norm == source_title_norm:
+        return 'copied_source_headline'
+    if (
+        len(source_title_words) >= 7
+        and len(draft_title_norm.split()) >= 7
+        and SequenceMatcher(None, source_title_norm, draft_title_norm).ratio() > 0.88
+    ):
+        return 'headline_too_similar_to_source'
     numbers = lambda text: set(re.findall(r'(?<!\w)\d+(?:[.,:/–-]\d+)*(?:%|\b)', text))
     if numbers(output) - numbers(source): return 'unsupported_number'
     tokens = lambda text: re.findall(r"[\w]+", text.lower())
