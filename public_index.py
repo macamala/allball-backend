@@ -121,7 +121,7 @@ def repair_recent_unresolved(db: Session, limit: int = 24) -> int:
     enabling historical mass repair.
     """
     rows = (
-        db.query(Article)
+        db.query(Article, ArticleTaxonomyResolution)
         .join(
             ArticleTaxonomyResolution,
             ArticleTaxonomyResolution.article_id == Article.id,
@@ -130,24 +130,28 @@ def repair_recent_unresolved(db: Session, limit: int = 24) -> int:
             Article.ai_generated.is_(True),
             ArticleTaxonomyResolution.resolver_version == RESOLVER_VERSION,
             ArticleTaxonomyResolution.public_ok.is_(False),
+            Article.image_url.isnot(None),
+            Article.image_url != "",
         )
         .order_by(Article.id.desc())
         .limit(max(1, min(int(limit), 50)))
         .all()
     )
     repaired = 0
-    for article in rows:
-        before = load_cached_resolution(db, article)
-        if before is not None and before.public_ok:
-            continue
+    attempted = 0
+    for article, cached in rows:
+        # Resolve in memory first. Most held rows remain unresolved; do not spend
+        # multiple round-trips re-persisting a result that still cannot publish.
         resolved = resolve_article_competition(article)
+        if (
+            not resolved.sport
+            or resolved.sport_confidence < MIN_SPORT_CONFIDENCE
+            or not news_image_is_publishable(article.image_url)
+        ):
+            continue
+        attempted += 1
         persist_public_article(db, article, resolved, commit=False)
-        cached = (
-            db.query(ArticleTaxonomyResolution)
-            .filter(ArticleTaxonomyResolution.article_id == article.id)
-            .first()
-        )
-        if cached is not None and cached.public_ok:
+        if cached.public_ok:
             repaired += 1
     if rows:
         try:
@@ -156,8 +160,13 @@ def repair_recent_unresolved(db: Session, limit: int = 24) -> int:
             db.rollback()
             logger.exception("recent unresolved News repair failed")
             return 0
-    if repaired:
-        logger.info("[public_index] repaired recent unresolved articles=%s", repaired)
+    if repaired or attempted:
+        logger.info(
+            "[public_index] unresolved repair candidates=%s repaired=%s scanned=%s",
+            attempted,
+            repaired,
+            len(rows),
+        )
     return repaired
 
 
