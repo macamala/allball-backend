@@ -5,9 +5,23 @@ from bot import news_feed_http as net
 
 
 def setup(monkeypatch, handler):
+    net._ROBOTS_CACHE.clear()
     monkeypatch.setattr(net.socket, 'getaddrinfo', lambda *a, **k: [(socket.AF_INET, socket.SOCK_STREAM, 6, '', ('93.184.216.34',443))])
     client = httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=False)
     monkeypatch.setattr(net.httpx, 'Client', lambda **kw: client)
+
+
+def test_reuses_verified_robots_policy_for_same_host(monkeypatch):
+    seen=[]
+    def handler(request):
+        seen.append(request.url.path)
+        if request.url.path == '/robots.txt':
+            return httpx.Response(200, content=b'User-agent: *\nAllow: /')
+        return httpx.Response(200, content=b'<rss/>')
+    setup(monkeypatch, handler)
+    assert net.read_news_feed('https://example.test/feed-a') == b'<rss/>'
+    assert net.read_news_feed('https://example.test/feed-b') == b'<rss/>'
+    assert seen == ['/robots.txt', '/feed-a', '/feed-b']
 
 
 def test_reads_allowed_feed_bytes(monkeypatch):
