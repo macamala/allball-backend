@@ -11,7 +11,6 @@ import logging
 import os
 import re
 import time
-from decimal import Decimal, InvalidOperation
 from typing import Optional, Tuple
 
 import httpx
@@ -22,12 +21,14 @@ logger = logging.getLogger(__name__)
 
 _XKIRO_ENDPOINT = "https://api.xkiro.com/v1/chat/completions"
 _XKIRO_MODELS_ENDPOINT = "https://api.xkiro.com/v1/models"
+_XKIRO_USAGE_ENDPOINT = "https://api.xkiro.com/v1/usage"
 _MODEL_RE = re.compile(r"^[A-Za-z0-9._/+:-]{3,160}:free$")
 _DEFAULT_WRITER = "qwen/qwen3.5-397b-a17b:free"
 _DEFAULT_VALIDATOR = "qwen/qwen3.5-397b-a17b:free"
 
 _rate_limited = False
 _catalog_cache = {"at": 0.0, "rows": None}
+_usage_cache = {"at": 0.0, "remaining": None, "verified": False}
 
 
 def _free_model(env_name: str, default: str) -> Optional[str]:
@@ -38,37 +39,7 @@ def _free_model(env_name: str, default: str) -> Optional[str]:
     return model
 
 
-def _zero_money(value) -> bool:
-    try:
-        return Decimal(str(value)) == Decimal("0")
-    except (InvalidOperation, ValueError, TypeError):
-        return False
-
-
-def _catalog_rows() -> Optional[list]:
-    now = time.monotonic()
-    cached = _catalog_cache.get("rows")
-    if isinstance(cached, list) and now - float(_catalog_cache.get("at") or 0) < 60:
-        return cached
-    try:
-        with httpx.Client(timeout=httpx.Timeout(12, connect=5), follow_redirects=False) as client:
-            response = client.get(_XKIRO_MODELS_ENDPOINT, headers={"Accept": "application/json"})
-        if response.status_code != 200:
-            return None
-        payload = response.json()
-        rows = payload.get("data") if isinstance(payload, dict) else None
-        if not isinstance(rows, list):
-            return None
-        rows = [row for row in rows if isinstance(row, dict)]
-        _catalog_cache["at"] = now
-        _catalog_cache["rows"] = rows
-        return rows
-    except Exception as exc:
-        logger.warning("[free_ai] xKiro model catalog unavailable: %s", type(exc).__name__)
-        return None
-
-
-def _zero_price_free_model(model: str) -> bool:
+def _free_catalog_model(model: str) -> bool:
     if not _MODEL_RE.fullmatch(model):
         return False
     rows = _catalog_rows()
@@ -77,20 +48,42 @@ def _zero_price_free_model(model: str) -> bool:
     row = next((item for item in rows if item.get("id") == model), None)
     if not isinstance(row, dict) or row.get("access_tier") != "free":
         return False
-    pricing = row.get("pricing")
-    if not isinstance(pricing, dict):
-        return False
-    for key in ("input", "output"):
-        if not _zero_money(pricing.get(key)):
-            return False
-    for key, value in pricing.items():
-        if key in {"currency", "unit"}:
-            continue
-        if not _zero_money(value):
-            return False
+    # Explicit pay-as-you-go routes are never acceptable for News.
     if row.get("pay_as_you_go") is True:
         return False
     return True
+
+
+def _free_tokens_available() -> bool:
+    """Authenticated free-token counter. Cached so batches do not double traffic."""
+    now = time.monotonic()
+    if _usage_cache.get("verified") and now - float(_usage_cache.get("at") or 0) < 60:
+        remaining = _usage_cache.get("remaining")
+        return remaining is None or (isinstance(remaining, int) and remaining > 0)
+    key = (os.getenv("XKIRO_API_KEY") or "").strip()
+    if not key:
+        return False
+    try:
+        with httpx.Client(timeout=httpx.Timeout(12, connect=5), follow_redirects=False) as client:
+            response = client.get(
+                _XKIRO_USAGE_ENDPOINT,
+                headers={"Authorization": f"Bearer {key}", "Accept": "application/json"},
+            )
+        if response.status_code != 200:
+            return False
+        payload = response.json()
+        free = payload.get("free_tokens") if isinstance(payload, dict) else None
+        if not isinstance(free, dict) or "remaining" not in free:
+            return False
+        remaining = free.get("remaining")
+        if remaining is not None and (type(remaining) is not int or remaining < 0):
+            return False
+        _usage_cache.update(at=now, remaining=remaining, verified=True)
+        return remaining is None or remaining > 0
+    except Exception as exc:
+        logger.warning("[free_ai] xKiro usage counter unavailable: %s", type(exc).__name__)
+        return False
+
 
 
 def free_ai_available() -> bool:
@@ -100,8 +93,9 @@ def free_ai_available() -> bool:
         (os.getenv("XKIRO_API_KEY") or "").strip()
         and writer
         and validator
-        and _zero_price_free_model(writer)
-        and _zero_price_free_model(validator)
+        and _free_catalog_model(writer)
+        and _free_catalog_model(validator)
+        and _free_tokens_available()
     )
 
 
@@ -129,8 +123,11 @@ def _completion(
     key = (os.getenv("XKIRO_API_KEY") or "").strip()
     if not key or not _MODEL_RE.fullmatch(model):
         return None
-    if not _zero_price_free_model(model):
-        logger.error("[free_ai] refused model without live zero-price free metadata: %s", model)
+    if not _free_catalog_model(model):
+        logger.error("[free_ai] refused model without live free-tier metadata: %s", model)
+        return None
+    if not _free_tokens_available():
+        logger.warning("[free_ai] free-token allowance unavailable or exhausted")
         return None
     if not reserve_ai_request():
         logger.warning("[free_ai] request budget unavailable or exhausted")
