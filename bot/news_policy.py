@@ -119,8 +119,25 @@ def original_draft_reason(draft, source_title, source_body):
     # was not present in the bounded writer input.
     protected_source = f'{source_title}\n{(source_body or "")[:6000]}'
     source_names = {name.casefold() for name in protected_proper_names(protected_source)}
+    source_words = {
+        token.casefold()
+        for token in re.findall(r"[A-Za-zÀ-ÖØ-öø-ÿ'’.-]{2,}", protected_source)
+    }
     for name in protected_proper_names(output):
-        if name.casefold() not in source_names:
+        folded = name.casefold()
+        if folded in source_names:
+            continue
+        # Title-case grouping can legitimately change when we write a new story
+        # (for example "World Championship" vs a longer source phrase). Reject
+        # only when the draft introduces a capitalized name token that did not
+        # appear anywhere in the writer-visible source; the AI validator remains
+        # the authority for renamed people/teams/competitions.
+        name_tokens = {
+            token.casefold()
+            for token in re.findall(r"[A-Za-zÀ-ÖØ-öø-ÿ'’.-]{2,}", name)
+            if token.casefold() not in {"de", "da", "del", "di", "la", "le", "van", "von"}
+        }
+        if name_tokens - source_words:
             return 'missing_or_changed_proper_name'
     if src == dst: return 'copied_source_body'
     n = 8
