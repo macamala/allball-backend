@@ -197,10 +197,23 @@ def _fetch_feed_entries(feed_cfg: Dict, max_articles: int) -> List[Dict]:
     for entry in entries[:100]:
         title = strip_truncation_markers(clean_text(entry.get("title") or ""))
         raw_summary = entry.get("summary") or entry.get("description") or ""
-        parsed_summary = paragraphs_from_html(raw_summary)
-        summary = strip_truncation_markers(
-            parsed_summary or clean_text(raw_summary)
-        )
+        feed_content = entry.get("content") or []
+        content_values = []
+        if isinstance(feed_content, list):
+            content_values = [
+                str(row.get("value") or "")
+                for row in feed_content
+                if isinstance(row, dict) and row.get("value")
+            ]
+        elif isinstance(feed_content, dict) and feed_content.get("value"):
+            content_values = [str(feed_content.get("value") or "")]
+        parsed_candidates = []
+        for raw in [raw_summary, *content_values]:
+            parsed = paragraphs_from_html(raw)
+            cleaned = strip_truncation_markers(parsed or clean_text(raw))
+            if cleaned:
+                parsed_candidates.append(cleaned)
+        summary = max(parsed_candidates, key=len) if parsed_candidates else ""
         link = (entry.get("link") or "").strip()
         if not link or not title or looks_like_garbage(title):
             continue
