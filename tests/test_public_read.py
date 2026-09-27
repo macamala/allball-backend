@@ -215,3 +215,40 @@ def test_recent_inventory_ignores_old_and_missing_image_rows():
         assert inventory.get("football",0) >= 1
     finally:
         db.close()
+
+
+
+def test_recent_cross_sport_mislabel_is_hidden():
+    from models import ArticleTaxonomyResolution
+    from public_index import repair_recent_sport_mislabels
+
+    article = _make(
+        slug="cycling-poisoned-as-nfl",
+        title="Caroline Andersson conscious after heavy crash at Road World Championships",
+        content=(
+            "The Swedish rider crashed heavily during the road world championships. "
+            "Medical staff treated the cyclist before she was taken for further checks. "
+            "The road race was stopped briefly while the cycling medical team responded."
+        ),
+        sport="cycling",
+        league=None,
+        external_id="https://example.com/cycling-poisoned-as-nfl",
+    )
+    db = SessionLocal()
+    try:
+        tax = db.query(ArticleTaxonomyResolution).filter(
+            ArticleTaxonomyResolution.article_id == article.id
+        ).first()
+        assert tax is not None
+        tax.resolved_sport = "american-football"
+        tax.resolved_competition = None
+        tax.sport_confidence = "0.920"
+        tax.public_ok = True
+        db.add(tax)
+        db.commit()
+
+        assert repair_recent_sport_mislabels(db, limit=100, max_age_hours=168) >= 1
+        db.refresh(tax)
+        assert tax.public_ok is False
+    finally:
+        db.close()
