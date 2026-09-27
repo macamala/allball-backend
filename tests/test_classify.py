@@ -104,3 +104,29 @@ def test_mixed_feed_does_not_stamp_league():
     assert result.sport == "motorsport"
     assert result.league != "serbia-superliga"
     assert result.country != "serbia"
+
+def test_portuguese_joao_matos_story_is_futsal():
+    result = classify_article(
+        "Varandas sobre João Matos: Ambição de vencer, respeito pelo adversário",
+        "João Matos foi destacado numa história sobre a equipa.",
+        feed_kind="mixed",
+    )
+    assert result.sport == "futsal"
+
+
+def test_aba_liga_story_is_basketball():
+    result = classify_article(
+        "Klub iz ABA lige poražen 85 razlike, ovo se ne pamti",
+        "Vest govori o klubu i utakmici u regionalnom takmičenju.",
+        feed_kind="mixed",
+    )
+    assert result.sport == "basketball"
+
+
+def test_muay_thai_stays_unclassified_without_registry_sport():
+    result = classify_article(
+        "Muay-Thai-Spektakel in Bern: Rodriguez begeistert nicht nur FCZ-Spieler",
+        "Ein Kampfsport-Abend in Bern.",
+        feed_kind="mixed",
+    )
+    assert result.sport is None
