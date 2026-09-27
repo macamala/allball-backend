@@ -175,9 +175,10 @@ def test_json_ld_article_body_used_when_paragraphs_are_thin():
 def test_rewrite_prompt_forbids_hallucinated_filler():
     lower = SYSTEM_PROMPT.lower()
     assert "do not invent" in lower
-    assert "do not pad" in lower
-    assert "350-700" in SYSTEM_PROMPT.replace("–", "-")
-    assert "2-6 short paragraphs" not in lower
+    assert "do not repeat facts just to add length" in lower
+    assert "accuracy beats length" in lower
+    assert "180-340" in SYSTEM_PROMPT.replace("–", "-")
+    assert "2-5 short factual paragraphs" in lower
 
 
 def test_needs_full_source_repair_is_selective():
