@@ -29,6 +29,7 @@ EXTRA_SPORT_ALIASES: Dict[str, List[str]] = {
         "zvezdin biser",
         "nati-noten",
         "nordmazedonien",
+        "mitrovic ganha confiança",
         "bazunu",
         "coundoul",
     ],
