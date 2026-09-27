@@ -224,7 +224,8 @@ def main():
     now = datetime.now(timezone.utc)
     first_run = _next_interval_boundary(now, interval)
     image_interval = 10
-    # Offset by five minutes so image maintenance never races the :00/:30 writer lock.\n    first_image_run = _next_interval_boundary(now, image_interval, offset_minutes=5)
+    # Offset by five minutes so image maintenance never races the :00/:30 writer lock.
+    first_image_run = _next_interval_boundary(now, image_interval, offset_minutes=5)
     logger.info(
         'Starting NinkoSports News scheduler every %s minutes; first cycle=%s; image-health=%s minutes first=%s (offset=5m)',
         interval,
