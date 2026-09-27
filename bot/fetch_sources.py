@@ -290,7 +290,10 @@ def _ingest_item(db: Session, item: Dict, use_ai: bool, max_ai_chars: int, ai_bu
             db, parsed or {}, source_url=source_url, sport=tags.sport
         )
         lock_reason = learned_block or (
-            fact_lock_reason(parsed, item["title"], facts, expected_sport=tags.sport)
+            fact_lock_reason(
+                parsed, item["title"], facts,
+                expected_sport=tags.sport, expected_league=tags.league,
+            )
             if parsed else "empty-rewrite"
         )
         if lock_reason:
@@ -318,7 +321,8 @@ def _ingest_item(db: Session, item: Dict, use_ai: bool, max_ai_chars: int, ai_bu
                     db, retry_parsed, source_url=source_url, sport=tags.sport
                 )
                 retry_lock = retry_block or fact_lock_reason(
-                    retry_parsed, item["title"], facts, expected_sport=tags.sport
+                    retry_parsed, item["title"], facts,
+                    expected_sport=tags.sport, expected_league=tags.league,
                 )
                 if not retry_lock:
                     parsed = retry_parsed
