@@ -294,3 +294,16 @@ def test_correction_retry_preserves_translation_reserve(monkeypatch, tmp_path):
         budget.blocked_reason = None
         budget.attempts = 2
         assert ingest._correction_retry_allowed()
+
+
+def test_correction_retry_yields_to_breadth_when_coverage_is_sparse(monkeypatch, tmp_path):
+    from bot.news_budget import AiRequestBudget, ai_budget_scope
+
+    monkeypatch.setenv("NEWS_TRANSLATIONS_ENABLED", "1")
+    monkeypatch.setenv("NEWS_TRANSLATIONS_PER_CYCLE", "1")
+    budget = AiRequestBudget(6, str(tmp_path / "breadth-ledger.sqlite"), daily_limit=50)
+    with ai_budget_scope(budget):
+        # First writer + validator have already consumed two attempts.
+        budget.attempts = 2
+        assert ingest._correction_retry_allowed(prefer_breadth=False)
+        assert not ingest._correction_retry_allowed(prefer_breadth=True)
