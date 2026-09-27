@@ -31,7 +31,8 @@ def _run_cycle():
     rewritten = indexed = translated_rows = 0
 
     if maximum <= 0 or not budget.can_start():
-        logger.info('News AI lane held: allowance_or_ledger_unavailable')
+        reason = 'article_limit_disabled' if maximum <= 0 else (budget.blocked_reason or 'allowance_or_ledger_unavailable')
+        logger.info('News AI lane held: %s', reason)
         return 0
 
     from bot.fetch_sources import fetch_and_store_all_articles
