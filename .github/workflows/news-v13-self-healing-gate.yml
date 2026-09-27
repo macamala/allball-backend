@@ -10,6 +10,7 @@ on:
       - news/gap-source-fallbacks-20260927
       - news/repair-performance-20260927
       - news/mislabel-repair-fast-20260927
+      - news/discovery-speed-20260927
     paths:
       - ".github/workflows/news-v13-self-healing-gate.yml"
       - "bot/**"
