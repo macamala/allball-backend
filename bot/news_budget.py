@@ -32,10 +32,16 @@ class AiRequestBudget:
 
     def can_start(self):
         """Cheap conservative precheck before fetching feeds; reserve is authority."""
-        if not self.max_requests or not self.daily_limit or not self.ledger_path:
+        self.blocked_reason = None
+        if not self.max_requests or not self.daily_limit:
+            self.blocked_reason = 'allowance_disabled'
+            return False
+        if not self.ledger_path:
+            self.blocked_reason = 'durable_ledger_required'
             return False
         path = Path(self.ledger_path)
         if not path.is_absolute() or path.is_symlink() or not path.parent.is_dir():
+            self.blocked_reason = 'invalid_ledger_path'
             return False
         if not path.exists():
             return True
@@ -46,8 +52,12 @@ class AiRequestBudget:
                     return True
                 day = self.clock().astimezone(timezone.utc).date().isoformat()
                 row = db.execute('SELECT attempts FROM news_ai_requests WHERE day=?', (day,)).fetchone()
-                return not row or row[0] < self.daily_limit
+                if row and int(row[0]) >= self.daily_limit:
+                    self.blocked_reason = 'daily_request_limit'
+                    return False
+                return True
         except (sqlite3.Error, OSError, ValueError):
+            self.blocked_reason = 'ledger_unavailable'
             return False
 
     def reserve(self):
@@ -102,7 +112,12 @@ class PostgresAiRequestBudget:
         )
 
     def can_start(self):
-        if not self.max_requests or not self.daily_limit or not self.dsn:
+        self.blocked_reason = None
+        if not self.max_requests or not self.daily_limit:
+            self.blocked_reason = 'allowance_disabled'
+            return False
+        if not self.dsn:
+            self.blocked_reason = 'durable_ledger_required'
             return False
         connection = cursor = None
         try:
@@ -116,8 +131,12 @@ class PostgresAiRequestBudget:
             day = self.clock().astimezone(timezone.utc).date().isoformat()
             cursor.execute('SELECT attempts FROM news_ai_requests WHERE day=%s', (day,))
             row = cursor.fetchone()
-            return not row or int(row[0]) < self.daily_limit
+            if row and int(row[0]) >= self.daily_limit:
+                self.blocked_reason = 'daily_request_limit'
+                return False
+            return True
         except Exception:
+            self.blocked_reason = 'ledger_unavailable'
             return False
         finally:
             if cursor is not None:
