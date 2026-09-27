@@ -103,7 +103,7 @@ def job():
         logger.error('News job held: %s', ','.join(errors))
         return 0
     try:
-        with news_owner(os.environ['NEWS_AI_LEDGER_PATH']):
+        with news_owner():
             return _run_cycle()
     except NewsOwnerUnavailable as exc:
         logger.error('News job held: %s', exc)
@@ -111,30 +111,28 @@ def job():
 
 
 def main():
-    """Direct python -m invocation cannot bypass the preflight environment gate."""
-    from news_runtime import NewsOwnerUnavailable, news_owner
+    """Direct invocation schedules only guarded per-cycle jobs."""
     errors = _start_errors()
     if errors:
         logger.error('News startup refused: %s', ','.join(errors))
         return 78
+    from apscheduler.schedulers.blocking import BlockingScheduler
+    interval = int(os.environ['NEWS_FETCH_INTERVAL_MINUTES'])
+    scheduler = BlockingScheduler()
+    logger.info('Starting guarded News scheduler every %s minutes', interval)
     try:
-        with news_owner(os.environ['NEWS_AI_LEDGER_PATH']):
-            from apscheduler.schedulers.blocking import BlockingScheduler
-            interval = int(os.environ['NEWS_FETCH_INTERVAL_MINUTES'])
-            scheduler = BlockingScheduler()
-            logger.info('Starting guarded News scheduler every %s minutes', interval)
-            try:
-                _run_cycle()
-                scheduler.add_job(_run_cycle, 'interval', minutes=interval,
-                                  max_instances=1, coalesce=True)
-                scheduler.start()
-            finally:
-                # Keep ownership until in-flight scheduler jobs have stopped.
-                if scheduler.running:
-                    scheduler.shutdown(wait=True)
-    except NewsOwnerUnavailable as exc:
-        logger.error('News startup refused: %s', exc)
-        return 78
+        job()
+        scheduler.add_job(
+            job,
+            'interval',
+            minutes=interval,
+            max_instances=1,
+            coalesce=True,
+        )
+        scheduler.start()
+    finally:
+        if scheduler.running:
+            scheduler.shutdown(wait=True)
     return 0
 
 
