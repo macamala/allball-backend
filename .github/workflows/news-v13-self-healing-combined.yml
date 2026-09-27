@@ -9,6 +9,7 @@ on:
       - news/required-images-20260927
       - news/gap-source-fallbacks-20260927
       - news/repair-performance-20260927
+      - news/mislabel-repair-fast-20260927
     paths:
       - ".github/workflows/news-v13-self-healing-combined.yml"
   workflow_dispatch:
