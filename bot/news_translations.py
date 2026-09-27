@@ -72,13 +72,14 @@ def _validate(source: Dict[str, str], payload: object) -> Optional[Dict[str, Dic
         return _translation_reject("top-level-shape")
     source_combined = "\n".join(source.values())
     source_numbers = _numbers(source_combined)
-    protected = protected_proper_names(source_combined)
-    source_name_words = {
-        token.casefold()
-        for name in protected
-        for token in re.findall(r"[A-Za-zÀ-ÖØ-öø-ÿ'’.-]{2,}", name)
-        if token.casefold() not in {"de", "da", "del", "di", "la", "le", "van", "von"}
-    }
+    # Preserve central proper names from the source headline/summary exactly.
+    # Do not classify every capitalized word in a translated sentence as a new name.
+    source_head = f'{source.get("title") or ""}\n{source.get("summary") or ""}'
+    protected = [
+        name for name in protected_proper_names(source_head)
+        if len(name.split()) >= 2
+    ]
+    acronyms = set(re.findall(r"\b[A-Z][A-Z0-9.-]{1,7}\b", source_combined))
     source_words = max(1, _word_count(source.get("body") or ""))
 
     cleaned: Dict[str, Dict[str, str]] = {}
@@ -97,14 +98,11 @@ def _validate(source: Dict[str, str], payload: object) -> Optional[Dict[str, Dic
             return _translation_reject("external-link", language)
         if _numbers(combined) != source_numbers:
             return _translation_reject("numbers-changed", language)
-        translated_name_words = {
-            token.casefold()
-            for name in protected_proper_names(combined)
-            for token in re.findall(r"[A-Za-zÀ-ÖØ-öø-ÿ'’.-]{2,}", name)
-            if token.casefold() not in {"de", "da", "del", "di", "la", "le", "van", "von"}
-        }
-        if translated_name_words - source_name_words:
+        folded = combined.casefold()
+        if any(name.casefold() not in folded for name in protected):
             return _translation_reject("proper-name-changed", language)
+        if any(acronym not in combined for acronym in acronyms):
+            return _translation_reject("acronym-changed", language)
         if _word_count(body) < max(25, int(source_words * 0.50)):
             return _translation_reject("body-too-short", language)
         if language == "sr" and CYRILLIC_RE.search(combined):
