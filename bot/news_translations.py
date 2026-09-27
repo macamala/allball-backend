@@ -27,7 +27,7 @@ LANGUAGES = ("sr", "es", "de", "fr", "it", "pt")
 TRANSLATION_PROVIDER = "xkiro-free-v13"
 # v13 also canonicalizes English numeric ordinals before cross-language validation.
 CYRILLIC_RE = re.compile(r"[\u0400-\u04FF]")
-NUMBER_RE = re.compile(r"(?<!\\w)\\d+(?:[.,:/–-]\\d+)*(?:st|nd|rd|th|%|\\b)", re.I)
+NUMBER_RE = re.compile(r"(?<!\w)\d+(?:[.,:/–-]\d+)*(?:st|nd|rd|th|%|\b)", re.I)
 
 _SYSTEM = """You are the NinkoSports literary translation desk.
 Translate the supplied English sports article faithfully and completely.
