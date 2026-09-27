@@ -110,9 +110,9 @@ def source_article_facts(
     if (source_url or "").strip().startswith("http"):
         # Some legitimate sports publishers expose usable article text in RSS
         # while the linked page is JS-only, returns 202, or defeats the plain
-        # extractor. A substantial RSS body is still source material; short
-        # teasers remain fail-closed.
-        if rss_ok and word_count(rss_clean) >= 45:
+        # extractor. At least 25 source words are required; deterministic and
+        # second-pass fact gates still protect publication.
+        if rss_ok and word_count(rss_clean) >= 25:
             return rss_clean, "rss-fallback"
         return "", "missing-source"
     if rss_ok:
