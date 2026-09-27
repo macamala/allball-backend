@@ -116,4 +116,3 @@ def test_translation_masks_and_restores_exact_protected_name(monkeypatch):
         combined='\n'.join(result[language].values())
         assert 'Laver Cup' in combined
         assert token not in combined
-
