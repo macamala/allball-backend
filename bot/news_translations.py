@@ -7,7 +7,7 @@ incomplete bodies, or Serbian Cyrillic. Failures never hide the English article.
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 import logging
 import os
 import re
@@ -50,9 +50,14 @@ def _word_count(text: str) -> int:
     return len(re.findall(r"\b\w+\b", text or "", flags=re.UNICODE))
 
 
+def _translation_reject(reason: str, language: Optional[str] = None):
+    logger.info("[translations] validation reject=%s language=%s", reason, language or "-")
+    return None
+
+
 def _validate(source: Dict[str, str], payload: object) -> Optional[Dict[str, Dict[str, str]]]:
     if not isinstance(payload, dict) or set(payload) != set(LANGUAGES):
-        return None
+        return _translation_reject("top-level-shape")
     source_combined = "\n".join(source.values())
     source_numbers = _numbers(source_combined)
     protected = protected_proper_names(source_combined)
@@ -62,25 +67,25 @@ def _validate(source: Dict[str, str], payload: object) -> Optional[Dict[str, Dic
     for language in LANGUAGES:
         row = payload.get(language)
         if not isinstance(row, dict) or set(row) != {"title", "summary", "body"}:
-            return None
+            return _translation_reject("language-shape", language)
         title = row.get("title")
         summary = row.get("summary")
         body = row.get("body")
         if not all(isinstance(value, str) and value.strip() for value in (title, summary, body)):
-            return None
+            return _translation_reject("missing-text", language)
         title, summary, body = title.strip(), summary.strip(), body.strip()
         combined = f"{title}\n{summary}\n{body}"
         if re.search(r"https?://|www\.", combined, re.I):
-            return None
+            return _translation_reject("external-link", language)
         if _numbers(combined) != source_numbers:
-            return None
+            return _translation_reject("numbers-changed", language)
         folded = combined.casefold()
         if any(name.casefold() not in folded for name in protected):
-            return None
+            return _translation_reject("proper-name-changed", language)
         if _word_count(body) < max(25, int(source_words * 0.50)):
-            return None
+            return _translation_reject("body-too-short", language)
         if language == "sr" and CYRILLIC_RE.search(combined):
-            return None
+            return _translation_reject("serbian-cyrillic", language)
         cleaned[language] = {"title": title, "summary": summary, "body": body}
     return cleaned
 
@@ -122,29 +127,55 @@ def _latest_missing(db: Session, limit: int) -> list[Article]:
             ArticleTaxonomyResolution.resolver_version == RESOLVER_VERSION,
             ArticleTaxonomyResolution.public_ok.is_(True),
         )
-        .order_by(Article.published_at.desc(), Article.id.desc())
-        .limit(max(10, min(limit * 20, 100)))
+        .order_by(Article.ai_generated.desc(), Article.published_at.desc(), Article.id.desc())
+        .limit(max(10, min(limit * 30, 120)))
         .all()
     )
     output = []
+    cutoff = datetime.utcnow() - timedelta(hours=6)
     for article in rows:
-        ready = {
-            row[0]
-            for row in (
-                db.query(ArticleTranslation.language_code)
-                .filter(
-                    ArticleTranslation.article_id == article.id,
-                    ArticleTranslation.status == "ready",
-                    ArticleTranslation.language_code.in_(LANGUAGES),
-                )
-                .all()
+        translation_rows = (
+            db.query(ArticleTranslation)
+            .filter(
+                ArticleTranslation.article_id == article.id,
+                ArticleTranslation.language_code.in_(LANGUAGES),
             )
-        }
+            .all()
+        )
+        ready = {row.language_code for row in translation_rows if row.status == "ready"}
+        recently_failed = any(
+            row.status == "failed" and row.updated_at is not None and row.updated_at >= cutoff
+            for row in translation_rows
+        )
+        if recently_failed:
+            continue
         if ready != set(LANGUAGES):
             output.append(article)
             if len(output) >= limit:
                 break
     return output
+
+
+def _mark_failed(db: Session, article: Article) -> None:
+    model = (selected_free_model_name() or "")[:80] or None
+    now = datetime.utcnow()
+    for language in LANGUAGES:
+        row = (
+            db.query(ArticleTranslation)
+            .filter(
+                ArticleTranslation.article_id == article.id,
+                ArticleTranslation.language_code == language,
+            )
+            .first()
+        )
+        if row is None:
+            row = ArticleTranslation(article_id=article.id, language_code=language)
+            db.add(row)
+        if row.status != "ready":
+            row.status = "failed"
+            row.provider = "xkiro-free"
+            row.model_name = model
+            row.updated_at = now
 
 
 def _store(db: Session, article: Article, translations: Dict[str, Dict[str, str]]) -> int:
@@ -188,7 +219,9 @@ def translate_latest_articles(limit: int = 1) -> int:
         for article in _latest_missing(db, limit):
             payload = translate_article_payload(article)
             if not payload:
-                logger.info("[translations] held article=%s", article.id)
+                _mark_failed(db, article)
+                db.commit()
+                logger.info("[translations] held article=%s cooldown_hours=6", article.id)
                 continue
             with db.begin_nested():
                 translated += _store(db, article, payload)
