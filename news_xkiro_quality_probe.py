@@ -18,6 +18,8 @@ from news_free_probe import LANGUAGES, SERVICE_ID, request_json, safe_number
 
 MODEL = "qwen/qwen3.5-397b-a17b:free"
 ENDPOINT = "https://api.xkiro.com/v1/chat/completions"
+CYRILLIC_RE = re.compile(r"[\u0400-\u04FF]")
+
 LOCKED_NAMES = (
     "Northbridge Athletic",
     "Southport United",
@@ -73,11 +75,46 @@ def validate_translations(rows: dict) -> list[str]:
         for name in LOCKED_NAMES:
             if name not in text:
                 errors.append(f"{language}:missing_locked_name:{name}")
-        if _numbers(text) - source_numbers:
+        observed_numbers = _numbers(text)
+        if observed_numbers - source_numbers:
             errors.append(f"{language}:unsupported_number")
-        if not {"2-1", "1-0", "18", "64", "82", "55%", "11", "9", "4", "3"}.issubset(_numbers(text)):
+        if not source_numbers.issubset(observed_numbers):
             errors.append(f"{language}:missing_required_number")
+        if language == "en":
+            words = len(re.findall(r"\b\w+\b", text))
+            if not 140 <= words <= 210:
+                errors.append("en:unexpected_word_count")
+        if language == "sr" and CYRILLIC_RE.search(text):
+            errors.append("sr:cyrillic_not_allowed")
     return errors
+
+
+def verify_free_entitlement(key: str) -> tuple[bool, dict]:
+    report = {"model_catalog_verified": False, "free_usage_verified": False}
+    status, payload = request_json("GET", "https://api.xkiro.com/v1/models", key)
+    report["models_http_status"] = status.get("http_status")
+    rows = payload.get("data") if isinstance(payload, dict) else None
+    model = next(
+        (row for row in rows or [] if isinstance(row, dict) and row.get("id") == MODEL),
+        None,
+    )
+    if not isinstance(model, dict) or model.get("access_tier") != "free" or model.get("pay_as_you_go") is True:
+        return False, report
+    report["model_catalog_verified"] = True
+    report["model_access_tier"] = "free"
+
+    status, payload = request_json("GET", "https://api.xkiro.com/v1/usage", key)
+    report["usage_http_status"] = status.get("http_status")
+    free = payload.get("free_tokens") if isinstance(payload, dict) else None
+    if not isinstance(free, dict) or "remaining" not in free:
+        return False, report
+    remaining = free.get("remaining")
+    if remaining is not None and (type(remaining) is not int or remaining <= 0):
+        report["free_tokens_remaining"] = safe_number(remaining)
+        return False, report
+    report["free_usage_verified"] = True
+    report["free_tokens_remaining"] = safe_number(remaining)
+    return True, report
 
 
 def run_probe() -> dict:
@@ -96,6 +133,10 @@ def run_probe() -> dict:
         return {**report, "result": "refused_non_free_model"}
     if not key:
         return {**report, "result": "missing_key"}
+    entitled, entitlement = verify_free_entitlement(key)
+    report["entitlement"] = entitlement
+    if not entitled:
+        return {**report, "result": "free_entitlement_not_verified"}
 
     payload = {
         "model": MODEL,
