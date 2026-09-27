@@ -14,6 +14,7 @@ on:
       - news/source-path-hints-20260927
       - news/image-health-cadence-20260927
       - news/image-health-offset-20260927
+      - news/non-sport-sections-20260927
     paths:
       - ".github/workflows/news-v13-self-healing-gate.yml"
       - "bot/**"
