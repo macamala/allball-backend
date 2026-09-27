@@ -11,7 +11,6 @@ _ROWS = [
     ('rugby', 'BBC Sport', 'https://feeds.bbci.co.uk/sport/rugby-union/rss.xml', 0, True),
     ('rugby-league', 'BBC Sport', 'https://feeds.bbci.co.uk/sport/rugby-league/rss.xml', 0, True),
     ('cricket', 'BBC Sport', 'https://feeds.bbci.co.uk/sport/cricket/rss.xml', 0, True),
-    ('volleyball', 'FIVB', 'https://www.fivb.com/feed/', 0, True),
     ('netball', 'World Netball', 'https://netball.sport/feed/', 0, True),
     ('lacrosse', 'World Lacrosse', 'https://worldlacrosse.sport/feed/', 0, False),
     ('snooker', 'BBC Sport', 'https://feeds.bbci.co.uk/sport/snooker/rss.xml', 0, False),
@@ -41,7 +40,6 @@ _ROWS = [
     ('field-hockey', 'BBC Sport', 'https://feeds.bbci.co.uk/sport/hockey/rss.xml', 2, False),
     ('table-tennis', 'BBC Sport', 'https://feeds.bbci.co.uk/sport/table-tennis/rss.xml', 2, False),
     ('water-polo', 'BBC Sport', 'https://feeds.bbci.co.uk/sport/water-polo/rss.xml', 2, False),
-    ('ea-sports-fc', 'Electronic Arts', 'https://news.ea.com/rss/pressrelease.aspx', 2, True),
 ]
 VERIFIED_RSS = [
     {
