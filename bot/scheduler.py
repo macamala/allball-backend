@@ -39,8 +39,6 @@ def _run_cycle():
             logger.error('News data lane failed: %s', type(exc).__name__)
 
     if maximum <= 0 or not budget.can_start():
-        if data_briefs:
-            bump_public_cache()
         logger.info('News AI lane held: allowance_or_ledger_unavailable data_briefs=%s',
                     data_briefs)
         return data_briefs
@@ -69,7 +67,7 @@ def _run_cycle():
                 finally:
                     db.close()
                 repair_contaminated(max_pages=1)
-        if rewritten or historical or data_briefs:
+        if rewritten or historical:
             bump_public_cache()
         logger.info(
             'News cycle finished: ai_articles=%s data_briefs=%s indexed=%s attempts=%s stop=%s history=%s',
