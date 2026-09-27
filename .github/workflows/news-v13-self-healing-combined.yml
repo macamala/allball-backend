@@ -1,0 +1,144 @@
+name: NinkoSports News v13 self-healing combined release gate
+
+on:
+  push:
+    branches:
+      - integration/news-v13-self-healing-20260927
+    paths:
+      - ".github/workflows/news-v13-self-healing-combined.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: news-v13-self-healing-combined-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  combined-backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    env:
+      DATABASE_URL: sqlite:////tmp/ninko-combined.db
+      OPENAI_API_KEY: isolated-test-not-real
+      PYTHONPATH: .
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Verify source lineage and no Live Scores implementation touched
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor dc718e5ad78697e93e184cb049fee0c57ad0d365 HEAD
+          changed="$(git diff --name-only dc718e5ad78697e93e184cb049fee0c57ad0d365 HEAD)"
+          if echo "$changed" | grep -E '^(collector/|sports_provider\.py$)'; then
+            echo "Unexpected Live Scores implementation change"
+            echo "$changed"
+            exit 1
+          fi
+          git diff --check
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 36229950821
+          artifact-ids: 10901897318
+          merge-multiple: true
+          path: /tmp/c21-retained
+      - name: Build exact current News image and preflight
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          python -c 'import app; print("API_IMPORT_OK")' | tee evidence/api-import.txt
+          docker build --progress=plain -f deploy/news/Dockerfile -t ninko-news-v13-self-heal:gate . 2>&1 | tee evidence/news-image-build.log
+          docker run --rm --network none ninko-news-v13-self-heal:gate python deploy/news/preflight.py --check | tee evidence/news-preflight.json
+          set +e
+          docker run --rm --network none ninko-news-v13-self-heal:gate > evidence/unconfigured-default.txt 2>&1
+          default_status=$?
+          docker run --rm --network none ninko-news-v13-self-heal:gate python -m bot.scheduler > evidence/unconfigured-direct.txt 2>&1
+          direct_status=$?
+          set -e
+          test "$default_status" -eq 78
+          test "$direct_status" -eq 78
+      - name: Build current combined regression selection
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          paths=set(Path('/tmp/c21-retained/test-selection.txt').read_text().split())
+          paths.update({
+              'tests/test_c22_news_runtime.py',
+              'tests/test_c22_news_scheduler.py',
+              'tests/test_classify.py',
+              'tests/test_news_data_news.py',
+              'tests/test_news_free_ai.py',
+              'tests/test_news_official_indexes.py',
+              'tests/test_news_postgres_accounting.py',
+              'tests/test_news_scheduler_lanes.py',
+              'tests/test_news_self_healing_v13.py',
+              'tests/test_news_translations.py',
+              'tests/test_news_verified_sources.py',
+          })
+          assert len(paths) == 91, len(paths)
+          missing=[p for p in sorted(paths) if not Path(p).is_file()]
+          assert not missing, missing
+          Path('evidence/test-selection.txt').write_text('\n'.join(sorted(paths))+'\n')
+          PY
+      - name: Run retained Live Scores plus current News suite offline
+        run: |
+          set -euo pipefail
+          docker run --rm --network none --user "$(id -u):$(id -g)" \
+            -v "$PWD:/work:ro" -v "$PWD/evidence:/evidence" -w /work \
+            ninko-news-v13-self-heal:gate \
+            python -m pytest -q -p no:cacheprovider \
+            $(cat evidence/test-selection.txt) \
+            --junitxml=/evidence/tests.xml 2>&1 | tee evidence/tests.log
+          python - <<'PY'
+          import json, xml.etree.ElementTree as E
+          from pathlib import Path
+          root=E.parse('evidence/tests.xml')
+          counts={k:len(list(root.iter(v))) for k,v in [
+              ('tests','testcase'),('failures','failure'),('errors','error'),('skipped','skipped')
+          ]}
+          print(counts)
+          assert counts['tests'] >= 1395, counts
+          assert counts['failures'] == counts['errors'] == counts['skipped'] == 0, counts
+          Path('evidence/test-summary.json').write_text(json.dumps(counts,indent=2))
+          Path('evidence/candidate-sha.txt').write_text(
+              __import__('subprocess').check_output(['git','rev-parse','HEAD'],text=True)
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: news-v13-self-healing-combined-backend
+          path: evidence
+          retention-days: 30
+
+  current-frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: macamala/allball-frontend
+          ref: 66aa42c1eecd775072a39189b4285f47c341a878
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci
+      - name: Full frontend tests
+        run: npm test -- --reporter=default
+      - name: Production frontend build
+        run: npm run build
+        env:
+          VITE_API_URL: https://allball-backend-production.up.railway.app
