@@ -5,6 +5,7 @@ from bot.news_policy import original_draft_reason, protected_proper_names
 
 
 def test_free_ai_route_requires_key_and_explicit_free_model_ids(monkeypatch):
+    monkeypatch.setattr(free_ai, '_zero_price_free_model', lambda model: True)
     monkeypatch.delenv('XKIRO_API_KEY', raising=False)
     assert not free_ai.free_ai_available()
 
@@ -16,6 +17,33 @@ def test_free_ai_route_requires_key_and_explicit_free_model_ids(monkeypatch):
     monkeypatch.setenv('NEWS_XKIRO_WRITER_MODEL', 'qwen/qwen3.5-397b-a17b:free')
     assert free_ai.free_ai_available()
 
+
+
+def test_free_model_requires_live_free_tier_and_zero_pricing(monkeypatch):
+    model='qwen/qwen3.5-397b-a17b:free'
+    monkeypatch.setattr(free_ai, '_catalog_rows', lambda: [{
+        'id': model,
+        'access_tier': 'free',
+        'pricing': {'currency': 'USD', 'unit': 'per_1m_tokens', 'input': 0, 'output': '0.000000'},
+    }])
+    assert free_ai._zero_price_free_model(model)
+
+    monkeypatch.setattr(free_ai, '_catalog_rows', lambda: [{
+        'id': model,
+        'access_tier': 'paid',
+        'pricing': {'input': 0, 'output': 0},
+    }])
+    assert not free_ai._zero_price_free_model(model)
+
+    monkeypatch.setattr(free_ai, '_catalog_rows', lambda: [{
+        'id': model,
+        'access_tier': 'free',
+        'pricing': {'input': 0, 'output': 0.001},
+    }])
+    assert not free_ai._zero_price_free_model(model)
+
+    monkeypatch.setattr(free_ai, '_catalog_rows', lambda: None)
+    assert not free_ai._zero_price_free_model(model)
 
 def test_free_validator_fails_closed_on_bad_or_unsupported_output(monkeypatch):
     monkeypatch.setenv('NEWS_XKIRO_VALIDATOR_MODEL', 'qwen/qwen3.5-397b-a17b:free')
