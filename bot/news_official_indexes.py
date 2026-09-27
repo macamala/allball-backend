@@ -127,7 +127,7 @@ HTML_INDEXES = (
         "publisher": "FIH",
         "url": "https://www.fih.hockey/news",
         "host": "www.fih.hockey",
-        "paths": ("/news/", "/events/"),
+        "paths": ("/news/",),
         "keywords": ("hockey", "fih"),
         "hydrate_keywords_only": True,
     },
