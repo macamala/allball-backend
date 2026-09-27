@@ -57,6 +57,53 @@ def _run_zero_ai_public_repairs():
     )
     return inventory
 
+
+def _run_image_health():
+    """Bounded zero-AI hero-image maintenance for the current public feed."""
+    from database import SessionLocal
+    from public_cache import bump_public_cache
+    from public_index import repair_recent_news_images
+
+    db = SessionLocal()
+    try:
+        changed = repair_recent_news_images(
+            db,
+            limit=80,
+            max_age_hours=72,
+            recover_limit=8,
+        )
+    except Exception as exc:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        logger.error('News image-health repair failed: %s', type(exc).__name__)
+        return 0
+    finally:
+        db.close()
+    if changed:
+        bump_public_cache()
+    logger.info('News image-health finished: changed=%s', changed)
+    return changed
+
+
+def image_health_job():
+    """Run image maintenance under the same single News write-owner lock."""
+    from news_runtime import NewsOwnerUnavailable, news_owner
+
+    errors = _start_errors()
+    if errors:
+        logger.error('News image-health held: %s', ','.join(errors))
+        return 0
+    try:
+        with news_owner():
+            return _run_image_health()
+    except NewsOwnerUnavailable as exc:
+        # The main 30-minute News cycle already performs the same image repair.
+        # If both schedules meet on one boundary, one owner is enough.
+        logger.info('News image-health skipped: %s', exc)
+        return 0
+
 def _run_cycle():
     """Called under news_owner. Every tick rechecks flags before importing DB code."""
     errors = _start_errors()
@@ -177,11 +224,16 @@ def main():
     from apscheduler.schedulers.blocking import BlockingScheduler
     interval = int(os.environ['NEWS_FETCH_INTERVAL_MINUTES'])
     scheduler = BlockingScheduler()
-    first_run = _next_interval_boundary(datetime.now(timezone.utc), interval)
+    now = datetime.now(timezone.utc)
+    first_run = _next_interval_boundary(now, interval)
+    image_interval = 10
+    first_image_run = _next_interval_boundary(now, image_interval)
     logger.info(
-        'Starting NinkoSports News scheduler every %s minutes; first cycle=%s',
+        'Starting NinkoSports News scheduler every %s minutes; first cycle=%s; image-health=%s minutes first=%s',
         interval,
         first_run.isoformat(),
+        image_interval,
+        first_image_run.isoformat(),
     )
     try:
         # Do not run a one-shot cycle on every Railway deployment. Repeated
@@ -195,6 +247,16 @@ def main():
             max_instances=1,
             coalesce=True,
             id='news-interval-cycle',
+            replace_existing=True,
+        )
+        scheduler.add_job(
+            image_health_job,
+            'interval',
+            minutes=image_interval,
+            start_date=first_image_run,
+            max_instances=1,
+            coalesce=True,
+            id='news-image-health-cycle',
             replace_existing=True,
         )
         scheduler.start()
