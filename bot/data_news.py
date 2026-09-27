@@ -64,11 +64,29 @@ def data_news_available() -> bool:
     return os.getenv("NEWS_DATA_NEWS_ENABLED") == "1" and _api_base() is not None
 
 
+def _day_bounds_utc(day: str) -> Optional[Tuple[str, str]]:
+    try:
+        local_start = datetime.fromisoformat(day).replace(tzinfo=_editorial_zone())
+    except (TypeError, ValueError):
+        return None
+    local_end = local_start + timedelta(days=1) - timedelta(microseconds=1)
+    start = local_start.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    end = local_end.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    return start, end
+
+
 def _public_recent(day: str) -> List[Dict]:
     base = _api_base()
     if not base:
         return []
-    url = f"{base}/sports-data/recent?date={quote(day, safe='')}"
+    bounds = _day_bounds_utc(day)
+    if bounds is None:
+        return []
+    start, end = bounds
+    url = (
+        f"{base}/sports-data/recent"
+        f"?date_from={quote(start, safe='')}&date_to={quote(end, safe='')}"
+    )
     try:
         with httpx.Client(timeout=httpx.Timeout(18, connect=5), follow_redirects=False) as client:
             with client.stream("GET", url, headers={"Accept": "application/json"}) as response:
