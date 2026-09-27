@@ -229,10 +229,14 @@ def repair_recent_duplicate_news(
 
     cutoff = datetime.utcnow() - timedelta(hours=max(1, int(max_age_hours)))
     rows = (
-        db.query(Article, ArticleTaxonomyResolution)
-        .join(
+        db.query(
             ArticleTaxonomyResolution,
-            ArticleTaxonomyResolution.article_id == Article.id,
+            Article.id,
+            Article.title,
+        )
+        .join(
+            Article,
+            Article.id == ArticleTaxonomyResolution.article_id,
         )
         .filter(
             ArticleTaxonomyResolution.resolver_version == RESOLVER_VERSION,
@@ -246,26 +250,54 @@ def repair_recent_duplicate_news(
         .limit(max(1, min(int(limit), 1200)))
         .all()
     )
-    kept: dict[str, list[Article]] = {}
+    from bot.dedupe import _title_tokens
+
+    kept_titles: dict[str, dict[int, str]] = {}
+    token_index: dict[str, dict[str, set[int]]] = {}
     hidden = 0
-    for article, tax in rows:
+    for tax, article_id, article_title in rows:
         sport = str(tax.resolved_sport or "")
-        if not sport:
+        title = article_title or ""
+        if not sport or not title:
             continue
-        duplicate = any(
-            titles_are_near_duplicate(article.title or "", other.title or "")
-            for other in kept.get(sport, [])
+        tokens = _title_tokens(title)
+        sport_titles = kept_titles.setdefault(sport, {})
+        sport_index = token_index.setdefault(sport, {})
+
+        candidate_ids: set[int] = set()
+        token_hits: dict[int, int] = {}
+        for token in tokens:
+            for candidate_id in sport_index.get(token, ()):
+                token_hits[candidate_id] = token_hits.get(candidate_id, 0) + 1
+        # Near-duplicate headlines should share multiple meaningful terms. Exact
+        # normalization still gets a fallback scan over the small recent set.
+        candidate_ids.update(
+            candidate_id for candidate_id, hits in token_hits.items() if hits >= 3
         )
+        normalized = None
+        duplicate = False
+        for candidate_id in candidate_ids:
+            other = sport_titles.get(candidate_id, "")
+            if other and titles_are_near_duplicate(title, other):
+                duplicate = True
+                break
+        if not duplicate:
+            from bot.textutil import normalize_title
+
+            normalized = normalize_title(title)
+            duplicate = any(
+                normalize_title(other) == normalized
+                for other in sport_titles.values()
+            )
         if duplicate:
             tax.public_ok = False
             db.add(tax)
             hidden += 1
             continue
-        kept.setdefault(sport, []).append(article)
-        # Comparing only the latest bounded headlines in each sport keeps this O(n)
-        # enough for the small repair batch while covering repeated feed stories.
-        if len(kept[sport]) > 80:
-            kept[sport] = kept[sport][:80]
+
+        sport_titles[int(article_id)] = title
+        for token in tokens:
+            sport_index.setdefault(token, set()).add(int(article_id))
     if hidden:
         try:
             db.commit()
@@ -323,10 +355,17 @@ def repair_recent_sport_mislabels(
 
     cutoff = datetime.utcnow() - timedelta(hours=max(1, int(max_age_hours)))
     rows = (
-        db.query(Article, ArticleTaxonomyResolution)
-        .join(
+        db.query(
             ArticleTaxonomyResolution,
-            ArticleTaxonomyResolution.article_id == Article.id,
+            Article.id,
+            Article.title,
+            Article.ai_content,
+            Article.content,
+            Article.summary,
+        )
+        .join(
+            Article,
+            Article.id == ArticleTaxonomyResolution.article_id,
         )
         .filter(
             ArticleTaxonomyResolution.resolver_version == RESOLVER_VERSION,
@@ -342,10 +381,10 @@ def repair_recent_sport_mislabels(
         .all()
     )
     hidden = 0
-    for article, tax in rows:
-        text = article.ai_content or article.content or article.summary or ""
+    for tax, article_id, title, ai_content, content, summary in rows:
+        text = ai_content or content or summary or ""
         independent = classify_article(
-            article.title or "",
+            title or "",
             text,
             feed_kind="mixed",
             feed_sport=None,
@@ -357,15 +396,15 @@ def repair_recent_sport_mislabels(
             and tax.resolved_sport
             and independent.sport != tax.resolved_sport
             and _distinctive_title_sport_support(
-                article.title or "", independent.sport
+                title or "", independent.sport
             )
         ):
             logger.warning(
                 "[public_index] hide sport mismatch article=%s cached=%s independent=%s title=%s",
-                article.id,
+                article_id,
                 tax.resolved_sport,
                 independent.sport,
-                (article.title or "")[:100],
+                (title or "")[:100],
             )
             tax.public_ok = False
             db.add(tax)
