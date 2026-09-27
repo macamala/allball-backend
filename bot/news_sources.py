@@ -24,7 +24,7 @@ OFFICIAL_HTML_SOURCES = [
         "kind": "mixed",
         "sport": "league-of-legends",
         "publisher": "LoL Esports",
-        "article_prefixes": ("/en-US/news/", "/en-US/lolesports/news/"),
+        "article_prefixes": ("/news/", "/en-US/news/", "/en-US/lolesports/news/"),
         "enabled": True,
     },
     {
@@ -33,7 +33,7 @@ OFFICIAL_HTML_SOURCES = [
         "kind": "mixed",
         "sport": "valorant",
         "publisher": "VALORANT Esports",
-        "article_prefixes": ("/en-US/news/",),
+        "article_prefixes": ("/news/", "/en-US/news/", "/de-DE/news/", "/fr-FR/news/", "/es-ES/news/", "/pt-BR/news/", "/ko-KR/news/", "/ja-JP/news/"),
         "enabled": True,
     },
     {
