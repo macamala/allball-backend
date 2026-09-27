@@ -602,6 +602,44 @@ def fetch_all_sports_headlines(
     return all_items[:hard_limit]
 
 
+def _classify_candidate(item):
+    feed = item.get("feed") or {}
+    evidence = item.get("_classification_text") or item.get("summary") or ""
+    return classify_article(
+        item["title"],
+        evidence,
+        feed_kind=feed.get("kind", "mixed"),
+        feed_sport=feed.get("sport"),
+        feed_league=feed.get("league"),
+        feed_country=feed.get("country"),
+    )
+
+
+def _enrich_unknown_candidates(items, limit=8):
+    """Bounded source-body enrichment for mixed-feed headlines with no sport."""
+    enriched = 0
+    for candidate in items:
+        if enriched >= max(0, int(limit)):
+            break
+        try:
+            candidate_tags = __classify_candidate(candidate)
+        except Exception:
+            continue
+        if candidate_tags.sport is not None or not candidate.get("url"):
+            continue
+        try:
+            extracted, extracted_image = extract_from_url(candidate["url"])
+        except Exception:
+            continue
+        if not extracted:
+            continue
+        candidate["_extracted"] = extracted
+        candidate["_extracted_image"] = extracted_image
+        candidate["_classification_text"] = extracted
+        enriched += 1
+    return enriched
+
+
 def _fetch_and_store_all_articles(
     max_per_league: int = 3,
     hard_limit: Optional[int] = None,
@@ -633,42 +671,11 @@ def _fetch_and_store_all_articles(
                 queued.extend(fetch_official_index_entries(per_feed))
             except Exception as e:
                 logger.error("[fetch_sources] official index error: %s", type(e).__name__)
-        def classify_candidate(item):
-            feed = item.get("feed") or {}
-            evidence = item.get("_classification_text") or item.get("summary") or ""
-            return classify_article(
-                item["title"],
-                evidence,
-                feed_kind=feed.get("kind", "mixed"),
-                feed_sport=feed.get("sport"),
-                feed_league=feed.get("league"),
-                feed_country=feed.get("country"),
-            )
-
         # Mixed feeds often have a headline with no sport word even though the
         # actual article body is unambiguous. Enrich only a small bounded set
         # before fair-queue admission. This spends no AI requests, and the same
         # extracted body is reused later by _ingest_item.
-        enriched_unknown = 0
-        for candidate in queued:
-            if enriched_unknown >= 8:
-                break
-            try:
-                candidate_tags = classify_candidate(candidate)
-            except Exception:
-                continue
-            if candidate_tags.sport is not None or not candidate.get("url"):
-                continue
-            try:
-                extracted, extracted_image = extract_from_url(candidate["url"])
-            except Exception:
-                continue
-            if not extracted:
-                continue
-            candidate["_extracted"] = extracted
-            candidate["_extracted_image"] = extracted_image
-            candidate["_classification_text"] = extracted
-            enriched_unknown += 1
+        enriched_unknown = _enrich_unknown_candidates(queued, limit=8)
         if enriched_unknown:
             logger.info(
                 "[fetch_sources] enriched unknown-sport candidates=%s",
@@ -680,7 +687,7 @@ def _fetch_and_store_all_articles(
             if len(unknown_samples) >= 10:
                 break
             try:
-                candidate_tags = classify_candidate(candidate)
+                candidate_tags = _classify_candidate(candidate)
             except Exception:
                 continue
             if candidate_tags.sport is None:
@@ -695,7 +702,7 @@ def _fetch_and_store_all_articles(
         if unknown_samples:
             logger.info("[fetch_sources] unknown_sport_samples=%s", unknown_samples)
 
-        queued, admission = fair_news_queue(queued, classify_candidate,
+        queued, admission = fair_news_queue(queued, _classify_candidate,
             sport_order=[row["id"] for row in SPORTS if row["active"] and row["supports_news"]])
         logger.info("[fetch_sources] eligible=%s rejected=%s", len(queued), admission)
         for item in queued:
