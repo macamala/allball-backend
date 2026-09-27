@@ -88,22 +88,25 @@ def test_postgres_budget_persists_daily_cap_across_instances():
     ).can_start()
 
 
-def test_postgres_accounting_config_needs_no_railway_volume():
+def test_postgres_accounting_config_needs_no_railway_volume_when_news_ai_is_enabled():
     env = {
         "DATABASE_URL": "postgresql://user:secret@db.example/ninko",
         "NEWS_ACCOUNTING_BACKEND": "postgres",
-        "NEWS_MAX_AI_ARTICLES": "0",
-        "NEWS_DATA_NEWS_ENABLED": "1",
+        "NEWS_MAX_AI_ARTICLES": "1",
         "NEWS_TRANSLATIONS_ENABLED": "0",
         "NEWS_TRANSLATIONS_PER_CYCLE": "0",
         "NEWS_HISTORICAL_REPAIR_ENABLED": "0",
         "NEWS_EXPANDED_FEEDS_ENABLED": "0",
+        "NEWS_AI_MAX_REQUESTS_PER_RUN": "2",
+        "NEWS_AI_MAX_REQUESTS_PER_DAY": "3",
+        "NEWS_AI_PROVIDER_MODE": "xkiro_free",
+        "XKIRO_API_KEY": "FIXTURE_ONLY",
     }
     assert news_runtime.configuration_errors(env) == []
     assert news_runtime.storage_errors(env) == []
 
 
-def test_data_only_config_does_not_require_ai_key_or_request_limits():
+def test_removed_data_news_flag_cannot_create_a_data_only_configuration():
     env = {
         "DATABASE_URL": "postgresql://user:secret@db.example/ninko",
         "NEWS_ACCOUNTING_BACKEND": "postgres",
@@ -114,7 +117,7 @@ def test_data_only_config_does_not_require_ai_key_or_request_limits():
         "NEWS_HISTORICAL_REPAIR_ENABLED": "0",
         "NEWS_EXPANDED_FEEDS_ENABLED": "0",
     }
-    assert news_runtime.configuration_errors(env) == []
+    assert news_runtime.configuration_errors(env) == ["no_news_lane_enabled"]
 
 
 class OwnerState:
