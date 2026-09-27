@@ -138,6 +138,7 @@ def _completion(
     user: str,
     max_tokens: int,
     json_mode: bool = False,
+    temperature: float = 0.1,
 ) -> Optional[str]:
     """One actual xKiro request. No retry and no paid fallback."""
     global _rate_limited
@@ -164,7 +165,7 @@ def _completion(
         ],
         "max_tokens": max(256, min(int(max_tokens), 9000)),
         "reasoning_effort": "none",
-        "temperature": 0.2,
+        "temperature": max(0.0, min(float(temperature), 1.0)),
         "stream": False,
     }
     if json_mode:
@@ -213,6 +214,7 @@ def write_free_story(system_prompt: str, prompt: str) -> Optional[str]:
         user=prompt,
         max_tokens=int(os.getenv("NEWS_XKIRO_WRITER_MAX_TOKENS", "1800") or "1800"),
         json_mode=False,
+        temperature=0.45,
     )
 
 
@@ -227,6 +229,7 @@ def free_json_completion(system_prompt: str, prompt: str, *, max_tokens: int = 5
         user=prompt,
         max_tokens=max_tokens,
         json_mode=True,
+        temperature=0.15,
     )
 
 
@@ -285,6 +288,7 @@ def validate_free_story(
         user=user,
         max_tokens=int(os.getenv("NEWS_XKIRO_VALIDATOR_MAX_TOKENS", "700") or "700"),
         json_mode=True,
+        temperature=0.0,
     )
     if not raw:
         return False, "validator-unavailable"
