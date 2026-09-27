@@ -4,7 +4,7 @@ Policy: never mass-rewrite historical articles. Explicit maintenance is bounded.
 """
 import logging
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -112,6 +112,18 @@ def job():
         return 0
 
 
+def _next_interval_boundary(now, interval_minutes):
+    """Return the next UTC wall-clock boundary for the configured interval.
+
+    Railway deploys can happen repeatedly while News code is being improved.
+    Aligning the first run to a shared clock boundary means ten redeploys before
+    12:00 still produce one 12:00 cycle instead of ten immediate AI cycles.
+    """
+    step_seconds = max(1, int(interval_minutes)) * 60
+    next_epoch = ((int(now.timestamp()) // step_seconds) + 1) * step_seconds
+    return datetime.fromtimestamp(next_epoch, tz=timezone.utc)
+
+
 def main():
     """Run only the independent NinkoSports News pipeline."""
     errors = _start_errors()
@@ -122,33 +134,25 @@ def main():
     from apscheduler.schedulers.blocking import BlockingScheduler
     interval = int(os.environ['NEWS_FETCH_INTERVAL_MINUTES'])
     scheduler = BlockingScheduler()
-    logger.info('Starting NinkoSports News scheduler every %s minutes', interval)
+    first_run = _next_interval_boundary(datetime.now(timezone.utc), interval)
+    logger.info(
+        'Starting NinkoSports News scheduler every %s minutes; first cycle=%s',
+        interval,
+        first_run.isoformat(),
+    )
     try:
-        # Railway performs blue/green swaps: the new container can start while
-        # the previous News container still holds the Postgres owner lock.
-        # Delay the first cycle briefly so deploys do not lose their startup run.
-        startup_delay = 20
-        scheduler.add_job(
-            job,
-            'date',
-            run_date=datetime.now() + timedelta(seconds=startup_delay),
-            id='news-startup-cycle',
-            replace_existing=True,
-            misfire_grace_time=60,
-        )
+        # Do not run a one-shot cycle on every Railway deployment. Repeated
+        # deploys previously spent the same durable daily AI allowance before
+        # the regular 30-minute schedule had a chance to control cadence.
         scheduler.add_job(
             job,
             'interval',
             minutes=interval,
+            start_date=first_run,
             max_instances=1,
             coalesce=True,
             id='news-interval-cycle',
             replace_existing=True,
-        )
-        logger.info(
-            'News startup cycle scheduled in %s seconds; interval remains %s minutes',
-            startup_delay,
-            interval,
         )
         scheduler.start()
     finally:
