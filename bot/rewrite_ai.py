@@ -174,20 +174,16 @@ def _call_openai(prompt: str) -> Optional[str]:
     return None
 
 
-def write_ninkosports_story(
+def build_story_prompt(
     title: str,
     facts: str,
     sport: str = "sports",
     league: str = "",
     retry_for_length: bool = False,
     correction_reason: str = "",
-) -> Optional[str]:
-    if openai_rate_limited():
-        return None
+) -> str:
     facts = (facts or "").strip()
     title = (title or "").strip()
-    if not title and not facts:
-        return None
     if len(facts) > 8000:
         facts = facts[:8000]
     prompt = (
@@ -202,7 +198,33 @@ def write_ninkosports_story(
     if correction_reason:
         safe_reason = re.sub(r"[^a-zA-Z0-9:_-]", "", correction_reason)[:120]
         prompt = f"{FACT_RETRY_HINT}\nFACT_LOCK_FAILURE: {safe_reason}\n\n{prompt}"
-    return _call_openai(prompt)
+    return prompt
+
+
+def write_ninkosports_story(
+    title: str,
+    facts: str,
+    sport: str = "sports",
+    league: str = "",
+    retry_for_length: bool = False,
+    correction_reason: str = "",
+) -> Optional[str]:
+    if openai_rate_limited():
+        return None
+    facts = (facts or "").strip()
+    title = (title or "").strip()
+    if not title and not facts:
+        return None
+    return _call_openai(
+        build_story_prompt(
+            title=title,
+            facts=facts,
+            sport=sport,
+            league=league,
+            retry_for_length=retry_for_length,
+            correction_reason=correction_reason,
+        )
+    )
 
 
 def parse_ai_output(ai_text: str) -> dict:
