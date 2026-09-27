@@ -144,6 +144,13 @@ def test_next_interval_boundary_is_shared_across_redeploys(monkeypatch,tmp_path)
     assert first == second == datetime(2026,9,27,12,0,0,tzinfo=timezone.utc)
 
 
+def test_image_health_job_is_zero_ai_and_uses_same_owner(monkeypatch,tmp_path):
+    scheduler,calls,_,_,_=cycle(monkeypatch,tmp_path)
+    assert scheduler.image_health_job()==0
+    assert ('images',{'limit':80,'max_age_hours':72,'recover_limit':8}) in calls
+    assert not any(isinstance(c,tuple) and c[0]=='fetch' for c in calls)
+
+
 def test_main_releases_cycle_owner_before_scheduler_shutdown(monkeypatch,tmp_path):
     from news_runtime import news_owner
     scheduler,calls,_,_,env=cycle(monkeypatch,tmp_path)
@@ -151,14 +158,19 @@ def test_main_releases_cycle_owner_before_scheduler_shutdown(monkeypatch,tmp_pat
     class Blocking:
         running=False
         def add_job(self,func,*a,**kw):
-            assert func is scheduler.job
             trigger = a[0] if a else None
-            scheduled.append((trigger, kw.get('id'), kw.get('start_date')))
+            scheduled.append((func.__name__, trigger, kw.get('id'), kw.get('start_date'), kw.get('minutes')))
             assert trigger == 'interval'
             assert kw['max_instances']==1 and kw['coalesce'] is True
-            assert kw['id']=='news-interval-cycle'
             assert kw.get('start_date') is not None
             assert kw['start_date'].tzinfo is not None
+            if func is scheduler.job:
+                assert kw['id']=='news-interval-cycle'
+            elif func is scheduler.image_health_job:
+                assert kw['id']=='news-image-health-cycle'
+                assert kw['minutes']==10
+            else:
+                raise AssertionError(func)
         def start(self):
             self.running=True
             raise KeyboardInterrupt()
@@ -171,5 +183,8 @@ def test_main_releases_cycle_owner_before_scheduler_shutdown(monkeypatch,tmp_pat
     monkeypatch.setitem(sys.modules,'apscheduler.schedulers.blocking',fake)
     with pytest.raises(KeyboardInterrupt): scheduler.main()
     assert state==['shutdown_after_cycle']
-    assert len(scheduled)==1
-    assert scheduled[0][0:2] == ('interval','news-interval-cycle')
+    assert len(scheduled)==2
+    assert {(row[0],row[2]) for row in scheduled} == {
+        ('job','news-interval-cycle'),
+        ('image_health_job','news-image-health-cycle'),
+    }
