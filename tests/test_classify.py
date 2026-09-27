@@ -172,3 +172,22 @@ def test_road_world_championships_beats_bad_american_football_feed_hint():
         feed_country="usa",
     )
     assert result.sport == "cycling"
+
+
+
+def test_cambridgeshire_is_horse_racing_not_ambri_hockey():
+    result = classify_article(
+        "Pierre Royal becomes first Irish-trained Cambridgeshire winner this century",
+        "The jockey guided the horse home in the Cambridgeshire after a strong run.",
+        feed_kind="mixed",
+    )
+    assert result.sport == "horse-racing"
+
+
+def test_gbgb_calendar_is_greyhound_not_mma():
+    result = classify_article(
+        "GBGB Calendar Vol 18 No.19 Now Available Online",
+        "The GBGB published the latest greyhound racing calendar for licensed tracks.",
+        feed_kind="mixed",
+    )
+    assert result.sport == "greyhound-racing"
