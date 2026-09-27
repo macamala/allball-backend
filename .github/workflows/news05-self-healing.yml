@@ -1,9 +1,6 @@
 name: News05 self-healing gate
 
 on:
-  push:
-    branches:
-      - news/source-coverage-20260927-05
   workflow_dispatch:
 
 jobs:
