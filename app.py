@@ -448,7 +448,7 @@ def most_read_articles(
     db: Session = Depends(get_db),
     limit: int = Query(8, ge=1, le=20),
 ):
-    pairs = fetch_public(db, viewed=True, limit=limit)
+    pairs = fetch_public(db, viewed=True, limit=limit, max_age_hours=72)
     _cache_headers(response, pairs)
     return serialize_cards(pairs)
 
@@ -540,7 +540,7 @@ def portal_home(
     breaking_kept = [
         (row, tax) for row, tax in breaking_pairs if row.id not in featured_ids
     ][:8]
-    most_read_pairs = fetch_public(db, viewed=True, limit=8 + len(featured_ids))
+    most_read_pairs = fetch_public(db, viewed=True, limit=8 + len(featured_ids), max_age_hours=72)
     most_read_kept = [
         (row, tax) for row, tax in most_read_pairs if row.id not in featured_ids
     ][:8]
