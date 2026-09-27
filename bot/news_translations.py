@@ -24,7 +24,7 @@ from .news_policy import protected_proper_names
 logger = logging.getLogger(__name__)
 
 LANGUAGES = ("sr", "es", "de", "fr", "it", "pt")
-TRANSLATION_PROVIDER = "xkiro-free-v8"
+TRANSLATION_PROVIDER = "xkiro-free-v9"
 CYRILLIC_RE = re.compile(r"[\u0400-\u04FF]")
 NUMBER_RE = re.compile(r"(?<!\w)\d+(?:[.,:/–-]\d+)*(?:%|\b)")
 
@@ -46,6 +46,8 @@ FACTUAL RULES:
 - Preserve every numeric VALUE exactly, including scores, minutes, percentages,
   dates and statistics. Locale punctuation may change naturally (for example
   100,023 -> 100.023 or 4.52 -> 4,52), but the numeric value must not change.
+- Every value listed under LOCKED NUMERIC VALUES must appear in EVERY language.
+  Never omit a listed age, score, count, ranking, date, percentage or statistic.
 - Serbian must be natural Serbian LATIN script only, never Cyrillic.
 - Serbian should sound like a passionate sports columnist from the Balkans,
   not like a literal machine translation.
@@ -353,10 +355,19 @@ def translate_article_payload(article: Article) -> Optional[Dict[str, Dict[str, 
         if len(name.split()) >= 2
     ]
     locked_block = "\n".join(f"- {name}" for name in locked_names[:24]) or "- none"
+    locked_numbers = sorted(
+        _numbers("\n".join(source.values())),
+        key=lambda value: (len(value), value),
+    )
+    number_block = "\n".join(f"- {value}" for value in locked_numbers) or "- none"
     prompt = (
         "LOCKED NAMES — copy these spellings VERBATIM wherever the entity is mentioned; "
         "do not translate, transliterate or rename them:\n"
         + locked_block
+        + "\n\nLOCKED NUMERIC VALUES — every value below must appear in EVERY language; "
+          "do not omit any value. Locale punctuation may change only when the numeric "
+          "value stays identical:\n"
+        + number_block
         + "\n\nENGLISH TITLE:\n" + source["title"][:1000]
         + "\n\nENGLISH SUMMARY:\n" + source["summary"][:1600]
         + "\n\nENGLISH BODY:\n" + source["body"]
