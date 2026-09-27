@@ -23,7 +23,7 @@ FEEDS: List[Feed] = [
     {'url': 'https://www.football-italia.net/feed', 'kind': 'league', 'sport': 'football', 'league': 'italy-serie-a', 'country': 'italy', 'enabled': True},
     {'url': 'https://www.espn.com/espn/rss/nba/news', 'kind': 'league', 'sport': 'basketball', 'league': 'nba', 'country': 'usa', 'enabled': True},
     {'url': 'https://www.espn.com/espn/rss/ncb/news', 'kind': 'league', 'sport': 'basketball', 'league': 'ncaa-basketball', 'country': 'usa', 'enabled': True},
-    {'url': 'https://www.bbc.co.uk/sport/football/scottish-premiership/rss.xml', 'kind': 'league', 'sport': 'football', 'league': 'scotland-premiership', 'country': 'scotland', 'enabled': True},
+    {'url': 'https://feeds.bbci.co.uk/sport/football/scottish-premiership/rss.xml', 'kind': 'league', 'sport': 'football', 'league': 'scotland-premiership', 'country': 'scotland', 'enabled': True},
     {'url': 'https://www.skysports.com/rss/29328', 'kind': 'league', 'sport': 'football', 'league': 'scotland-premiership', 'country': 'scotland', 'enabled': True},
     {'url': 'https://www.hln.be/sport/voetbal/rss.xml', 'kind': 'mixed', 'enabled': True, 'note': 'Belgian football mix; classify independently'},
     {'url': 'https://www.record.pt/rss', 'kind': 'mixed', 'enabled': True, 'note': 'Portuguese general sport; classify independently'},
