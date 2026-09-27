@@ -330,3 +330,35 @@ def test_duplicate_repair_does_not_load_full_article_objects():
         assert len({a.id,b.id} & visible)==1
     finally:
         db.close()
+
+
+def test_mislabel_repair_still_hides_distinctive_wrong_sport():
+    from models import ArticleTaxonomyResolution
+    from public_index import repair_recent_sport_mislabels
+
+    article=_make(
+        slug="mislabel-football-fixture",
+        title="Football clubs prepare for Premier League match after squad update",
+        content=(
+            "Football clubs are preparing for the Premier League match after the "
+            "manager confirmed the squad update. The teams trained before the league "
+            "fixture and expect to name their final football line-ups before kick-off."
+        ),
+        external_id="https://example.com/mislabel-football-fixture",
+    )
+    db=SessionLocal()
+    try:
+        tax=db.query(ArticleTaxonomyResolution).filter(
+            ArticleTaxonomyResolution.article_id==article.id
+        ).first()
+        assert tax is not None
+        tax.resolved_sport="ice-hockey"
+        tax.public_ok=True
+        db.add(tax)
+        db.commit()
+
+        assert repair_recent_sport_mislabels(db,limit=100,max_age_hours=168) >= 1
+        db.refresh(tax)
+        assert tax.public_ok is False
+    finally:
+        db.close()
