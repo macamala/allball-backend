@@ -24,7 +24,7 @@ from .news_policy import protected_proper_names
 logger = logging.getLogger(__name__)
 
 LANGUAGES = ("sr", "es", "de", "fr", "it", "pt")
-TRANSLATION_PROVIDER = "xkiro-free-v6"
+TRANSLATION_PROVIDER = "xkiro-free-v7"
 CYRILLIC_RE = re.compile(r"[\u0400-\u04FF]")
 NUMBER_RE = re.compile(r"(?<!\w)\d+(?:[.,:/–-]\d+)*(?:%|\b)")
 
@@ -145,8 +145,15 @@ def _validate(source: Dict[str, str], payload: object) -> Optional[Dict[str, Dic
     cleaned: Dict[str, Dict[str, str]] = {}
     for language in LANGUAGES:
         row = payload.get(language)
-        if not isinstance(row, dict) or set(row) != {"title", "summary", "body"}:
+        required = {"title", "summary", "body"}
+        if not isinstance(row, dict) or not required.issubset(set(row)):
+            logger.info(
+                "[translations] language shape language=%s keys=%s",
+                language,
+                sorted(row.keys()) if isinstance(row, dict) else [],
+            )
             return _translation_reject("language-shape", language)
+        # Ignore harmless model-added metadata; only these three fields are ever stored.
         title = row.get("title")
         summary = row.get("summary")
         body = row.get("body")
