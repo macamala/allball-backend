@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 from typing import List, Optional, Sequence, Tuple
 
 from sqlalchemy.orm import Session, load_only
@@ -135,6 +136,7 @@ def fetch_public(
     breaking: bool = False,
     viewed: bool = False,
     cards: bool = True,
+    max_age_hours: Optional[int] = None,
 ) -> List[PublicPair]:
     query = apply_scope(
         public_query(db, cards=cards),
@@ -146,6 +148,9 @@ def fetch_public(
         breaking=breaking,
         viewed=viewed,
     )
+    if max_age_hours is not None and int(max_age_hours) > 0:
+        cutoff = datetime.utcnow() - timedelta(hours=max(1, int(max_age_hours)))
+        query = query.filter(_sort_expr() >= cutoff)
     order = _sort_expr().asc() if sort == "oldest" else _sort_expr().desc()
     if viewed:
         query = query.order_by(Article.view_count.desc(), order)
