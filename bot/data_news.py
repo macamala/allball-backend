@@ -18,6 +18,7 @@ from typing import Dict, Iterable, List, Optional, Tuple
 from urllib.parse import quote, urlsplit
 
 import httpx
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from models import Article
@@ -336,25 +337,39 @@ def ingest_result_briefs(days: int = 2, max_groups: int = 120) -> int:
         return 0
 
     db = SessionLocal()
-    changed = 0
+    changed = processed = 0
     try:
+        try:
+            db.execute(text("SET LOCAL lock_timeout = '2s'"))
+            db.execute(text("SET LOCAL statement_timeout = '5s'"))
+        except Exception:
+            db.rollback()
         for (sport, competition_key, day), events in ordered:
             try:
-                # Isolate one malformed competition/result group without losing
-                # already prepared briefs from the same cycle.
                 with db.begin_nested():
                     if _upsert_group(db, sport, competition_key, day, events):
                         changed += 1
             except Exception as exc:
                 logger.warning("[data_news] group held %s/%s: %s", sport, competition_key, type(exc).__name__)
+            processed += 1
+            # Release locks/progress regularly; one huge first-run transaction
+            # must never block the source-news lane.
+            if processed % 10 == 0:
+                db.commit()
+                try:
+                    db.execute(text("SET LOCAL lock_timeout = '2s'"))
+                    db.execute(text("SET LOCAL statement_timeout = '5s'"))
+                except Exception:
+                    db.rollback()
+        db.commit()
         if changed:
-            db.commit()
             try:
                 from public_cache import bump_public_cache
 
                 bump_public_cache()
             except Exception:
                 logger.warning("[data_news] public cache bump failed")
+        logger.info("[data_news] completed groups=%s changed=%s", processed, changed)
         return changed
     except Exception:
         db.rollback()
