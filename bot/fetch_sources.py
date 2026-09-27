@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from database import SessionLocal
 from models import Article
+from editorial import news_image_is_publishable, pick_article_image
 
 from .news_policy import fair_news_queue, freshness_reason, original_draft_reason
 from .news_learning import (
@@ -371,6 +372,28 @@ def _ingest_item(db: Session, item: Dict, use_ai: bool, max_ai_chars: int, ai_bu
         )
         return None, False
 
+    image_candidates = list(item.get("image_candidates") or [])
+    if extracted_image:
+        image_candidates.append(
+            {"url": extracted_image, "source": "og", "in_article": False}
+        )
+    # Article.image_url is VARCHAR(500). Never publish a truncated/broken source
+    # image URL; choose only candidates that can be stored intact.
+    image_candidates = [
+        candidate
+        for candidate in image_candidates
+        if isinstance(candidate, dict)
+        and 0 < len(str(candidate.get("url") or "").strip()) <= 500
+    ]
+    image_url = pick_article_image(image_candidates)
+    if not news_image_is_publishable(image_url):
+        _hold_ai_source(source_url, "missing-publishable-image")
+        logger.info(
+            "[fetch_sources] hold image reason=missing-publishable-image title=%s",
+            item["title"][:80],
+        )
+        return None, False
+
     feed = item.get("feed") or {}
     tags = classify_article(
         item["title"],
@@ -567,18 +590,6 @@ def _ingest_item(db: Session, item: Dict, use_ai: bool, max_ai_chars: int, ai_bu
     story_body = _sanitize_body(story_body, title=story_title)
     story_summary = _sanitize_summary(story_summary, title=story_title)
 
-    from editorial import pick_article_image
-
-    image_url = pick_article_image(
-        list(item.get("image_candidates") or [])
-        + (
-            [{"url": extracted_image, "source": "og", "in_article": False}]
-            if extracted_image
-            else []
-        )
-    )
-    if image_url and len(image_url) > 500:
-        image_url = image_url[:500]
     slug = _make_unique_slug(db, _slugify(story_title))
     article = Article(
         external_id=source_url[:500],
