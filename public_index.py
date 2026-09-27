@@ -190,7 +190,6 @@ def load_cached_resolutions(db: Session, articles: Sequence[Article]) -> dict:
 
 def recent_public_sport_inventory(db: Session, max_age_hours: int = 72) -> dict[str, int]:
     """Counts the same current, image-valid News inventory readers can browse."""
-    from sqlalchemy import func
     cutoff = datetime.utcnow() - timedelta(hours=max(1, int(max_age_hours)))
     rows = (
         db.query(
