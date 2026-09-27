@@ -21,13 +21,13 @@ def _run_cycle():
     if errors:
         logger.error('News cycle held: %s', ','.join(errors))
         return 0
-    from bot.news_budget import ai_budget_scope, configured_budget
+    from bot.news_budget import ai_budget_exhausted, ai_budget_scope, configured_budget
     maximum = int(os.environ['NEWS_MAX_AI_ARTICLES'])
     budget = configured_budget(maximum)
     from public_cache import bump_public_cache
 
     historical = os.environ['NEWS_HISTORICAL_REPAIR_ENABLED'] == '1'
-    rewritten = indexed = data_briefs = 0
+    rewritten = indexed = data_briefs = translated_rows = 0
 
     # Zero-AI NinkoSports result briefs are independent from external AI quota.
     # They still share the same single News owner and startup safety gates.
@@ -56,6 +56,20 @@ def _run_cycle():
                 max_per_league=3, hard_limit=None, use_ai=True,
                 max_ai_chars=6000, max_ai_articles=maximum,
             )
+            # English freshness always wins. Translate only after new-story
+            # ingestion, from whatever request allowance remains.
+            if (
+                os.environ.get('NEWS_TRANSLATIONS_ENABLED') == '1'
+                and int(os.environ.get('NEWS_TRANSLATIONS_PER_CYCLE', '0')) > 0
+                and not ai_budget_exhausted()
+            ):
+                try:
+                    from bot.news_translations import translate_latest_articles
+                    translated_rows = translate_latest_articles(
+                        limit=int(os.environ['NEWS_TRANSLATIONS_PER_CYCLE'])
+                    )
+                except Exception as exc:
+                    logger.error('News translation lane failed: %s', type(exc).__name__)
             if historical:
                 from database import SessionLocal
                 from public_index import index_missing
@@ -70,8 +84,9 @@ def _run_cycle():
         if rewritten or historical:
             bump_public_cache()
         logger.info(
-            'News cycle finished: ai_articles=%s data_briefs=%s indexed=%s attempts=%s stop=%s history=%s',
-            rewritten, data_briefs, indexed, budget.attempts, budget.blocked_reason, historical,
+            'News cycle finished: ai_articles=%s data_briefs=%s translated_rows=%s indexed=%s attempts=%s stop=%s history=%s',
+            rewritten, data_briefs, translated_rows, indexed, budget.attempts,
+            budget.blocked_reason, historical,
         )
         return rewritten + data_briefs
     except Exception as exc:
