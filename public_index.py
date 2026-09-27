@@ -10,7 +10,7 @@ from typing import Optional, Sequence
 
 from sqlalchemy.orm import Session
 
-from editorial import classify_media_url, evaluate_quality
+from editorial import classify_media_url, evaluate_quality, news_image_is_publishable
 from models import Article, ArticleTaxonomyResolution
 from sport_match import MAIN_SPORTS, isolation_ok
 from bot.taxonomy import COMPETITIONS
@@ -58,6 +58,7 @@ def persist_public_article(db: Session, article: Article, resolution=None, commi
         and resolved.sport
         and resolved.sport_confidence >= MIN_SPORT_CONFIDENCE
         and isolated
+        and news_image_is_publishable(article.image_url)
         and not article_has_open_incident(db, article.id)
     )
     row = (
