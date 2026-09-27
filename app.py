@@ -58,6 +58,7 @@ from public_index import (
     load_cached_resolution,
     recent_public_sport_inventory,
     repair_recent_duplicate_news,
+    repair_recent_sport_mislabels,
 )
 from public_read import (
     apply_scope,
@@ -105,6 +106,7 @@ def _startup_index():
             if counted < 400:
                 break
         repair_recent_duplicate_news(db, limit=800, max_age_hours=168)
+        repair_recent_sport_mislabels(db, limit=800, max_age_hours=168)
     finally:
         db.close()
     from repair_content import repair_contaminated
