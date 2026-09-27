@@ -111,12 +111,21 @@ def test_disabled_budget_does_not_invalidate_public_cache(monkeypatch,tmp_path):
 def test_main_releases_cycle_owner_before_scheduler_shutdown(monkeypatch,tmp_path):
     from news_runtime import news_owner
     scheduler,calls,_,_,env=cycle(monkeypatch,tmp_path)
-    state=[]
+    state=[];scheduled=[]
     class Blocking:
         running=False
         def add_job(self,func,*a,**kw):
             assert func is scheduler.job
-            assert kw['max_instances']==1 and kw['coalesce'] is True
+            trigger = a[0] if a else None
+            scheduled.append((trigger, kw.get('id')))
+            if trigger == 'interval':
+                assert kw['max_instances']==1 and kw['coalesce'] is True
+                assert kw['id']=='news-interval-cycle'
+            elif trigger == 'date':
+                assert kw['id']=='news-startup-cycle'
+                assert 'run_date' in kw
+            else:
+                raise AssertionError(trigger)
         def start(self):
             self.running=True
             raise KeyboardInterrupt()
@@ -129,3 +138,4 @@ def test_main_releases_cycle_owner_before_scheduler_shutdown(monkeypatch,tmp_pat
     monkeypatch.setitem(sys.modules,'apscheduler.schedulers.blocking',fake)
     with pytest.raises(KeyboardInterrupt): scheduler.main()
     assert state==['shutdown_after_cycle']
+    assert scheduled == [('date','news-startup-cycle'),('interval','news-interval-cycle')]
