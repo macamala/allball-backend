@@ -86,10 +86,11 @@ jobs:
               'tests/test_news_postgres_accounting.py',
               'tests/test_news_scheduler_lanes.py',
               'tests/test_news_self_healing_v13.py',
+              'tests/test_news14_publish_guards.py',
               'tests/test_news_translations.py',
               'tests/test_news_verified_sources.py',
           })
-          assert len(paths) == 91, len(paths)
+          assert len(paths) == 92, len(paths)
           missing=[p for p in sorted(paths) if not Path(p).is_file()]
           assert not missing, missing
           Path('evidence/test-selection.txt').write_text('\n'.join(sorted(paths))+'\n')
