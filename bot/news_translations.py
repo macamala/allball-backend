@@ -91,14 +91,15 @@ def translate_article_payload(article: Article) -> Optional[Dict[str, Dict[str, 
         "summary": str(article.summary or "").strip(),
         "body": str(article.ai_content or article.content or article.summary or "").strip(),
     }
-    if not all(source.values()):
+    if not all(source.values()) or len(source["body"]) > 12000:
+        # Never cache a translation of only the first part of an article.
         return None
     prompt = (
         "ENGLISH TITLE:\n" + source["title"][:1000]
         + "\n\nENGLISH SUMMARY:\n" + source["summary"][:1600]
-        + "\n\nENGLISH BODY:\n" + source["body"][:12000]
+        + "\n\nENGLISH BODY:\n" + source["body"]
     )
-    raw = free_json_completion(_SYSTEM, prompt, max_tokens=6000)
+    raw = free_json_completion(_SYSTEM, prompt, max_tokens=9000)
     if not raw:
         return None
     import json
