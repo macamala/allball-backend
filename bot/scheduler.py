@@ -100,6 +100,21 @@ def _run_cycle():
         return data_briefs
 
 
+def data_job():
+    """Frequent zero-AI result-news refresh with the same single-owner guard."""
+    from news_runtime import NewsOwnerUnavailable, news_owner
+    errors = _start_errors()
+    if errors:
+        logger.error('News data job held: %s', ','.join(errors))
+        return 0
+    try:
+        with news_owner():
+            return _run_data_lane()
+    except NewsOwnerUnavailable as exc:
+        logger.info('News data job skipped: %s', exc)
+        return 0
+
+
 def job():
     """Explicit one-cycle entry point with the same startup and ownership gates."""
     from news_runtime import NewsOwnerUnavailable, news_owner
@@ -123,8 +138,12 @@ def main():
         return 78
     from apscheduler.schedulers.blocking import BlockingScheduler
     interval = int(os.environ['NEWS_FETCH_INTERVAL_MINUTES'])
+    data_interval = max(5, int(os.environ.get('NEWS_DATA_INTERVAL_MINUTES', '10')))
     scheduler = BlockingScheduler()
-    logger.info('Starting guarded News scheduler every %s minutes', interval)
+    logger.info(
+        'Starting guarded News scheduler AI=%s min data=%s min',
+        interval, data_interval,
+    )
     try:
         job()
         scheduler.add_job(
@@ -134,6 +153,14 @@ def main():
             max_instances=1,
             coalesce=True,
         )
+        if os.environ.get('NEWS_DATA_NEWS_ENABLED') == '1':
+            scheduler.add_job(
+                data_job,
+                'interval',
+                minutes=data_interval,
+                max_instances=1,
+                coalesce=True,
+            )
         scheduler.start()
     finally:
         if scheduler.running:
