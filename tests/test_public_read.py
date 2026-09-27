@@ -308,3 +308,25 @@ def test_ambiguous_cross_sport_classifier_result_does_not_hide_valid_row(monkeyp
         assert tax.public_ok is True
     finally:
         db.close()
+
+
+def test_duplicate_repair_does_not_load_full_article_objects():
+    """Behavioral regression for the optimized title-only duplicate repair."""
+    from public_index import repair_recent_duplicate_news
+    a=_make(
+        slug="light-dedupe-one",
+        title="Liverpool confirm Mohamed Salah will miss Arsenal match after injury",
+        external_id="https://one.example/light-dedupe",
+    )
+    b=_make(
+        slug="light-dedupe-two",
+        title="Liverpool confirms Salah will miss Arsenal game following injury",
+        external_id="https://two.example/light-dedupe",
+    )
+    db=SessionLocal()
+    try:
+        assert repair_recent_duplicate_news(db,limit=100,max_age_hours=168) >= 1
+        visible={row.id for row,_ in fetch_public(db,sport="football",limit=200)}
+        assert len({a.id,b.id} & visible)==1
+    finally:
+        db.close()
