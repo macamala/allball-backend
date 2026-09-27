@@ -202,15 +202,12 @@ def job():
         return 0
 
 
-def _next_interval_boundary(now, interval_minutes):
-    """Return the next UTC wall-clock boundary for the configured interval.
-
-    Railway deploys can happen repeatedly while News code is being improved.
-    Aligning the first run to a shared clock boundary means ten redeploys before
-    12:00 still produce one 12:00 cycle instead of ten immediate AI cycles.
-    """
+def _next_interval_boundary(now, interval_minutes, offset_minutes=0):
+    """Return the next UTC wall-clock boundary for an interval and safe offset."""
     step_seconds = max(1, int(interval_minutes)) * 60
-    next_epoch = ((int(now.timestamp()) // step_seconds) + 1) * step_seconds
+    offset_seconds = (max(0, int(offset_minutes)) * 60) % step_seconds
+    epoch = int(now.timestamp())
+    next_epoch = ((epoch - offset_seconds) // step_seconds + 1) * step_seconds + offset_seconds
     return datetime.fromtimestamp(next_epoch, tz=timezone.utc)
 
 
@@ -227,9 +224,9 @@ def main():
     now = datetime.now(timezone.utc)
     first_run = _next_interval_boundary(now, interval)
     image_interval = 10
-    first_image_run = _next_interval_boundary(now, image_interval)
+    # Offset by five minutes so image maintenance never races the :00/:30 writer lock.\n    first_image_run = _next_interval_boundary(now, image_interval, offset_minutes=5)
     logger.info(
-        'Starting NinkoSports News scheduler every %s minutes; first cycle=%s; image-health=%s minutes first=%s',
+        'Starting NinkoSports News scheduler every %s minutes; first cycle=%s; image-health=%s minutes first=%s (offset=5m)',
         interval,
         first_run.isoformat(),
         image_interval,
