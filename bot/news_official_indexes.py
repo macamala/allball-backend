@@ -7,6 +7,7 @@ explicit publication timestamps or missing article prose.
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from html.parser import HTMLParser
 import logging
 import re
@@ -246,7 +247,7 @@ def _hydrate(cfg: Dict, url: str, fallback_title: str) -> Optional[Dict]:
         return None
 
     published_at = page_published_at_from_html(html)
-    if published_at is None or freshness_reason(published_at, __import__("datetime").datetime.now(__import__("datetime").timezone.utc)):
+    if published_at is None or freshness_reason(published_at, datetime.now(timezone.utc)):
         return None
     title = page_title_from_html(html) or fallback_title
     body = article_text_from_html(html)
