@@ -500,6 +500,13 @@ def _ingest_item(db: Session, item: Dict, use_ai: bool, max_ai_chars: int, ai_bu
         bump_public_cache()
     except Exception:
         db.rollback()
+    logger.info(
+        "[fetch_sources] published id=%s sport=%s slug=%s title=%s",
+        article.id,
+        stamp_sport or "unknown",
+        article.slug,
+        (article.title or "")[:120],
+    )
     return article, used_ai
 
 
