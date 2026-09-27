@@ -10,7 +10,14 @@ from typing import Dict, List
 
 # Distinctive phrases only. Shared words like "hockey" or "open" are avoided.
 EXTRA_SPORT_ALIASES: Dict[str, List[str]] = {
-    "rugby-league": ["rugby league", " nrl ", "super league rugby"],
+    "rugby-league": [
+        "rugby league",
+        " nrl ",
+        "super league rugby",
+        "super league grand final",
+        "wigan warriors",
+        "wakefield trinity",
+    ],
     "futsal": ["futsal"],
     "water-polo": ["water polo"],
     "field-hockey": ["field hockey"],
