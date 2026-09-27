@@ -228,6 +228,20 @@ Current safe service intentionally does not yet have the new candidate variables
 - existing explicit AI request caps retained
 - no NEWS_AI_LEDGER_PATH/RAILWAY_VOLUME_MOUNT_PATH required in Postgres mode
 
+## Isolated runtime-probe branch
+
+To minimize Railway risk, the xKiro quality deployment has its own branch built
+directly from the exact currently pinned safe News probe commit:
+
+- branch: `ops/news-xkiro-quality-probe-20260927`
+- base: `aa7aef864b88234990b12df24a96e7421e322f99`
+- probe commit: `fdd25db0dc916b040cbd654a1afb524d11383d93`
+- only intended addition relative to the base: strengthened `news_xkiro_quality_probe.py`
+- regular scheduler/candidate backend does not need to be deployed to run this probe
+- intended one-shot start command: `python news_xkiro_quality_probe.py --once`
+- still requires `NEWS_FREE_PROBE=1` and the exact existing News service identity
+- no database/app/scheduler import in the probe path
+
 ## Next real external gate
 
 The remaining blocker is no longer code/CI/storage design.
