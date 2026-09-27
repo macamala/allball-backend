@@ -36,6 +36,7 @@ from .news_writer_router import (
     write_ninkosports_story,
     writer_policy_scope,
     configured_writer_identities,
+    note_writer_rejection,
 )
 from .taxonomy import COMPETITIONS
 from .textutil import clean_text, looks_like_garbage, strip_truncation_markers
@@ -315,6 +316,7 @@ def _ingest_item(db: Session, item: Dict, use_ai: bool, max_ai_chars: int, ai_bu
             if parsed else "empty-rewrite"
         )
         if lock_reason:
+            note_writer_rejection(provider, model)
             incident = None
             if isinstance(db, Session):
                 incident = record_incident(
@@ -359,6 +361,7 @@ def _ingest_item(db: Session, item: Dict, use_ai: bool, max_ai_chars: int, ai_bu
                             note="corrective rewrite passed deterministic fact lock",
                         )
                 else:
+                    note_writer_rejection(retry_provider, retry_model)
                     if isinstance(db, Session):
                         record_incident(
                             db,
@@ -387,6 +390,7 @@ def _ingest_item(db: Session, item: Dict, use_ai: bool, max_ai_chars: int, ai_bu
             story_summary = parsed.get("summary") or body.split("\n", 1)[0][:280]
             used_ai = True
         else:
+            note_writer_rejection(provider, model)
             if isinstance(db, Session):
                 record_incident(
                     db,
