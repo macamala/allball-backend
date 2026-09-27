@@ -71,6 +71,7 @@ Write using ONLY facts explicitly present in the supplied source facts.
 
 NON-NEGOTIABLE:
 - Every factual clause must be directly supported by the source facts. If unsure, OMIT it.
+- Do not invent facts, context, motives, quotes, scores, statistics, dates, injuries, fees, sources, chronology, or causal claims.
 - Never infer motive, cause, importance, momentum, significance, atmosphere, tactics, emotion, future impact, or chronology that the source does not explicitly state.
 - Never invent or embellish scores, dates, times, injuries, fees, statistics, locations, standings, records, roles, relationships or background.
 - Every numeric token in the draft must already appear in the supplied source facts. Never calculate, infer or add a year, age, score, count, ranking or date.
