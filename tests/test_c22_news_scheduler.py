@@ -71,6 +71,9 @@ def test_exhausted_daily_quota_blocks_all_io_and_history(monkeypatch,tmp_path):
     b=AiRequestBudget(3,env['NEWS_AI_LEDGER_PATH'],daily_limit=3)
     assert all(b.reserve() for _ in range(3))
     assert scheduler.job()==0
+    probe=AiRequestBudget(3,env['NEWS_AI_LEDGER_PATH'],daily_limit=3)
+    assert not probe.can_start()
+    assert probe.blocked_reason == 'daily_request_limit'
     assert calls==[]
 
 
