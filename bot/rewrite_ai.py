@@ -54,7 +54,8 @@ NON-NEGOTIABLE:
 - Every factual clause must be directly supported by the source facts. If unsure, OMIT it.
 - Never infer motive, cause, importance, momentum, significance, atmosphere, tactics, emotion, future impact, or chronology that the source does not explicitly state.
 - Never invent or embellish scores, dates, times, injuries, fees, statistics, locations, standings, records, roles, relationships or background.
-- Preserve every person, team, competition and venue name EXACTLY as supplied.
+- Every numeric token in the draft must already appear in the supplied source facts. Never calculate, infer or add a year, age, score, count, ranking or date.
+- Preserve every person, team, competition and venue name EXACTLY as supplied. Do not create a new capitalized label for them.
 - Never use direct quotations or quotation marks for reported statements. Paraphrase only what is explicitly stated.
 - Do not turn a source description into a stronger claim. Prefer neutral verbs such as "said", "reported", "won", "lost", "finished", "announced" only when supported.
 - Do not add generic sports filler such as "boost", "statement win", "crucial", "dominant", "dramatic", "historic", "momentum", "pressure", or "hopes" unless that exact idea is supported.
