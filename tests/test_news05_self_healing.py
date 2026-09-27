@@ -66,7 +66,12 @@ def test_fact_lock_blocks_new_high_risk_claim_family():
     bad = {
         "title": "Arsenal schedule update",
         "summary": "A new deal changes the club's plans.",
-        "body": "Arsenal signed a transfer deal before the next competition match. The club published the timetable.",
+        "body": (
+            "Arsenal signed a transfer deal before the next competition match. "
+            "The club published the timetable for the upcoming fixture and explained "
+            "that the revised schedule will govern the next stage of competition. "
+            "The update also described how the match programme will be organised."
+        ),
     }
     assert fact_lock_reason(bad, "Arsenal schedule", source) == "unsupported_claim_family:transfer"
 
@@ -150,7 +155,11 @@ def test_ingest_auto_corrects_first_bad_draft_and_publishes_second(monkeypatch):
     first = {
         "title": "Arsenal and Chelsea schedule update",
         "summary": "The two clubs received a revised schedule.",
-        "body": "Arsenal and Chelsea will use the revised competition schedule. The organising committee completed its review.",
+        "body": (
+            "Arsenal and Chelsea will use the revised competition schedule after the "
+            "organising committee completed its review. The update concerns the published "
+            "competition format and the club's next match under the revised schedule."
+        ),
     }
     second = GOOD
     calls = []
