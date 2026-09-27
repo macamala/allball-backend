@@ -40,6 +40,8 @@ _ROWS = [
     ('field-hockey', 'BBC Sport', 'https://feeds.bbci.co.uk/sport/hockey/rss.xml', 2, False),
     ('table-tennis', 'BBC Sport', 'https://feeds.bbci.co.uk/sport/table-tennis/rss.xml', 2, False),
     ('water-polo', 'BBC Sport', 'https://feeds.bbci.co.uk/sport/water-polo/rss.xml', 2, False),
+    ('table-tennis', 'Table Tennis England', 'https://www.tabletennisengland.co.uk/feed', 2, True),
+    ('futsal', 'Futsal Focus', 'https://www.futsalfocus.net/feed', 2, True),
 ]
 VERIFIED_RSS = [
     {
