@@ -111,15 +111,15 @@ def original_draft_reason(draft, source_title, source_body):
     if re.search(r'[“\"]([^”\"\n]{8,})[”\"]', output): return 'direct_quote_requires_review'
     numbers = lambda text: set(re.findall(r'(?<!\w)\d+(?:[.,:/–-]\d+)*(?:%|\b)', text))
     if numbers(output) - numbers(source): return 'unsupported_number'
+    tokens = lambda text: re.findall(r"[\w]+", text.lower())
+    src, dst = tokens(source_body), tokens(body)
+    if len(dst) < 25: return 'insufficient_original_body'
     folded_output = output.casefold()
     # Writer input is intentionally bounded; do not require a name the model never saw.
     protected_source = f'{source_title}\n{(source_body or "")[:6000]}'
     for name in protected_proper_names(protected_source):
         if name.casefold() not in folded_output:
             return 'missing_or_changed_proper_name'
-    tokens = lambda text: re.findall(r"[\w]+", text.lower())
-    src, dst = tokens(source_body), tokens(body)
-    if len(dst) < 25: return 'insufficient_original_body'
     if src == dst: return 'copied_source_body'
     n = 8
     grams = {tuple(src[i:i+n]) for i in range(max(0, len(src)-n+1))}
