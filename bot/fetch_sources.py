@@ -1,6 +1,7 @@
 """Ingest RSS, classify independently, extract facts, write English NinkoSports copy."""
 
 import logging
+import os
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
@@ -228,7 +229,10 @@ def _ingest_item(db: Session, item: Dict, use_ai: bool, max_ai_chars: int, ai_bu
         return None, False
 
     rss_text = item.get("summary") or ""
-    extracted, extracted_image = extract_from_url(source_url)
+    extracted = item.get("_extracted") or ""
+    extracted_image = item.get("_extracted_image")
+    if not extracted:
+        extracted, extracted_image = extract_from_url(source_url)
     facts, origin = source_article_facts(extracted, rss_text, source_url)
     facts = strip_truncation_markers(facts)
     if origin == "missing-source" or not facts or is_site_chrome_text(facts) or not enough_for_brief(item["title"], facts):
@@ -416,6 +420,13 @@ def _fetch_and_store_all_articles(
                 queued.extend(_fetch_feed_entries(feed, per_feed))
             except Exception as e:
                 logger.error("[fetch_sources] feed error %s: %s", feed.get("url"), e)
+        if os.getenv("NEWS_EXPANDED_FEEDS_ENABLED") == "1":
+            try:
+                from .news_official_indexes import fetch_official_index_entries
+
+                queued.extend(fetch_official_index_entries(per_feed))
+            except Exception as e:
+                logger.error("[fetch_sources] official index error: %s", type(e).__name__)
         def classify_candidate(item):
             feed = item.get("feed") or {}
             return classify_article(item["title"], item.get("summary") or "",
