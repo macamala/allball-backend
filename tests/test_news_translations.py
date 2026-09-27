@@ -59,3 +59,16 @@ def test_translation_validator_rejects_links_and_incomplete_shape():
     payload=_valid_payload()
     del payload['it']['summary']
     assert translations._validate(SOURCE, payload) is None
+
+
+def test_long_article_is_held_instead_of_partially_translated(monkeypatch):
+    article=type('ArticleFixture', (), {
+        'title':'Northbridge Athletic update',
+        'summary':'A complete update.',
+        'ai_content':None,
+        'content':'A' * 12001,
+    })()
+    called=[]
+    monkeypatch.setattr(translations, 'free_json_completion', lambda *args, **kwargs: called.append(True))
+    assert translations.translate_article_payload(article) is None
+    assert called == []
