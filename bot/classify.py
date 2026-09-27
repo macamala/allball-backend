@@ -121,9 +121,17 @@ def classify_article(
             sport = None
 
     if not sport:
-        # Genuine league feeds may hint sport only when the article itself is silent.
-        # Mixed/national firehoses must not inherit a bucket.
-        if feed_kind == "league" and feed_sport and best_sport == 0:
+        # A curated sport-specific feed may break a weak/ambiguous tie, but may
+        # never override strong contradictory article evidence.
+        feed_score = sport_scores.get(feed_sport, 0) if feed_sport else 0
+        if (
+            feed_kind == "league"
+            and feed_sport
+            and (
+                best_sport == 0
+                or feed_score > 0 and feed_score >= best_sport * 0.75
+            )
+        ):
             sport = feed_sport
         else:
             return Classification(None, None, None, "low", "unknown-sport")
