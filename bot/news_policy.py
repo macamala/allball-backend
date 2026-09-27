@@ -163,6 +163,15 @@ def non_article_news_reason(item):
         return "non_article_podcast"
     if re.search(r"\bscorecard\b", title) or "/scorecard/" in path:
         return "non_article_scorecard"
+
+    try:
+        host = (urlsplit(url).hostname or "").lower()
+    except ValueError:
+        host = ""
+    if host == "www.record.pt" and path.startswith("/jogo-da-vida/"):
+        return "non_sports_lifestyle_section"
+    if host == "www.record.pt" and path.startswith("/fora-de-campo/"):
+        return "non_sports_off_field_section"
     return None
 
 
