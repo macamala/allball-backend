@@ -43,6 +43,8 @@ EXTRA_SPORT_ALIASES: Dict[str, List[str]] = {
         "santiago giménez",
         "fc arouca",
         "do arouca",
+        "guarda-redes",
+        "guarda redes",
     ],
     "basketball": ["nba rank", "aba liga", "aba lige", "aba league"],
     "boxing": ["radivoje kalajdžić", "radivoje kalajdzic", "srbin u londonu prebio britanca"],
@@ -108,7 +110,7 @@ EXTRA_SPORT_ALIASES: Dict[str, List[str]] = {
         " gbgb ",
     ],
     "harness-racing": ["harness racing", "trotting race"],
-    "athletics": [" athletics ", "track and field", "world athletics"],
+    "athletics": [" athletics ", "track and field", "world athletics", "wheelchair marathon", "rollstuhl-marathon", "rollstuhl marathon"],
     "cycling": [
         "road world championship",
         "road world championships",
@@ -121,7 +123,7 @@ EXTRA_SPORT_ALIASES: Dict[str, List[str]] = {
     ],
     "swimming": [" swimming ", "world aquatics"],
     "winter-sports": ["winter sports", "alpine skiing", "figure skating", "ski-weltmeister", "ski-weltmeisterin"],
-    "mma": ["vémola", "vemola"],
+    "mma": ["vémola", "vemola", "oktagon"],
     "ice-hockey": [
         "ice hockey",
         " ambri ",
