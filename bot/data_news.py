@@ -211,13 +211,11 @@ def build_result_brief(sport: str, competition_key: str, day: str, events: List[
         f"{sport_name.lower()} result{'s' if len(rows) != 1 else ''} from {competition}."
     )
     body = (
-        f"NinkoSports recorded {len(rows)} completed {sport_name.lower()} "
-        f"event{'s' if len(rows) != 1 else ''} in {competition} for {day}. "
-        "This result brief uses only finalized fields already available in the "
-        "NinkoSports Live Scores record; scheduled and live events are excluded.\n\n"
+        f"{competition} produced {len(rows)} completed {sport_name.lower()} "
+        f"result{'s' if len(rows) != 1 else ''} on {day}.\n\n"
         f"{result_text}\n\n"
-        "The roundup changes only when the canonical final-result record changes. "
-        "No unverified scorers, incidents, quotes, injuries, tactics or statistics are added."
+        "NinkoSports will keep this results roundup aligned with the confirmed final scores "
+        "as the competition schedule is completed."
     )
     digest = hashlib.sha256("|".join(event_id for event_id, _ in rows).encode("utf-8")).hexdigest()[:16]
     return {
@@ -314,10 +312,12 @@ def ingest_result_briefs(days: int = 2, max_groups: int = 120) -> int:
     try:
         for (sport, competition_key, day), events in ordered:
             try:
-                if _upsert_group(db, sport, competition_key, day, events):
-                    changed += 1
+                # Isolate one malformed competition/result group without losing
+                # already prepared briefs from the same cycle.
+                with db.begin_nested():
+                    if _upsert_group(db, sport, competition_key, day, events):
+                        changed += 1
             except Exception as exc:
-                db.rollback()
                 logger.warning("[data_news] group held %s/%s: %s", sport, competition_key, type(exc).__name__)
         if changed:
             db.commit()
