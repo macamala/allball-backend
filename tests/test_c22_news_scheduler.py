@@ -24,7 +24,7 @@ def cycle(monkeypatch, tmp_path, *, history='0'):
     def index(db, **kw): calls.append(('index',kw)); return 400 if history == '1' else 1
     def session(): calls.append('session'); return Session()
     sources=module('bot.fetch_sources',fetch_and_store_all_articles=fetch)
-    module('bot.rewrite_ai',reset_openai_rate_limit=lambda:calls.append('reset'))
+    module('bot.news_writer_router',reset_writer_state=lambda:calls.append('reset'))
     module('public_cache',bump_public_cache=lambda:calls.append('cache'))
     repairs=module('repair_content',repair_summary_only=summary,repair_contaminated=contaminated)
     module('database',SessionLocal=session)
