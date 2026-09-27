@@ -113,3 +113,17 @@ def test_each_real_provider_http_attempt_consumes_shared_budget(monkeypatch, tmp
         assert router._post("cloudflare", "https://example.test", {}, {}) == {"ok": True}
     assert budget.attempts == 2
     assert not AiRequestBudget(1, str(tmp_path / "ledger.db"), daily_limit=2).can_start()
+
+
+def test_three_deterministic_rejects_hold_writer_only_for_current_cycle(monkeypatch):
+    _clear(monkeypatch)
+    monkeypatch.setenv("GROQ_API_KEY", "fixture-groq")
+    identity = router.configured_writer_identities()[0]
+    assert identity[0] == "groq"
+    assert router.note_writer_rejection(*identity) == 1
+    assert router.note_writer_rejection(*identity) == 2
+    assert not router.writer_rate_limited()
+    assert router.note_writer_rejection(*identity) == 3
+    assert router.writer_rate_limited()
+    router.reset_writer_state()
+    assert not router.writer_rate_limited()
