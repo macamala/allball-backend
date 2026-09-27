@@ -130,4 +130,3 @@ def test_muay_thai_stays_unclassified_without_registry_sport():
         feed_kind="mixed",
     )
     assert result.sport is None
-
