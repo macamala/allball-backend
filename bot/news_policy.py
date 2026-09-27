@@ -99,6 +99,35 @@ def newsworthiness_score(item):
     return score
 
 
+def non_sports_personal_life_reason(item):
+    """Reject clearly personal/lifestyle headlines unless sport is the actual event."""
+    title = str((item or {}).get("title") or "").casefold()
+    if not title:
+        return None
+
+    personal_patterns = (
+        r"\b(?:wedding|marries|married|pregnan\w*|newborn|first child)\b",
+        r"\b(?:becomes?|became|welcomes?)\s+(?:a\s+)?(?:mother|father|mum|mom|dad)\b",
+        r"\bhochzeit\b|\bheirat\w*\b|\bschwanger\w*\b|\bmama geworden\b|\bpapa geworden\b",
+        r"\bcasamento\b|\bgrávida\b|\bgravida\b|\bprimeiro filho\b|\bprimeira filha\b",
+        r"\bboda\b|\bembarazad\w*\b|\bprimer hijo\b|\bprimera hija\b",
+    )
+    if not any(re.search(pattern, title, re.I) for pattern in personal_patterns):
+        return None
+
+    # Keep a personal-life headline only when the title itself says the story
+    # materially affects competition, selection or playing status.
+    sport_impact_patterns = (
+        r"\b(?:match|game|race|round|final|semi[- ]?final|tournament|season|league|cup|championship|qualif\w*)\b",
+        r"\b(?:miss(?:es|ed|ing)?|withdraw\w*|ruled out|return\w*|retir\w*|injur\w*|suspend\w*|ban(?:ned)?|transfer\w*|sign\w*)\b",
+        r"\b(?:spiel\w*|rennen\w*|saison|liga|meisterschaft|qualifikation|ausfall|verletzt\w*|rückkehr|kader)\b",
+        r"\b(?:partid\w*|jogo\w*|corrida|temporada|campeonato|qualifica\w*|les[aã]o|desfalque|regresso)\b",
+    )
+    if any(re.search(pattern, title, re.I) for pattern in sport_impact_patterns):
+        return None
+    return "non_sports_personal_life"
+
+
 def queue_priority_score(item, now):
     """Blend editorial value with freshness without altering admission."""
     score = newsworthiness_score(item)
@@ -136,6 +165,9 @@ def fair_news_queue(items, classify, *, now=None, max_age_hours=72, sport_order=
             rejected[reason or 'invalid_source_url'] += 1; continue
         if url in seen:
             rejected['duplicate_source_url'] += 1; continue
+        editorial_reason = non_sports_personal_life_reason(item)
+        if editorial_reason:
+            rejected[editorial_reason] += 1; continue
         tags = classify(item)
         sport = getattr(tags, 'sport', None)
         if not sport:
