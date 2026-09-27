@@ -42,7 +42,7 @@ from .textutil import clean_text, looks_like_garbage, strip_truncation_markers, 
 logger = logging.getLogger(__name__)
 
 _AI_REJECT_COOLDOWN = {}
-_AI_REJECT_COOLDOWN_SECONDS = 2 * 60 * 60
+_AI_REJECT_COOLDOWN_SECONDS = 6 * 60 * 60
 _AI_REJECT_COOLDOWN_MAX = 1000
 
 
@@ -168,26 +168,6 @@ def _ai_story(
             title[:80],
         )
         return None, deterministic_reason
-    # Cheap deterministic safeguards must run before the second AI
-    # fact-check request. Bad names/numbers/quotes should cost one free
-    # writer call, not two AI calls.
-    deterministic_reason = original_draft_reason(
-        {
-            "title": parsed.get("title") or title,
-            "summary": parsed.get("summary") or "",
-            "body": parsed.get("body") or "",
-        },
-        title,
-        payload,
-    )
-    if deterministic_reason:
-        logger.info(
-            "[fetch_sources] reject deterministic=%s title=%s",
-            deterministic_reason,
-            title[:80],
-        )
-        return None, deterministic_reason
-
     facts_ok, facts_reason = validate_story_facts(
         title, payload, parsed, trusted_context=trusted_context
     )
@@ -378,6 +358,7 @@ def _ingest_item(db: Session, item: Dict, use_ai: bool, max_ai_chars: int, ai_bu
             trusted_context=trusted_context,
         )
         if rewrite_reason == "too-short":
+            _hold_ai_source(source_url)
             logger.info(
                 "[fetch_sources] skip substantial source with summary-only rewrite: %s",
                 item["title"][:80],
