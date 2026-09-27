@@ -1,4 +1,5 @@
 """Mocked I/O regression tests. No real News, credentials, DB or AI requests."""
+from datetime import datetime, timezone
 import importlib.util
 from pathlib import Path
 import sys
@@ -108,6 +109,17 @@ def test_disabled_budget_does_not_invalidate_public_cache(monkeypatch,tmp_path):
     assert 'cache' not in calls
 
 
+def test_next_interval_boundary_is_shared_across_redeploys(monkeypatch,tmp_path):
+    scheduler,_,_,_,_=cycle(monkeypatch,tmp_path)
+    first=scheduler._next_interval_boundary(
+        datetime(2026,9,27,11,47,0,tzinfo=timezone.utc),30
+    )
+    second=scheduler._next_interval_boundary(
+        datetime(2026,9,27,11,59,59,tzinfo=timezone.utc),30
+    )
+    assert first == second == datetime(2026,9,27,12,0,0,tzinfo=timezone.utc)
+
+
 def test_main_releases_cycle_owner_before_scheduler_shutdown(monkeypatch,tmp_path):
     from news_runtime import news_owner
     scheduler,calls,_,_,env=cycle(monkeypatch,tmp_path)
@@ -117,15 +129,12 @@ def test_main_releases_cycle_owner_before_scheduler_shutdown(monkeypatch,tmp_pat
         def add_job(self,func,*a,**kw):
             assert func is scheduler.job
             trigger = a[0] if a else None
-            scheduled.append((trigger, kw.get('id')))
-            if trigger == 'interval':
-                assert kw['max_instances']==1 and kw['coalesce'] is True
-                assert kw['id']=='news-interval-cycle'
-            elif trigger == 'date':
-                assert kw['id']=='news-startup-cycle'
-                assert 'run_date' in kw
-            else:
-                raise AssertionError(trigger)
+            scheduled.append((trigger, kw.get('id'), kw.get('start_date')))
+            assert trigger == 'interval'
+            assert kw['max_instances']==1 and kw['coalesce'] is True
+            assert kw['id']=='news-interval-cycle'
+            assert kw.get('start_date') is not None
+            assert kw['start_date'].tzinfo is not None
         def start(self):
             self.running=True
             raise KeyboardInterrupt()
@@ -138,4 +147,5 @@ def test_main_releases_cycle_owner_before_scheduler_shutdown(monkeypatch,tmp_pat
     monkeypatch.setitem(sys.modules,'apscheduler.schedulers.blocking',fake)
     with pytest.raises(KeyboardInterrupt): scheduler.main()
     assert state==['shutdown_after_cycle']
-    assert scheduled == [('date','news-startup-cycle'),('interval','news-interval-cycle')]
+    assert len(scheduled)==1
+    assert scheduled[0][0:2] == ('interval','news-interval-cycle')
