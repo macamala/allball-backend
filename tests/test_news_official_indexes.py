@@ -111,3 +111,29 @@ def test_new_gap_sources_are_article_path_scoped():
     assert by_id['world-aquatics-water-polo']['paths']==('/news/',)
     assert by_id['fih-field-hockey-news']['paths']==('/news/',)
     assert by_id['wst-snooker-news']['paths']==('/news/',)
+
+
+def test_unusable_primary_indexes_have_active_fallbacks():
+    by_id={row['id']:row for row in idx.HTML_INDEXES}
+    assert by_id['rocket-league-competitive'].get('enabled') is False
+    assert by_id['ittf-table-tennis-news'].get('enabled') is False
+    assert by_id['fih-field-hockey-news'].get('enabled') is False
+    assert by_id['fifa-futsal-news'].get('enabled') is False
+
+    assert by_id['rocket-league-blast-partner'].get('enabled', True) is True
+    assert by_id['rocket-league-blast-partner']['max_age_hours'] == 168
+    assert by_id['hockey-australia-news'].get('enabled', True) is True
+    assert by_id['hockey-australia-news']['sport'] == 'field-hockey'
+
+
+def test_disabled_html_indexes_are_not_fetched(monkeypatch):
+    calls=[]
+    monkeypatch.setattr(idx, '_anchor_candidates', lambda cfg: calls.append(cfg['id']) or [])
+    monkeypatch.setattr(idx, '_sitemap_candidates', lambda cfg: [])
+    idx.fetch_official_index_entries(1)
+    assert 'rocket-league-competitive' not in calls
+    assert 'ittf-table-tennis-news' not in calls
+    assert 'fih-field-hockey-news' not in calls
+    assert 'fifa-futsal-news' not in calls
+    assert 'rocket-league-blast-partner' in calls
+    assert 'hockey-australia-news' in calls
