@@ -332,9 +332,43 @@ def ingest_result_briefs(days: int = 2, max_groups: int = 120) -> int:
                 continue
             grouped[(sport, _competition_key(event), day)].append(event)
 
-    ordered = sorted(grouped.items(), key=lambda item: item[0])[: max(1, min(int(max_groups), 300))]
-    if not ordered:
+    group_limit = max(1, min(int(max_groups), 300))
+    today = now.date().isoformat()
+    all_items = sorted(
+        grouped.items(),
+        key=lambda item: (item[0][2], item[0][0], item[0][1]),
+    )
+    if not all_items:
         return 0
+
+    today_items = [item for item in all_items if item[0][2] == today]
+    older_items = [item for item in all_items if item[0][2] != today]
+    slot = int(now.timestamp() // 600)
+
+    def _rotating_slice(items, limit, salt=0):
+        if not items or limit <= 0:
+            return []
+        if len(items) <= limit:
+            return list(items)
+        start = ((slot + salt) * limit) % len(items)
+        return [items[(start + index) % len(items)] for index in range(limit)]
+
+    if older_items and group_limit >= 10:
+        today_budget = min(len(today_items), max(1, int(group_limit * 0.80)))
+        older_budget = min(len(older_items), group_limit - today_budget)
+        spare = group_limit - today_budget - older_budget
+        if spare and len(today_items) > today_budget:
+            extra = min(spare, len(today_items) - today_budget)
+            today_budget += extra
+            spare -= extra
+        if spare and len(older_items) > older_budget:
+            older_budget += min(spare, len(older_items) - older_budget)
+        ordered = (
+            _rotating_slice(today_items, today_budget)
+            + _rotating_slice(older_items, older_budget, salt=1)
+        )
+    else:
+        ordered = _rotating_slice(today_items or all_items, group_limit)
 
     db = SessionLocal()
     changed = processed = 0
@@ -369,7 +403,10 @@ def ingest_result_briefs(days: int = 2, max_groups: int = 120) -> int:
                 bump_public_cache()
             except Exception:
                 logger.warning("[data_news] public cache bump failed")
-        logger.info("[data_news] completed groups=%s changed=%s", processed, changed)
+        logger.info(
+            "[data_news] completed groups=%s changed=%s pool_today=%s pool_older=%s",
+            processed, changed, len(today_items), len(older_items),
+        )
         return changed
     except Exception:
         db.rollback()
