@@ -38,6 +38,14 @@ HTML_INDEXES = (
         "paths": ("/media-center/news/",),
     },
     {
+        "id": "volleyball-world-news",
+        "sport": "volleyball",
+        "publisher": "Volleyball World",
+        "url": "https://en.volleyballworld.com/news/",
+        "host": "en.volleyballworld.com",
+        "paths": ("/news/",),
+    },
+    {
         "id": "ea-sports-fc-news",
         "sport": "ea-sports-fc",
         "publisher": "EA SPORTS FC",
