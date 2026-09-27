@@ -16,7 +16,9 @@ REQUIRED_FILES = (
     "requirements.txt", "news_runtime.py", "database.py", "models.py", "public_index.py",
     "public_read.py", "editorial.py", "taxonomy_resolver.py", "repair_content.py",
     "bot/__init__.py", "bot/scheduler.py", "bot/fetch_sources.py", "bot/extract.py",
-    "bot/feeds.py", "bot/rewrite_ai.py", "sports_registry/__init__.py",
+    "bot/feeds.py", "bot/rewrite_ai.py", "bot/news_writer_router.py",
+    "bot/news_fact_guard.py", "bot/news_learning.py", "bot/news_sources.py",
+    "bot/news_html_discovery.py", "sports_registry/__init__.py",
 )
 DEPENDENCIES = ("apscheduler", "feedparser", "sqlalchemy", "psycopg2", "httpx", "requests")
 FALSE_VALUES = {"0", "false", "no", "off"}
