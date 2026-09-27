@@ -30,6 +30,7 @@ from editorial import classify_media_url, sanitize_title
 from auth import router as auth_router
 from comments_api import router as comments_router
 from predictions_api import router as predictions_router
+from news_feedback_api import router as news_feedback_router
 from bot.fetch_sources import LEAGUE_CONFIG
 from bot.taxonomy import (
     COMPETITIONS,
@@ -182,6 +183,7 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(comments_router)
 app.include_router(predictions_router)
+app.include_router(news_feedback_router)
 
 PUBLIC_CACHE = "public, max-age=5, s-maxage=10, stale-while-revalidate=20"
 
