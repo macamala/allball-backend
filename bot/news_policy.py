@@ -99,6 +99,22 @@ def newsworthiness_score(item):
     return score
 
 
+def non_article_news_reason(item):
+    """Reject discovery records that are score/media products, not news articles."""
+    title = str((item or {}).get("title") or "").casefold()
+    url = str((item or {}).get("url") or "")
+    try:
+        path = urlsplit(url).path.casefold()
+    except ValueError:
+        path = ""
+
+    if re.search(r"\bpodcast\b", title) or "/iplayer/episode/" in path or "/podcasts/" in path:
+        return "non_article_podcast"
+    if re.search(r"\bscorecard\b", title) or "/scorecard/" in path:
+        return "non_article_scorecard"
+    return None
+
+
 def non_sports_personal_life_reason(item):
     """Reject clearly personal/lifestyle headlines unless sport is the actual event."""
     title = str((item or {}).get("title") or "").casefold()
@@ -189,7 +205,7 @@ def fair_news_queue(
             rejected[reason or 'invalid_source_url'] += 1; continue
         if url in seen:
             rejected['duplicate_source_url'] += 1; continue
-        editorial_reason = non_sports_personal_life_reason(item)
+        editorial_reason = non_article_news_reason(item) or non_sports_personal_life_reason(item)
         if editorial_reason:
             rejected[editorial_reason] += 1; continue
         tags = classify(item)
