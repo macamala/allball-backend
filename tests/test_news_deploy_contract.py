@@ -26,6 +26,7 @@ def good_env():
             'NEWS_LEGACY_REPAIR_ACK':'1',
             'NEWS_AI_MAX_REQUESTS_PER_RUN':'2','NEWS_AI_MAX_REQUESTS_PER_DAY':'3',
             'NEWS_HISTORICAL_REPAIR_ENABLED':'0','NEWS_EXPANDED_FEEDS_ENABLED':'0',
+            'NEWS_DATA_NEWS_ENABLED':'0',
             'NEWS_AI_PROVIDER_MODE':'xkiro_free','XKIRO_API_KEY':'FIXTURE_ONLY',
             'NEWS_XKIRO_WRITER_MODEL':'qwen/qwen3.5-397b-a17b:free',
             'NEWS_XKIRO_VALIDATOR_MODEL':'qwen/qwen3.5-397b-a17b:free',
@@ -128,6 +129,13 @@ def test_legacy_openai_requires_explicit_paid_opt_in():
 def test_unknown_news_ai_provider_mode_fails_closed():
     env=good_env();env['NEWS_AI_PROVIDER_MODE']='auto'
     assert 'unsupported_news_ai_provider_mode' in guard.runtime_errors(env)
+
+
+def test_data_news_flag_must_be_explicit_boolean():
+    env=good_env();del env['NEWS_DATA_NEWS_ENABLED']
+    assert 'explicit_boolean_required:NEWS_DATA_NEWS_ENABLED' in guard.runtime_errors(env)
+    env=good_env();env['NEWS_DATA_NEWS_ENABLED']='true'
+    assert 'explicit_boolean_required:NEWS_DATA_NEWS_ENABLED' in guard.runtime_errors(env)
 
 def test_enabled_guard_executes_only_existing_news_entrypoint(tmp_path,monkeypatch,capsys):
     root=artifact(tmp_path);calls=[];dirs=[]
