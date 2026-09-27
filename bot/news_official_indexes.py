@@ -258,10 +258,25 @@ def _anchor_candidates(cfg: Dict) -> List[tuple[str, str]]:
     seen = set()
     required = tuple(str(x).lower() for x in cfg.get("keywords", ()))
     discovered = list(parser.links)
+    # Do not let a URL rejected from a real anchor (for example generic patch
+    # notes under an esports news path) re-enter as an empty-title JSON URL.
+    anchor_urls = {
+        url
+        for href, _title in parser.links
+        if (url := _same_host_url(cfg["url"], href, cfg["host"], cfg))
+    }
     for match in EMBEDDED_URL_RE.findall(html):
-        discovered.append((match.replace("\\/","/"), ""))
+        href = match.replace("\\/","/")
+        url = _same_host_url(cfg["url"], href, cfg["host"], cfg)
+        if url and url in anchor_urls:
+            continue
+        discovered.append((href, ""))
     for match in ABSOLUTE_URL_RE.findall(html):
-        discovered.append((match.replace("\\/","/"), ""))
+        href = match.replace("\\/","/")
+        url = _same_host_url(cfg["url"], href, cfg["host"], cfg)
+        if url and url in anchor_urls:
+            continue
+        discovered.append((href, ""))
     for href, title in discovered:
         url = _same_host_url(cfg["url"], href, cfg["host"], cfg)
         if not url or url in seen:
