@@ -488,6 +488,11 @@ def _ingest_item(db: Session, item: Dict, use_ai: bool, max_ai_chars: int, ai_bu
         article.slug,
         (article.title or "")[:120],
     )
+    logger.info(
+        "[fetch_sources] published_preview id=%s text=%s",
+        article.id,
+        " ".join((article.content or "").split())[:520],
+    )
     return article, used_ai
 
 
