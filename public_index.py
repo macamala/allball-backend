@@ -6,6 +6,7 @@ Public GET handlers must read these rows, not reclassify or re-score bodies.
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timedelta
 from typing import Optional, Sequence
 
 from sqlalchemy.orm import Session
@@ -184,3 +185,92 @@ def load_cached_resolutions(db: Session, articles: Sequence[Article]) -> dict:
         .all()
     )
     return {row.article_id: row for row in rows}
+
+
+
+def recent_public_sport_inventory(db: Session, max_age_hours: int = 72) -> dict[str, int]:
+    """Counts the same current, image-valid News inventory readers can browse."""
+    from sqlalchemy import func
+    cutoff = datetime.utcnow() - timedelta(hours=max(1, int(max_age_hours)))
+    rows = (
+        db.query(
+            ArticleTaxonomyResolution.resolved_sport,
+            func.count(ArticleTaxonomyResolution.id),
+        )
+        .join(Article, Article.id == ArticleTaxonomyResolution.article_id)
+        .filter(
+            ArticleTaxonomyResolution.resolver_version == RESOLVER_VERSION,
+            ArticleTaxonomyResolution.public_ok.is_(True),
+            ArticleTaxonomyResolution.resolved_sport.isnot(None),
+            ArticleTaxonomyResolution.hero_media_kind.in_(("EDITORIAL_PHOTO", "UNKNOWN")),
+            Article.image_url.isnot(None),
+            Article.image_url != "",
+            func.coalesce(Article.published_at, Article.created_at) >= cutoff,
+        )
+        .group_by(ArticleTaxonomyResolution.resolved_sport)
+        .all()
+    )
+    return {str(sport): int(count or 0) for sport, count in rows if sport}
+
+
+def repair_recent_duplicate_news(
+    db: Session,
+    *,
+    limit: int = 600,
+    max_age_hours: int = 168,
+) -> int:
+    """Hide recent cross-source duplicate News rows without deleting articles.
+
+    Newest public row wins. The stricter ingest-time detector prevents recurrence;
+    this bounded repair cleans legacy duplicate cards already in the public index.
+    """
+    from bot.dedupe import titles_are_near_duplicate
+
+    cutoff = datetime.utcnow() - timedelta(hours=max(1, int(max_age_hours)))
+    rows = (
+        db.query(Article, ArticleTaxonomyResolution)
+        .join(
+            ArticleTaxonomyResolution,
+            ArticleTaxonomyResolution.article_id == Article.id,
+        )
+        .filter(
+            ArticleTaxonomyResolution.resolver_version == RESOLVER_VERSION,
+            ArticleTaxonomyResolution.public_ok.is_(True),
+            func.coalesce(Article.published_at, Article.created_at) >= cutoff,
+        )
+        .order_by(
+            func.coalesce(Article.published_at, Article.created_at).desc(),
+            Article.id.desc(),
+        )
+        .limit(max(1, min(int(limit), 1200)))
+        .all()
+    )
+    kept: dict[str, list[Article]] = {}
+    hidden = 0
+    for article, tax in rows:
+        sport = str(tax.resolved_sport or "")
+        if not sport:
+            continue
+        duplicate = any(
+            titles_are_near_duplicate(article.title or "", other.title or "")
+            for other in kept.get(sport, [])
+        )
+        if duplicate:
+            tax.public_ok = False
+            db.add(tax)
+            hidden += 1
+            continue
+        kept.setdefault(sport, []).append(article)
+        # Comparing only the latest bounded headlines in each sport keeps this O(n)
+        # enough for the small repair batch while covering repeated feed stories.
+        if len(kept[sport]) > 80:
+            kept[sport] = kept[sport][:80]
+    if hidden:
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("recent News duplicate repair failed")
+            return 0
+        logger.info("[public_index] hid recent duplicate News rows=%s", hidden)
+    return hidden
