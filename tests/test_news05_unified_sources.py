@@ -94,3 +94,14 @@ def test_esports_official_language_is_recognized_without_bucket_stamping():
     for title, body, expected in cases:
         result = classify_article(title, body, feed_kind="mixed", feed_sport=expected)
         assert result.sport == expected
+
+
+def test_lol_and_valorant_accept_locale_neutral_story_paths():
+    from bot.news_html_discovery import _allowed_article
+
+    configs = {row["sport"]: row for row in OFFICIAL_HTML_SOURCES}
+    lol = configs["league-of-legends"]
+    val = configs["valorant"]
+    assert _allowed_article("https://lolesports.com/news/worlds-2026-venue-event-policies", lol)
+    assert _allowed_article("https://valorantesports.com/news/champions-2026-update", val)
+    assert _allowed_article("https://evil.example/news/champions-2026-update", val) is None
