@@ -32,6 +32,16 @@ class IncidentActionIn(BaseModel):
     note: Optional[str] = Field(default=None, max_length=4000)
 
 
+class RuleIn(BaseModel):
+    rule_type: str = Field(max_length=40)
+    bad_value: str = Field(min_length=2, max_length=300)
+    replacement: Optional[str] = Field(default=None, max_length=300)
+    sport: Optional[str] = Field(default=None, max_length=50)
+    source_url: Optional[str] = Field(default=None, max_length=500)
+    scope: str = Field(default="global", max_length=20)
+    note: Optional[str] = Field(default=None, max_length=4000)
+
+
 class CorrectionIn(BaseModel):
     incident_id: Optional[int] = None
     title: Optional[str] = Field(default=None, max_length=500)
@@ -147,6 +157,61 @@ def flag_article(
     )
     _reindex(db, article)
     return _incident_payload(row)
+
+
+@router.post("/incidents/{incident_id}/confirm")
+def confirm_news_incident(
+    incident_id: int,
+    payload: IncidentActionIn,
+    request: Request,
+    db: Session = Depends(get_db),
+    staff: User = Depends(require_staff),
+):
+    require_csrf(request)
+    row = db.query(NewsIncident).filter(NewsIncident.id == incident_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Incident not found.")
+    confirm_incident(
+        db,
+        row,
+        user_id=staff.id,
+        resolution_note=payload.note or "confirmed by staff",
+        dismissed=False,
+    )
+    return _incident_payload(row)
+
+
+@router.post("/rules")
+def create_rule(
+    payload: RuleIn,
+    request: Request,
+    db: Session = Depends(get_db),
+    staff: User = Depends(require_staff),
+):
+    require_csrf(request)
+    scope = (payload.scope or "global").lower()
+    if scope not in {"source", "sport", "global"}:
+        raise HTTPException(status_code=400, detail="Invalid learning scope.")
+    sport = None
+    if scope in {"source", "sport"}:
+        sport = canonical_sport_slug(payload.sport or "")
+        if not sport or not get_sport(sport):
+            raise HTTPException(status_code=400, detail="Valid sport required for this scope.")
+    try:
+        row = add_confirmed_rule(
+            db,
+            rule_type=payload.rule_type,
+            bad_value=payload.bad_value,
+            replacement=payload.replacement,
+            sport=sport,
+            source_url=payload.source_url,
+            source_scope=scope == "source",
+            user_id=staff.id,
+            note=payload.note or "staff-confirmed News rule",
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, "rule_id": row.id}
 
 
 @router.post("/incidents/{incident_id}/dismiss")
