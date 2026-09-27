@@ -3,6 +3,7 @@
 import logging
 import os
 import random
+import re
 import time
 from typing import Optional
 
@@ -138,6 +139,12 @@ Avoid press-release language and abstract corporate nouns. Find the human shape
 inside the verified facts, then write it cleanly with one restrained literary
 touch. Every event-specific factual claim must remain anchored to the source."""
 
+
+FACT_RETRY_HINT = (
+    "The previous draft failed NinkoSports publication validation. "
+    "Rewrite it from the verified source facts only. Remove the unsupported "
+    "detail instead of guessing, generalising, or replacing it with another fact."
+)
 
 LENGTH_RETRY_HINT = (
     "The previous draft was only a short summary of a substantial source article. "
@@ -304,6 +311,8 @@ def write_ninkosports_story(
     sport: str = "sports",
     league: str = "",
     retry_for_length: bool = False,
+    correction_reason: str = "",
+    learned_instructions: str = "",
 ) -> Optional[str]:
     if openai_rate_limited():
         return None
@@ -321,8 +330,18 @@ def write_ninkosports_story(
         "VERIFIED SOURCE FACTS (may be another language; use only what is stated):\n"
         f"{facts}\n"
     )
+    if learned_instructions:
+        prompt = (
+            "STAFF-CONFIRMED CORRECTION MEMORY:\n"
+            + learned_instructions[:2400]
+            + "\nThese rules do not add facts; the source facts remain authoritative.\n\n"
+            + prompt
+        )
     if retry_for_length:
         prompt = f"{LENGTH_RETRY_HINT}\n\n{prompt}"
+    if correction_reason:
+        safe_reason = re.sub(r"[^a-zA-Z0-9:_-]", "", correction_reason)[:160]
+        prompt = f"{FACT_RETRY_HINT}\nVALIDATION_FAILURE: {safe_reason}\n\n{prompt}"
     return _call_selected_ai(prompt)
 
 
