@@ -635,9 +635,46 @@ def _fetch_and_store_all_articles(
                 logger.error("[fetch_sources] official index error: %s", type(e).__name__)
         def classify_candidate(item):
             feed = item.get("feed") or {}
-            return classify_article(item["title"], item.get("summary") or "",
-                feed_kind=feed.get("kind", "mixed"), feed_sport=feed.get("sport"),
-                feed_league=feed.get("league"), feed_country=feed.get("country"))
+            evidence = item.get("_classification_text") or item.get("summary") or ""
+            return classify_article(
+                item["title"],
+                evidence,
+                feed_kind=feed.get("kind", "mixed"),
+                feed_sport=feed.get("sport"),
+                feed_league=feed.get("league"),
+                feed_country=feed.get("country"),
+            )
+
+        # Mixed feeds often have a headline with no sport word even though the
+        # actual article body is unambiguous. Enrich only a small bounded set
+        # before fair-queue admission. This spends no AI requests, and the same
+        # extracted body is reused later by _ingest_item.
+        enriched_unknown = 0
+        for candidate in queued:
+            if enriched_unknown >= 8:
+                break
+            try:
+                candidate_tags = classify_candidate(candidate)
+            except Exception:
+                continue
+            if candidate_tags.sport is not None or not candidate.get("url"):
+                continue
+            try:
+                extracted, extracted_image = extract_from_url(candidate["url"])
+            except Exception:
+                continue
+            if not extracted:
+                continue
+            candidate["_extracted"] = extracted
+            candidate["_extracted_image"] = extracted_image
+            candidate["_classification_text"] = extracted
+            enriched_unknown += 1
+        if enriched_unknown:
+            logger.info(
+                "[fetch_sources] enriched unknown-sport candidates=%s",
+                enriched_unknown,
+            )
+
         unknown_samples = []
         for candidate in queued:
             if len(unknown_samples) >= 10:
