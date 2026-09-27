@@ -8,6 +8,17 @@ import os
 logger = logging.getLogger(__name__)
 
 
+def _run_data_lane():
+    if os.environ.get('NEWS_DATA_NEWS_ENABLED') != '1':
+        return 0
+    try:
+        from bot.data_news import ingest_result_briefs
+        return ingest_result_briefs(days=2, max_groups=40)
+    except Exception as exc:
+        logger.error('News data lane failed: %s', type(exc).__name__)
+        return 0
+
+
 def _start_errors():
     from deploy.news.preflight import runtime_errors
     from news_runtime import storage_errors
@@ -29,16 +40,8 @@ def _run_cycle():
     historical = os.environ['NEWS_HISTORICAL_REPAIR_ENABLED'] == '1'
     rewritten = indexed = data_briefs = translated_rows = 0
 
-    # Zero-AI NinkoSports result briefs are independent from external AI quota.
-    # They still share the same single News owner and startup safety gates.
-    if os.environ.get('NEWS_DATA_NEWS_ENABLED') == '1':
-        try:
-            from bot.data_news import ingest_result_briefs
-            data_briefs = ingest_result_briefs(days=2, max_groups=120)
-        except Exception as exc:
-            logger.error('News data lane failed: %s', type(exc).__name__)
-
     if maximum <= 0 or not budget.can_start():
+        data_briefs = _run_data_lane()
         logger.info('News AI lane held: allowance_or_ledger_unavailable data_briefs=%s',
                     data_briefs)
         return data_briefs
@@ -83,6 +86,7 @@ def _run_cycle():
                 repair_contaminated(max_pages=1)
         if rewritten or historical:
             bump_public_cache()
+        data_briefs = _run_data_lane()
         logger.info(
             'News cycle finished: ai_articles=%s data_briefs=%s translated_rows=%s indexed=%s attempts=%s stop=%s history=%s',
             rewritten, data_briefs, translated_rows, indexed, budget.attempts,
@@ -90,8 +94,9 @@ def _run_cycle():
         )
         return rewritten + data_briefs
     except Exception as exc:
-        # Exception strings can contain a credential-bearing DB/source URL.
-        logger.error('News AI cycle failed: %s data_briefs=%s', type(exc).__name__, data_briefs)
+        # Source/AI failure must not suppress zero-AI result news.
+        logger.error('News AI cycle failed: %s', type(exc).__name__)
+        data_briefs = _run_data_lane()
         return data_briefs
 
 
