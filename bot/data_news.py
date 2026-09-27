@@ -316,6 +316,49 @@ def _upsert_group(db: Session, sport: str, competition_key: str, day: str, event
     return True
 
 
+def retire_result_briefs() -> int:
+    """Hide every legacy Live Scores-derived article from all public News reads."""
+    from database import SessionLocal
+    from models import ArticleTaxonomyResolution
+
+    db = SessionLocal()
+    try:
+        rows = (
+            db.query(Article)
+            .filter(Article.external_id.like("ninkosports-results:%"))
+            .all()
+        )
+        if not rows:
+            return 0
+        ids = [row.id for row in rows]
+        (
+            db.query(ArticleTaxonomyResolution)
+            .filter(ArticleTaxonomyResolution.article_id.in_(ids))
+            .update(
+                {
+                    ArticleTaxonomyResolution.public_ok: False,
+                    ArticleTaxonomyResolution.quality_ok: False,
+                },
+                synchronize_session=False,
+            )
+        )
+        for row in rows:
+            row.is_live = False
+        db.commit()
+        try:
+            from public_cache import bump_public_cache
+            bump_public_cache()
+        except Exception:
+            pass
+        logger.info("[data_news] retired legacy result-news articles=%s", len(rows))
+        return len(rows)
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
 def ingest_result_briefs(days: int = 2, max_groups: int = 120) -> int:
     """Refresh bounded daily competition roundups. No AI request is consumed."""
     if not data_news_available():
