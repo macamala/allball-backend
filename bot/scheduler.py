@@ -24,12 +24,14 @@ def _run_zero_ai_public_repairs():
     from public_index import (
         recent_public_sport_inventory,
         repair_recent_duplicate_news,
+        repair_recent_news_images,
         repair_recent_sport_mislabels,
         repair_recent_unresolved,
     )
 
     db = SessionLocal()
     try:
+        images = repair_recent_news_images(db, limit=80, max_age_hours=72, recover_limit=8)
         mislabels = repair_recent_sport_mislabels(db, limit=600, max_age_hours=168)
         repaired = repair_recent_unresolved(db, limit=24)
         duplicates = repair_recent_duplicate_news(db, limit=600, max_age_hours=168)
@@ -43,10 +45,11 @@ def _run_zero_ai_public_repairs():
         return {}
     finally:
         db.close()
-    if mislabels or repaired or duplicates:
+    if images or mislabels or repaired or duplicates:
         bump_public_cache()
     logger.info(
-        'News zero-AI repair: mislabels=%s unresolved=%s duplicates=%s inventory=%s',
+        'News zero-AI repair: images=%s mislabels=%s unresolved=%s duplicates=%s inventory=%s',
+        images,
         mislabels,
         repaired,
         duplicates,
