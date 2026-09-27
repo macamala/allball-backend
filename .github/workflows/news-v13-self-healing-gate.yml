@@ -1,0 +1,54 @@
+name: News v13 self-healing integration gate
+
+on:
+  push:
+    branches:
+      - integration/news-v13-self-healing-20260927
+    paths:
+      - ".github/workflows/news-v13-self-healing-gate.yml"
+      - "bot/**"
+      - "app.py"
+      - "models.py"
+      - "news_feedback_api.py"
+      - "public_index.py"
+      - "deploy/news/preflight.py"
+      - "tests/test_news_self_healing_v13.py"
+  workflow_dispatch:
+
+jobs:
+  focused-news:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DATABASE_URL: sqlite:////tmp/ninko-news-v13.db
+      OPENAI_API_KEY: isolated-test-not-real
+      PYTHONPATH: .
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install backend requirements
+        run: python -m pip install --disable-pip-version-check -r requirements.txt
+      - name: API import and News image preflight
+        run: |
+          python -c 'import app; print("API_IMPORT_OK")'
+          docker build --progress=plain -f deploy/news/Dockerfile -t ninko-news-v13:gate .
+          docker run --rm --network none ninko-news-v13:gate python deploy/news/preflight.py --check
+      - name: Focused production News regressions
+        run: |
+          pytest -q -p no:cacheprovider \
+            tests/test_news_self_healing_v13.py \
+            tests/test_news03_integration.py \
+            tests/test_news_free_ai.py \
+            tests/test_news_official_indexes.py \
+            tests/test_news_postgres_accounting.py \
+            tests/test_news_scheduler_lanes.py \
+            tests/test_news_translations.py \
+            tests/test_news_verified_sources.py \
+            tests/test_c22_news_runtime.py \
+            tests/test_c22_news_scheduler.py \
+            tests/test_news_deploy_contract.py \
+            tests/test_classify.py \
+            tests/test_public_read.py \
+            tests/test_taxonomy_resolver.py
