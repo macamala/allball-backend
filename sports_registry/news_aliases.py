@@ -27,14 +27,14 @@ EXTRA_SPORT_ALIASES: Dict[str, List[str]] = {
     "swimming": [" swimming ", "world aquatics"],
     "winter-sports": ["winter sports", "alpine skiing", "figure skating"],
     "esports": ["esports", "e-sports"],
-    "ea-sports-fc": ["ea sports fc", "efootball"],
+    "ea-sports-fc": ["ea sports fc", "efootball", "fc pro", "echampions league", "eeuro"],
     "counter-strike": ["counter-strike", "counter strike"],
-    "league-of-legends": ["league of legends"],
+    "league-of-legends": ["league of legends", "lol esports", " lcs ", " lec ", " lck ", " lpl "],
     "dota-2": ["dota 2", "dota2"],
     "valorant": ["valorant"],
-    "call-of-duty": ["call of duty"],
-    "overwatch": ["overwatch"],
-    "rocket-league": ["rocket league"],
+    "call-of-duty": ["call of duty", " cdl ", "call of duty league"],
+    "overwatch": ["overwatch", " owcs ", "overwatch world cup"],
+    "rocket-league": ["rocket league", " rlcs "],
 }
 
 
