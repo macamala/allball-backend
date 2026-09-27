@@ -142,3 +142,46 @@ def test_translation_validator_accepts_localized_english_ordinal_value():
     assert translations._numbers('started 16th') == {'16'}
     assert translations._numbers('started 16.') == {'16'}
     assert translations._validate(source, payload)
+
+def test_translation_masks_and_restores_numeric_values(monkeypatch):
+    article=type('ArticleFixture', (), {
+        'id':22003,
+        'title':'Azerbaijan recovery from 16th place',
+        'summary':'The driver recovered from 16th after a difficult start.',
+        'ai_content':(
+            'The driver recovered from 16th after a difficult start and kept the race under control. '
+            'The account stays within the supplied sporting facts, avoids invented statistics or quotes, '
+            'and preserves the original numerical value throughout the complete translated article.'
+        ),
+        'content':None,
+    })()
+    seen={}
+    token='__NINKONUM_A__'
+
+    def fake_completion(system, prompt, **kwargs):
+        seen['system']=system
+        seen['prompt']=prompt
+        body=(
+            f'The driver recovered from {token} after a difficult start and kept the race under control. '
+            'The account stays within the supplied sporting facts, avoids invented statistics or quotes, '
+            'and preserves the original numerical value throughout the complete translated article.'
+        )
+        payload={}
+        for language in translations.LANGUAGES:
+            payload[f'{language}_title']=f'Azerbaijan recovery from {token} place'
+            payload[f'{language}_summary']=f'The driver recovered from {token} after a difficult start.'
+            payload[f'{language}_body']=body
+        return json.dumps(payload)
+
+    monkeypatch.setattr(translations, 'free_json_completion', fake_completion)
+    result=translations.translate_article_payload(article)
+
+    assert result
+    assert token in seen['prompt']
+    assert '16th' not in seen['prompt']
+    for language in translations.LANGUAGES:
+        combined='\n'.join(result[language].values())
+        assert '16' in combined
+        assert token not in combined
+        assert translations._numbers(combined) == {'16'}
+
