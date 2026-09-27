@@ -41,31 +41,50 @@ def _absolute_path(value):
 
 def configuration_errors(env):
     errors = []
-    if request_limits(env) is None:
-        errors.append('explicit_news_request_limits_required')
-    elif 0 in request_limits(env):
-        errors.append('news_request_allowance_disabled')
-    mode = str(env.get('NEWS_AI_PROVIDER_MODE') or 'xkiro_free').strip().lower()
-    if mode == 'xkiro_free':
-        if not str(env.get('XKIRO_API_KEY') or '').strip():
-            errors.append('news_ai_key_missing')
-        for key in ('NEWS_XKIRO_WRITER_MODEL', 'NEWS_XKIRO_VALIDATOR_MODEL'):
-            model = str(env.get(key) or '').strip()
-            if model and (not model.endswith(':free') or not re.fullmatch(r'[A-Za-z0-9._/+:-]{3,160}:free', model)):
-                errors.append('non_free_news_model_refused:' + key)
-    elif mode == 'openai_legacy':
-        if env.get('NEWS_ALLOW_PAID_AI') != '1' or not str(env.get('OPENAI_API_KEY') or '').strip():
-            errors.append('legacy_paid_ai_not_explicitly_allowed')
-    else:
-        errors.append('unsupported_news_ai_provider_mode')
     for key in ('NEWS_HISTORICAL_REPAIR_ENABLED', 'NEWS_EXPANDED_FEEDS_ENABLED',
                 'NEWS_DATA_NEWS_ENABLED', 'NEWS_TRANSLATIONS_ENABLED'):
         if env.get(key) not in ('0', '1'):
             errors.append('explicit_boolean_required:' + key)
+
     per_cycle = str(env.get('NEWS_TRANSLATIONS_PER_CYCLE') or '').strip()
     if (not per_cycle.isascii() or not per_cycle.isdigit()
             or not 0 <= int(per_cycle) <= 3):
         errors.append('missing_or_invalid_integer:NEWS_TRANSLATIONS_PER_CYCLE')
+
+    try:
+        max_articles = int(str(env.get('NEWS_MAX_AI_ARTICLES') or '').strip())
+    except (TypeError, ValueError):
+        max_articles = 0
+    ai_required = bool(
+        max_articles > 0
+        or env.get('NEWS_TRANSLATIONS_ENABLED') == '1'
+        or env.get('NEWS_HISTORICAL_REPAIR_ENABLED') == '1'
+    )
+    data_required = env.get('NEWS_DATA_NEWS_ENABLED') == '1'
+    if not ai_required and not data_required:
+        errors.append('no_news_lane_enabled')
+
+    limits = request_limits(env)
+    if ai_required:
+        if limits is None:
+            errors.append('explicit_news_request_limits_required')
+        elif 0 in limits:
+            errors.append('news_request_allowance_disabled')
+
+        mode = str(env.get('NEWS_AI_PROVIDER_MODE') or 'xkiro_free').strip().lower()
+        if mode == 'xkiro_free':
+            if not str(env.get('XKIRO_API_KEY') or '').strip():
+                errors.append('news_ai_key_missing')
+            for key in ('NEWS_XKIRO_WRITER_MODEL', 'NEWS_XKIRO_VALIDATOR_MODEL'):
+                model = str(env.get(key) or '').strip()
+                if model and (not model.endswith(':free') or not re.fullmatch(r'[A-Za-z0-9._/+:-]{3,160}:free', model)):
+                    errors.append('non_free_news_model_refused:' + key)
+        elif mode == 'openai_legacy':
+            if env.get('NEWS_ALLOW_PAID_AI') != '1' or not str(env.get('OPENAI_API_KEY') or '').strip():
+                errors.append('legacy_paid_ai_not_explicitly_allowed')
+        else:
+            errors.append('unsupported_news_ai_provider_mode')
+
     ledger = _absolute_path(env.get('NEWS_AI_LEDGER_PATH'))
     mount = _absolute_path(env.get('RAILWAY_VOLUME_MOUNT_PATH'))
     if ledger is None or mount is None:
