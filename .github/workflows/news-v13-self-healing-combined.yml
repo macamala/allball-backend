@@ -95,6 +95,8 @@ jobs:
           assert not missing, missing
           Path('evidence/test-selection.txt').write_text('\n'.join(sorted(paths))+'\n')
           PY
+      - name: Candidate boundary note
+        run: echo "Final candidate includes explicit no-invention prompt and reusable robots mock-client regression."
       - name: Run retained Live Scores plus current News suite offline
         run: |
           set -euo pipefail
@@ -112,7 +114,7 @@ jobs:
               ('tests','testcase'),('failures','failure'),('errors','error'),('skipped','skipped')
           ]}
           print(counts)
-          assert counts['tests'] >= 1395, counts
+          assert counts['tests'] >= 1475, counts
           assert counts['failures'] == counts['errors'] == counts['skipped'] == 0, counts
           Path('evidence/test-summary.json').write_text(json.dumps(counts,indent=2))
           Path('evidence/candidate-sha.txt').write_text(
