@@ -1,6 +1,6 @@
 import os
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 import threading
 import time
@@ -53,7 +53,12 @@ from sports_registry.sports import sitemap_sport_paths
 from homepage_compose import HOMEPAGE_COMPETITIONS, editorial_score, select_diverse
 from entities import extract_entities
 from public_cache import cache_generation
-from public_index import index_missing, load_cached_resolution
+from public_index import (
+    index_missing,
+    load_cached_resolution,
+    recent_public_sport_inventory,
+    repair_recent_duplicate_news,
+)
 from public_read import (
     apply_scope,
     fetch_public,
@@ -99,6 +104,7 @@ def _startup_index():
             counted = index_missing(db, limit=400)
             if counted < 400:
                 break
+        repair_recent_duplicate_news(db, limit=800, max_age_hours=168)
     finally:
         db.close()
     from repair_content import repair_contaminated
@@ -683,27 +689,22 @@ def list_sports():
 
 @app.get("/meta/taxonomy")
 def taxonomy_meta(db: Session = Depends(get_db)):
-    counts = dict(
-        db.query(
-            ArticleTaxonomyResolution.resolved_sport,
-            func.count(ArticleTaxonomyResolution.id),
-        )
-        .filter(
-            ArticleTaxonomyResolution.resolver_version == RESOLVER_VERSION,
-            ArticleTaxonomyResolution.public_ok == True,
-        )
-        .group_by(ArticleTaxonomyResolution.resolved_sport)
-        .all()
-    )
+    cutoff = datetime.utcnow() - timedelta(hours=72)
+    counts = recent_public_sport_inventory(db, max_age_hours=72)
     competition_counts = dict(
         db.query(
             ArticleTaxonomyResolution.resolved_competition,
             func.count(ArticleTaxonomyResolution.id),
         )
+        .join(Article, Article.id == ArticleTaxonomyResolution.article_id)
         .filter(
             ArticleTaxonomyResolution.resolver_version == RESOLVER_VERSION,
             ArticleTaxonomyResolution.public_ok == True,
             ArticleTaxonomyResolution.resolved_competition.isnot(None),
+            ArticleTaxonomyResolution.hero_media_kind.in_(("EDITORIAL_PHOTO", "UNKNOWN")),
+            Article.image_url.isnot(None),
+            Article.image_url != "",
+            func.coalesce(Article.published_at, Article.created_at) >= cutoff,
         )
         .group_by(ArticleTaxonomyResolution.resolved_competition)
         .all()
@@ -742,30 +743,25 @@ def taxonomy_meta(db: Session = Depends(get_db)):
 
 @app.get("/meta/navigation")
 def navigation(db: Session = Depends(get_db)):
+    cutoff = datetime.utcnow() - timedelta(hours=72)
     counts = dict(
         db.query(
             ArticleTaxonomyResolution.resolved_competition,
             func.count(ArticleTaxonomyResolution.id),
         )
+        .join(Article, Article.id == ArticleTaxonomyResolution.article_id)
         .filter(
             ArticleTaxonomyResolution.resolver_version == RESOLVER_VERSION,
             ArticleTaxonomyResolution.public_ok == True,
+            ArticleTaxonomyResolution.hero_media_kind.in_(("EDITORIAL_PHOTO", "UNKNOWN")),
+            Article.image_url.isnot(None),
+            Article.image_url != "",
+            func.coalesce(Article.published_at, Article.created_at) >= cutoff,
         )
         .group_by(ArticleTaxonomyResolution.resolved_competition)
         .all()
     )
-    sport_counts = dict(
-        db.query(
-            ArticleTaxonomyResolution.resolved_sport,
-            func.count(ArticleTaxonomyResolution.id),
-        )
-        .filter(
-            ArticleTaxonomyResolution.resolver_version == RESOLVER_VERSION,
-            ArticleTaxonomyResolution.public_ok == True,
-        )
-        .group_by(ArticleTaxonomyResolution.resolved_sport)
-        .all()
-    )
+    sport_counts = recent_public_sport_inventory(db, max_age_hours=72)
     sports = []
     for sport in MAIN_SPORTS:
         leagues = []
