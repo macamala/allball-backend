@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from database import SessionLocal
 from models import Article
-from editorial import news_image_is_publishable, pick_article_image
+from editorial import news_image_is_publishable, pick_article_image, score_image_candidate
 
 from .news_policy import fair_news_queue, freshness_reason, non_article_news_reason, original_draft_reason
 from .news_learning import (
@@ -30,6 +30,7 @@ from .dedupe import existing_by_url, existing_near_duplicate
 from .extract import extract_from_url, parse_feed_datetime, paragraphs_from_html
 from .feeds import enabled_feeds
 from .news_feed_http import read_news_feed
+from .news_image_http import news_image_is_reachable
 from .media_url import collect_feed_image_candidates, pick_source_image, width_from_url
 from .quality import (
     enough_for_brief,
@@ -227,6 +228,32 @@ def _extract_image_candidates(entry) -> list:
     return candidates
 
 
+def _pick_reachable_article_image(candidates: list, max_checks: int = 6) -> Optional[str]:
+    """Choose the best candidate that actually serves image bytes."""
+    ranked = []
+    for candidate in candidates or []:
+        if not isinstance(candidate, dict):
+            continue
+        score = score_image_candidate(candidate)
+        url = str(candidate.get("url") or "").strip()
+        if score < 0 or not url or not news_image_is_publishable(url):
+            continue
+        ranked.append((score, url))
+    ranked.sort(key=lambda row: row[0], reverse=True)
+    seen = set()
+    checks = 0
+    for _score, url in ranked:
+        if url in seen:
+            continue
+        seen.add(url)
+        checks += 1
+        if news_image_is_reachable(url):
+            return url
+        if checks >= max(1, int(max_checks)):
+            break
+    return None
+
+
 def _slugify(title: str, fallback: str = "") -> str:
     import re
 
@@ -405,11 +432,11 @@ def _ingest_item(
         if isinstance(candidate, dict)
         and 0 < len(str(candidate.get("url") or "").strip()) <= 500
     ]
-    image_url = pick_article_image(image_candidates)
+    image_url = _pick_reachable_article_image(image_candidates)
     if not news_image_is_publishable(image_url):
-        _hold_ai_source(source_url, "missing-publishable-image")
+        _hold_ai_source(source_url, "missing-or-unreachable-publishable-image")
         logger.info(
-            "[fetch_sources] hold image reason=missing-publishable-image title=%s",
+            "[fetch_sources] hold image reason=missing-or-unreachable-publishable-image title=%s",
             item["title"][:80],
         )
         return None, False
