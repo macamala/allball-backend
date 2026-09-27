@@ -88,3 +88,33 @@ def test_personal_news_with_explicit_competition_impact_is_kept():
     assert result == [row]
     assert reasons == {}
 
+
+
+def test_underfilled_sport_beats_overstocked_high_score_sport():
+    hockey=item('ice-hockey', 1)
+    hockey['title']='Ice hockey champion wins final title trophy'
+    lacrosse=item('lacrosse', 1)
+    lacrosse['title']='Lacrosse team names squad'
+    result,_=fair_news_queue(
+        [hockey,lacrosse],
+        classify,
+        now=NOW,
+        sport_order=['ice-hockey','lacrosse'],
+        sport_inventory={'ice-hockey':169,'lacrosse':1},
+        coverage_floor=6,
+    )
+    assert result[0]['sport_fixture']=='lacrosse'
+
+
+def test_lowest_inventory_wins_after_basic_floor():
+    football=item('football', 1)
+    tennis=item('tennis', 1)
+    result,_=fair_news_queue(
+        [football,tennis],
+        classify,
+        now=NOW,
+        sport_order=['football','tennis'],
+        sport_inventory={'football':30,'tennis':7},
+        coverage_floor=6,
+    )
+    assert result[0]['sport_fixture']=='tennis'
