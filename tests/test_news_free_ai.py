@@ -96,7 +96,7 @@ def test_free_validator_accepts_only_exact_clean_shape(monkeypatch):
     assert free_ai.validate_free_story('A', 'facts', 'B', 'summary', 'body') == (False, 'validator-invalid-shape')
 
 
-def test_protected_multiword_names_are_preserved_deterministically():
+def test_protected_names_are_extracted_but_changed_name_rejection_is_semantic():
     source_title='Northbridge Athletic beat Southport United in Summer Shield'
     source_body=(
         'Northbridge Athletic beat Southport United in the Summer Shield practice match. '
@@ -122,4 +122,6 @@ def test_protected_multiword_names_are_preserved_deterministically():
     renamed['body']=body.replace('Southport United', 'Southport Club')
     renamed['title']='Northbridge Athletic finish ahead'
     renamed['summary']='Northbridge Athletic finished ahead in the Summer Shield practice match.'
-    assert original_draft_reason(renamed, source_title, source_body) == 'missing_or_changed_proper_name'
+    # The brittle regex gate was intentionally removed from deterministic admission.
+    # The xKiro semantic validator above is the authority for changed proper names.
+    assert original_draft_reason(renamed, source_title, source_body) is None
