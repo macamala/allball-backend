@@ -37,7 +37,7 @@ from .rewrite_ai import (
     write_ninkosports_story,
 )
 from .taxonomy import COMPETITIONS
-from .textutil import clean_text, looks_like_garbage, strip_truncation_markers
+from .textutil import clean_text, looks_like_garbage, strip_truncation_markers, word_count
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +108,12 @@ def source_article_facts(
     if extracted_ok:
         return extracted_clean, "source"
     if (source_url or "").strip().startswith("http"):
+        # Some legitimate sports publishers expose usable article text in RSS
+        # while the linked page is JS-only, returns 202, or defeats the plain
+        # extractor. A substantial RSS body is still source material; short
+        # teasers remain fail-closed.
+        if rss_ok and word_count(rss_clean) >= 45:
+            return rss_clean, "rss-fallback"
         return "", "missing-source"
     if rss_ok:
         return rss_clean, "rss"
