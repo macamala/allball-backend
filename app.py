@@ -582,10 +582,10 @@ def related_articles(
     db: Session = Depends(get_db),
     limit: int = Query(6, ge=1, le=20),
 ):
-    article = db.query(Article).filter(Article.slug == slug).first()
-    if not article:
+    pair = public_query(db, cards=False).filter(Article.slug == slug).first()
+    if not pair:
         raise HTTPException(status_code=404, detail="Article not found")
-    tax = load_cached_resolution(db, article)
+    article, tax = pair
     cards = related_cards(db, article, tax, limit=limit)
     _cache_headers(response)
     return cards
@@ -593,9 +593,10 @@ def related_articles(
 
 @app.post("/articles/{slug}/view")
 def record_article_view(slug: str, request: Request, db: Session = Depends(get_db)):
-    article = db.query(Article).filter(Article.slug == slug).first()
-    if not article:
+    pair = public_query(db, cards=False).filter(Article.slug == slug).first()
+    if not pair:
         raise HTTPException(status_code=404, detail="Article not found")
+    article, _tax = pair
 
     now = time.time()
     if len(_recent_views) > 5000:
@@ -615,9 +616,10 @@ def record_article_view(slug: str, request: Request, db: Session = Depends(get_d
 
 @app.get("/articles/{slug}")
 def get_article_by_slug(slug: str, response: Response, db: Session = Depends(get_db)):
-    article = db.query(Article).filter(Article.slug == slug).first()
-    if not article:
+    pair = public_query(db, cards=False).filter(Article.slug == slug).first()
+    if not pair:
         raise HTTPException(status_code=404, detail="Article not found")
+    article, tax = pair
     media_rows = (
         db.query(ArticleMedia)
         .filter(ArticleMedia.article_id == article.id)
@@ -628,7 +630,6 @@ def get_article_by_slug(slug: str, response: Response, db: Session = Depends(get
         )
         .all()
     )
-    tax = load_cached_resolution(db, article)
     previous = neighbor_article(db, article, tax, newer=False)
     nxt = neighbor_article(db, article, tax, newer=True)
     related_insert = None
@@ -648,9 +649,10 @@ def get_article_by_slug(slug: str, response: Response, db: Session = Depends(get
 
 @app.get("/articles/{slug}/translation/{language}")
 def article_translation(slug: str, language: str, db: Session = Depends(get_db)):
-    article = db.query(Article).filter(Article.slug == slug).first()
-    if not article:
+    pair = public_query(db, cards=False).filter(Article.slug == slug).first()
+    if not pair:
         raise HTTPException(status_code=404, detail="Article not found")
+    article, _tax = pair
     row = (
         db.query(ArticleTranslation)
         .filter(
