@@ -209,3 +209,37 @@ print('NO_DATABASE_IMPORT')'''
     child = subprocess.run([sys.executable,'-c',code],env=env,capture_output=True,text=True,timeout=20)
     assert child.returncode == 0, child.stderr
     assert child.stdout.strip() == 'NO_DATABASE_IMPORT'
+
+
+def test_groq_only_writer_config_is_valid():
+    env = settings()
+    env.pop("OPENAI_API_KEY")
+    env["NEWS_WRITER_ORDER"] = "groq"
+    env["GROQ_API_KEY"] = "FIXTURE_ONLY"
+    assert runtime.writer_configuration_error(env) is None
+    assert runtime_errors(env) == []
+
+
+def test_cloudflare_only_writer_config_is_valid():
+    env = settings()
+    env.pop("OPENAI_API_KEY")
+    env["NEWS_WRITER_ORDER"] = "cloudflare"
+    env["CLOUDFLARE_API_TOKEN"] = "FIXTURE_ONLY"
+    env["CLOUDFLARE_ACCOUNT_ID"] = "a" * 32
+    assert runtime.writer_configuration_error(env) is None
+    assert runtime_errors(env) == []
+
+
+def test_unknown_writer_name_fails_closed_even_with_other_keys():
+    env = settings()
+    env["NEWS_WRITER_ORDER"] = "groq,unknown"
+    env["GROQ_API_KEY"] = "FIXTURE_ONLY"
+    assert runtime.writer_configuration_error(env) == "invalid_news_writer_order"
+    assert "invalid_news_writer_order" in runtime_errors(env)
+
+
+def test_selected_writer_without_credential_cannot_borrow_unselected_key():
+    env = settings()
+    env["NEWS_WRITER_ORDER"] = "groq"
+    assert runtime.writer_configuration_error(env) == "news_ai_key_missing"
+    assert "news_ai_key_missing" in runtime_errors(env)
