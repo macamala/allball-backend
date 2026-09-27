@@ -223,6 +223,169 @@ def recent_public_sport_inventory(db: Session, max_age_hours: int = 72) -> dict[
     return {str(sport): int(count or 0) for sport, count in rows if sport}
 
 
+
+def repair_recent_news_images(
+    db: Session,
+    *,
+    limit: int = 80,
+    max_age_hours: int = 72,
+    recover_limit: int = 8,
+) -> int:
+    """Verify recent public hero URLs and recover fresh images without AI.
+
+    A syntactically plausible image URL is not enough: it must actually serve
+    image bytes. Broken public heroes are refreshed from the canonical source
+    page when possible; otherwise the row is held until a future recovery finds
+    a working image.
+    """
+    from collections import Counter
+
+    from bot.extract import extract_from_url
+    from bot.news_image_http import news_image_is_reachable, probe_news_images
+
+    cutoff = datetime.utcnow() - timedelta(hours=max(1, int(max_age_hours)))
+    rows = (
+        db.query(Article, ArticleTaxonomyResolution)
+        .join(
+            ArticleTaxonomyResolution,
+            ArticleTaxonomyResolution.article_id == Article.id,
+        )
+        .filter(
+            ArticleTaxonomyResolution.resolver_version == RESOLVER_VERSION,
+            ArticleTaxonomyResolution.public_ok.is_(True),
+            Article.image_url.isnot(None),
+            Article.image_url != "",
+            func.coalesce(Article.published_at, Article.created_at) >= cutoff,
+        )
+        .order_by(
+            func.coalesce(Article.published_at, Article.created_at).desc(),
+            Article.id.desc(),
+        )
+        .limit(max(1, min(int(limit), 160)))
+        .all()
+    )
+
+    probes = probe_news_images(
+        [article.image_url for article, _tax in rows if article.image_url],
+        max_workers=6,
+    )
+    broken = [
+        (article, tax, probes.get(str(article.image_url or "").strip(), (False, "probe_missing"))[1])
+        for article, tax in rows
+        if not probes.get(str(article.image_url or "").strip(), (False, "probe_missing"))[0]
+    ]
+    reasons = Counter(reason for _article, _tax, reason in broken)
+    refreshed = 0
+    hidden = 0
+    touched_ids: set[int] = set()
+
+    for article, tax, _reason in broken[: max(1, min(int(recover_limit), 16))]:
+        touched_ids.add(int(article.id))
+        replacement = None
+        source_url = str(article.source_url or "").strip()
+        if source_url:
+            try:
+                _text, candidate = extract_from_url(source_url, timeout=12.0)
+            except Exception:
+                candidate = None
+            candidate = str(candidate or "").strip()
+            if (
+                candidate
+                and len(candidate) <= 500
+                and candidate != str(article.image_url or "").strip()
+                and news_image_is_publishable(candidate)
+                and news_image_is_reachable(candidate)
+            ):
+                replacement = candidate
+
+        if replacement:
+            article.image_url = replacement
+            db.add(article)
+            resolved = resolve_article_competition(article)
+            persist_public_article(db, article, resolved, commit=False)
+            if tax.public_ok:
+                refreshed += 1
+                continue
+
+        article.image_url = None
+        tax.hero_media_kind = "MISSING"
+        tax.public_ok = False
+        db.add(article)
+        db.add(tax)
+        hidden += 1
+
+    # A previously held recent row may become recoverable when the publisher
+    # changes its hero URL. Re-extract a small bounded set every cycle.
+    recovery_rows = (
+        db.query(Article, ArticleTaxonomyResolution)
+        .join(
+            ArticleTaxonomyResolution,
+            ArticleTaxonomyResolution.article_id == Article.id,
+        )
+        .filter(
+            ArticleTaxonomyResolution.resolver_version == RESOLVER_VERSION,
+            ArticleTaxonomyResolution.public_ok.is_(False),
+            Article.source_url.isnot(None),
+            Article.source_url != "",
+            ((Article.image_url.is_(None)) | (Article.image_url == "")),
+            func.coalesce(Article.published_at, Article.created_at) >= cutoff,
+        )
+        .order_by(
+            func.coalesce(Article.published_at, Article.created_at).desc(),
+            Article.id.desc(),
+        )
+        .limit(max(1, min(int(recover_limit), 16)))
+        .all()
+    )
+    recovered = 0
+    for article, tax in recovery_rows:
+        if int(article.id) in touched_ids:
+            continue
+        try:
+            _text, candidate = extract_from_url(str(article.source_url), timeout=12.0)
+        except Exception:
+            candidate = None
+        candidate = str(candidate or "").strip()
+        if (
+            not candidate
+            or len(candidate) > 500
+            or not news_image_is_publishable(candidate)
+            or not news_image_is_reachable(candidate)
+        ):
+            continue
+        article.image_url = candidate
+        db.add(article)
+        resolved = resolve_article_competition(article)
+        persist_public_article(db, article, resolved, commit=False)
+        if tax.public_ok:
+            recovered += 1
+
+    changed = refreshed + hidden + recovered
+    if changed:
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("recent News image repair failed")
+            return 0
+        logger.info(
+            "[public_index] image repair checked=%s broken=%s refreshed=%s hidden=%s recovered=%s reasons=%s",
+            len(rows),
+            len(broken),
+            refreshed,
+            hidden,
+            recovered,
+            dict(reasons),
+        )
+    elif broken:
+        logger.info(
+            "[public_index] image repair checked=%s broken=%s changed=0 reasons=%s",
+            len(rows),
+            len(broken),
+            dict(reasons),
+        )
+    return changed
+
 def repair_recent_duplicate_news(
     db: Session,
     *,
