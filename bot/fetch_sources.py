@@ -560,6 +560,25 @@ def _fetch_and_store_all_articles(
             return classify_article(item["title"], item.get("summary") or "",
                 feed_kind=feed.get("kind", "mixed"), feed_sport=feed.get("sport"),
                 feed_league=feed.get("league"), feed_country=feed.get("country"))
+        unknown_samples = []
+        for candidate in queued:
+            if len(unknown_samples) >= 15:
+                break
+            try:
+                candidate_tags = classify_candidate(candidate)
+            except Exception:
+                continue
+            if candidate_tags.sport is None:
+                feed_meta = candidate.get("feed") or {}
+                unknown_samples.append({
+                    "title": str(candidate.get("title") or "")[:120],
+                    "feed_sport": feed_meta.get("sport"),
+                    "feed_kind": feed_meta.get("kind"),
+                    "publisher": feed_meta.get("publisher"),
+                })
+        if unknown_samples:
+            logger.info("[fetch_sources] unknown_sport_samples=%s", unknown_samples)
+
         queued, admission = fair_news_queue(queued, classify_candidate,
             sport_order=[row["id"] for row in SPORTS if row["active"] and row["supports_news"]])
         logger.info("[fetch_sources] eligible=%s rejected=%s", len(queued), admission)
