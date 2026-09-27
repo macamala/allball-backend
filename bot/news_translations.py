@@ -24,7 +24,7 @@ from .news_policy import protected_proper_names
 logger = logging.getLogger(__name__)
 
 LANGUAGES = ("sr", "es", "de", "fr", "it", "pt")
-TRANSLATION_PROVIDER = "xkiro-free-v7"
+TRANSLATION_PROVIDER = "xkiro-free-v8"
 CYRILLIC_RE = re.compile(r"[\u0400-\u04FF]")
 NUMBER_RE = re.compile(r"(?<!\w)\d+(?:[.,:/–-]\d+)*(?:%|\b)")
 
@@ -50,8 +50,12 @@ FACTUAL RULES:
 - Serbian should sound like a passionate sports columnist from the Balkans,
   not like a literal machine translation.
 
-Return JSON only. The top-level keys must be exactly sr,es,de,fr,it,pt.
-Each language value must be an object with exactly title,summary,body strings.
+Return JSON only.
+Preferred schema: one flat object with exactly these 18 string fields:
+sr_title,sr_summary,sr_body,es_title,es_summary,es_body,
+de_title,de_summary,de_body,fr_title,fr_summary,fr_body,
+it_title,it_summary,it_body,pt_title,pt_summary,pt_body.
+Do not return arrays, prose, markdown or omitted fields.
 """
 
 
@@ -127,8 +131,71 @@ def _translation_reject(reason: str, language: Optional[str] = None):
     return None
 
 
+def _canonical_translation_payload(payload: object):
+    """Accept only structurally equivalent complete translation payloads."""
+    import json
+
+    if not isinstance(payload, dict):
+        return None
+
+    # Some compatible models wrap the requested object once.
+    for wrapper in ("translations", "translation", "result", "data"):
+        inner = payload.get(wrapper)
+        if isinstance(inner, dict):
+            payload = inner
+            break
+
+    required = ("title", "summary", "body")
+
+    # Preferred flat schema: sr_title, sr_summary, sr_body, ...
+    flat = {}
+    flat_ok = True
+    for language in LANGUAGES:
+        row = {}
+        for field in required:
+            key = f"{language}_{field}"
+            value = payload.get(key)
+            if not isinstance(value, str):
+                flat_ok = False
+                break
+            row[field] = value
+        if not flat_ok:
+            break
+        flat[language] = row
+    if flat_ok and set(flat) == set(LANGUAGES):
+        return flat
+
+    # Backward-compatible nested schema. Each language may itself be a JSON
+    # string or a one-item list containing the same required object.
+    nested = {}
+    for language in LANGUAGES:
+        row = payload.get(language)
+        if isinstance(row, str):
+            try:
+                row = json.loads(row)
+            except (TypeError, ValueError):
+                return None
+        if isinstance(row, list) and len(row) == 1 and isinstance(row[0], dict):
+            row = row[0]
+        if not isinstance(row, dict):
+            return None
+
+        # Allow only well-known harmless wrappers, never guess from free text.
+        if not set(required).issubset(row):
+            for wrapper in ("translation", "article", "content", "result"):
+                inner = row.get(wrapper)
+                if isinstance(inner, dict) and set(required).issubset(inner):
+                    row = inner
+                    break
+        if not set(required).issubset(row):
+            return None
+        nested[language] = {field: row.get(field) for field in required}
+    return nested if set(nested) == set(LANGUAGES) else None
+
+
 def _validate(source: Dict[str, str], payload: object) -> Optional[Dict[str, Dict[str, str]]]:
-    if not isinstance(payload, dict) or set(payload) != set(LANGUAGES):
+    payload = _canonical_translation_payload(payload)
+    if payload is None:
         return _translation_reject("top-level-shape")
     source_combined = "\n".join(source.values())
     source_numbers = _numbers(source_combined)
@@ -250,7 +317,15 @@ def translate_article_payload(article: Article) -> Optional[Dict[str, Dict[str, 
     if payload is None:
         logger.info("[translations] invalid JSON response article=%s", article.id)
         return None
-    return _validate(source, payload)
+    normalized = _canonical_translation_payload(payload)
+    if normalized is None:
+        logger.info(
+            "[translations] unsupported response shape article=%s top_keys=%s",
+            article.id,
+            sorted(payload.keys())[:24] if isinstance(payload, dict) else [],
+        )
+        return None
+    return _validate(source, normalized)
 
 
 def _latest_missing(db: Session, limit: int) -> list[Article]:
