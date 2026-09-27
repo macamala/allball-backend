@@ -47,6 +47,14 @@ NINKOSPORTS VOICE:
 - Never become purple prose. One or two strong lyrical turns are better than a
   paragraph of clichés.
 - Headlines remain clear and factual; the body is where the voice can breathe.
+- Write like a sports columnist, never like a press officer, consultancy memo or AI summary.
+- Prefer concrete human sentences over abstract corporate phrasing.
+- Avoid empty formulations such as "significant factor", "played a major role",
+  "framed the choice", "highlighted the importance", "professional ambition",
+  "the decision rested on", "underscored", "reflected a desire", or "a blend of"
+  unless the wording is genuinely unavoidable to preserve a sourced fact.
+- Vary sentence length. Let one short sentence land after a longer one.
+- Open with the human or sporting heart of the story, not a bureaucratic summary.
 
 Write using ONLY facts explicitly present in the supplied source facts.
 
@@ -80,13 +88,23 @@ def _ninkosports_style(sport: str) -> str:
     sport = (sport or "").strip().lower()
     if sport == "football":
         return """FOOTBALL VOICE:
-Write with the feeling of someone who loves football, not someone compiling a feed.
-Use restrained football poetry: the weight of a shirt, the thin line between joy
-and regret, a season turning on one moment, the old romance of the game.
-Do not invent crowd noise, weather, tension, rivalry, pressure, tactical intent,
-or historical importance unless the source states it.
+Write like someone who has loved football for years, not someone filling a content slot.
+Football is people before data: a shirt can carry memory, a career can turn on a
+single choice, and the game often lives on the thin line between joy and regret.
+Let one or two sentences carry that old romance of football without becoming sentimental.
+Prefer vivid but simple prose over adjectives piled on adjectives.
+Do not invent crowd noise, weather, tension, rivalry, pressure, tactics, dressing-room
+emotion or historical importance unless the source states it.
+Never claim a player "dreamed", "suffered", "felt pressure" or "silenced critics"
+unless the source explicitly supports it.
 A metaphor must decorate a verified fact, never replace one.
-Aim for one memorable lyrical sentence in the opening or closing paragraph."""
+Aim for one memorable lyrical line in the opening or closing paragraph."""
+    if sport == "basketball":
+        return """BASKETBALL VOICE:
+Keep the prose warm, direct and human. Let relationships, careers and the pursuit
+of winning carry the story when the source supports them. Avoid front-office or
+press-release language. Use one elegant turn of phrase at most; the game should
+feel alive without invented locker-room emotion, pressure or legacy."""
     if sport in {"boxing", "mma"}:
         return """COMBAT VOICE:
 Write with controlled intensity and respect for the fighters. Let the prose carry
@@ -100,8 +118,10 @@ fact-bound; never invent conditions, strategy, danger or turning points."""
 Use clean, graceful prose with a sense of rhythm and momentum, but never invent
 pressure, nerves, dominance or match flow."""
     return """SPORTS VOICE:
-Tell the story with warmth, rhythm and a little literary character while keeping
-every event-specific factual claim anchored to the supplied source."""
+Tell the story like a human sports columnist: warm, concrete and rhythmic.
+Avoid press-release language and abstract corporate nouns. Find the human shape
+inside the verified facts, then write it cleanly with one restrained literary
+touch. Every event-specific factual claim must remain anchored to the source."""
 
 
 LENGTH_RETRY_HINT = (
