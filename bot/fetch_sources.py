@@ -421,8 +421,10 @@ def _ingest_item(db: Session, item: Dict, use_ai: bool, max_ai_chars: int, ai_bu
                             incident,
                             note="corrective rewrite passed deterministic and semantic fact gates",
                         )
-                elif incident is not None:
-                    mark_retry(db, incident, retry_reason or "retry-failed")
+                else:
+                    rewrite_reason = retry_reason or "retry-failed"
+                    if incident is not None:
+                        mark_retry(db, incident, rewrite_reason)
 
         if rewrite_reason == "too-short":
             _hold_ai_source(source_url, "too-short")
