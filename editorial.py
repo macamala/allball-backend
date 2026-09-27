@@ -694,6 +694,15 @@ def classify_media_url(
     return "UNKNOWN"
 
 
+def news_image_is_publishable(url: Optional[str]) -> bool:
+    """Hard News contract: every public story needs a real hero image.
+
+    UNKNOWN is allowed because many sports CDNs omit a useful file extension or
+    dimensions, but known logos/graphics/placeholders/missing URLs are rejected.
+    """
+    return classify_media_url(url) in {"EDITORIAL_PHOTO", "UNKNOWN"}
+
+
 def score_image_candidate(candidate: Dict) -> float:
     url = candidate.get("url")
     kind = classify_media_url(
@@ -794,6 +803,7 @@ def evaluate_quality(
         "truncation",
         "weak_body",
         "non_english",
+        "unusable_image",
     }
     return {
         "ok": not any(flag in premium_flags for flag in flags),
