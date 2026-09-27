@@ -7,7 +7,7 @@ def _fixture_text():
         " The synthetic report stays limited to the supplied match record and repeats no extra claims."
         " It adds no venue, date, crowd detail, tactical judgment, injury update, quotation or outside context."
     )
-    return base + filler * 6
+    return base + filler * 2
 
 
 def test_quality_fixture_accepts_all_source_numbers_names_and_latin_serbian():
