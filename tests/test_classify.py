@@ -254,3 +254,12 @@ def test_distinctive_football_coaches_from_live_unknown_samples():
     )
     assert first.sport=="football"
     assert second.sport=="football"
+
+
+def test_schjelderup_live_unknown_sample_is_football():
+    result=classify_article(
+        "Hugo Pereira rende-se a Schjelderup: Está com capacidade para evoluir nos Big Five",
+        "The report discusses Schjelderup and his development at club level.",
+        feed_kind="mixed",
+    )
+    assert result.sport=="football"
