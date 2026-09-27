@@ -46,7 +46,7 @@ def validate_public_url(url):
         raise ValueError('nonpublic_feed_address')
 
 
-def _read(client, url, deadline, allowed=None):
+def _read(client, url, deadline, allowed=None, max_bytes=MAX_BYTES):
     for _ in range(4):
         if time.monotonic() > deadline:
             raise ValueError('feed_deadline')
@@ -65,13 +65,13 @@ def _read(client, url, deadline, allowed=None):
             data = bytearray()
             for chunk in response.iter_bytes():
                 data.extend(chunk)
-                if len(data) > MAX_BYTES or time.monotonic() > deadline:
+                if len(data) > max_bytes or time.monotonic() > deadline:
                     raise ValueError('feed_response_limit')
             return response.status_code, url, bytes(data)
     raise ValueError('feed_redirect_limit')
 
 
-def read_news_feed(url):
+def read_news_feed(url, *, max_bytes=MAX_BYTES):
     """Return only a successful allowed feed body. No implicit parse-time I/O.
 
     The body and read deadline are bounded. DNS and socket establishment still
@@ -85,8 +85,14 @@ def read_news_feed(url):
         robots = _robots_for(client, parts, deadline)
         if robots is not None and not robots.can_fetch(USER_AGENT, url):
             raise ValueError('feed_robots_disallowed')
-        status, final_url, body = _read(client, url, deadline,
-            (lambda target: robots.can_fetch(USER_AGENT, target)) if robots else None)
+        bounded = max(1, min(int(max_bytes or MAX_BYTES), 4_000_000))
+        status, final_url, body = _read(
+            client,
+            url,
+            deadline,
+            (lambda target: robots.can_fetch(USER_AGENT, target)) if robots else None,
+            bounded,
+        )
         if robots and not robots.can_fetch(USER_AGENT, final_url):
             raise ValueError('feed_redirect_robots_disallowed')
         if status != 200:
