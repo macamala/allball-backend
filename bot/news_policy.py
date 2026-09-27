@@ -56,6 +56,39 @@ def freshness_reason(stamp, now, max_age_hours=72):
     return None
 
 
+def newsworthiness_score(item):
+    """Small editorial signal only; never changes factual admission."""
+    blob = " ".join(
+        str(item.get(key) or "") for key in ("title", "summary")
+    ).lower()
+    score = 0
+    high_patterns = (
+        r"\b(final|semi[- ]?final|quarter[- ]?final|champion|title)\b",
+        r"\b(wins?|won|beats?|beat|defeats?|defeated|knockout|knocks? out)\b",
+        r"\b(signs?|signed|transfer|joins?|joined|leaves?|depart|sacked|fired|resigns?|retires?|retirement)\b",
+        r"\b(injury|injured|ruled out|suspended|banned|ban)\b",
+        r"\b(record|world record|contract|manager|coach)\b",
+    )
+    for pattern in high_patterns:
+        if re.search(pattern, blob):
+            score += 3
+
+    low_patterns = (
+        r"\bcalendar\b",
+        r"\bschedule\b",
+        r"\bfixture list\b",
+        r"\btickets?\b|ticket sale",
+        r"\bevent guide\b|fan(?:'s)? guide|how to watch|where to watch",
+        r"watch and earn|everything you need to know",
+        r"pack probabilities|patch notes|soundtrack|offer\b",
+        r"community api|rankings explained|terms and conditions|policy update",
+    )
+    for pattern in low_patterns:
+        if re.search(pattern, blob):
+            score -= 5
+    return score
+
+
 def fair_news_queue(items, classify, *, now=None, max_age_hours=72, sport_order=()):
     """Newest per sport, then round robin; classify evidence before spending AI.
 
@@ -84,8 +117,30 @@ def fair_news_queue(items, classify, *, now=None, max_age_hours=72, sport_order=
     order += sorted(set(buckets) - set(order))
     if order:
         offset = int(now.timestamp() // 600) % len(order)
-        order = order[offset:] + order[:offset]
-    queues = {s: deque(sorted(buckets[s], key=lambda x: publication_time(x['published_at']), reverse=True)) for s in order}
+        rotated = order[offset:] + order[:offset]
+        rotation_rank = {sport: index for index, sport in enumerate(rotated)}
+        # News value decides the tier; rotation only breaks ties so one sport
+        # cannot own the small free-AI budget forever.
+        order = sorted(
+            order,
+            key=lambda sport: (
+                -max(newsworthiness_score(item) for item in buckets[sport]),
+                rotation_rank[sport],
+            ),
+        )
+    queues = {
+        sport: deque(
+            sorted(
+                buckets[sport],
+                key=lambda item: (
+                    newsworthiness_score(item),
+                    publication_time(item['published_at']),
+                ),
+                reverse=True,
+            )
+        )
+        for sport in order
+    }
     output = []
     while any(queues.values()):
         for s in order:
