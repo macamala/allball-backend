@@ -118,3 +118,21 @@ def test_lowest_inventory_wins_after_basic_floor():
         coverage_floor=6,
     )
     assert result[0]['sport_fixture']=='tennis'
+
+
+def test_equally_empty_sports_prefer_admission_ready_candidate():
+    raw=item('lacrosse', 1)
+    raw['title']='Lacrosse team prepares for international match'
+    ready=item('netball', 1)
+    ready['title']='Netball team prepares for international match'
+    ready['_extracted']='Netball source body with verified competition facts.'
+    ready['_extracted_image']='https://example.test/netball-photo.jpg'
+    result,_=fair_news_queue(
+        [raw,ready],
+        classify,
+        now=NOW,
+        sport_order=['lacrosse','netball'],
+        sport_inventory={'lacrosse':0,'netball':0},
+        coverage_floor=6,
+    )
+    assert result[0]['sport_fixture']=='netball'
