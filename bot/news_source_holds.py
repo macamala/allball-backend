@@ -1,0 +1,171 @@
+"""Durable cooldowns for News source URLs that failed AI/editorial admission.
+
+Production stores only a SHA-256 source fingerprint plus expiry/reason in the
+existing Postgres database. No new Railway service or volume is required.
+Offline/non-Postgres modes retain a bounded in-process fallback.
+"""
+from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
+import hashlib
+import logging
+import os
+import time
+
+logger = logging.getLogger(__name__)
+
+_MEMORY = {}
+_MEMORY_MAX = 1000
+_SCHEMA_READY = False
+
+
+def _fingerprint(url: str) -> str:
+    return hashlib.sha256((url or "").strip().encode("utf-8")).hexdigest()
+
+
+def _memory_held(key: str) -> bool:
+    now = time.monotonic()
+    expiry = _MEMORY.get(key)
+    if expiry is None:
+        return False
+    if expiry <= now:
+        _MEMORY.pop(key, None)
+        return False
+    return True
+
+
+def _memory_hold(key: str, hours: int) -> None:
+    now = time.monotonic()
+    if len(_MEMORY) >= _MEMORY_MAX:
+        expired = [k for k, expiry in _MEMORY.items() if expiry <= now]
+        for item in expired[:250]:
+            _MEMORY.pop(item, None)
+        if len(_MEMORY) >= _MEMORY_MAX:
+            oldest = min(_MEMORY, key=_MEMORY.get)
+            _MEMORY.pop(oldest, None)
+    _MEMORY[key] = now + max(1, int(hours)) * 3600
+
+
+def _postgres_dsn() -> str | None:
+    try:
+        from news_runtime import accounting_backend, postgres_dsn
+        if accounting_backend(os.environ) != "postgres":
+            return None
+        return postgres_dsn(os.environ)
+    except Exception:
+        return None
+
+
+def _connect(dsn: str):
+    import psycopg2
+    return psycopg2.connect(
+        dsn,
+        connect_timeout=5,
+        application_name="ninkosports-news-source-holds",
+    )
+
+
+def _ensure_schema(cursor) -> None:
+    global _SCHEMA_READY
+    if _SCHEMA_READY:
+        return
+    cursor.execute(
+        "CREATE TABLE IF NOT EXISTS news_ai_source_holds ("
+        "source_hash CHAR(64) PRIMARY KEY,"
+        "expires_at TIMESTAMPTZ NOT NULL,"
+        "reason VARCHAR(80),"
+        "updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())"
+    )
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS ix_news_ai_source_holds_expiry "
+        "ON news_ai_source_holds (expires_at)"
+    )
+    _SCHEMA_READY = True
+
+
+def source_on_cooldown(url: str) -> bool:
+    key = _fingerprint(url)
+    if not key:
+        return False
+    dsn = _postgres_dsn()
+    if not dsn:
+        return _memory_held(key)
+    connection = cursor = None
+    try:
+        connection = _connect(dsn)
+        cursor = connection.cursor()
+        cursor.execute("SET LOCAL lock_timeout = '2s'")
+        cursor.execute("SET LOCAL statement_timeout = '5s'")
+        _ensure_schema(cursor)
+        cursor.execute(
+            "SELECT 1 FROM news_ai_source_holds "
+            "WHERE source_hash=%s AND expires_at > NOW()",
+            (key,),
+        )
+        row = cursor.fetchone()
+        connection.commit()
+        return bool(row)
+    except Exception as exc:
+        if connection is not None:
+            try:
+                connection.rollback()
+            except Exception:
+                pass
+        logger.warning("[source_holds] read fallback: %s", type(exc).__name__)
+        return _memory_held(key)
+    finally:
+        if cursor is not None:
+            try:
+                cursor.close()
+            except Exception:
+                pass
+        if connection is not None:
+            try:
+                connection.close()
+            except Exception:
+                pass
+
+
+def hold_source(url: str, reason: str = "rejected", hours: int = 6) -> None:
+    key = _fingerprint(url)
+    if not key:
+        return
+    hours = max(1, min(int(hours), 72))
+    _memory_hold(key, hours)
+    dsn = _postgres_dsn()
+    if not dsn:
+        return
+    expires = datetime.now(timezone.utc) + timedelta(hours=hours)
+    connection = cursor = None
+    try:
+        connection = _connect(dsn)
+        cursor = connection.cursor()
+        cursor.execute("SET LOCAL lock_timeout = '2s'")
+        cursor.execute("SET LOCAL statement_timeout = '5s'")
+        _ensure_schema(cursor)
+        cursor.execute(
+            "INSERT INTO news_ai_source_holds(source_hash,expires_at,reason,updated_at) "
+            "VALUES (%s,%s,%s,NOW()) "
+            "ON CONFLICT(source_hash) DO UPDATE SET "
+            "expires_at=EXCLUDED.expires_at,reason=EXCLUDED.reason,updated_at=NOW()",
+            (key, expires, str(reason or "rejected")[:80]),
+        )
+        connection.commit()
+    except Exception as exc:
+        if connection is not None:
+            try:
+                connection.rollback()
+            except Exception:
+                pass
+        logger.warning("[source_holds] write fallback: %s", type(exc).__name__)
+    finally:
+        if cursor is not None:
+            try:
+                cursor.close()
+            except Exception:
+                pass
+        if connection is not None:
+            try:
+                connection.close()
+            except Exception:
+                pass
