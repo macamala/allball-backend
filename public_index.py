@@ -277,6 +277,33 @@ def repair_recent_duplicate_news(
 
 
 
+def _distinctive_title_sport_support(title: str, sport: str) -> bool:
+    """Require an alias unique to the proposed sport in the headline itself."""
+    from bot.taxonomy import SPORT_ALIASES
+
+    haystack = " " + (title or "").casefold() + " "
+    aliases = [str(alias).casefold() for alias in SPORT_ALIASES.get(sport, ()) if str(alias).strip()]
+    other_aliases = {
+        str(alias).casefold().strip()
+        for other_sport, rows in SPORT_ALIASES.items()
+        if other_sport != sport
+        for alias in rows
+        if str(alias).strip()
+    }
+    for alias in aliases:
+        needle = alias.strip()
+        if len(needle) < 4 or needle in other_aliases:
+            continue
+        # Aliases with intentional surrounding spaces already encode a word
+        # boundary; otherwise accept exact phrase containment in the padded title.
+        if alias.startswith(" ") or alias.endswith(" "):
+            if alias in haystack:
+                return True
+        elif needle in haystack:
+            return True
+    return False
+
+
 def repair_recent_sport_mislabels(
     db: Session,
     *,
@@ -326,6 +353,9 @@ def repair_recent_sport_mislabels(
             independent.sport
             and tax.resolved_sport
             and independent.sport != tax.resolved_sport
+            and _distinctive_title_sport_support(
+                article.title or "", independent.sport
+            )
         ):
             logger.warning(
                 "[public_index] hide sport mismatch article=%s cached=%s independent=%s title=%s",
