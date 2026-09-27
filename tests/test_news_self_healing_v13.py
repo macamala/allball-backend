@@ -275,3 +275,22 @@ def test_unknown_sport_enrichment_is_bounded_and_reuses_source(monkeypatch):
     assert len(calls) == 3
     assert all(rows[i].get("_extracted") for i in range(3))
     assert all(not rows[i].get("_extracted") for i in range(3, 6))
+
+
+def test_correction_retry_preserves_translation_reserve(monkeypatch, tmp_path):
+    from bot.news_budget import AiRequestBudget, ai_budget_scope
+
+    monkeypatch.setenv("NEWS_TRANSLATIONS_ENABLED", "1")
+    monkeypatch.setenv("NEWS_TRANSLATIONS_PER_CYCLE", "6")
+    budget = AiRequestBudget(4, str(tmp_path / "budget.sqlite"), daily_limit=20)
+    with ai_budget_scope(budget):
+        budget.attempts = 1
+        assert ingest._correction_retry_allowed()
+        budget.attempts = 2
+        assert not ingest._correction_retry_allowed()
+
+    monkeypatch.setenv("NEWS_TRANSLATIONS_ENABLED", "0")
+    with ai_budget_scope(budget):
+        budget.blocked_reason = None
+        budget.attempts = 2
+        assert ingest._correction_retry_allowed()
