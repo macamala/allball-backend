@@ -59,7 +59,7 @@ def test_hydrate_requires_explicit_timestamp_and_article_prose(monkeypatch):
       <meta property="article:published_time" content="2026-09-26T12:00:00+00:00">
     </head><body><main><p>{body}</p></main></body></html>'''.encode()
     monkeypatch.setattr(idx, 'read_news_feed', lambda url: html)
-    monkeypatch.setattr(idx, 'freshness_reason', lambda stamp, now: None)
+    monkeypatch.setattr(idx, 'freshness_reason', lambda stamp, now, **kwargs: None)
     item=idx._hydrate(cfg, 'https://www.ihf.info/media-center/news/test-story', 'fallback')
     assert item
     assert item['feed']['sport']=='handball'
@@ -75,4 +75,20 @@ def test_hydrate_requires_explicit_timestamp_and_article_prose(monkeypatch):
 
 def test_official_index_catalog_covers_target_free_sources():
     sports={row['sport'] for row in idx.HTML_INDEXES} | {row['sport'] for row in idx.SITEMAPS}
-    assert {'handball','futsal','valorant','league-of-legends','call-of-duty','overwatch','rocket-league'} <= sports
+    assert {
+        'handball','futsal','valorant','league-of-legends','call-of-duty',
+        'overwatch','rocket-league','athletics','counter-strike','netball'
+    } <= sports
+
+
+def test_embedded_app_state_links_are_discovered(monkeypatch):
+    html=b'''<html><script>
+      window.__STATE__={"url":"/en-us/news/24246297/owcs-2026-season/"};
+    </script></html>'''
+    monkeypatch.setattr(idx, 'read_news_feed', lambda url: html)
+    cfg=next(row for row in idx.HTML_INDEXES if row['id']=='overwatch-esports')
+    rows=idx._anchor_candidates(cfg)
+    assert rows == [(
+        'https://overwatch.blizzard.com/en-us/news/24246297/owcs-2026-season/',
+        '',
+    )]
