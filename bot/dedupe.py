@@ -9,18 +9,35 @@ from sqlalchemy.orm import Session
 
 from models import Article
 from .textutil import normalize_title
+from .news_policy import canonical_news_url
 
 
 def existing_by_url(db: Session, source_url: str) -> Optional[Article]:
     if not source_url:
         return None
-    return (
+    exact = (
         db.query(Article)
         .filter(
             (Article.external_id == source_url) | (Article.source_url == source_url)
         )
         .first()
     )
+    if exact is not None:
+        return exact
+    target = canonical_news_url(source_url)
+    if not target:
+        return None
+    recent = (
+        db.query(Article)
+        .filter(Article.source_url.isnot(None))
+        .order_by(Article.id.desc())
+        .limit(500)
+        .all()
+    )
+    for article in recent:
+        if canonical_news_url(article.source_url or article.external_id or "") == target:
+            return article
+    return None
 
 
 def _title_tokens(value: str) -> set[str]:
