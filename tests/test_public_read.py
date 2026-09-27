@@ -134,5 +134,30 @@ def test_bbc_programme_still_is_not_public_hero():
         assert detail["hero_media_kind"] in {"GRAPHIC", "MISSING"}
         listed = client.get("/articles?sport=football&limit=50").json()
         row = next((item for item in listed if item["slug"] == article.slug), None)
-        if row:
-            assert row["image_url"] in {None, ""}
+        assert row is None
+
+
+def test_missing_image_is_never_public():
+    article = _make(
+        slug="missing-image-hidden",
+        title="Arsenal announce a Premier League squad update",
+        image_url=None,
+        external_id="https://example.com/missing-image-hidden",
+    )
+    db = SessionLocal()
+    try:
+        pairs = fetch_public(db, sport="football", limit=100)
+        assert all(row.id != article.id for row, _ in pairs)
+    finally:
+        db.close()
+
+
+def test_public_query_has_global_image_contract():
+    db = SessionLocal()
+    try:
+        compiled = str(public_query(db, cards=True).statement.compile(compile_kwargs={"literal_binds": False}))
+        lower = compiled.lower()
+        assert "image_url is not null" in lower
+        assert "hero_media_kind" in lower
+    finally:
+        db.close()
