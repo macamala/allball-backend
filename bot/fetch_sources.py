@@ -279,6 +279,44 @@ def _fetch_feed_entries(feed_cfg: Dict, max_articles: int) -> List[Dict]:
     return fresh[:max(1, max_articles)]
 
 
+def _reconcile_public_taxonomy(tags, resolved, feed: Dict):
+    """Preserve source-proven sport unless rewritten copy supplies a contradiction."""
+    from taxonomy_resolver import TaxonomyResolution
+
+    trusted_feed = (
+        feed.get("kind") == "league"
+        and feed.get("sport")
+        and feed.get("sport") == tags.sport
+    )
+    if resolved.sport and tags.sport and resolved.sport != tags.sport:
+        return None, "taxonomy-conflict"
+
+    if not resolved.sport and tags.sport:
+        competition = None
+        competition_confidence = 0.0
+        evidence = [f"source-classifier-sport:{getattr(tags, 'reason', 'evidence')}"]
+        if trusted_feed and feed.get("league") and tags.league == feed.get("league"):
+            competition = tags.league
+            competition_confidence = 0.86
+            evidence.append("trusted-dedicated-feed-competition")
+        confidence = {
+            "high": 0.92,
+            "medium": 0.84,
+            "low": 0.76,
+        }.get(getattr(tags, "confidence", None), 0.76)
+        resolved = TaxonomyResolution(
+            sport=tags.sport,
+            competition=competition,
+            sport_confidence=confidence,
+            competition_confidence=competition_confidence,
+            evidence=evidence,
+        )
+
+    if not resolved.sport:
+        return None, "taxonomy-unresolved-after-rewrite"
+    return resolved, None
+
+
 def _ingest_item(db: Session, item: Dict, use_ai: bool, max_ai_chars: int, ai_budget: int) -> tuple:
     """Returns (created_article_or_None, ai_used_bool)."""
     # Budget absence is never permission to publish copied source prose.
@@ -475,7 +513,7 @@ def _ingest_item(db: Session, item: Dict, use_ai: bool, max_ai_chars: int, ai_bu
         logger.info("[fetch_sources] hold original draft: %s", draft_reason)
         return None, False
 
-    from taxonomy_resolver import TaxonomyResolution, resolve_article_competition
+    from taxonomy_resolver import resolve_article_competition
 
     class _Probe:
         pass
@@ -488,31 +526,18 @@ def _ingest_item(db: Session, item: Dict, use_ai: bool, max_ai_chars: int, ai_bu
     probe.sport = tags.sport
     probe.league = tags.league
     resolved = resolve_article_competition(probe)
-    trusted_feed = (
-        feed.get("kind") == "league"
-        and feed.get("sport")
-        and feed.get("sport") == tags.sport
-    )
-    if resolved.sport and tags.sport and resolved.sport != tags.sport:
-        _hold_ai_source(source_url, "taxonomy-conflict")
+    rewritten_sport = resolved.sport
+    resolved, taxonomy_reason = _reconcile_public_taxonomy(tags, resolved, feed)
+    if taxonomy_reason:
+        _hold_ai_source(source_url, taxonomy_reason)
         logger.info(
-            "[fetch_sources] hold taxonomy conflict resolved=%s classified=%s title=%s",
-            resolved.sport, tags.sport, item["title"][:80],
+            "[fetch_sources] hold taxonomy reason=%s classified=%s rewritten=%s title=%s",
+            taxonomy_reason,
+            tags.sport or "unknown",
+            rewritten_sport or "unknown",
+            item["title"][:80],
         )
         return None, False
-    if not resolved.sport and trusted_feed:
-        competition = None
-        competition_confidence = 0.0
-        if feed.get("league") and tags.league == feed.get("league"):
-            competition = tags.league
-            competition_confidence = 0.86
-        resolved = TaxonomyResolution(
-            sport=tags.sport,
-            competition=competition,
-            sport_confidence=0.90,
-            competition_confidence=competition_confidence,
-            evidence=["trusted-dedicated-feed-sport"],
-        )
     stamp_sport = resolved.sport
     stamp_league = resolved.public_competition
 
