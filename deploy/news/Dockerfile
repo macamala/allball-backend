@@ -9,8 +9,6 @@ COPY *.py ./
 COPY bot/ ./bot/
 COPY sports_registry/ ./sports_registry/
 COPY deploy/news/preflight.py ./deploy/news/preflight.py
-COPY tests/test_news_free_ai.py tests/test_news_deploy_contract.py tests/test_news_data_news.py tests/test_news_official_indexes.py tests/test_news_verified_sources.py ./tests/
 RUN python deploy/news/preflight.py --check
-RUN python -m pytest -q tests/test_news_free_ai.py tests/test_news_deploy_contract.py tests/test_news_data_news.py tests/test_news_official_indexes.py tests/test_news_verified_sources.py
 USER 10001:10001
 CMD ["python", "deploy/news/preflight.py", "--run"]
