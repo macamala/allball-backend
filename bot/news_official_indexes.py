@@ -77,6 +77,7 @@ HTML_INDEXES = (
     },
     {
         "id": "rocket-league-competitive",
+        "enabled": False,
         "sport": "rocket-league",
         "publisher": "Rocket League",
         "url": "https://www.rocketleague.com/news/tag/competitive",
@@ -102,9 +103,11 @@ HTML_INDEXES = (
             "fort worth",
             "paris major",
         ),
+        "max_age_hours": 168,
     },
     {
         "id": "ittf-table-tennis-news",
+        "enabled": False,
         "sport": "table-tennis",
         "publisher": "ITTF",
         "url": "https://www.ittf.com/news/",
@@ -123,6 +126,7 @@ HTML_INDEXES = (
     },
     {
         "id": "fih-field-hockey-news",
+        "enabled": False,
         "sport": "field-hockey",
         "publisher": "FIH",
         "url": "https://www.fih.hockey/news",
@@ -130,6 +134,24 @@ HTML_INDEXES = (
         "paths": ("/news/",),
         "keywords": ("hockey", "fih"),
         "hydrate_keywords_only": True,
+    },
+    {
+        "id": "hockey-australia-news",
+        "sport": "field-hockey",
+        "publisher": "Hockey Australia",
+        "url": "https://www.hockey.org.au/news",
+        "host": "www.hockey.org.au",
+        "paths": ("/news/",),
+        "keywords": (
+            "hockeyroos",
+            "kookaburras",
+            "hockey",
+            "fih",
+            "world cup",
+            "pro league",
+        ),
+        "hydrate_keywords_only": True,
+        "max_age_hours": 168,
     },
     {
         "id": "wst-snooker-news",
@@ -149,6 +171,7 @@ HTML_INDEXES = (
     },
     {
         "id": "fifa-futsal-news",
+        "enabled": False,
         "sport": "futsal",
         "publisher": "FIFA",
         "url": "https://inside.fifa.com/organisation/news",
@@ -441,6 +464,8 @@ def fetch_official_index_entries(max_per_source: int = 3) -> List[Dict]:
     limit = max(1, min(int(max_per_source), 5))
     items: List[Dict] = []
     for cfg in HTML_INDEXES:
+        if cfg.get("enabled", True) is False:
+            continue
         hydrated = 0
         for url, title in _anchor_candidates(cfg):
             item = _hydrate(cfg, url, title)
