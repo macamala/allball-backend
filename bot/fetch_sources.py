@@ -758,11 +758,17 @@ def _fetch_and_store_all_articles(
         if unknown_samples:
             logger.info("[fetch_sources] unknown_sport_samples=%s", unknown_samples)
 
-        from public_index import recent_public_sport_inventory, repair_recent_duplicate_news
+        from public_index import (
+            recent_public_sport_inventory,
+            repair_recent_duplicate_news,
+            repair_recent_sport_mislabels,
+        )
 
-        # Clean legacy visible duplicates before measuring coverage debt. This is
-        # zero-AI and bounded; it never deletes the underlying article.
+        # Clean legacy visible duplicates and clear cross-sport feed poisoning
+        # before measuring coverage debt. Both repairs are zero-AI, bounded and
+        # never delete the underlying article.
         repair_recent_duplicate_news(db, limit=600, max_age_hours=168)
+        repair_recent_sport_mislabels(db, limit=600, max_age_hours=168)
         sport_inventory = recent_public_sport_inventory(db, max_age_hours=72)
         queued, admission = fair_news_queue(
             queued,
