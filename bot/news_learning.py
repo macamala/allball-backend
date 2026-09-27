@@ -29,10 +29,10 @@ def source_host(url: Optional[str]) -> Optional[str]:
 
 
 def writer_identity():
-    """Current writer identity. Kept behind one function for future router use."""
+    """Identity of the writer that produced the most recent draft in this context."""
     try:
-        from .rewrite_ai import OPENAI_MODEL
-        return "openai", OPENAI_MODEL
+        from .news_writer_router import last_writer_identity
+        return last_writer_identity()
     except Exception:
         return "unknown", "unknown"
 
