@@ -142,4 +142,3 @@ def test_translation_validator_accepts_localized_english_ordinal_value():
     assert translations._numbers('started 16th') == {'16'}
     assert translations._numbers('started 16.') == {'16'}
     assert translations._validate(source, payload)
-
