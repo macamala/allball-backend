@@ -1,0 +1,52 @@
+name: News v14 candidate gate
+
+on:
+  push:
+    branches:
+      - fix/news-v14-publish-guards-20260927
+    paths:
+      - bot/news_translations.py
+      - bot/news_policy.py
+      - bot/fetch_sources.py
+      - tests/test_news_translations.py
+      - tests/test_news03_policy.py
+      - tests/test_news14_publish_guards.py
+      - .github/workflows/news-v14-candidate.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: news-v14-candidate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+      - name: Diff and syntax checks
+        run: |
+          git diff --check dc718e5ad78697e93e184cb049fee0c57ad0d365 HEAD
+          python -m compileall -q bot sports_registry
+      - name: Focused News v14 regression
+        run: |
+          python -m pytest -q -p no:cacheprovider \
+            tests/test_news_translations.py \
+            tests/test_news03_policy.py \
+            tests/test_news14_publish_guards.py \
+            tests/test_classify.py \
+            tests/test_taxonomy_resolver.py \
+            tests/test_taxonomy_leakage.py \
+            tests/test_public_read.py \
+            tests/test_news_verified_sources.py
