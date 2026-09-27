@@ -193,6 +193,58 @@ def _canonical_translation_payload(payload: object):
     return nested if set(nested) == set(LANGUAGES) else None
 
 
+def _json_key(value: str) -> str:
+    normalized = unicodedata.normalize("NFKD", str(value or ""))
+    return "".join(ch for ch in normalized if not unicodedata.combining(ch)).casefold().strip()
+
+
+def _normalize_language_row(row):
+    if isinstance(row, str):
+        import json
+        try:
+            decoded = json.loads(row)
+        except (TypeError, ValueError):
+            return None
+        if decoded is row:
+            return None
+        return _normalize_language_row(decoded)
+
+    if isinstance(row, (list, tuple)):
+        if len(row) != 3 or not all(isinstance(value, str) for value in row):
+            return None
+        return {"title": row[0], "summary": row[1], "body": row[2]}
+
+    if not isinstance(row, dict):
+        return None
+
+    required = {"title", "summary", "body"}
+    if required.issubset(set(row)):
+        return {key: row.get(key) for key in required}
+
+    aliases = {
+        "title": {"title", "naslov", "titulo", "titel", "titre", "titolo"},
+        "summary": {
+            "summary", "sazetak", "resumen", "zusammenfassung",
+            "resume", "sintesi", "resumo",
+        },
+        "body": {"body", "tekst", "text", "cuerpo", "texte", "testo", "corpo"},
+    }
+    normalized = {_json_key(key): value for key, value in row.items()}
+    mapped = {}
+    for target, names in aliases.items():
+        value = next((normalized[name] for name in names if name in normalized), None)
+        if isinstance(value, str):
+            mapped[target] = value
+    if set(mapped) == required:
+        return mapped
+
+    # Tolerate one harmless wrapper such as {"translation": [...]}; do not
+    # recursively combine multiple fields or guess ambiguous shapes.
+    if len(row) == 1:
+        return _normalize_language_row(next(iter(row.values())))
+    return None
+
+
 def _validate(source: Dict[str, str], payload: object) -> Optional[Dict[str, Dict[str, str]]]:
     payload = _canonical_translation_payload(payload)
     if payload is None:
@@ -211,16 +263,16 @@ def _validate(source: Dict[str, str], payload: object) -> Optional[Dict[str, Dic
 
     cleaned: Dict[str, Dict[str, str]] = {}
     for language in LANGUAGES:
-        row = payload.get(language)
-        required = {"title", "summary", "body"}
-        if not isinstance(row, dict) or not required.issubset(set(row)):
+        raw_row = payload.get(language)
+        row = _normalize_language_row(raw_row)
+        if row is None:
             logger.info(
-                "[translations] language shape language=%s keys=%s",
+                "[translations] language shape language=%s type=%s keys=%s",
                 language,
-                sorted(row.keys()) if isinstance(row, dict) else [],
+                type(raw_row).__name__,
+                sorted(raw_row.keys()) if isinstance(raw_row, dict) else [],
             )
             return _translation_reject("language-shape", language)
-        # Ignore harmless model-added metadata; only these three fields are ever stored.
         title = row.get("title")
         summary = row.get("summary")
         body = row.get("body")
