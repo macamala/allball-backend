@@ -279,11 +279,12 @@ def repair_recent_news_images(
     hidden = 0
     touched_ids: set[int] = set()
 
-    for article, tax, _reason in broken[: max(1, min(int(recover_limit), 16))]:
+    refresh_budget = max(0, min(int(recover_limit), 16))
+    for index, (article, tax, _reason) in enumerate(broken):
         touched_ids.add(int(article.id))
         replacement = None
         source_url = str(article.source_url or "").strip()
-        if source_url:
+        if index < refresh_budget and source_url:
             try:
                 _text, candidate = extract_from_url(source_url, timeout=12.0)
             except Exception:
@@ -307,6 +308,9 @@ def repair_recent_news_images(
                 refreshed += 1
                 continue
 
+        # Never leave a known-dead hero in the public feed. Rows beyond the
+        # bounded source-refresh budget are held immediately and can recover in
+        # a later cycle from their canonical source page.
         article.image_url = None
         tax.hero_media_kind = "MISSING"
         tax.public_ok = False
