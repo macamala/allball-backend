@@ -77,7 +77,8 @@ def test_official_index_catalog_covers_target_free_sources():
     sports={row['sport'] for row in idx.HTML_INDEXES} | {row['sport'] for row in idx.SITEMAPS}
     assert {
         'handball','futsal','valorant','league-of-legends','call-of-duty',
-        'overwatch','rocket-league','athletics','counter-strike','netball'
+        'overwatch','rocket-league','athletics','counter-strike','netball',
+        'table-tennis','water-polo','field-hockey','snooker'
     } <= sports
 
 
@@ -92,3 +93,21 @@ def test_embedded_app_state_links_are_discovered(monkeypatch):
         'https://overwatch.blizzard.com/en-us/news/24246297/owcs-2026-season/',
         '',
     )]
+
+
+def test_hydrate_only_keyword_source_allows_generic_anchor_then_filters_body(monkeypatch):
+    cfg=next(row for row in idx.HTML_INDEXES if row['id']=='world-aquatics-water-polo')
+    index_html=b'<a href="/news/4580591/pathway-to-la28">Pathway to LA28 revealed</a>'
+    monkeypatch.setattr(idx,'read_news_feed',lambda url:index_html)
+    assert idx._anchor_candidates(cfg)==[(
+        'https://www.worldaquatics.com/news/4580591/pathway-to-la28',
+        'Pathway to LA28 revealed',
+    )]
+
+
+def test_new_gap_sources_are_article_path_scoped():
+    by_id={row['id']:row for row in idx.HTML_INDEXES}
+    assert by_id['ittf-table-tennis-news']['paths']==('/2026/',)
+    assert by_id['world-aquatics-water-polo']['paths']==('/news/',)
+    assert by_id['fih-field-hockey-news']['paths']==('/news/',)
+    assert by_id['wst-snooker-news']['paths']==('/news/',)
