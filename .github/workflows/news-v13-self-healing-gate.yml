@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - integration/news-v13-self-healing-20260927
+      - news/required-images-20260927
     paths:
       - ".github/workflows/news-v13-self-healing-gate.yml"
       - "bot/**"
@@ -54,4 +55,5 @@ jobs:
             tests/test_news_deploy_contract.py \
             tests/test_classify.py \
             tests/test_public_read.py \
+            tests/test_image_and_article_length.py \
             tests/test_taxonomy_resolver.py
