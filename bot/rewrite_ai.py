@@ -55,6 +55,16 @@ NINKOSPORTS VOICE:
   unless the wording is genuinely unavoidable to preserve a sourced fact.
 - Vary sentence length. Let one short sentence land after a longer one.
 - Open with the human or sporting heart of the story, not a bureaucratic summary.
+- Avoid stock AI sports prose: "dissect the nuances", "unique take", "defined by precision",
+  "sparked discussion", "return to peak form", "showcased", "on full display",
+  "statement performance", "testament to", "wrote another chapter", "set the stage",
+  "under the lights", "narrative", "storyline", "journey", "showed why",
+  "sent a message", "cemented his place", "reminded everyone", or "proved once again"
+  unless the exact idea is explicitly supported and the phrase is genuinely natural.
+- Avoid evaluative adjectives such as "commanding", "impressive", "remarkable",
+  "stunning", "dominant", "brilliant" or "dramatic" unless the source itself
+  clearly supports that evaluation.
+- Poetry should come from rhythm, image and restraint — not from cliché.
 
 Write using ONLY facts explicitly present in the supplied source facts.
 
@@ -98,7 +108,10 @@ emotion or historical importance unless the source states it.
 Never claim a player "dreamed", "suffered", "felt pressure" or "silenced critics"
 unless the source explicitly supports it.
 A metaphor must decorate a verified fact, never replace one.
-Aim for one memorable lyrical line in the opening or closing paragraph."""
+For a player, club, match, transfer or career story, include one natural,
+memorable lyrical line in the opening or closing paragraph. It should feel like
+a line a real football columnist might keep in a notebook, not an AI flourish.
+For schedules, ticketing, policy or administrative news, stay clean and factual."""
     if sport == "basketball":
         return """BASKETBALL VOICE:
 Keep the prose warm, direct and human. Let relationships, careers and the pursuit
@@ -111,8 +124,10 @@ Write with controlled intensity and respect for the fighters. Let the prose carr
 weight and tension, but never invent courage, fear, damage, dominance or drama."""
     if sport in {"motorsport", "cycling"}:
         return """RACING VOICE:
-Use movement, speed and precision in the prose. Keep the imagery elegant and
-fact-bound; never invent conditions, strategy, danger or turning points."""
+Use movement and clean sentence rhythm, but keep the language grounded.
+Do not reach for generic phrases about precision, perfection, momentum or
+"dissecting" a performance. Prefer concrete facts and one light image of motion.
+Never invent conditions, strategy, danger or turning points."""
     if sport in {"tennis", "badminton", "table-tennis"}:
         return """RACKET-SPORT VOICE:
 Use clean, graceful prose with a sense of rhythm and momentum, but never invent
