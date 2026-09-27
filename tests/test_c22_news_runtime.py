@@ -21,7 +21,12 @@ def settings(tmp_path=None):
             'NEWS_FETCH_INTERVAL_MINUTES': '10', 'NEWS_MAX_AI_ARTICLES': '2',
             'NEWS_LEGACY_REPAIR_ACK': '1', 'NEWS_AI_MAX_REQUESTS_PER_RUN': '2',
             'NEWS_AI_MAX_REQUESTS_PER_DAY': '3', 'NEWS_HISTORICAL_REPAIR_ENABLED': '0',
-            'NEWS_EXPANDED_FEEDS_ENABLED': '0', 'OPENAI_API_KEY': 'NEVER_LOG_KEY',
+            'NEWS_EXPANDED_FEEDS_ENABLED': '0', 'NEWS_DATA_NEWS_ENABLED': '0',
+            'NEWS_TRANSLATIONS_ENABLED': '0', 'NEWS_TRANSLATIONS_PER_CYCLE': '0',
+            'NEWS_AI_PROVIDER_MODE': 'xkiro_free', 'XKIRO_API_KEY': 'NEVER_LOG_KEY',
+            'NEWS_XKIRO_WRITER_MODEL': 'qwen/qwen3.5-397b-a17b:free',
+            'NEWS_XKIRO_VALIDATOR_MODEL': 'qwen/qwen3.5-397b-a17b:free',
+            'NEWS_ACCOUNTING_BACKEND': 'file',
             'NEWS_AI_LEDGER_PATH': mount + '/budget.sqlite', 'RAILWAY_VOLUME_MOUNT_PATH': mount}
 
 
@@ -67,7 +72,8 @@ def test_valid_config_does_not_certify_storage_or_user_approval():
     assert runtime.request_limits(settings()) == (2, 3)
 
 
-@pytest.mark.parametrize('key', ['NEWS_HISTORICAL_REPAIR_ENABLED','NEWS_EXPANDED_FEEDS_ENABLED'])
+@pytest.mark.parametrize('key', ['NEWS_HISTORICAL_REPAIR_ENABLED','NEWS_EXPANDED_FEEDS_ENABLED',
+                                 'NEWS_DATA_NEWS_ENABLED','NEWS_TRANSLATIONS_ENABLED'])
 @pytest.mark.parametrize('value', [None,'','true','false','yes','2'])
 def test_history_and_expansion_flags_must_be_explicit(key, value):
     env = settings(); env[key] = value
