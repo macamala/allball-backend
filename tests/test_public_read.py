@@ -252,3 +252,53 @@ def test_recent_cross_sport_mislabel_is_hidden():
         assert tax.public_ok is False
     finally:
         db.close()
+
+
+
+def test_cross_sport_repair_requires_distinctive_headline_evidence():
+    from public_index import _distinctive_title_sport_support
+
+    assert _distinctive_title_sport_support(
+        "Caroline Andersson conscious after heavy crash at Road World Championships",
+        "cycling",
+    )
+    assert not _distinctive_title_sport_support(
+        "Pierre Royal becomes first Irish-trained Cambridgeshire winner this century",
+        "ice-hockey",
+    )
+    assert not _distinctive_title_sport_support(
+        "GBGB Calendar Vol 18 No.19 Now Available Online",
+        "mma",
+    )
+
+
+def test_ambiguous_cross_sport_classifier_result_does_not_hide_valid_row(monkeypatch):
+    import public_index as pi
+    from models import ArticleTaxonomyResolution
+
+    article = _make(
+        slug="horse-repair-conservative",
+        title="Pierre Royal becomes first Irish-trained Cambridgeshire winner this century",
+        content=(
+            "Pierre Royal won the Cambridgeshire after a strong run under his jockey. "
+            "The horse was trained in Ireland and finished ahead of the field."
+        ),
+        sport="horse-racing",
+        league=None,
+        external_id="https://example.com/horse-repair-conservative",
+    )
+    db = SessionLocal()
+    try:
+        tax = db.query(ArticleTaxonomyResolution).filter(
+            ArticleTaxonomyResolution.article_id == article.id
+        ).first()
+        assert tax and tax.public_ok
+        monkeypatch.setattr(
+            "bot.classify.classify_article",
+            lambda *a, **k: type("C", (), {"sport": "ice-hockey"})(),
+        )
+        assert pi.repair_recent_sport_mislabels(db, limit=100, max_age_hours=168) == 0
+        db.refresh(tax)
+        assert tax.public_ok is True
+    finally:
+        db.close()
