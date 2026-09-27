@@ -105,7 +105,7 @@ jobs:
           Path('evidence/test-selection.txt').write_text('\n'.join(sorted(paths))+'\n')
           PY
       - name: Candidate boundary note
-        run: echo "Final candidate replaces known robots-blocked niche indexes with bounded free fallbacks for Rocket League, Table Tennis, Field Hockey and Futsal while preserving image-required, deduped, breadth-aware News and retained Live Scores boundaries."
+        run: echo "Final candidate also makes News self-healing repairs title-first and removes unresolved-repair N+1 database round-trips, preserving image-required, deduped, breadth-aware News and retained Live Scores boundaries."
       - name: Run retained Live Scores plus current News suite offline
         run: |
           set -euo pipefail
