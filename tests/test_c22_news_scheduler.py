@@ -188,3 +188,14 @@ def test_main_releases_cycle_owner_before_scheduler_shutdown(monkeypatch,tmp_pat
         ('job','news-interval-cycle'),
         ('image_health_job','news-image-health-cycle'),
     }
+
+
+def test_image_health_boundary_is_offset_from_writer_boundary(monkeypatch,tmp_path):
+    scheduler,_,_,_,_=cycle(monkeypatch,tmp_path)
+    now=datetime(2026,9,27,12,51,0,tzinfo=timezone.utc)
+    writer=scheduler._next_interval_boundary(now,30)
+    image=scheduler._next_interval_boundary(now,10,offset_minutes=5)
+    assert writer == datetime(2026,9,27,13,0,0,tzinfo=timezone.utc)
+    assert image == datetime(2026,9,27,12,55,0,tzinfo=timezone.utc)
+    assert writer != image
+    assert image.minute % 10 == 5
