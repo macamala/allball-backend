@@ -8,6 +8,7 @@ incomplete bodies, or Serbian Cyrillic. Failures never hide the English article.
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+import unicodedata
 import logging
 import os
 import re
@@ -23,7 +24,7 @@ from .news_policy import protected_proper_names
 logger = logging.getLogger(__name__)
 
 LANGUAGES = ("sr", "es", "de", "fr", "it", "pt")
-TRANSLATION_PROVIDER = "xkiro-free-v4"
+TRANSLATION_PROVIDER = "xkiro-free-v5"
 CYRILLIC_RE = re.compile(r"[\u0400-\u04FF]")
 NUMBER_RE = re.compile(r"(?<!\w)\d+(?:[.,:/–-]\d+)*(?:%|\b)")
 
@@ -99,6 +100,22 @@ def _numbers(text: str) -> set[str]:
     return {_canonical_number(token) for token in NUMBER_RE.findall(text or "")}
 
 
+def _name_key(value: str) -> str:
+    normalized = unicodedata.normalize("NFKD", value or "")
+    stripped = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+    stripped = (
+        stripped.replace("’", "'")
+        .replace("‘", "'")
+        .replace("–", "-")
+        .replace("—", "-")
+    )
+    return " ".join(stripped.casefold().split())
+
+
+def _contains_name(text: str, name: str) -> bool:
+    return _name_key(name) in _name_key(text)
+
+
 def _word_count(text: str) -> int:
     return len(re.findall(r"\b\w+\b", text or "", flags=re.UNICODE))
 
@@ -146,8 +163,13 @@ def _validate(source: Dict[str, str], payload: object) -> Optional[Dict[str, Dic
                 sorted(translated_numbers - source_numbers),
             )
             return _translation_reject("numbers-changed", language)
-        folded = combined.casefold()
-        if any(name.casefold() not in folded for name in protected):
+        missing_names = [name for name in protected if not _contains_name(combined, name)]
+        if missing_names:
+            logger.info(
+                "[translations] missing protected names language=%s names=%s",
+                language,
+                missing_names[:8],
+            )
             return _translation_reject("proper-name-changed", language)
         if any(acronym not in combined for acronym in acronyms):
             return _translation_reject("acronym-changed", language)
