@@ -57,7 +57,7 @@ FACTUAL RULES:
   not like a literal machine translation.
 
 Return JSON only.
-Preferred schema: one flat object with exactly these 18 string fields:
+Preferred schema: one flat object with exactly all of these string fields:
 sr_title,sr_summary,sr_body,es_title,es_summary,es_body,
 de_title,de_summary,de_body,fr_title,fr_summary,fr_body,
 it_title,it_summary,it_body,pt_title,pt_summary,pt_body.
