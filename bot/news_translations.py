@@ -24,7 +24,7 @@ from .news_policy import protected_proper_names
 logger = logging.getLogger(__name__)
 
 LANGUAGES = ("sr", "es", "de", "fr", "it", "pt")
-TRANSLATION_PROVIDER = "xkiro-free-v5"
+TRANSLATION_PROVIDER = "xkiro-free-v6"
 CYRILLIC_RE = re.compile(r"[\u0400-\u04FF]")
 NUMBER_RE = re.compile(r"(?<!\w)\d+(?:[.,:/–-]\d+)*(?:%|\b)")
 
@@ -41,6 +41,8 @@ Preserve the NinkoSports voice, not just the information:
 FACTUAL RULES:
 - Do not summarize, add context, add links, add quotes, or change any fact.
 - Preserve every team/person/competition/venue name EXACTLY.
+- Names listed under LOCKED NAMES are immutable tokens: copy their spelling
+  verbatim in every target language and never translate or transliterate them.
 - Preserve every numeric VALUE exactly, including scores, minutes, percentages,
   dates and statistics. Locale punctuation may change naturally (for example
   100,023 -> 100.023 or 4.52 -> 4,52), but the numeric value must not change.
@@ -218,8 +220,18 @@ def translate_article_payload(article: Article) -> Optional[Dict[str, Dict[str, 
     if not all(source.values()) or len(source["body"]) > 12000:
         # Never cache a translation of only the first part of an article.
         return None
+    locked_names = [
+        name for name in protected_proper_names(
+            f'{source["title"]}\n{source["summary"]}'
+        )
+        if len(name.split()) >= 2
+    ]
+    locked_block = "\n".join(f"- {name}" for name in locked_names[:24]) or "- none"
     prompt = (
-        "ENGLISH TITLE:\n" + source["title"][:1000]
+        "LOCKED NAMES — copy these spellings VERBATIM wherever the entity is mentioned; "
+        "do not translate, transliterate or rename them:\n"
+        + locked_block
+        + "\n\nENGLISH TITLE:\n" + source["title"][:1000]
         + "\n\nENGLISH SUMMARY:\n" + source["summary"][:1600]
         + "\n\nENGLISH BODY:\n" + source["body"]
     )
