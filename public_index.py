@@ -269,12 +269,26 @@ def repair_recent_news_images(
         [article.image_url for article, _tax in rows if article.image_url],
         max_workers=6,
     )
-    broken = [
+    definitive_reasons = {
+        "invalid_or_nonpublic_url",
+        "redirect_without_location",
+        "redirect_limit",
+        "not_image_content",
+        "empty_image_response",
+        "http_400",
+        "http_401",
+        "http_403",
+        "http_404",
+        "http_410",
+        "http_451",
+    }
+    failed = [
         (article, tax, probes.get(str(article.image_url or "").strip(), (False, "probe_missing"))[1])
         for article, tax in rows
         if not probes.get(str(article.image_url or "").strip(), (False, "probe_missing"))[0]
     ]
-    reasons = Counter(reason for _article, _tax, reason in broken)
+    broken = [row for row in failed if row[2] in definitive_reasons]
+    reasons = Counter(reason for _article, _tax, reason in failed)
     refreshed = 0
     hidden = 0
     touched_ids: set[int] = set()
@@ -373,8 +387,9 @@ def repair_recent_news_images(
             logger.exception("recent News image repair failed")
             return 0
         logger.info(
-            "[public_index] image repair checked=%s broken=%s refreshed=%s hidden=%s recovered=%s reasons=%s",
+            "[public_index] image repair checked=%s failed=%s definitive=%s refreshed=%s hidden=%s recovered=%s reasons=%s",
             len(rows),
+            len(failed),
             len(broken),
             refreshed,
             hidden,
@@ -383,8 +398,9 @@ def repair_recent_news_images(
         )
     elif broken:
         logger.info(
-            "[public_index] image repair checked=%s broken=%s changed=0 reasons=%s",
+            "[public_index] image repair checked=%s failed=%s definitive=%s changed=0 reasons=%s",
             len(rows),
+            len(failed),
             len(broken),
             dict(reasons),
         )
