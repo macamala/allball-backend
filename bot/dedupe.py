@@ -42,13 +42,24 @@ def existing_by_url(db: Session, source_url: str) -> Optional[Article]:
 
 def _title_tokens(value: str) -> set[str]:
     stop = {
-        "the","and","for","with","from","after","before","into","over","under",
+        "the","and","for","with","from","before","into","over","under","will",
         "news","latest","update","report","live","says","set","new","sport",
     }
-    return {
-        token for token in re.findall(r"[a-z0-9]{3,}", normalize_title(value or ""))
-        if token not in stop
+    aliases = {
+        "confirms": "confirm", "confirmed": "confirm", "confirming": "confirm",
+        "following": "after",
+        "clash": "match", "game": "match", "fixture": "match",
+        "beats": "beat", "beaten": "beat",
+        "wins": "win", "won": "win",
+        "signs": "sign", "signed": "sign",
+        "joins": "join", "joined": "join",
     }
+    tokens = set()
+    for token in re.findall(r"[a-z0-9]{3,}", normalize_title(value or "")):
+        if token in stop:
+            continue
+        tokens.add(aliases.get(token, token))
+    return tokens
 
 
 def title_similarity(left: str, right: str) -> float:
