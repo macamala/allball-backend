@@ -169,3 +169,65 @@ def hold_source(url: str, reason: str = "rejected", hours: int = 6) -> None:
                 connection.close()
             except Exception:
                 pass
+
+
+
+def held_source_urls(urls) -> set[str]:
+    """Batch-read active source holds with one Postgres round trip.
+
+    This is an efficiency/fairness helper only. A source not returned here still
+    passes the normal per-item cooldown check before any AI request.
+    """
+    values = []
+    hashes = {}
+    for raw in urls or []:
+        url = str(raw or "").strip()
+        if not url or url in hashes:
+            continue
+        key = _fingerprint(url)
+        if not key:
+            continue
+        hashes[url] = key
+        values.append(url)
+    if not values:
+        return set()
+
+    dsn = _postgres_dsn()
+    if not dsn:
+        return {url for url in values if _memory_held(hashes[url])}
+
+    connection = cursor = None
+    try:
+        connection = _connect(dsn)
+        cursor = connection.cursor()
+        cursor.execute("SET LOCAL lock_timeout = '2s'")
+        cursor.execute("SET LOCAL statement_timeout = '5s'")
+        _ensure_schema(cursor)
+        keys = [hashes[url] for url in values]
+        cursor.execute(
+            "SELECT source_hash FROM news_ai_source_holds "
+            "WHERE source_hash = ANY(%s) AND expires_at > NOW()",
+            (keys,),
+        )
+        held_hashes = {row[0] for row in cursor.fetchall() if row and row[0]}
+        connection.commit()
+        return {url for url in values if hashes[url] in held_hashes}
+    except Exception as exc:
+        if connection is not None:
+            try:
+                connection.rollback()
+            except Exception:
+                pass
+        logger.warning("[source_holds] batch read fallback: %s", type(exc).__name__)
+        return {url for url in values if _memory_held(hashes[url])}
+    finally:
+        if cursor is not None:
+            try:
+                cursor.close()
+            except Exception:
+                pass
+        if connection is not None:
+            try:
+                connection.close()
+            except Exception:
+                pass
