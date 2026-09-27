@@ -26,7 +26,8 @@ def good_env():
             'NEWS_LEGACY_REPAIR_ACK':'1',
             'NEWS_AI_MAX_REQUESTS_PER_RUN':'2','NEWS_AI_MAX_REQUESTS_PER_DAY':'3',
             'NEWS_HISTORICAL_REPAIR_ENABLED':'0','NEWS_EXPANDED_FEEDS_ENABLED':'0',
-            'NEWS_DATA_NEWS_ENABLED':'0',
+            'NEWS_DATA_NEWS_ENABLED':'0','NEWS_TRANSLATIONS_ENABLED':'0',
+            'NEWS_TRANSLATIONS_PER_CYCLE':'0',
             'NEWS_AI_PROVIDER_MODE':'xkiro_free','XKIRO_API_KEY':'FIXTURE_ONLY',
             'NEWS_XKIRO_WRITER_MODEL':'qwen/qwen3.5-397b-a17b:free',
             'NEWS_XKIRO_VALIDATOR_MODEL':'qwen/qwen3.5-397b-a17b:free',
@@ -136,6 +137,15 @@ def test_data_news_flag_must_be_explicit_boolean():
     assert 'explicit_boolean_required:NEWS_DATA_NEWS_ENABLED' in guard.runtime_errors(env)
     env=good_env();env['NEWS_DATA_NEWS_ENABLED']='true'
     assert 'explicit_boolean_required:NEWS_DATA_NEWS_ENABLED' in guard.runtime_errors(env)
+
+
+def test_translation_lane_requires_explicit_flag_and_bounded_count():
+    env=good_env();del env['NEWS_TRANSLATIONS_ENABLED']
+    assert 'explicit_boolean_required:NEWS_TRANSLATIONS_ENABLED' in guard.runtime_errors(env)
+    env=good_env();env['NEWS_TRANSLATIONS_PER_CYCLE']='4'
+    assert 'missing_or_invalid_integer:NEWS_TRANSLATIONS_PER_CYCLE' in guard.runtime_errors(env)
+    env=good_env();env['NEWS_TRANSLATIONS_PER_CYCLE']='bad'
+    assert 'missing_or_invalid_integer:NEWS_TRANSLATIONS_PER_CYCLE' in guard.runtime_errors(env)
 
 def test_enabled_guard_executes_only_existing_news_entrypoint(tmp_path,monkeypatch,capsys):
     root=artifact(tmp_path);calls=[];dirs=[]
