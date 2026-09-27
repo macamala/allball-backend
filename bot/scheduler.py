@@ -46,6 +46,18 @@ def _run_cycle():
                 max_per_league=3, hard_limit=None, use_ai=True,
                 max_ai_chars=6000, max_ai_articles=maximum,
             )
+            try:
+                from database import SessionLocal
+                from public_index import repair_recent_unresolved
+                repair_db = SessionLocal()
+                try:
+                    repaired = repair_recent_unresolved(repair_db, limit=24)
+                finally:
+                    repair_db.close()
+                if repaired:
+                    bump_public_cache()
+            except Exception as exc:
+                logger.error('Recent News taxonomy repair failed: %s', type(exc).__name__)
             # English freshness always wins. Translate only after new-story
             # ingestion, from whatever request allowance remains.
             if (
