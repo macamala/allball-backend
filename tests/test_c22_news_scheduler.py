@@ -23,13 +23,24 @@ def cycle(monkeypatch, tmp_path, *, history='0'):
     def summary(**kw): calls.append(('summary',kw)); return {}
     def contaminated(**kw): calls.append(('contaminated',kw)); return {}
     def index(db, **kw): calls.append(('index',kw)); return 400 if history == '1' else 1
+    def mislabels(db, **kw): calls.append(('mislabels',kw)); return 0
+    def unresolved(db, **kw): calls.append(('unresolved',kw)); return 0
+    def duplicates(db, **kw): calls.append(('duplicates',kw)); return 0
+    def inventory(db, **kw): calls.append(('inventory',kw)); return {'football': 2}
     def session(): calls.append('session'); return Session()
     sources=module('bot.fetch_sources',fetch_and_store_all_articles=fetch)
     module('bot.rewrite_ai',reset_openai_rate_limit=lambda:calls.append('reset'))
     module('public_cache',bump_public_cache=lambda:calls.append('cache'))
     repairs=module('repair_content',repair_summary_only=summary,repair_contaminated=contaminated)
     module('database',SessionLocal=session)
-    module('public_index',index_missing=index)
+    module(
+        'public_index',
+        index_missing=index,
+        repair_recent_sport_mislabels=mislabels,
+        repair_recent_unresolved=unresolved,
+        repair_recent_duplicate_news=duplicates,
+        recent_public_sport_inventory=inventory,
+    )
     path=Path(__file__).parents[1]/'bot/scheduler.py'
     spec=importlib.util.spec_from_file_location('bot._c22_scheduler_fixture',path)
     scheduler=importlib.util.module_from_spec(spec);spec.loader.exec_module(scheduler)
@@ -66,7 +77,7 @@ def test_historical_and_new_requests_share_same_cycle_limit(monkeypatch,tmp_path
     assert not AiRequestBudget(2,env['NEWS_AI_LEDGER_PATH'],daily_limit=2).can_start()
 
 
-def test_exhausted_daily_quota_blocks_all_io_and_history(monkeypatch,tmp_path):
+def test_exhausted_daily_quota_still_runs_zero_ai_public_repairs(monkeypatch,tmp_path):
     scheduler,calls,_,_,env=cycle(monkeypatch,tmp_path,history='1')
     b=AiRequestBudget(3,env['NEWS_AI_LEDGER_PATH'],daily_limit=3)
     assert all(b.reserve() for _ in range(3))
@@ -74,13 +85,20 @@ def test_exhausted_daily_quota_blocks_all_io_and_history(monkeypatch,tmp_path):
     probe=AiRequestBudget(3,env['NEWS_AI_LEDGER_PATH'],daily_limit=3)
     assert not probe.can_start()
     assert probe.blocked_reason == 'daily_request_limit'
-    assert calls==[]
+    assert ('mislabels',{'limit':600,'max_age_hours':168}) in calls
+    assert ('unresolved',{'limit':24}) in calls
+    assert ('duplicates',{'limit':600,'max_age_hours':168}) in calls
+    assert ('inventory',{'max_age_hours':72}) in calls
+    assert not any(isinstance(c,tuple) and c[0] in ('fetch','index','summary','contaminated') for c in calls)
 
 
-def test_zero_article_limit_blocks_all_io(monkeypatch,tmp_path):
+def test_zero_article_limit_still_runs_zero_ai_public_repairs(monkeypatch,tmp_path):
     scheduler,calls,_,_,_=cycle(monkeypatch,tmp_path)
     monkeypatch.setenv('NEWS_MAX_AI_ARTICLES','0')
-    assert scheduler.job()==0 and calls==[]
+    assert scheduler.job()==0
+    assert ('mislabels',{'limit':600,'max_age_hours':168}) in calls
+    assert ('inventory',{'max_age_hours':72}) in calls
+    assert not any(isinstance(c,tuple) and c[0]=='fetch' for c in calls)
 
 
 def test_invalidated_configuration_stops_next_cycle(monkeypatch,tmp_path):
