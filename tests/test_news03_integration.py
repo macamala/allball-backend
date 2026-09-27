@@ -80,6 +80,8 @@ def test_incomplete_or_failed_response_still_charged(monkeypatch,tmp_path,result
 def prepare_ingest(monkeypatch,draft=DRAFT):
     monkeypatch.setattr(ingest,'existing_by_url',lambda *a:None)
     monkeypatch.setattr(ingest,'existing_near_duplicate',lambda *a:None)
+    monkeypatch.setattr(ingest,'_source_on_ai_cooldown',lambda *a:False)
+    monkeypatch.setattr(ingest,'_hold_ai_source',lambda *a,**k:None)
     monkeypatch.setattr(ingest,'extract_from_url',lambda url:(FACTS,None))
     monkeypatch.setattr(ingest,'classify_article',lambda *a,**k:SimpleNamespace(sport='football',league=None,country=None))
     monkeypatch.setattr(ingest,'_ai_story',lambda **k:(draft,'ok' if draft else 'empty'))
