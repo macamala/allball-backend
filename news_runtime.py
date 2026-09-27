@@ -61,7 +61,7 @@ def postgres_dsn(env):
 def configuration_errors(env):
     errors = []
     for key in ('NEWS_HISTORICAL_REPAIR_ENABLED', 'NEWS_EXPANDED_FEEDS_ENABLED',
-                'NEWS_DATA_NEWS_ENABLED', 'NEWS_TRANSLATIONS_ENABLED'):
+                'NEWS_TRANSLATIONS_ENABLED'):
         if env.get(key) not in ('0', '1'):
             errors.append('explicit_boolean_required:' + key)
 
@@ -79,8 +79,7 @@ def configuration_errors(env):
         or env.get('NEWS_TRANSLATIONS_ENABLED') == '1'
         or env.get('NEWS_HISTORICAL_REPAIR_ENABLED') == '1'
     )
-    data_required = env.get('NEWS_DATA_NEWS_ENABLED') == '1'
-    if not ai_required and not data_required:
+    if not ai_required:
         errors.append('no_news_lane_enabled')
 
     limits = request_limits(env)
