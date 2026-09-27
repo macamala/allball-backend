@@ -107,7 +107,7 @@ jobs:
           Path('evidence/test-selection.txt').write_text('\n'.join(sorted(paths))+'\n')
           PY
       - name: Candidate boundary note
-        run: echo "Final candidate verifies actual hero-image reachability before AI, refreshes or hides broken recent heroes without AI, and preserves deduped breadth-aware News plus retained Live Scores boundaries."
+        run: echo "Final candidate verifies browser-like hero reachability before AI, refreshes or hides definitive broken heroes without AI, keeps transient CDN failures non-destructive, and preserves retained Live Scores boundaries."
       - name: Run retained Live Scores plus current News suite offline
         run: |
           set -euo pipefail
