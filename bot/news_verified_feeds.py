@@ -46,7 +46,10 @@ VERIFIED_RSS = [
         'url': url,
         # Dedicated sport feeds may hint the sport only when article evidence
         # itself is silent. EA press releases are cross-product and stay mixed.
-        'kind': 'mixed' if publisher == 'Electronic Arts' else 'league',
+        # These endpoints were metadata-verified, not content-scope certified.
+        # BBC niche URLs in particular may return broader Sport content, so they
+        # must never stamp a sport when the article text does not prove it.
+        'kind': 'mixed' if publisher in {'BBC Sport', 'Electronic Arts'} else 'league',
         'sport': sport,
         'enabled': True,
         'publisher': publisher,
