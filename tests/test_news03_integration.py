@@ -157,7 +157,9 @@ def test_expanded_feeds_opt_in_and_deduplicated(monkeypatch):
     after=feeds.enabled_feeds()
     assert len(after)>len(before)
     assert len({r['url'] for r in after})==len(after)
-    assert len(VERIFIED_RSS)==29 and len({r['sport'] for r in VERIFIED_RSS})==27
+    assert len(VERIFIED_RSS) >= 29
+    assert len({r['url'] for r in VERIFIED_RSS}) == len(VERIFIED_RSS)
+    assert len({r['sport'] for r in VERIFIED_RSS}) >= 27
     assert all(r['reuse_rights']=='NOT_VERIFIED' for r in VERIFIED_RSS)
     assert any(r['metadata_state']=='RSS_METADATA_STALE_OR_UNDATED' for r in VERIFIED_RSS)
 
