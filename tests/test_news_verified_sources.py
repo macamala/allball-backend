@@ -30,3 +30,33 @@ def test_new_source_sports_classify_from_article_evidence():
     for sport,(title,body) in samples.items():
         tags=classify_article(title,body,feed_kind='mixed')
         assert tags.sport==sport, (sport,tags)
+
+
+def test_dedicated_feed_can_hint_sport_when_article_text_is_silent(monkeypatch):
+    monkeypatch.setenv('NEWS_EXPANDED_FEEDS_ENABLED','1')
+    rows=enabled_feeds()
+    afl=next(row for row in rows if row['url']=='https://www.afl.com.au/rss')
+    assert afl['kind']=='league'
+    tags=classify_article(
+        'Swans name squad for Sunday clash',
+        'The club confirmed its squad and coaching changes before Sunday.',
+        feed_kind=afl['kind'],
+        feed_sport=afl['sport'],
+        feed_league=afl.get('league'),
+        feed_country=afl.get('country'),
+    )
+    assert tags.sport=='australian-rules'
+
+
+def test_cross_product_ea_feed_cannot_silently_stamp_ea_sports_fc(monkeypatch):
+    monkeypatch.setenv('NEWS_EXPANDED_FEEDS_ENABLED','1')
+    rows=enabled_feeds()
+    ea=next(row for row in rows if row['url']=='https://news.ea.com/rss/pressrelease.aspx')
+    assert ea['kind']=='mixed'
+    tags=classify_article(
+        'Studio announces new leadership update',
+        'The publisher shared a company update with employees and players.',
+        feed_kind=ea['kind'],
+        feed_sport=ea['sport'],
+    )
+    assert tags.sport is None
