@@ -62,3 +62,15 @@ def test_dedicated_feed_can_preserve_exact_competition_with_source_sport():
     assert reconciled.sport == 'football'
     assert reconciled.public_competition == 'england-premier-league'
     assert 'trusted-dedicated-feed-competition' in reconciled.evidence
+
+
+def test_cross_source_near_duplicate_headlines_are_detected():
+    from bot.dedupe import titles_are_near_duplicate
+    assert titles_are_near_duplicate(
+        "Arsenal confirm Bukayo Saka will miss Liverpool clash after injury",
+        "Arsenal confirms Saka will miss Liverpool game following injury",
+    )
+    assert not titles_are_near_duplicate(
+        "Arsenal confirm Bukayo Saka will miss Liverpool clash after injury",
+        "Arsenal announce new academy partnership for next season",
+    )
