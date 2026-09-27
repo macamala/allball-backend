@@ -161,3 +161,58 @@ def test_public_query_has_global_image_contract():
         assert "hero_media_kind" in lower
     finally:
         db.close()
+
+
+def test_recent_duplicate_repair_keeps_one_public_story():
+    from public_index import repair_recent_duplicate_news
+    first=_make(
+        slug="dedupe-arsenal-one",
+        title="Arsenal confirm Bukayo Saka will miss Liverpool clash after injury",
+        external_id="https://source-one.example/dedupe-arsenal",
+    )
+    second=_make(
+        slug="dedupe-arsenal-two",
+        title="Arsenal confirms Saka will miss Liverpool game following injury",
+        external_id="https://source-two.example/dedupe-arsenal",
+    )
+    db=SessionLocal()
+    try:
+        hidden=repair_recent_duplicate_news(db,limit=600,max_age_hours=168)
+        assert hidden >= 1
+        pairs=fetch_public(db,sport="football",limit=100)
+        ids={row.id for row,_ in pairs}
+        assert len({first.id,second.id} & ids)==1
+    finally:
+        db.close()
+
+
+def test_recent_inventory_ignores_old_and_missing_image_rows():
+    from datetime import timedelta
+    from public_index import recent_public_sport_inventory
+    fresh=_make(
+        slug="inventory-fresh-photo",
+        external_id="https://example.com/inventory-fresh-photo",
+        published_at=datetime.utcnow(),
+    )
+    old=_make(
+        slug="inventory-old-photo",
+        external_id="https://example.com/inventory-old-photo",
+        published_at=datetime.utcnow()-timedelta(days=10),
+    )
+    missing=_make(
+        slug="inventory-missing-image",
+        external_id="https://example.com/inventory-missing-image",
+        image_url=None,
+        published_at=datetime.utcnow(),
+    )
+    db=SessionLocal()
+    try:
+        inventory=recent_public_sport_inventory(db,max_age_hours=72)
+        assert fresh.id != old.id != missing.id
+        pairs=fetch_public(db,sport="football",limit=200)
+        visible_ids={row.id for row,_ in pairs}
+        assert fresh.id in visible_ids
+        assert missing.id not in visible_ids
+        assert inventory.get("football",0) >= 1
+    finally:
+        db.close()
