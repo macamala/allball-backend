@@ -85,6 +85,7 @@ def prepare_ingest(monkeypatch,draft=DRAFT):
     monkeypatch.setattr(ingest,'extract_from_url',lambda url:(FACTS,'https://example.test/hero.jpg'))
     monkeypatch.setattr(ingest,'classify_article',lambda *a,**k:SimpleNamespace(sport='football',league=None,country=None))
     monkeypatch.setattr(ingest,'_ai_story',lambda **k:(draft,'ok' if draft else 'empty'))
+    monkeypatch.setattr(ingest,'news_image_is_reachable',lambda url:True)
     return {'title':'Football cup format announced','url':'https://example.test/cup',
             'summary':'Football cup draw and knockout format.', 'published_at':datetime.now(timezone.utc)-timedelta(hours=1)}
 
@@ -202,7 +203,7 @@ def test_missing_image_stops_before_ai_writer(monkeypatch):
     holds=[]
     monkeypatch.setattr(ingest,'_hold_ai_source',lambda url,reason:holds.append((url,reason)))
     assert ingest._ingest_item(Mock(),item,True,6000,1)==(None,False)
-    assert holds[-1]==(item['url'],'missing-publishable-image')
+    assert holds[-1]==(item['url'],'missing-or-unreachable-publishable-image')
 
 
 def test_logo_image_stops_before_ai_writer(monkeypatch):
@@ -302,3 +303,28 @@ def test_unknown_enrichment_skips_non_articles_and_prefers_sport_hinted_story(mo
     assert "_extracted" in candidates[2]
     assert "_extracted" not in candidates[0]
     assert "_extracted" not in candidates[1]
+
+
+def test_reachable_image_selector_falls_back_to_second_candidate(monkeypatch):
+    seen=[]
+    monkeypatch.setattr(
+        ingest,
+        "news_image_is_reachable",
+        lambda url: seen.append(url) or url.endswith("good.jpg"),
+    )
+    candidates=[
+        {"url":"https://example.test/best.jpg","source":"body","width":1600,"in_article":True},
+        {"url":"https://example.test/good.jpg","source":"og","width":1200,"in_article":False},
+    ]
+    assert ingest._pick_reachable_article_image(candidates)=="https://example.test/good.jpg"
+    assert seen==["https://example.test/best.jpg","https://example.test/good.jpg"]
+
+
+def test_unreachable_image_stops_before_ai_writer(monkeypatch):
+    item=prepare_ingest(monkeypatch)
+    monkeypatch.setattr(ingest,"news_image_is_reachable",lambda url:False)
+    monkeypatch.setattr(ingest,"_ai_story",lambda **kw:pytest.fail("writer must not run for dead hero"))
+    holds=[]
+    monkeypatch.setattr(ingest,"_hold_ai_source",lambda url,reason:holds.append((url,reason)))
+    assert ingest._ingest_item(Mock(),item,True,6000,1)==(None,False)
+    assert holds[-1][1]=="missing-or-unreachable-publishable-image"
