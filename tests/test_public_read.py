@@ -228,7 +228,9 @@ def test_recent_cross_sport_mislabel_is_corrected():
         content=(
             "The Swedish rider crashed heavily during the road world championships. "
             "Medical staff treated the cyclist before she was taken for further checks. "
-            "The road race was stopped briefly while the cycling medical team responded."
+            "The road race was stopped briefly while the cycling medical team responded. "
+            "Officials then resumed the programme after the course was cleared. "
+            "The rider remained under observation while teammates and staff waited for an update."
         ),
         sport="cycling",
         league=None,
@@ -343,7 +345,9 @@ def test_mislabel_repair_corrects_distinctive_wrong_sport():
         content=(
             "Football clubs are preparing for the Premier League match after the "
             "manager confirmed the squad update. The teams trained before the league "
-            "fixture and expect to name their final football line-ups before kick-off."
+            "fixture and expect to name their final football line-ups before kick-off. "
+            "Coaches used the final training session to review shape and set pieces. "
+            "Supporters are waiting for the confirmed team news ahead of the league match."
         ),
         external_id="https://example.com/mislabel-football-fixture",
     )
@@ -376,7 +380,9 @@ def test_afl_club_headline_repairs_wrong_basketball_public_label():
         content=(
             "Gold Coast controlled the contest after half-time and pulled clear of "
             "St Kilda. The Suns maintained pressure around the ground and finished "
-            "strongly while the Saints were unable to close the margin."
+            "strongly while the Saints were unable to close the margin. "
+            "The contest opened evenly before Gold Coast gained territory and control. "
+            "St Kilda continued to compete, but the late stages belonged to the Suns."
         ),
         sport="australian-rules",
         league=None,
