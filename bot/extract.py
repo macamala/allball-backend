@@ -98,6 +98,77 @@ def _meta_name(html: str, name: str) -> Optional[str]:
     return match.group(1).strip() if match else None
 
 
+def _parse_explicit_datetime(raw: Optional[str]) -> Optional[datetime]:
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    value = raw.strip()
+    parsed = None
+    try:
+        parsed = parsedate_to_datetime(value)
+    except (TypeError, ValueError, OverflowError, IndexError):
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except (TypeError, ValueError, OverflowError):
+            return None
+    if parsed is None or parsed.tzinfo is None:
+        return None
+    try:
+        return parsed.astimezone(timezone.utc)
+    except (ValueError, OverflowError):
+        return None
+
+
+def page_title_from_html(html: str) -> str:
+    title = _og(html or "", "og:title") or _meta_name(html or "", "twitter:title")
+    if title:
+        return clean_text(title)
+    for raw in JSON_LD_RE.findall(html or ""):
+        try:
+            data = json.loads(raw)
+        except Exception:
+            continue
+        items = data if isinstance(data, list) else [data]
+        if isinstance(data, dict) and isinstance(data.get("@graph"), list):
+            items = data["@graph"]
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            value = item.get("headline") or item.get("name")
+            if isinstance(value, str) and value.strip():
+                return clean_text(value)
+    match = re.search(r"<title[^>]*>(.*?)</title>", html or "", re.I | re.S)
+    return clean_text(re.sub(r"<[^>]+>", " ", match.group(1))) if match else ""
+
+
+def page_published_at_from_html(html: str) -> Optional[datetime]:
+    candidates = [
+        _og(html or "", "article:published_time"),
+        _meta_name(html or "", "article:published_time"),
+        _meta_name(html or "", "date"),
+        _meta_name(html or "", "pubdate"),
+    ]
+    for raw in JSON_LD_RE.findall(html or ""):
+        try:
+            data = json.loads(raw)
+        except Exception:
+            continue
+        items = data if isinstance(data, list) else [data]
+        if isinstance(data, dict) and isinstance(data.get("@graph"), list):
+            items = data["@graph"]
+        for item in items:
+            if isinstance(item, dict):
+                value = item.get("datePublished")
+                if isinstance(value, str):
+                    candidates.append(value)
+    for match in re.finditer(r"<time[^>]+datetime=[\"']([^\"']+)", html or "", re.I):
+        candidates.append(match.group(1))
+    for value in candidates:
+        parsed = _parse_explicit_datetime(value)
+        if parsed is not None:
+            return parsed
+    return None
+
+
 def _json_ld_images(html: str) -> List[dict]:
     out: List[dict] = []
     for raw in JSON_LD_RE.findall(html or ""):
@@ -384,6 +455,18 @@ def _json_ld_article_body(html: str) -> str:
     return ""
 
 
+def article_text_from_html(html: str) -> str:
+    text = paragraphs_from_html(html or "")
+    text = strip_site_chrome(text) or text
+    if is_site_chrome_text(text):
+        text = ""
+    if not is_substantial_source(text):
+        ld_body = _json_ld_article_body(html or "")
+        if word_count(ld_body) > word_count(text):
+            text = ld_body
+    return text
+
+
 def extract_from_url(url: str, timeout: float = 18.0) -> Tuple[str, Optional[str]]:
     """
     Returns (article_text, image_url_or_none).
@@ -410,14 +493,7 @@ def extract_from_url(url: str, timeout: float = 18.0) -> Tuple[str, Optional[str
         image = pick_article_image(collect_page_image_candidates(html))
     except Exception:
         image = _og(html, "og:image")
-    text = paragraphs_from_html(html)
-    text = strip_site_chrome(text) or text
-    if is_site_chrome_text(text):
-        text = ""
-    if not is_substantial_source(text):
-        ld_body = _json_ld_article_body(html)
-        if word_count(ld_body) > word_count(text):
-            text = ld_body
+    text = article_text_from_html(html)
     logger.info(
         "[extract] %s words=%s",
         url[:120],
