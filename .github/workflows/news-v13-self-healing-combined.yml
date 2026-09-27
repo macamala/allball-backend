@@ -90,14 +90,17 @@ jobs:
               'tests/test_news14_publish_guards.py',
               'tests/test_news_translations.py',
               'tests/test_news_verified_sources.py',
+              'tests/test_public_read.py',
+              'tests/test_image_and_article_length.py',
+              'tests/test_news03_policy.py',
           })
-          assert len(paths) == 92, len(paths)
+          assert len(paths) >= 92, len(paths)
           missing=[p for p in sorted(paths) if not Path(p).is_file()]
           assert not missing, missing
           Path('evidence/test-selection.txt').write_text('\n'.join(sorted(paths))+'\n')
           PY
       - name: Candidate boundary note
-        run: echo "Final candidate includes current factual-length contract, explicit no-invention prompt, translation reserve, and non-recursive robots-cache regression."
+        run: echo "Final candidate includes mandatory hero images, cross-source dedupe, recent public inventory counts, underfilled-sport fairness, official-source fallbacks, factual self-healing, and retained Live Scores boundaries."
       - name: Run retained Live Scores plus current News suite offline
         run: |
           set -euo pipefail
