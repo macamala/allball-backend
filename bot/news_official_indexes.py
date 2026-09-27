@@ -168,6 +168,14 @@ HTML_INDEXES = (
         "url": "https://worldathletics.org/news",
         "host": "worldathletics.org",
         "paths": ("/news/",),
+        "exclude_paths": (
+            "/news/reports",
+            "/news/previews",
+            "/news/features",
+            "/news/series",
+            "/news/press-releases",
+            "/news/press-registration",
+        ),
     },
     {
         "id": "fifa-futsal-news",
@@ -197,6 +205,7 @@ HTML_INDEXES = (
         "exclude_paths": (
             "/news/", "/inside-world-netball/", "/events/", "/about/",
             "/members/", "/contact/", "/privacy/", "/category/", "/tag/",
+            "/events-and-results/", "/game/",
         ),
         "keywords": ("netball", "nwc2027", "silver ferns", "diamonds"),
         "max_age_hours": 120,
@@ -282,6 +291,13 @@ def _same_host_url(base: str, href: str, expected_host: str, cfg: Dict) -> Optio
     except ValueError:
         return None
     if parts.scheme != "https" or parts.hostname != expected_host:
+        return None
+    landing = urlsplit(base)
+    if (
+        parts.hostname == landing.hostname
+        and (parts.path or "/").rstrip("/") == (landing.path or "/").rstrip("/")
+        and not parts.query
+    ):
         return None
     path = parts.path or "/"
     if not any(path.startswith(prefix) for prefix in cfg.get("paths", ())):
