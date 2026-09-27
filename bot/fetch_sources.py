@@ -108,7 +108,7 @@ def source_article_facts(
     return "", "none"
 
 
-def _correction_retry_allowed() -> bool:
+def _correction_retry_allowed(*, prefer_breadth: bool = False) -> bool:
     """Conservatively preserve one request for translations when that lane is on."""
     budget = active_ai_budget()
     if budget is None:
@@ -122,7 +122,14 @@ def _correction_retry_allowed() -> bool:
             translation_reserve = 1 if int(os.getenv("NEWS_TRANSLATIONS_PER_CYCLE", "0")) > 0 else 0
         except ValueError:
             translation_reserve = 1
-    source_ceiling = max(0, int(budget.max_requests) - translation_reserve)
+    # While multiple sports remain underfilled, reserve one complete writer +
+    # validator attempt for a different sport instead of spending the whole
+    # cycle correcting one rejected draft.
+    breadth_reserve = 2 if prefer_breadth else 0
+    source_ceiling = max(
+        0,
+        int(budget.max_requests) - translation_reserve - breadth_reserve,
+    )
     # A full correction may consume writer + semantic-validator requests.
     return int(budget.attempts) + 2 <= source_ceiling
 
@@ -341,7 +348,15 @@ def _reconcile_public_taxonomy(tags, resolved, feed: Dict):
     return resolved, None
 
 
-def _ingest_item(db: Session, item: Dict, use_ai: bool, max_ai_chars: int, ai_budget: int) -> tuple:
+def _ingest_item(
+    db: Session,
+    item: Dict,
+    use_ai: bool,
+    max_ai_chars: int,
+    ai_budget: int,
+    *,
+    prefer_breadth: bool = False,
+) -> tuple:
     """Returns (created_article_or_None, ai_used_bool)."""
     # Budget absence is never permission to publish copied source prose.
     if not use_ai or ai_budget <= 0 or openai_rate_limited():
@@ -478,7 +493,7 @@ def _ingest_item(db: Session, item: Dict, use_ai: bool, max_ai_chars: int, ai_bu
                 rewrite_reason not in {"empty", "too-short"}
                 and not openai_rate_limited()
                 and not ai_budget_exhausted()
-                and _correction_retry_allowed()
+                and _correction_retry_allowed(prefer_breadth=prefer_breadth)
             ):
                 retry_parsed, retry_reason = _ai_story(
                     title=item["title"],
@@ -808,6 +823,16 @@ def _fetch_and_store_all_articles(
             admission,
             sport_inventory,
         )
+        active_news_sports = [
+            row["id"]
+            for row in SPORTS
+            if row["active"] and row["supports_news"]
+        ]
+        coverage_debt = sum(
+            1 for sport in active_news_sports
+            if int(sport_inventory.get(sport, 0) or 0) < 6
+        )
+        prefer_breadth = coverage_debt > 1
         for item in queued:
             if ai_budget <= 0 or openai_rate_limited() or ai_budget_exhausted():
                 break
@@ -830,6 +855,7 @@ def _fetch_and_store_all_articles(
                     use_ai=allow_ai,
                     max_ai_chars=max_ai_chars,
                     ai_budget=ai_budget,
+                    prefer_breadth=prefer_breadth,
                 )
             except Exception as e:
                 logger.exception("[fetch_sources] item failed: %s", e)
