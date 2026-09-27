@@ -13,6 +13,7 @@ on:
       - news/image-reachability-20260927
       - news/source-path-hints-20260927
       - news/image-health-cadence-20260927
+      - news/image-health-offset-20260927
     paths:
       - ".github/workflows/news-v13-self-healing-combined.yml"
   workflow_dispatch:
@@ -109,7 +110,7 @@ jobs:
           Path('evidence/test-selection.txt').write_text('\n'.join(sorted(paths))+'\n')
           PY
       - name: Candidate boundary note
-        run: echo "Final candidate keeps browser-like hero validation and source-path fallback, and adds a ten-minute zero-AI image-health cadence under the existing single News owner; retained Live Scores boundaries remain untouched."
+        run: echo "Final candidate keeps browser-like hero validation, conservative source-path fallback and ten-minute zero-AI image health, with watchdog runs offset five minutes from writer boundaries to preserve the single News owner."
       - name: Run retained Live Scores plus current News suite offline
         run: |
           set -euo pipefail
