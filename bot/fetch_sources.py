@@ -2,7 +2,6 @@
 
 import logging
 import os
-import time
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
@@ -41,32 +40,7 @@ from .textutil import clean_text, looks_like_garbage, strip_truncation_markers, 
 
 logger = logging.getLogger(__name__)
 
-_AI_REJECT_COOLDOWN = {}
-_AI_REJECT_COOLDOWN_SECONDS = 6 * 60 * 60
-_AI_REJECT_COOLDOWN_MAX = 1000
-
-
-def _source_on_ai_cooldown(url: str) -> bool:
-    now = time.monotonic()
-    expiry = _AI_REJECT_COOLDOWN.get(url)
-    if expiry is None:
-        return False
-    if expiry <= now:
-        _AI_REJECT_COOLDOWN.pop(url, None)
-        return False
-    return True
-
-
-def _hold_ai_source(url: str) -> None:
-    now = time.monotonic()
-    if len(_AI_REJECT_COOLDOWN) >= _AI_REJECT_COOLDOWN_MAX:
-        expired = [key for key, expiry in _AI_REJECT_COOLDOWN.items() if expiry <= now]
-        for key in expired[:250]:
-            _AI_REJECT_COOLDOWN.pop(key, None)
-        if len(_AI_REJECT_COOLDOWN) >= _AI_REJECT_COOLDOWN_MAX:
-            oldest = min(_AI_REJECT_COOLDOWN, key=_AI_REJECT_COOLDOWN.get)
-            _AI_REJECT_COOLDOWN.pop(oldest, None)
-    _AI_REJECT_COOLDOWN[url] = now + _AI_REJECT_COOLDOWN_SECONDS
+from .news_source_holds import hold_source as _hold_ai_source, source_on_cooldown as _source_on_ai_cooldown
 
 
 # Public filter catalog (human labels included for the API).
@@ -358,7 +332,7 @@ def _ingest_item(db: Session, item: Dict, use_ai: bool, max_ai_chars: int, ai_bu
             trusted_context=trusted_context,
         )
         if rewrite_reason == "too-short":
-            _hold_ai_source(source_url)
+            _hold_ai_source(source_url, "too-short")
             logger.info(
                 "[fetch_sources] skip substantial source with summary-only rewrite: %s",
                 item["title"][:80],
@@ -380,7 +354,7 @@ def _ingest_item(db: Session, item: Dict, use_ai: bool, max_ai_chars: int, ai_bu
             )
 
     if not used_ai:
-        _hold_ai_source(source_url)
+        _hold_ai_source(source_url, rewrite_reason or "no-accepted-original-draft")
         logger.info("[fetch_sources] hold: no accepted original draft")
         return None, False
     draft_reason = original_draft_reason(
@@ -388,7 +362,7 @@ def _ingest_item(db: Session, item: Dict, use_ai: bool, max_ai_chars: int, ai_bu
         item["title"], facts,
     )
     if draft_reason:
-        _hold_ai_source(source_url)
+        _hold_ai_source(source_url, draft_reason)
         logger.info("[fetch_sources] hold original draft: %s", draft_reason)
         return None, False
 
@@ -411,7 +385,7 @@ def _ingest_item(db: Session, item: Dict, use_ai: bool, max_ai_chars: int, ai_bu
         and feed.get("sport") == tags.sport
     )
     if resolved.sport and tags.sport and resolved.sport != tags.sport:
-        _hold_ai_source(source_url)
+        _hold_ai_source(source_url, "taxonomy-conflict")
         logger.info(
             "[fetch_sources] hold taxonomy conflict resolved=%s classified=%s title=%s",
             resolved.sport, tags.sport, item["title"][:80],
@@ -560,25 +534,6 @@ def _fetch_and_store_all_articles(
             return classify_article(item["title"], item.get("summary") or "",
                 feed_kind=feed.get("kind", "mixed"), feed_sport=feed.get("sport"),
                 feed_league=feed.get("league"), feed_country=feed.get("country"))
-        unknown_samples = []
-        for candidate in queued:
-            if len(unknown_samples) >= 15:
-                break
-            try:
-                candidate_tags = classify_candidate(candidate)
-            except Exception:
-                continue
-            if candidate_tags.sport is None:
-                feed_meta = candidate.get("feed") or {}
-                unknown_samples.append({
-                    "title": str(candidate.get("title") or "")[:120],
-                    "feed_sport": feed_meta.get("sport"),
-                    "feed_kind": feed_meta.get("kind"),
-                    "publisher": feed_meta.get("publisher"),
-                })
-        if unknown_samples:
-            logger.info("[fetch_sources] unknown_sport_samples=%s", unknown_samples)
-
         queued, admission = fair_news_queue(queued, classify_candidate,
             sport_order=[row["id"] for row in SPORTS if row["active"] and row["supports_news"]])
         logger.info("[fetch_sources] eligible=%s rejected=%s", len(queued), admission)
@@ -590,7 +545,7 @@ def _fetch_and_store_all_articles(
                 os.getenv("NEWS_TRANSLATIONS_ENABLED") == "1"
                 and int(os.getenv("NEWS_TRANSLATIONS_PER_CYCLE", "0") or "0") > 0
                 and active_budget is not None
-                and (active_budget.max_requests - active_budget.attempts) < 2
+                and (active_budget.max_requests - active_budget.attempts) < 3
             ):
                 logger.info("[fetch_sources] preserving final AI request for translation")
                 break
