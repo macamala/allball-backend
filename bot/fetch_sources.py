@@ -844,6 +844,7 @@ def _fetch_and_store_all_articles(
         from public_index import (
             recent_public_sport_inventory,
             repair_recent_duplicate_news,
+            repair_recent_news_images,
             repair_recent_sport_mislabels,
             repair_recent_unresolved,
         )
@@ -851,6 +852,8 @@ def _fetch_and_store_all_articles(
         # Self-heal taxonomy first, re-evaluate valid held rows, and run dedupe
         # last so no re-index can resurrect a duplicate. Zero AI is spent here.
         repair_started = time.monotonic()
+        images = repair_recent_news_images(db, limit=80, max_age_hours=72, recover_limit=8)
+        after_images = time.monotonic()
         mislabels = repair_recent_sport_mislabels(db, limit=600, max_age_hours=168)
         after_mislabels = time.monotonic()
         repaired = repair_recent_unresolved(db, limit=24)
@@ -859,10 +862,12 @@ def _fetch_and_store_all_articles(
         after_dedupe = time.monotonic()
         sport_inventory = recent_public_sport_inventory(db, max_age_hours=72)
         logger.info(
-            "[fetch_sources] repair phases mislabels=%s %.3fs unresolved=%s %.3fs "
-            "duplicates=%s %.3fs inventory=%.3fs",
+            "[fetch_sources] repair phases images=%s %.3fs mislabels=%s %.3fs "
+            "unresolved=%s %.3fs duplicates=%s %.3fs inventory=%.3fs",
+            images,
+            after_images - repair_started,
             mislabels,
-            after_mislabels - repair_started,
+            after_mislabels - after_images,
             repaired,
             after_unresolved - after_mislabels,
             duplicates,
