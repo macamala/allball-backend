@@ -459,8 +459,13 @@ SPORT_ALIASES: Dict[str, List[str]] = {
 }
 
 for _slug, _aliases in extra_sport_aliases().items():
-    if _slug not in SPORT_ALIASES:
-        SPORT_ALIASES[_slug] = list(_aliases)
+    current = list(SPORT_ALIASES.get(_slug) or [])
+    seen = {str(item).casefold() for item in current}
+    for _alias in _aliases:
+        if str(_alias).casefold() not in seen:
+            current.append(_alias)
+            seen.add(str(_alias).casefold())
+    SPORT_ALIASES[_slug] = current
 
 TEAMS: List[Dict[str, object]] = [
     {
