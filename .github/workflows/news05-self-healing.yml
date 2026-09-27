@@ -24,6 +24,10 @@ jobs:
           pytest -q \
             tests/test_news05_self_healing.py \
             tests/test_news05_unified_sources.py \
+            tests/test_news05_writer_router.py \
+            tests/test_c22_news_runtime.py \
+            tests/test_c22_news_scheduler.py \
+            tests/test_news_deploy_contract.py \
             tests/test_news03_policy.py \
             tests/test_news03_http.py \
             tests/test_news03_integration.py \
