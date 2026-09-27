@@ -11,6 +11,7 @@ on:
       - news/repair-performance-20260927
       - news/mislabel-repair-fast-20260927
       - news/image-reachability-20260927
+      - news/source-path-hints-20260927
     paths:
       - ".github/workflows/news-v13-self-healing-combined.yml"
   workflow_dispatch:
@@ -107,7 +108,7 @@ jobs:
           Path('evidence/test-selection.txt').write_text('\n'.join(sorted(paths))+'\n')
           PY
       - name: Candidate boundary note
-        run: echo "Final candidate verifies browser-like hero reachability before AI, refreshes or hides definitive broken heroes without AI, keeps transient CDN failures non-destructive, and preserves retained Live Scores boundaries."
+        run: echo "Final candidate retains browser-like hero health repair and adds conservative publisher-owned URL-path sport hints only when textual classification is unresolved; retained Live Scores boundaries remain untouched."
       - name: Run retained Live Scores plus current News suite offline
         run: |
           set -euo pipefail
