@@ -218,7 +218,7 @@ def test_recent_inventory_ignores_old_and_missing_image_rows():
 
 
 
-def test_recent_cross_sport_mislabel_is_hidden():
+def test_recent_cross_sport_mislabel_is_corrected():
     from models import ArticleTaxonomyResolution
     from public_index import repair_recent_sport_mislabels
 
@@ -249,7 +249,8 @@ def test_recent_cross_sport_mislabel_is_hidden():
 
         assert repair_recent_sport_mislabels(db, limit=100, max_age_hours=168) >= 1
         db.refresh(tax)
-        assert tax.public_ok is False
+        assert tax.resolved_sport == "cycling"
+        assert tax.public_ok is True
     finally:
         db.close()
 
@@ -332,7 +333,7 @@ def test_duplicate_repair_does_not_load_full_article_objects():
         db.close()
 
 
-def test_mislabel_repair_still_hides_distinctive_wrong_sport():
+def test_mislabel_repair_corrects_distinctive_wrong_sport():
     from models import ArticleTaxonomyResolution
     from public_index import repair_recent_sport_mislabels
 
@@ -359,7 +360,8 @@ def test_mislabel_repair_still_hides_distinctive_wrong_sport():
 
         assert repair_recent_sport_mislabels(db,limit=100,max_age_hours=168) >= 1
         db.refresh(tax)
-        assert tax.public_ok is False
+        assert tax.resolved_sport == "football"
+        assert tax.public_ok is True
     finally:
         db.close()
 
@@ -395,6 +397,7 @@ def test_afl_club_headline_repairs_wrong_basketball_public_label():
 
         assert repair_recent_sport_mislabels(db,limit=100,max_age_hours=168) >= 1
         db.refresh(tax)
-        assert tax.public_ok is False
+        assert tax.resolved_sport == "australian-rules"
+        assert tax.public_ok is True
     finally:
         db.close()
