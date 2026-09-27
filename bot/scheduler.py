@@ -24,15 +24,29 @@ def _run_cycle():
     from bot.news_budget import ai_budget_scope, configured_budget
     maximum = int(os.environ['NEWS_MAX_AI_ARTICLES'])
     budget = configured_budget(maximum)
-    if maximum <= 0 or not budget.can_start():
-        logger.info('News cycle held: allowance_or_ledger_unavailable')
-        return 0
-    from bot.fetch_sources import fetch_and_store_all_articles
-    from bot.rewrite_ai import reset_openai_rate_limit
     from public_cache import bump_public_cache
 
     historical = os.environ['NEWS_HISTORICAL_REPAIR_ENABLED'] == '1'
-    rewritten = indexed = 0
+    rewritten = indexed = data_briefs = 0
+
+    # Zero-AI NinkoSports result briefs are independent from external AI quota.
+    # They still share the same single News owner and startup safety gates.
+    if os.environ.get('NEWS_DATA_NEWS_ENABLED') == '1':
+        try:
+            from bot.data_news import ingest_result_briefs
+            data_briefs = ingest_result_briefs(days=2, max_groups=120)
+        except Exception as exc:
+            logger.error('News data lane failed: %s', type(exc).__name__)
+
+    if maximum <= 0 or not budget.can_start():
+        if data_briefs:
+            bump_public_cache()
+        logger.info('News AI lane held: allowance_or_ledger_unavailable data_briefs=%s',
+                    data_briefs)
+        return data_briefs
+
+    from bot.fetch_sources import fetch_and_store_all_articles
+    from bot.rewrite_ai import reset_openai_rate_limit
     try:
         # Historical retries and new articles share this one actual-request cap.
         with ai_budget_scope(budget):
@@ -55,11 +69,13 @@ def _run_cycle():
                 finally:
                     db.close()
                 repair_contaminated(max_pages=1)
-        if rewritten or historical:
+        if rewritten or historical or data_briefs:
             bump_public_cache()
-        logger.info('News cycle finished: articles=%s indexed=%s attempts=%s stop=%s history=%s',
-                    rewritten, indexed, budget.attempts, budget.blocked_reason, historical)
-        return rewritten
+        logger.info(
+            'News cycle finished: ai_articles=%s data_briefs=%s indexed=%s attempts=%s stop=%s history=%s',
+            rewritten, data_briefs, indexed, budget.attempts, budget.blocked_reason, historical,
+        )
+        return rewritten + data_briefs
     except Exception as exc:
         # Exception strings can contain a credential-bearing DB/source URL.
         logger.error('News cycle failed: %s', type(exc).__name__)
