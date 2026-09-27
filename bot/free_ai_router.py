@@ -196,6 +196,24 @@ def write_free_story(system_prompt: str, prompt: str) -> Optional[str]:
     )
 
 
+def free_json_completion(system_prompt: str, prompt: str, *, max_tokens: int = 5000) -> Optional[str]:
+    """Shared zero-price JSON lane for translation/validation work."""
+    model = _free_model("NEWS_XKIRO_WRITER_MODEL", _DEFAULT_WRITER)
+    if not model:
+        return None
+    return _completion(
+        model=model,
+        system=system_prompt,
+        user=prompt,
+        max_tokens=max_tokens,
+        json_mode=True,
+    )
+
+
+def selected_free_model_name() -> Optional[str]:
+    return _free_model("NEWS_XKIRO_WRITER_MODEL", _DEFAULT_WRITER)
+
+
 _VALIDATOR_SYSTEM = """You are a strict sports-news fact checker.
 Compare a draft only against the supplied source facts.
 Approve only when every factual claim in the draft is directly supported.
