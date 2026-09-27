@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 
 LANGUAGES = ("sr", "es", "de", "fr", "it", "pt")
 TRANSLATION_PROVIDER = "xkiro-free-v12"
+# Release marker: v12 protects exact proper names with reversible translation tokens.
 CYRILLIC_RE = re.compile(r"[\u0400-\u04FF]")
 NUMBER_RE = re.compile(r"(?<!\w)\d+(?:[.,:/–-]\d+)*(?:%|\b)")
 
