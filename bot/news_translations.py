@@ -24,7 +24,7 @@ from .news_policy import protected_proper_names
 logger = logging.getLogger(__name__)
 
 LANGUAGES = ("sr", "es", "de", "fr", "it", "pt")
-TRANSLATION_PROVIDER = "xkiro-free-v11"
+TRANSLATION_PROVIDER = "xkiro-free-v12"
 CYRILLIC_RE = re.compile(r"[\u0400-\u04FF]")
 NUMBER_RE = re.compile(r"(?<!\w)\d+(?:[.,:/–-]\d+)*(?:%|\b)")
 
@@ -41,8 +41,10 @@ Preserve the NinkoSports voice, not just the information:
 FACTUAL RULES:
 - Do not summarize, add context, add links, add quotes, or change any fact.
 - Preserve every team/person/competition/venue name EXACTLY.
-- Names listed under LOCKED NAMES are immutable tokens: copy their spelling
-  verbatim in every target language and never translate or transliterate them.
+- Protected multi-word names in the source are represented by LOCKED NAME TOKENS.
+- Copy every LOCKED NAME TOKEN exactly wherever it appears. Never translate,
+  transliterate, split, alter or drop a token. The server restores the original
+  proper name after translation.
 - Preserve every numeric VALUE exactly, including scores, minutes, percentages,
   dates and statistics. Locale punctuation may change naturally (for example
   100,023 -> 100.023 or 4.52 -> 4,52), but the numeric value must not change.
@@ -124,6 +126,52 @@ def _name_key(value: str) -> str:
 
 def _contains_name(text: str, name: str) -> bool:
     return _name_key(name) in _name_key(text)
+
+
+def _mask_protected_names(source: Dict[str, str], names: list[str]):
+    """Hide exact proper names behind immutable tokens during translation."""
+    masked = dict(source)
+    unique = []
+    seen = set()
+    for name in names:
+        value = str(name or "").strip()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        unique.append(value)
+
+    locks = []
+    for index, name in enumerate(sorted(unique, key=len, reverse=True)[:24]):
+        token = f"__NINKONAME_{chr(ord('A') + index)}__"
+        changed = False
+        for field in ("title", "summary", "body"):
+            value = masked.get(field) or ""
+            replaced = value.replace(name, token)
+            if replaced != value:
+                masked[field] = replaced
+                changed = True
+        if changed:
+            locks.append((token, name))
+    return masked, locks
+
+
+def _restore_protected_names(
+    payload: Dict[str, Dict[str, str]],
+    locks: list[tuple[str, str]],
+) -> Dict[str, Dict[str, str]]:
+    restored: Dict[str, Dict[str, str]] = {}
+    for language, row in payload.items():
+        restored_row = {}
+        for field in ("title", "summary", "body"):
+            value = row.get(field)
+            if not isinstance(value, str):
+                restored_row[field] = value
+                continue
+            for token, name in locks:
+                value = value.replace(token, name)
+            restored_row[field] = value
+        restored[language] = restored_row
+    return restored
 
 
 def _word_count(text: str) -> int:
@@ -356,24 +404,26 @@ def translate_article_payload(article: Article) -> Optional[Dict[str, Dict[str, 
         )
         if len(name.split()) >= 2
     ]
-    locked_block = "\n".join(f"- {name}" for name in locked_names[:24]) or "- none"
+    masked_source, name_locks = _mask_protected_names(source, locked_names)
+    locked_block = "\n".join(f"- {token}" for token, _name in name_locks) or "- none"
     locked_numbers = sorted(
         _numbers("\n".join(source.values())),
         key=lambda value: (len(value), value),
     )
     number_block = "\n".join(f"- {value}" for value in locked_numbers) or "- none"
     prompt = (
-        "LOCKED NAMES — copy these spellings VERBATIM wherever the entity is mentioned; "
-        "do not translate, transliterate or rename them:\n"
+        "LOCKED NAME TOKENS — copy every token VERBATIM wherever it appears. "
+        "Do not translate, transliterate, split, alter or drop these tokens; "
+        "the server restores the exact proper names after translation:\n"
         + locked_block
         + "\n\nLOCKED NUMERIC VALUES — these are the ONLY numerals allowed in the translation. "
           "Every value below must appear in EVERY language; do not omit any value and "
           "do not create any additional numeral. Locale punctuation may change only "
           "when the numeric value stays identical:\n"
         + number_block
-        + "\n\nENGLISH TITLE:\n" + source["title"][:1000]
-        + "\n\nENGLISH SUMMARY:\n" + source["summary"][:1600]
-        + "\n\nENGLISH BODY:\n" + source["body"]
+        + "\n\nENGLISH TITLE:\n" + masked_source["title"][:1000]
+        + "\n\nENGLISH SUMMARY:\n" + masked_source["summary"][:1600]
+        + "\n\nENGLISH BODY:\n" + masked_source["body"]
     )
     raw = free_json_completion(_SYSTEM, prompt, max_tokens=9000)
     if not raw:
@@ -391,7 +441,8 @@ def translate_article_payload(article: Article) -> Optional[Dict[str, Dict[str, 
             sorted(payload.keys())[:24] if isinstance(payload, dict) else [],
         )
         return None
-    return _validate(source, normalized)
+    restored = _restore_protected_names(normalized, name_locks)
+    return _validate(source, restored)
 
 
 def _latest_missing(db: Session, limit: int) -> list[Article]:
