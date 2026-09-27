@@ -14,6 +14,7 @@ on:
       - news/source-path-hints-20260927
       - news/image-health-cadence-20260927
       - news/image-health-offset-20260927
+      - news/non-sport-sections-20260927
     paths:
       - ".github/workflows/news-v13-self-healing-combined.yml"
   workflow_dispatch:
@@ -110,7 +111,7 @@ jobs:
           Path('evidence/test-selection.txt').write_text('\n'.join(sorted(paths))+'\n')
           PY
       - name: Candidate boundary note
-        run: echo "Final candidate keeps browser-like hero validation, conservative source-path fallback and ten-minute zero-AI image health, with watchdog runs offset five minutes from writer boundaries to preserve the single News owner."
+        run: echo "Final candidate retains image-health/source-path protections and rejects known publisher lifestyle/off-field sections plus non-article media before classification or AI, preserving retained Live Scores boundaries."
       - name: Run retained Live Scores plus current News suite offline
         run: |
           set -euo pipefail
