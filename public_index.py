@@ -9,6 +9,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import Optional, Sequence
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from editorial import classify_media_url, evaluate_quality, news_image_is_publishable
