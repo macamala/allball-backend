@@ -137,3 +137,24 @@ def test_disabled_html_indexes_are_not_fetched(monkeypatch):
     assert 'fifa-futsal-news' not in calls
     assert 'rocket-league-blast-partner' in calls
     assert 'hockey-australia-news' in calls
+
+
+def test_discovery_skips_landing_and_category_pages():
+    athletics=next(row for row in idx.HTML_INDEXES if row['id']=='world-athletics-news')
+    assert idx._same_host_url(
+        athletics['url'], 'https://worldathletics.org/news', athletics['host'], athletics
+    ) is None
+    assert idx._same_host_url(
+        athletics['url'], '/news/reports', athletics['host'], athletics
+    ) is None
+    assert idx._same_host_url(
+        athletics['url'], '/news/report/example-story', athletics['host'], athletics
+    ) == 'https://worldathletics.org/news/report/example-story'
+
+    netball=next(row for row in idx.HTML_INDEXES if row['id']=='world-netball-news')
+    assert idx._same_host_url(
+        netball['url'], '/events-and-results/netball-world-cup/', netball['host'], netball
+    ) is None
+    assert idx._same_host_url(
+        netball['url'], '/game/history-of-netball/', netball['host'], netball
+    ) is None
