@@ -104,14 +104,6 @@ HTML_INDEXES = (
         ),
     },
     {
-        "id": "ittf-table-tennis-news",
-        "sport": "table-tennis",
-        "publisher": "ITTF",
-        "url": "https://www.ittf.com/news/",
-        "host": "www.ittf.com",
-        "paths": ("/2026/",),
-    },
-    {
         "id": "world-aquatics-water-polo",
         "sport": "water-polo",
         "publisher": "World Aquatics",
@@ -130,6 +122,8 @@ HTML_INDEXES = (
         "paths": ("/news/",),
         "keywords": ("hockey", "fih"),
         "hydrate_keywords_only": True,
+        "max_links": 20,
+        "max_article_bytes": 4_000_000,
     },
     {
         "id": "wst-snooker-news",
@@ -138,6 +132,7 @@ HTML_INDEXES = (
         "url": "https://www.wst.tv/news/",
         "host": "www.wst.tv",
         "paths": ("/news/",),
+        "max_links": 30,
     },
     {
         "id": "world-athletics-news",
@@ -329,7 +324,7 @@ def _anchor_candidates(cfg: Dict) -> List[tuple[str, str]]:
             continue
         seen.add(url)
         output.append((url, text))
-        if len(output) >= MAX_LINKS_PER_SOURCE:
+        if len(output) >= max(1, min(int(cfg.get("max_links") or MAX_LINKS_PER_SOURCE), 40)):
             break
     return output
 
@@ -383,7 +378,13 @@ def _sitemap_candidates(cfg: Dict) -> List[tuple[str, str]]:
 
 def _hydrate(cfg: Dict, url: str, fallback_title: str) -> Optional[Dict]:
     try:
-        raw = read_news_feed(url)
+        raw = read_news_feed(
+            url,
+            max_bytes=max(
+                MAX_INDEX_BYTES,
+                min(int(cfg.get("max_article_bytes") or MAX_INDEX_BYTES), 4_000_000),
+            ),
+        )
         if len(raw) > MAX_INDEX_BYTES:
             return None
         html = raw.decode("utf-8", "replace")
