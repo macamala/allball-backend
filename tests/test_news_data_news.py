@@ -83,3 +83,16 @@ def test_event_without_final_result_fact_is_held():
     assert data_news.build_result_brief(
         'football','england-premier-league','2026-09-27',[event]
     ) is None
+
+
+def test_result_news_uses_sydney_local_day_bounds(monkeypatch):
+    monkeypatch.setenv('NEWS_EDITORIAL_TIMEZONE', 'Australia/Sydney')
+    start,end=data_news._day_bounds_utc('2026-09-27')
+    assert start == '2026-09-26T14:00:00Z'
+    assert end == '2026-09-27T13:59:59.999999Z'
+
+
+def test_invalid_editorial_timezone_falls_back_safely(monkeypatch):
+    monkeypatch.setenv('NEWS_EDITORIAL_TIMEZONE', 'Not/A_Real_Zone')
+    start,_=data_news._day_bounds_utc('2026-09-27')
+    assert start == '2026-09-26T14:00:00Z'
