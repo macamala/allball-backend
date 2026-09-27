@@ -1,5 +1,7 @@
 from datetime import datetime
 
+import pytest
+
 from fastapi.testclient import TestClient
 
 from app import app
@@ -547,5 +549,41 @@ def test_recent_image_repair_hides_every_dead_hero_without_replacement(monkeypat
             assert tax is not None and tax.public_ok is False
         visible={row.id for row,_ in fetch_public(db,sport="football",limit=300,max_age_hours=72)}
         assert not ({article.id for article in articles} & visible)
+    finally:
+        db.close()
+
+
+def test_recent_image_repair_keeps_transient_probe_failure_public(monkeypatch):
+    from models import ArticleTaxonomyResolution
+    from public_index import repair_recent_news_images
+
+    image_url="https://example.com/transient-hero.jpg"
+    article=_make(
+        slug="image-repair-transient",
+        title="Chelsea prepare for Premier League match after squad update",
+        image_url=image_url,
+        external_id="https://example.com/image-repair-transient",
+    )
+    monkeypatch.setattr(
+        "bot.news_image_http.probe_news_images",
+        lambda requested, **kw: {
+            url: ((url != image_url), "ok" if url != image_url else "http_503")
+            for url in requested
+        },
+    )
+    monkeypatch.setattr(
+        "bot.extract.extract_from_url",
+        lambda *a, **k: pytest.fail("transient CDN failure must not trigger destructive repair"),
+    )
+
+    db=SessionLocal()
+    try:
+        assert repair_recent_news_images(db,limit=200,max_age_hours=72,recover_limit=8) == 0
+        db.refresh(article)
+        tax=db.query(ArticleTaxonomyResolution).filter(
+            ArticleTaxonomyResolution.article_id==article.id
+        ).first()
+        assert article.image_url == image_url
+        assert tax is not None and tax.public_ok is True
     finally:
         db.close()
