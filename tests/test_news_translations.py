@@ -116,3 +116,30 @@ def test_translation_masks_and_restores_exact_protected_name(monkeypatch):
         combined='\n'.join(result[language].values())
         assert 'Laver Cup' in combined
         assert token not in combined
+
+def test_translation_validator_accepts_localized_english_ordinal_value():
+    source={
+        'title':'George Russell wins Azerbaijan Grand Prix',
+        'summary':'Kimi Antonelli recovered from 16th on the grid.',
+        'body':(
+            'George Russell won after a controlled drive while Kimi Antonelli recovered from 16th on the grid. '
+            'The race remained close late on, but the report adds no statistic, quote, motive or event beyond '
+            'the supplied sporting facts and keeps every protected proper name unchanged.'
+        ),
+    }
+    payload={
+        language:{
+            'title':'George Russell wins Azerbaijan Grand Prix',
+            'summary':'Kimi Antonelli recovered from 16. on the grid.',
+            'body':(
+                'George Russell won after a controlled drive while Kimi Antonelli recovered from 16. on the grid. '
+                'The race remained close late on, but the report adds no statistic, quote, motive or event beyond '
+                'the supplied sporting facts and keeps every protected proper name unchanged.'
+            ),
+        }
+        for language in translations.LANGUAGES
+    }
+    assert translations._numbers('started 16th') == {'16'}
+    assert translations._numbers('started 16.') == {'16'}
+    assert translations._validate(source, payload)
+
