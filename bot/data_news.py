@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import hashlib
 import logging
 import os
@@ -28,6 +29,15 @@ _ALLOWED_API_HOST = "allball-backend-production.up.railway.app"
 _FINISHED = {"finished", "complete", "final", "ft", "ended", "aet", "pen", "awarded"}
 _MAX_RESPONSE_BYTES = 8_000_000
 _MAX_EVENTS_PER_GROUP = 30
+_DEFAULT_EDITORIAL_TZ = "Australia/Sydney"
+
+
+def _editorial_zone():
+    value = (os.getenv("NEWS_EDITORIAL_TIMEZONE") or _DEFAULT_EDITORIAL_TZ).strip()
+    try:
+        return ZoneInfo(value)
+    except (ZoneInfoNotFoundError, ValueError):
+        return ZoneInfo(_DEFAULT_EDITORIAL_TZ)
 
 
 def _api_base() -> Optional[str]:
@@ -239,7 +249,7 @@ def _upsert_group(db: Session, sport: str, competition_key: str, day: str, event
         return False
     external_id = f"ninkosports-results:{day}:{sport}:{competition_key}"[:500]
     article = db.query(Article).filter(Article.external_id == external_id).first()
-    now = datetime.now(timezone.utc)
+    now = datetime.utcnow()
     body = draft["body"]
     if article is not None and (article.content or "") == body and (article.title or "") == draft["title"]:
         return False
@@ -293,7 +303,7 @@ def ingest_result_briefs(days: int = 2, max_groups: int = 120) -> int:
         return 0
     from database import SessionLocal
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(_editorial_zone())
     grouped: Dict[Tuple[str, str, str], List[Dict]] = defaultdict(list)
     for offset in range(max(1, min(int(days), 3))):
         day = (now - timedelta(days=offset)).date().isoformat()
