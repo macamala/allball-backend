@@ -14,6 +14,7 @@ from editorial import classify_media_url, evaluate_quality
 from models import Article, ArticleTaxonomyResolution
 from sport_match import MAIN_SPORTS, isolation_ok
 from bot.taxonomy import COMPETITIONS
+from bot.news_learning import article_has_open_incident
 from taxonomy_resolver import (
     MIN_SPORT_CONFIDENCE,
     RESOLVER_VERSION,
@@ -57,6 +58,7 @@ def persist_public_article(db: Session, article: Article, resolution=None, commi
         and resolved.sport
         and resolved.sport_confidence >= MIN_SPORT_CONFIDENCE
         and isolated
+        and not article_has_open_incident(db, article.id)
     )
     row = (
         db.query(ArticleTaxonomyResolution)
