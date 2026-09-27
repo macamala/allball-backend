@@ -116,12 +116,12 @@ def probe_news_image(url: str, *, client=None) -> tuple[bool, str]:
                             break
                     magic_ok = _looks_like_image_bytes(bytes(data))
                     type_ok = content_type.startswith("image/")
-                    if not type_ok and not magic_ok:
-                        result = (False, "not_image_content")
+                    if not data:
+                        result = (False, "empty_image_response")
                         _cache_put(value, *result)
                         return result
-                    if not data and not type_ok:
-                        result = (False, "empty_image_response")
+                    if not type_ok and not magic_ok:
+                        result = (False, "not_image_content")
                         _cache_put(value, *result)
                         return result
                     result = (True, "ok")
