@@ -544,6 +544,7 @@ def _fetch_and_store_all_articles(
                     "feed_sport": meta.get("sport"),
                     "feed_kind": meta.get("kind"),
                     "publisher": meta.get("publisher"),
+                    "url": str(candidate.get("url") or "")[:180],
                 })
         if unknown_samples:
             logger.info("[fetch_sources] unknown_sport_samples=%s", unknown_samples)
