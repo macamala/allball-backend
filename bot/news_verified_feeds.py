@@ -3,7 +3,7 @@
 Enabled only by NEWS_EXPANDED_FEEDS_ENABLED. Stale metadata remains honestly
 labelled; the runtime date gate must see a new eligible entry before admission.
 """
-_OBSERVED = ('2026-09-26T06:37:05.991572+00:00', '2026-09-26T06:43:20.010289+00:00')
+_OBSERVED = ('2026-09-26T06:37:05.991572+00:00', '2026-09-26T06:43:20.010289+00:00', '2026-09-27T01:54:00+00:00')
 _ROWS = [
     ('football', 'BBC Sport', 'https://feeds.bbci.co.uk/sport/football/rss.xml', 0, True),
     ('tennis', 'BBC Sport', 'https://feeds.bbci.co.uk/sport/tennis/rss.xml', 0, True),
@@ -34,6 +34,14 @@ _ROWS = [
     ('darts', 'BBC Sport', 'https://feeds.bbci.co.uk/sport/darts/rss.xml', 1, False),
     ('dota-2', 'Valve', 'https://store.steampowered.com/feeds/news/app/570/?l=english', 1, False),
     ('harness-racing', 'USTA', 'https://ustrottingnews.com/feed/', 1, True),
+    # 27 Sep discovery: AFL and EA are first-party RSS; BBC niche feeds were
+    # independently listed as recently checked but remain runtime fail-closed.
+    ('australian-rules', 'AFL', 'https://www.afl.com.au/rss', 2, True),
+    ('badminton', 'BBC Sport', 'https://feeds.bbci.co.uk/sport/badminton/rss.xml', 2, False),
+    ('field-hockey', 'BBC Sport', 'https://feeds.bbci.co.uk/sport/hockey/rss.xml', 2, False),
+    ('table-tennis', 'BBC Sport', 'https://feeds.bbci.co.uk/sport/table-tennis/rss.xml', 2, False),
+    ('water-polo', 'BBC Sport', 'https://feeds.bbci.co.uk/sport/water-polo/rss.xml', 2, False),
+    ('ea-sports-fc', 'Electronic Arts', 'https://news.ea.com/rss/pressrelease.aspx', 2, True),
 ]
 VERIFIED_RSS = [
     {'url': url, 'kind': 'mixed', 'sport': sport, 'enabled': True,
