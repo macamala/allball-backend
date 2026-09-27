@@ -23,6 +23,7 @@ from .news_policy import protected_proper_names
 logger = logging.getLogger(__name__)
 
 LANGUAGES = ("sr", "es", "de", "fr", "it", "pt")
+TRANSLATION_PROVIDER = "xkiro-free-v2"
 CYRILLIC_RE = re.compile(r"[\u0400-\u04FF]")
 NUMBER_RE = re.compile(r"(?<!\w)\d+(?:[.,:/–-]\d+)*(?:%|\b)")
 
@@ -55,7 +56,15 @@ def translations_enabled() -> bool:
 
 
 def _numbers(text: str) -> set[str]:
-    return set(NUMBER_RE.findall(text or ""))
+    values = set()
+    for token in NUMBER_RE.findall(text or ""):
+        canonical = (
+            token.replace("–", "-")
+            .replace("—", "-")
+            .replace("−", "-")
+        )
+        values.add(canonical)
+    return values
 
 
 def _word_count(text: str) -> int:
@@ -96,7 +105,14 @@ def _validate(source: Dict[str, str], payload: object) -> Optional[Dict[str, Dic
         combined = f"{title}\n{summary}\n{body}"
         if re.search(r"https?://|www\.", combined, re.I):
             return _translation_reject("external-link", language)
-        if _numbers(combined) != source_numbers:
+        translated_numbers = _numbers(combined)
+        if translated_numbers != source_numbers:
+            logger.info(
+                "[translations] number mismatch language=%s missing=%s extra=%s",
+                language,
+                sorted(source_numbers - translated_numbers),
+                sorted(translated_numbers - source_numbers),
+            )
             return _translation_reject("numbers-changed", language)
         folded = combined.casefold()
         if any(name.casefold() not in folded for name in protected):
@@ -165,7 +181,10 @@ def _latest_missing(db: Session, limit: int) -> list[Article]:
         )
         ready = {row.language_code for row in translation_rows if row.status == "ready"}
         recently_failed = any(
-            row.status == "failed" and row.updated_at is not None and row.updated_at >= cutoff
+            row.status == "failed"
+            and row.provider == TRANSLATION_PROVIDER
+            and row.updated_at is not None
+            and row.updated_at >= cutoff
             for row in translation_rows
         )
         if recently_failed:
@@ -194,7 +213,7 @@ def _mark_failed(db: Session, article: Article) -> None:
             db.add(row)
         if row.status != "ready":
             row.status = "failed"
-            row.provider = "xkiro-free"
+            row.provider = TRANSLATION_PROVIDER
             row.model_name = model
             row.updated_at = now
 
@@ -220,7 +239,7 @@ def _store(db: Session, article: Article, translations: Dict[str, Dict[str, str]
         row.translated_summary = data["summary"]
         row.translated_body = data["body"]
         row.status = "ready"
-        row.provider = "xkiro-free"
+        row.provider = TRANSLATION_PROVIDER
         row.model_name = model
         row.updated_at = now
         stored += 1
