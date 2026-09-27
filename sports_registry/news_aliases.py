@@ -45,6 +45,8 @@ EXTRA_SPORT_ALIASES: Dict[str, List[str]] = {
         "do arouca",
         "guarda-redes",
         "guarda redes",
+        "carlos queiroz",
+        "jorge jesus",
     ],
     "basketball": ["nba rank", "aba liga", "aba lige", "aba league"],
     "boxing": ["radivoje kalajdžić", "radivoje kalajdzic", "srbin u londonu prebio britanca"],
