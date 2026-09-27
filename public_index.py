@@ -279,11 +279,15 @@ def repair_recent_duplicate_news(
 
 
 def _distinctive_title_sport_support(title: str, sport: str) -> bool:
-    """Require an alias unique to the proposed sport in the headline itself."""
+    """Require a word-bounded alias unique to the proposed sport in the headline."""
     from bot.taxonomy import SPORT_ALIASES
 
     haystack = " " + (title or "").casefold() + " "
-    aliases = [str(alias).casefold() for alias in SPORT_ALIASES.get(sport, ()) if str(alias).strip()]
+    aliases = [
+        str(alias).casefold()
+        for alias in SPORT_ALIASES.get(sport, ())
+        if str(alias).strip()
+    ]
     other_aliases = {
         str(alias).casefold().strip()
         for other_sport, rows in SPORT_ALIASES.items()
@@ -295,16 +299,13 @@ def _distinctive_title_sport_support(title: str, sport: str) -> bool:
         needle = alias.strip()
         if len(needle) < 4 or needle in other_aliases:
             continue
-        # Aliases with intentional surrounding spaces already encode a word
-        # boundary; otherwise accept exact phrase containment in the padded title.
         pattern = re.compile(
-            r"(?<!\\w)" + re.escape(needle).replace(r"\\ ", r"\\s+") + r"(?!\\w)",
+            r"(?<!\w)" + re.escape(needle).replace(r"\ ", r"\s+") + r"(?!\w)",
             re.IGNORECASE,
         )
         if pattern.search(haystack):
             return True
     return False
-
 
 def repair_recent_sport_mislabels(
     db: Session,
