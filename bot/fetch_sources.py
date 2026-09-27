@@ -622,7 +622,7 @@ def _enrich_unknown_candidates(items, limit=8):
         if enriched >= max(0, int(limit)):
             break
         try:
-            candidate_tags = __classify_candidate(candidate)
+            candidate_tags = _classify_candidate(candidate)
         except Exception:
             continue
         if candidate_tags.sport is not None or not candidate.get("url"):
