@@ -13,7 +13,6 @@ def test_expanded_catalog_contains_new_free_sources(monkeypatch):
         'https://feeds.bbci.co.uk/sport/hockey/rss.xml',
         'https://feeds.bbci.co.uk/sport/table-tennis/rss.xml',
         'https://feeds.bbci.co.uk/sport/water-polo/rss.xml',
-        'https://news.ea.com/rss/pressrelease.aspx',
     }
     assert expected <= set(urls)
 
@@ -48,15 +47,7 @@ def test_dedicated_feed_can_hint_sport_when_article_text_is_silent(monkeypatch):
     assert tags.sport=='australian-rules'
 
 
-def test_cross_product_ea_feed_cannot_silently_stamp_ea_sports_fc(monkeypatch):
+def test_dead_cross_product_ea_press_feed_stays_removed(monkeypatch):
     monkeypatch.setenv('NEWS_EXPANDED_FEEDS_ENABLED','1')
-    rows=enabled_feeds()
-    ea=next(row for row in rows if row['url']=='https://news.ea.com/rss/pressrelease.aspx')
-    assert ea['kind']=='mixed'
-    tags=classify_article(
-        'Studio announces new leadership update',
-        'The publisher shared a company update with employees and players.',
-        feed_kind=ea['kind'],
-        feed_sport=ea['sport'],
-    )
-    assert tags.sport is None
+    urls={row['url'] for row in enabled_feeds()}
+    assert 'https://news.ea.com/rss/pressrelease.aspx' not in urls
