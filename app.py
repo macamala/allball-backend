@@ -394,6 +394,7 @@ def list_articles(
         limit=limit,
         offset=offset,
         sort=sort,
+        max_age_hours=72,
     )
     _cache_headers(response, pairs)
     return serialize_cards(pairs)
@@ -405,7 +406,7 @@ def recent_articles(
     db: Session = Depends(get_db),
     limit: int = Query(20, ge=1, le=100),
 ):
-    pairs = fetch_public(db, limit=limit)
+    pairs = fetch_public(db, limit=limit, max_age_hours=72)
     _cache_headers(response, pairs)
     return serialize_cards(pairs)
 
@@ -424,6 +425,7 @@ def featured_articles(
         competition=_resolve_league_key(league),
         require_photo=True,
         limit=limit,
+        max_age_hours=72,
     )
     _cache_headers(response, pairs)
     return serialize_cards(pairs)
@@ -435,7 +437,7 @@ def breaking_articles(
     db: Session = Depends(get_db),
     limit: int = Query(8, ge=1, le=20),
 ):
-    pairs = fetch_public(db, breaking=True, limit=limit)
+    pairs = fetch_public(db, breaking=True, limit=limit, max_age_hours=72)
     _cache_headers(response, pairs)
     return serialize_cards(pairs)
 
@@ -464,6 +466,7 @@ def articles_by_league(
         competition=_resolve_league_key(league),
         limit=limit,
         offset=offset,
+        max_age_hours=72,
     )
     _cache_headers(response, pairs)
     return serialize_cards(pairs)
@@ -477,7 +480,7 @@ def articles_by_sport(
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
 ):
-    pairs = fetch_public(db, sport=sport, limit=limit, offset=offset)
+    pairs = fetch_public(db, sport=sport, limit=limit, offset=offset, max_age_hours=72)
     _cache_headers(response, pairs)
     return serialize_cards(pairs)
 
@@ -505,7 +508,7 @@ def portal_home(
     sport_limit: int = Query(4, ge=1, le=12),
     league_min: int = Query(3, ge=1, le=10),
 ):
-    featured_pairs = fetch_public(db, require_photo=True, limit=max(featured_limit * 4, 16))
+    featured_pairs = fetch_public(db, require_photo=True, limit=max(featured_limit * 4, 16), max_age_hours=72)
     ranked = []
     for article, tax in featured_pairs:
         ranked.append(
@@ -529,11 +532,11 @@ def portal_home(
     featured_ids = {item.id for item in featured_items}
     tax_by_id = {article.id: tax for article, tax in featured_pairs}
 
-    latest_pairs = fetch_public(db, limit=latest_limit + len(featured_ids) + 8)
+    latest_pairs = fetch_public(db, limit=latest_limit + len(featured_ids) + 8, max_age_hours=72)
     latest_kept = [
         (row, tax) for row, tax in latest_pairs if row.id not in featured_ids
     ][:latest_limit]
-    breaking_pairs = fetch_public(db, breaking=True, limit=8)
+    breaking_pairs = fetch_public(db, breaking=True, limit=8, max_age_hours=72)
     breaking_kept = [
         (row, tax) for row, tax in breaking_pairs if row.id not in featured_ids
     ][:8]
@@ -544,11 +547,11 @@ def portal_home(
 
     by_sport = {}
     for sport in MAIN_SPORTS:
-        by_sport[sport] = serialize_cards(fetch_public(db, sport=sport, limit=sport_limit))
+        by_sport[sport] = serialize_cards(fetch_public(db, sport=sport, limit=sport_limit, max_age_hours=72))
 
     by_league = []
     for key in HOMEPAGE_COMPETITIONS:
-        rows = fetch_public(db, competition=key, limit=4)
+        rows = fetch_public(db, competition=key, limit=4, max_age_hours=72)
         if len(rows) < league_min:
             continue
         by_league.append(
