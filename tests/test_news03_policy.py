@@ -72,3 +72,19 @@ def test_reordered_copied_paragraphs_are_held():
 
 @pytest.mark.parametrize('draft', [None,{},[],{'title':'ok','summary':'ok','body':{}},{**DRAFT,'title':''}])
 def test_missing_drafts_do_not_publish(draft): assert original_draft_reason(draft,'Title',SOURCE)=='missing_original_draft'
+
+def test_personal_life_headline_is_rejected_before_queueing():
+    row=item('winter-sports', 90)
+    row['title']='Ex-Ski-Weltmeisterin ist kurz nach Hochzeit Mama geworden'
+    result,reasons=fair_news_queue([row],classify,now=NOW)
+    assert result == []
+    assert reasons == {'non_sports_personal_life': 1}
+
+
+def test_personal_news_with_explicit_competition_impact_is_kept():
+    row=item('tennis', 91)
+    row['title']='Player misses final after becoming a father'
+    result,reasons=fair_news_queue([row],classify,now=NOW)
+    assert result == [row]
+    assert reasons == {}
+
