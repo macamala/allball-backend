@@ -129,9 +129,8 @@ def test_bbc_programme_still_is_not_public_hero():
         external_id="https://example.com/bbc-graphic-hero",
     )
     with TestClient(app) as client:
-        detail = client.get(f"/articles/{article.slug}").json()
-        assert detail["image_url"] in {None, ""}
-        assert detail["hero_media_kind"] in {"GRAPHIC", "MISSING"}
+        detail_response = client.get(f"/articles/{article.slug}")
+        assert detail_response.status_code == 404
         listed = client.get("/articles?sport=football&limit=50").json()
         row = next((item for item in listed if item["slug"] == article.slug), None)
         assert row is None
