@@ -23,7 +23,7 @@ from .news_policy import protected_proper_names
 logger = logging.getLogger(__name__)
 
 LANGUAGES = ("sr", "es", "de", "fr", "it", "pt")
-TRANSLATION_PROVIDER = "xkiro-free-v2"
+TRANSLATION_PROVIDER = "xkiro-free-v3"
 CYRILLIC_RE = re.compile(r"[\u0400-\u04FF]")
 NUMBER_RE = re.compile(r"(?<!\w)\d+(?:[.,:/–-]\d+)*(?:%|\b)")
 
@@ -40,8 +40,9 @@ Preserve the NinkoSports voice, not just the information:
 FACTUAL RULES:
 - Do not summarize, add context, add links, add quotes, or change any fact.
 - Preserve every team/person/competition/venue name EXACTLY.
-- Preserve every numeric token exactly as digits, including scores, minutes,
-  percentages, dates and statistics.
+- Preserve every numeric VALUE exactly, including scores, minutes, percentages,
+  dates and statistics. Locale punctuation may change naturally (for example
+  100,023 -> 100.023 or 4.52 -> 4,52), but the numeric value must not change.
 - Serbian must be natural Serbian LATIN script only, never Cyrillic.
 - Serbian should sound like a passionate sports columnist from the Balkans,
   not like a literal machine translation.
@@ -55,16 +56,47 @@ def translations_enabled() -> bool:
     return os.getenv("NEWS_TRANSLATIONS_ENABLED") == "1"
 
 
+def _canonical_number(token: str) -> str:
+    token = (
+        (token or "").replace("–", "-")
+        .replace("—", "-")
+        .replace("−", "-")
+    )
+    suffix = "%" if token.endswith("%") else ""
+    core = token[:-1] if suffix else token
+
+    # Scores, ratios and dates keep their structural separator; normalize only
+    # dash glyphs. Decimal/thousands punctuation inside simple numbers may be
+    # localized by the target language without changing the numeric value.
+    if any(sep in core for sep in (":", "/", "-")):
+        return core + suffix
+
+    if "," not in core and "." not in core:
+        return core + suffix
+
+    separators = [ch for ch in core if ch in ",."]
+    parts = re.split(r"[.,]", core)
+
+    if len(set(separators)) == 1:
+        # 100,023 / 100.023 and 1,234,567 / 1.234.567 are equivalent
+        # grouping conventions. Otherwise treat a single separator as decimal.
+        if len(parts) > 1 and all(len(group) == 3 for group in parts[1:]):
+            return "".join(parts) + suffix
+        if len(parts) == 2:
+            return f"{parts[0]}.{parts[1]}" + suffix
+
+    # Mixed separators: the last separator is decimal only when followed by
+    # one or two digits; preceding punctuation is grouping.
+    last_pos = max(core.rfind(","), core.rfind("."))
+    fractional = core[last_pos + 1 :]
+    integer = re.sub(r"[.,]", "", core[:last_pos])
+    if 1 <= len(fractional) <= 2:
+        return f"{integer}.{fractional}" + suffix
+    return re.sub(r"[.,]", "", core) + suffix
+
+
 def _numbers(text: str) -> set[str]:
-    values = set()
-    for token in NUMBER_RE.findall(text or ""):
-        canonical = (
-            token.replace("–", "-")
-            .replace("—", "-")
-            .replace("−", "-")
-        )
-        values.add(canonical)
-    return values
+    return {_canonical_number(token) for token in NUMBER_RE.findall(text or "")}
 
 
 def _word_count(text: str) -> int:
