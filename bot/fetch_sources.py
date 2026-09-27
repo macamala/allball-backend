@@ -12,6 +12,15 @@ from database import SessionLocal
 from models import Article
 
 from .news_policy import fair_news_queue, freshness_reason, original_draft_reason
+from .news_learning import (
+    learned_rule_violation_reason,
+    mark_auto_corrected,
+    mark_retry,
+    record_incident,
+    rule_prompt_instructions,
+    writer_allowed,
+    writer_identity,
+)
 from .news_budget import active_ai_budget, ai_budget_scope, configured_budget, ai_budget_exhausted
 from sports_registry.sports import SPORTS
 from .classify import classify_article
@@ -101,10 +110,19 @@ def _ai_story(
     league: str,
     max_ai_chars: int,
     trusted_context: str = "",
+    correction_reason: str = "",
+    learned_instructions: str = "",
 ) -> tuple:
     """Returns (parsed_dict_or_None, reason). reason is ok|empty|too-short."""
     payload = facts[: max(1, max_ai_chars)]
-    raw = write_ninkosports_story(title=title, facts=payload, sport=sport, league=league)
+    raw = write_ninkosports_story(
+        title=title,
+        facts=payload,
+        sport=sport,
+        league=league,
+        correction_reason=correction_reason,
+        learned_instructions=learned_instructions,
+    )
     parsed = parse_ai_output(raw or "")
     body = parsed.get("body") or ""
     if not body:
@@ -116,6 +134,8 @@ def _ai_story(
             sport=sport,
             league=league,
             retry_for_length=True,
+            correction_reason=correction_reason,
+            learned_instructions=learned_instructions,
         )
         parsed = parse_ai_output(raw or "")
         body = parsed.get("body") or ""
@@ -312,6 +332,7 @@ def _ingest_item(db: Session, item: Dict, use_ai: bool, max_ai_chars: int, ai_bu
     story_body = facts
     story_summary = facts[:400]
     used_ai = False
+    rewrite_reason = None
     if use_ai and ai_budget > 0 and not openai_rate_limited():
         trusted_feed = (
             feed.get("kind") == "league"
@@ -323,6 +344,19 @@ def _ingest_item(db: Session, item: Dict, use_ai: bool, max_ai_chars: int, ai_bu
             f"VERIFIED COMPETITION HINT: {tags.league or 'unspecified'}."
             if trusted_feed else ""
         )
+        provider, model = writer_identity()
+        if isinstance(db, Session) and not writer_allowed(db, provider, model):
+            logger.error(
+                "[fetch_sources] writer circuit open provider=%s model=%s",
+                provider,
+                model,
+            )
+            return None, False
+        learned_instructions, learned_rule_ids = (
+            rule_prompt_instructions(db, source_url=source_url, sport=tags.sport)
+            if isinstance(db, Session)
+            else ("", [])
+        )
         parsed, rewrite_reason = _ai_story(
             title=item["title"],
             facts=facts,
@@ -330,7 +364,66 @@ def _ingest_item(db: Session, item: Dict, use_ai: bool, max_ai_chars: int, ai_bu
             league=tags.league or "",
             max_ai_chars=max_ai_chars,
             trusted_context=trusted_context,
+            learned_instructions=learned_instructions,
         )
+        if parsed and isinstance(db, Session):
+            learned_violation = learned_rule_violation_reason(
+                db, parsed, source_url=source_url, sport=tags.sport
+            )
+            if learned_violation:
+                parsed = None
+                rewrite_reason = learned_violation
+
+        incident = None
+        if rewrite_reason != "ok":
+            if isinstance(db, Session):
+                incident = record_incident(
+                    db,
+                    reason_code=rewrite_reason or "missing-draft",
+                    source_url=source_url,
+                    sport=tags.sport,
+                    phase="prepublish",
+                    draft=parsed,
+                    writer_provider=provider,
+                    writer_model=model,
+                    details={"learned_rule_ids": learned_rule_ids},
+                )
+            # One bounded self-correction. It still passes the same deterministic
+            # and semantic validator gates inside _ai_story.
+            if (
+                rewrite_reason not in {"empty", "too-short"}
+                and not openai_rate_limited()
+                and not ai_budget_exhausted()
+            ):
+                retry_parsed, retry_reason = _ai_story(
+                    title=item["title"],
+                    facts=facts,
+                    sport=tags.sport or "sports",
+                    league=tags.league or "",
+                    max_ai_chars=max_ai_chars,
+                    trusted_context=trusted_context,
+                    correction_reason=rewrite_reason or "validation-failed",
+                    learned_instructions=learned_instructions,
+                )
+                if retry_parsed and isinstance(db, Session):
+                    retry_violation = learned_rule_violation_reason(
+                        db, retry_parsed, source_url=source_url, sport=tags.sport
+                    )
+                    if retry_violation:
+                        retry_parsed = None
+                        retry_reason = retry_violation
+                if retry_reason == "ok" and retry_parsed:
+                    parsed = retry_parsed
+                    rewrite_reason = "ok"
+                    if incident is not None:
+                        mark_auto_corrected(
+                            db,
+                            incident,
+                            note="corrective rewrite passed deterministic and semantic fact gates",
+                        )
+                elif incident is not None:
+                    mark_retry(db, incident, retry_reason or "retry-failed")
+
         if rewrite_reason == "too-short":
             _hold_ai_source(source_url, "too-short")
             logger.info(
@@ -338,18 +431,32 @@ def _ingest_item(db: Session, item: Dict, use_ai: bool, max_ai_chars: int, ai_bu
                 item["title"][:80],
             )
             return None, False
+
         body = (parsed or {}).get("body") or ""
         title = (parsed or {}).get("title") or item["title"]
-        ok_ai, reason_ai = quality_check(title, body, tags.sport, require_english=True) if body else (False, "empty-rewrite")
-        if ok_ai:
+        ok_ai, reason_ai = quality_check(
+            title, body, tags.sport, require_english=True
+        ) if body else (False, "empty-rewrite")
+        if ok_ai and rewrite_reason == "ok":
             story_title = title
             story_body = body
             story_summary = parsed.get("summary") or body.split("\n", 1)[0][:280]
             used_ai = True
         else:
+            if isinstance(db, Session) and rewrite_reason == "ok":
+                record_incident(
+                    db,
+                    reason_code=f"quality:{reason_ai}",
+                    source_url=source_url,
+                    sport=tags.sport,
+                    phase="prepublish-quality",
+                    draft=parsed,
+                    writer_provider=provider,
+                    writer_model=model,
+                )
             logger.info(
                 "[fetch_sources] AI skipped/rejected: %s title=%s",
-                reason_ai,
+                rewrite_reason or reason_ai,
                 item["title"][:80],
             )
 
