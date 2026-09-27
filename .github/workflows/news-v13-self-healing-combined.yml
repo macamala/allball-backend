@@ -100,7 +100,7 @@ jobs:
           Path('evidence/test-selection.txt').write_text('\n'.join(sorted(paths))+'\n')
           PY
       - name: Candidate boundary note
-        run: echo "Final candidate includes mandatory hero images, cross-source dedupe, recent public inventory counts, underfilled-sport fairness, official-source fallbacks, factual self-healing, and retained Live Scores boundaries."
+        run: echo "Final candidate includes mandatory hero images, strict public detail eligibility, cross-source dedupe, recent public inventory counts, underfilled-sport fairness, official-source fallbacks, factual self-healing, and retained Live Scores boundaries."
       - name: Run retained Live Scores plus current News suite offline
         run: |
           set -euo pipefail
