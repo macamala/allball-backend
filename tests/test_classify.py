@@ -191,3 +191,24 @@ def test_gbgb_calendar_is_greyhound_not_mma():
         feed_kind="mixed",
     )
     assert result.sport == "greyhound-racing"
+
+
+def test_afl_club_names_classify_without_explicit_afl_word():
+    result = classify_article(
+        "Gold Coast surges into top four with dominant win over St Kilda",
+        (
+            "Gold Coast controlled the contest and pulled clear of St Kilda "
+            "after half-time in a strong performance."
+        ),
+        feed_kind="mixed",
+    )
+    assert result.sport == "australian-rules"
+
+
+def test_generic_suns_and_saints_do_not_force_afl():
+    result = classify_article(
+        "Suns edge Saints in late thriller",
+        "The teams traded the lead several times before the final minute.",
+        feed_kind="mixed",
+    )
+    assert result.sport is None
