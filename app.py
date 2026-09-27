@@ -59,6 +59,7 @@ from public_index import (
     recent_public_sport_inventory,
     repair_recent_duplicate_news,
     repair_recent_sport_mislabels,
+    repair_recent_unresolved,
 )
 from public_read import (
     apply_scope,
@@ -105,8 +106,11 @@ def _startup_index():
             counted = index_missing(db, limit=400)
             if counted < 400:
                 break
-        repair_recent_duplicate_news(db, limit=800, max_age_hours=168)
         repair_recent_sport_mislabels(db, limit=800, max_age_hours=168)
+        repair_recent_unresolved(db, limit=50)
+        # A re-index may legitimately restore taxonomy-held rows; dedupe is the
+        # final public guard so a duplicate can never be resurrected.
+        repair_recent_duplicate_news(db, limit=800, max_age_hours=168)
     finally:
         db.close()
     from repair_content import repair_contaminated
