@@ -238,3 +238,67 @@ def test_prequeue_cooldown_filter_runs_before_fair_queue():
     batch=source.index("_held_ai_source_urls")
     queue=source.index("fair_news_queue", batch)
     assert batch < queue
+
+
+def test_non_article_podcast_and_scorecard_are_rejected_before_queue_classification():
+    from bot.news_policy import fair_news_queue
+    now=datetime.now(timezone.utc)
+    calls=[]
+    def classify(item):
+        calls.append(item["title"])
+        return SimpleNamespace(sport="cricket")
+    items=[
+        {"title":"The Chequered Flag Podcast","url":"https://www.bbc.co.uk/iplayer/episode/m002zvgw","published_at":now},
+        {"title":"India v West Indies - first ODI scorecard","url":"https://www.bbc.co.uk/sport/cricket/scorecard/e-237254","published_at":now},
+        {"title":"Cricket captain returns for decisive series","url":"https://example.test/cricket-return","published_at":now},
+    ]
+    queued,rejected=fair_news_queue(items,classify,sport_order=["cricket"])
+    assert [row["title"] for row in queued]==["Cricket captain returns for decisive series"]
+    assert rejected["non_article_podcast"]==1
+    assert rejected["non_article_scorecard"]==1
+    assert calls==["Cricket captain returns for decisive series"]
+
+
+def test_unknown_enrichment_skips_non_articles_and_prefers_sport_hinted_story(monkeypatch):
+    now=datetime.now(timezone.utc)
+    candidates=[
+        {
+            "title":"The Chequered Flag Podcast",
+            "url":"https://www.bbc.co.uk/iplayer/episode/m002zvgw",
+            "published_at":now,
+            "feed":{"kind":"mixed","sport":"motorsport"},
+        },
+        {
+            "title":"India v West Indies - first ODI scorecard",
+            "url":"https://www.bbc.co.uk/sport/cricket/scorecard/e-237254",
+            "published_at":now,
+            "feed":{"kind":"mixed","sport":"cricket"},
+        },
+        {
+            "title":"Internationals hold three-point lead over US",
+            "url":"https://www.bbc.co.uk/sport/golf/articles/c64gvvjze807o",
+            "published_at":now,
+            "feed":{"kind":"mixed","sport":"golf"},
+        },
+        {
+            "title":"Generic unknown sport story",
+            "url":"https://example.test/unknown",
+            "published_at":now-timedelta(minutes=1),
+            "feed":{"kind":"mixed"},
+        },
+    ]
+    monkeypatch.setattr(
+        ingest,
+        "_classify_candidate",
+        lambda item: SimpleNamespace(sport=None),
+    )
+    calls=[]
+    def extract(url):
+        calls.append(url)
+        return ("Golf players contested the tournament on the final day. "*8, "https://example.test/photo.jpg")
+    monkeypatch.setattr(ingest,"extract_from_url",extract)
+    assert ingest._enrich_unknown_candidates(candidates,limit=1)==1
+    assert calls==["https://www.bbc.co.uk/sport/golf/articles/c64gvvjze807o"]
+    assert "_extracted" in candidates[2]
+    assert "_extracted" not in candidates[0]
+    assert "_extracted" not in candidates[1]
