@@ -354,14 +354,15 @@ def repair_recent_sport_mislabels(
     from bot.classify import classify_article
 
     cutoff = datetime.utcnow() - timedelta(hours=max(1, int(max_age_hours)))
+    # First pass is title-only. The final mismatch rule already requires a
+    # distinctive alias for the independently detected sport in the headline,
+    # so loading hundreds of large article bodies before checking that condition
+    # is unnecessary and can stall the News worker on a remote database.
     rows = (
         db.query(
             ArticleTaxonomyResolution,
             Article.id,
             Article.title,
-            Article.ai_content,
-            Article.content,
-            Article.summary,
         )
         .join(
             Article,
@@ -380,12 +381,62 @@ def repair_recent_sport_mislabels(
         .limit(max(1, min(int(limit), 1200)))
         .all()
     )
+
+    from bot.taxonomy import SPORT_ALIASES
+
+    alias_owners: dict[str, set[str]] = {}
+    for candidate_sport, aliases in SPORT_ALIASES.items():
+        for alias in aliases or ():
+            value = str(alias or "").casefold().strip()
+            if len(value) >= 4:
+                alias_owners.setdefault(value, set()).add(candidate_sport)
+    distinctive_aliases = [
+        (alias, next(iter(owners)))
+        for alias, owners in alias_owners.items()
+        if len(owners) == 1
+    ]
+
+    candidates: dict[int, tuple[ArticleTaxonomyResolution, str, set[str]]] = {}
+    for tax, article_id, title in rows:
+        cached = str(tax.resolved_sport or "")
+        raw_title = title or ""
+        if not cached or not raw_title:
+            continue
+        possible: set[str] = set()
+        for alias, candidate_sport in distinctive_aliases:
+            if candidate_sport == cached:
+                continue
+            pattern = re.compile(
+                r"(?<!\w)" + re.escape(alias).replace(r"\ ", r"\s+") + r"(?!\w)",
+                re.IGNORECASE,
+            )
+            if pattern.search(raw_title):
+                possible.add(candidate_sport)
+        if possible:
+            candidates[int(article_id)] = (tax, raw_title, possible)
+
+    if not candidates:
+        return 0
+
+    bodies = {
+        int(article_id): (ai_content or content or summary or "")
+        for article_id, ai_content, content, summary in (
+            db.query(
+                Article.id,
+                Article.ai_content,
+                Article.content,
+                Article.summary,
+            )
+            .filter(Article.id.in_(list(candidates)))
+            .all()
+        )
+    }
+
     hidden = 0
-    for tax, article_id, title, ai_content, content, summary in rows:
-        text = ai_content or content or summary or ""
+    for article_id, (tax, title, possible) in candidates.items():
         independent = classify_article(
-            title or "",
-            text,
+            title,
+            bodies.get(article_id, ""),
             feed_kind="mixed",
             feed_sport=None,
             feed_league=None,
@@ -393,18 +444,17 @@ def repair_recent_sport_mislabels(
         )
         if (
             independent.sport
+            and independent.sport in possible
             and tax.resolved_sport
             and independent.sport != tax.resolved_sport
-            and _distinctive_title_sport_support(
-                title or "", independent.sport
-            )
+            and _distinctive_title_sport_support(title, independent.sport)
         ):
             logger.warning(
                 "[public_index] hide sport mismatch article=%s cached=%s independent=%s title=%s",
                 article_id,
                 tax.resolved_sport,
                 independent.sport,
-                (title or "")[:100],
+                title[:100],
             )
             tax.public_ok = False
             db.add(tax)
