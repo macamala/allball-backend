@@ -391,19 +391,37 @@ def _ingest_item(db: Session, item: Dict, use_ai: bool, max_ai_chars: int, ai_bu
             resolved.sport, tags.sport, item["title"][:80],
         )
         return None, False
-    if not resolved.sport and trusted_feed:
+
+    # The rewrite is allowed to change wording, never to erase taxonomy that was
+    # already established from the source headline + extracted source facts.
+    # A contradictory rewritten sport still fails above. When the rewrite simply
+    # omits the decisive sport words, preserve only the source-proven sport and
+    # keep competition fail-closed unless a dedicated feed independently proves it.
+    if not resolved.sport and tags.sport:
         competition = None
         competition_confidence = 0.0
-        if feed.get("league") and tags.league == feed.get("league"):
+        evidence = [f"source-classifier-sport:{tags.reason}"]
+        if trusted_feed and feed.get("league") and tags.league == feed.get("league"):
             competition = tags.league
             competition_confidence = 0.86
+            evidence.append("trusted-dedicated-feed-competition")
+        confidence = {"high": 0.92, "medium": 0.84, "low": 0.76}.get(tags.confidence, 0.76)
         resolved = TaxonomyResolution(
             sport=tags.sport,
             competition=competition,
-            sport_confidence=0.90,
+            sport_confidence=confidence,
             competition_confidence=competition_confidence,
-            evidence=["trusted-dedicated-feed-sport"],
+            evidence=evidence,
         )
+
+    if not resolved.sport:
+        _hold_ai_source(source_url, "taxonomy-unresolved-after-rewrite")
+        logger.info(
+            "[fetch_sources] hold unresolved taxonomy after rewrite title=%s",
+            item["title"][:80],
+        )
+        return None, False
+
     stamp_sport = resolved.sport
     stamp_league = resolved.public_competition
 
@@ -529,26 +547,6 @@ def _fetch_and_store_all_articles(
             return classify_article(item["title"], item.get("summary") or "",
                 feed_kind=feed.get("kind", "mixed"), feed_sport=feed.get("sport"),
                 feed_league=feed.get("league"), feed_country=feed.get("country"))
-        unknown_samples = []
-        for candidate in queued:
-            if len(unknown_samples) >= 10:
-                break
-            try:
-                candidate_tags = classify_candidate(candidate)
-            except Exception:
-                continue
-            if candidate_tags.sport is None:
-                meta = candidate.get("feed") or {}
-                unknown_samples.append({
-                    "title": str(candidate.get("title") or "")[:120],
-                    "feed_sport": meta.get("sport"),
-                    "feed_kind": meta.get("kind"),
-                    "publisher": meta.get("publisher"),
-                    "url": str(candidate.get("url") or "")[:180],
-                })
-        if unknown_samples:
-            logger.info("[fetch_sources] unknown_sport_samples=%s", unknown_samples)
-
         queued, admission = fair_news_queue(queued, classify_candidate,
             sport_order=[row["id"] for row in SPORTS if row["active"] and row["supports_news"]])
         logger.info("[fetch_sources] eligible=%s rejected=%s", len(queued), admission)
