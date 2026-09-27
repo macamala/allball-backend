@@ -286,9 +286,12 @@ def _ingest_item(db: Session, item: Dict, use_ai: bool, max_ai_chars: int, ai_bu
             )
             return None, False
 
-        parsed, learned_block, applied_rules = apply_confirmed_rules(
-            db, parsed or {}, source_url=source_url, sport=tags.sport
-        )
+        if isinstance(db, Session):
+            parsed, learned_block, applied_rules = apply_confirmed_rules(
+                db, parsed or {}, source_url=source_url, sport=tags.sport
+            )
+        else:
+            learned_block, applied_rules = None, []
         lock_reason = learned_block or (
             fact_lock_reason(
                 parsed, item["title"], facts,
@@ -297,17 +300,19 @@ def _ingest_item(db: Session, item: Dict, use_ai: bool, max_ai_chars: int, ai_bu
             if parsed else "empty-rewrite"
         )
         if lock_reason:
-            incident = record_incident(
-                db,
-                reason_code=lock_reason,
-                source_url=source_url,
-                sport=tags.sport,
-                phase="prepublish",
-                draft=parsed,
-                writer_provider=provider,
-                writer_model=model,
-                details={"applied_rule_ids": applied_rules},
-            )
+            incident = None
+            if isinstance(db, Session):
+                incident = record_incident(
+                    db,
+                    reason_code=lock_reason,
+                    source_url=source_url,
+                    sport=tags.sport,
+                    phase="prepublish",
+                    draft=parsed,
+                    writer_provider=provider,
+                    writer_model=model,
+                    details={"applied_rule_ids": applied_rules},
+                )
             retry_parsed, retry_reason = _ai_story(
                 title=item["title"],
                 facts=facts,
@@ -317,19 +322,23 @@ def _ingest_item(db: Session, item: Dict, use_ai: bool, max_ai_chars: int, ai_bu
                 correction_reason=lock_reason,
             )
             if retry_reason == "ok" and retry_parsed:
-                retry_parsed, retry_block, retry_rules = apply_confirmed_rules(
-                    db, retry_parsed, source_url=source_url, sport=tags.sport
-                )
+                if isinstance(db, Session):
+                    retry_parsed, retry_block, retry_rules = apply_confirmed_rules(
+                        db, retry_parsed, source_url=source_url, sport=tags.sport
+                    )
+                else:
+                    retry_block, retry_rules = None, []
                 retry_lock = retry_block or fact_lock_reason(
                     retry_parsed, item["title"], facts,
                     expected_sport=tags.sport, expected_league=tags.league,
                 )
                 if not retry_lock:
                     parsed = retry_parsed
-                    mark_auto_corrected(
-                        db, incident,
-                        note="corrective rewrite passed deterministic fact lock",
-                    )
+                    if incident is not None:
+                        mark_auto_corrected(
+                            db, incident,
+                            note="corrective rewrite passed deterministic fact lock",
+                        )
                 else:
                     logger.warning(
                         "[fetch_sources] fact lock held after retry reason=%s title=%s",
@@ -348,16 +357,17 @@ def _ingest_item(db: Session, item: Dict, use_ai: bool, max_ai_chars: int, ai_bu
             story_summary = parsed.get("summary") or body.split("\n", 1)[0][:280]
             used_ai = True
         else:
-            record_incident(
-                db,
-                reason_code=f"quality:{reason_ai}",
-                source_url=source_url,
-                sport=tags.sport,
-                phase="prepublish",
-                draft=parsed,
-                writer_provider=provider,
-                writer_model=model,
-            )
+            if isinstance(db, Session):
+                record_incident(
+                    db,
+                    reason_code=f"quality:{reason_ai}",
+                    source_url=source_url,
+                    sport=tags.sport,
+                    phase="prepublish",
+                    draft=parsed,
+                    writer_provider=provider,
+                    writer_model=model,
+                )
             logger.info(
                 "[fetch_sources] AI skipped/rejected: %s title=%s",
                 reason_ai,
