@@ -51,3 +51,10 @@ def test_dead_cross_product_ea_press_feed_stays_removed(monkeypatch):
     monkeypatch.setenv('NEWS_EXPANDED_FEEDS_ENABLED','1')
     urls={row['url'] for row in enabled_feeds()}
     assert 'https://news.ea.com/rss/pressrelease.aspx' not in urls
+
+
+def test_table_tennis_and_futsal_fallback_feeds_are_present():
+    from bot.news_verified_feeds import VERIFIED_RSS
+    by_url={row['url']:row for row in VERIFIED_RSS}
+    assert by_url['https://www.tabletennisengland.co.uk/feed']['sport']=='table-tennis'
+    assert by_url['https://www.futsalfocus.net/feed']['sport']=='futsal'
