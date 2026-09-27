@@ -197,15 +197,23 @@ def _call_selected_ai(prompt: str) -> Optional[str]:
     return None
 
 
-def validate_story_facts(source_title: str, source_facts: str, parsed: dict) -> tuple[bool, str]:
+def validate_story_facts(
+    source_title: str,
+    source_facts: str,
+    parsed: dict,
+    trusted_context: str = "",
+) -> tuple[bool, str]:
     """Fail closed on free mode unless the second-pass fact checker approves."""
     if AI_PROVIDER_MODE != "xkiro_free":
         return True, "legacy-route"
     if not isinstance(parsed, dict):
         return False, "missing-draft"
+    verified = source_facts
+    if trusted_context:
+        verified = f"{trusted_context}\n\n{source_facts}"
     return validate_free_story(
         source_title,
-        source_facts,
+        verified,
         parsed.get("title") or "",
         parsed.get("summary") or "",
         parsed.get("body") or "",
