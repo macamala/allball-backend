@@ -7,6 +7,7 @@ on:
       - news/official-gap-sources-20260927
       - news/availability-fairness-20260927
       - news/required-images-20260927
+      - news/gap-source-fallbacks-20260927
     paths:
       - ".github/workflows/news-v13-self-healing-gate.yml"
       - "bot/**"
