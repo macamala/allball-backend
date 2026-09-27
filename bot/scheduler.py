@@ -4,6 +4,7 @@ Policy: never mass-rewrite historical articles. Explicit maintenance is bounded.
 """
 import logging
 import os
+from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -123,13 +124,31 @@ def main():
     scheduler = BlockingScheduler()
     logger.info('Starting NinkoSports News scheduler every %s minutes', interval)
     try:
-        job()
+        # Railway performs blue/green swaps: the new container can start while
+        # the previous News container still holds the Postgres owner lock.
+        # Delay the first cycle briefly so deploys do not lose their startup run.
+        startup_delay = 20
+        scheduler.add_job(
+            job,
+            'date',
+            run_date=datetime.now() + timedelta(seconds=startup_delay),
+            id='news-startup-cycle',
+            replace_existing=True,
+            misfire_grace_time=60,
+        )
         scheduler.add_job(
             job,
             'interval',
             minutes=interval,
             max_instances=1,
             coalesce=True,
+            id='news-interval-cycle',
+            replace_existing=True,
+        )
+        logger.info(
+            'News startup cycle scheduled in %s seconds; interval remains %s minutes',
+            startup_delay,
+            interval,
         )
         scheduler.start()
     finally:
