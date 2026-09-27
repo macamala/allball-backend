@@ -6,6 +6,7 @@ Public GET handlers must read these rows, not reclassify or re-score bodies.
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime, timedelta
 from typing import Optional, Sequence
 
@@ -296,10 +297,11 @@ def _distinctive_title_sport_support(title: str, sport: str) -> bool:
             continue
         # Aliases with intentional surrounding spaces already encode a word
         # boundary; otherwise accept exact phrase containment in the padded title.
-        if alias.startswith(" ") or alias.endswith(" "):
-            if alias in haystack:
-                return True
-        elif needle in haystack:
+        pattern = re.compile(
+            r"(?<!\\w)" + re.escape(needle).replace(r"\\ ", r"\\s+") + r"(?!\\w)",
+            re.IGNORECASE,
+        )
+        if pattern.search(haystack):
             return True
     return False
 
