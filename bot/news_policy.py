@@ -58,35 +58,64 @@ def freshness_reason(stamp, now, max_age_hours=72):
 
 
 def newsworthiness_score(item):
-    """Small editorial signal only; never changes factual admission."""
+    """Editorial value only; never changes factual admission."""
     blob = " ".join(
         str(item.get(key) or "") for key in ("title", "summary")
     ).lower()
     score = 0
-    high_patterns = (
-        r"\b(final|semi[- ]?final|quarter[- ]?final|champion|title)\b",
-        r"\b(wins?|won|beats?|beat|defeats?|defeated|knockout|knocks? out)\b",
+    major_patterns = (
+        r"\b(final|semi[- ]?final|champion|championship|title|trophy)\b",
+        r"\b(wins?|won|beats?|beat|defeats?|defeated|upset|knockout|knocks? out)\b",
         r"\b(signs?|signed|transfer|joins?|joined|leaves?|depart|sacked|fired|resigns?|retires?|retirement)\b",
-        r"\b(injury|injured|ruled out|suspended|banned|ban)\b",
-        r"\b(record|world record|contract|manager|coach)\b",
+        r"\b(injury|injured|ruled out|withdraws?|suspended|banned|ban)\b",
+        r"\b(record|world record|contract extension|new contract|appoints?|appointed)\b",
+        r"\b(qualifies?|qualified|reaches? (?:the )?final|returns?|comeback)\b",
     )
-    for pattern in high_patterns:
+    for pattern in major_patterns:
         if re.search(pattern, blob):
-            score += 3
+            score += 4
+
+    supporting_patterns = (
+        r"\b(manager|coach|captain|debut|selection|squad|call[- ]?up)\b",
+        r"\b(agrees? deal|set to join|medical|extension)\b",
+    )
+    for pattern in supporting_patterns:
+        if re.search(pattern, blob):
+            score += 2
 
     low_patterns = (
-        r"\bcalendar\b",
-        r"\bschedule\b",
-        r"\bfixture list\b",
+        r"\bcalendar\b|\bschedule\b|\bfixture list\b",
         r"\btickets?\b|ticket sale",
         r"\bevent guide\b|fan(?:'s)? guide|how to watch|where to watch",
         r"watch and earn|everything you need to know",
         r"pack probabilities|patch notes|soundtrack|offer\b",
         r"community api|rankings explained|terms and conditions|policy update",
+        r"\bpodcast\b|\blisten\b|\baudio\b|\bquiz\b",
+        r"rank audit|power rankings?|top \d+|grades?\b|ratings?\b",
     )
     for pattern in low_patterns:
         if re.search(pattern, blob):
-            score -= 5
+            score -= 7
+    return score
+
+
+def queue_priority_score(item, now):
+    """Blend editorial value with freshness without altering admission."""
+    score = newsworthiness_score(item)
+    stamp = publication_time(item.get("published_at"))
+    if stamp is None:
+        return score
+    age_hours = max(0.0, (now - stamp).total_seconds() / 3600.0)
+    if age_hours <= 2:
+        score += 6
+    elif age_hours <= 6:
+        score += 5
+    elif age_hours <= 12:
+        score += 4
+    elif age_hours <= 24:
+        score += 3
+    elif age_hours <= 48:
+        score += 1
     return score
 
 
@@ -125,7 +154,7 @@ def fair_news_queue(items, classify, *, now=None, max_age_hours=72, sport_order=
         order = sorted(
             order,
             key=lambda sport: (
-                -max(newsworthiness_score(item) for item in buckets[sport]),
+                -max(queue_priority_score(item, now) for item in buckets[sport]),
                 rotation_rank[sport],
             ),
         )
@@ -134,7 +163,7 @@ def fair_news_queue(items, classify, *, now=None, max_age_hours=72, sport_order=
             sorted(
                 buckets[sport],
                 key=lambda item: (
-                    newsworthiness_score(item),
+                    queue_priority_score(item, now),
                     publication_time(item['published_at']),
                 ),
                 reverse=True,
