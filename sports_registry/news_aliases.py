@@ -30,6 +30,7 @@ EXTRA_SPORT_ALIASES: Dict[str, List[str]] = {
         "nati-noten",
         "nordmazedonien",
         "bazunu",
+        "coundoul",
     ],
     "basketball": ["nba rank"],
     "rugby-league": [
@@ -55,6 +56,7 @@ EXTRA_SPORT_ALIASES: Dict[str, List[str]] = {
     "athletics": [" athletics ", "track and field", "world athletics"],
     "swimming": [" swimming ", "world aquatics"],
     "winter-sports": ["winter sports", "alpine skiing", "figure skating"],
+    "mma": ["vémola", "vemola"],
     "ice-hockey": ["ice hockey", "ambri", "ambrì", "tipsport extraliga", "extraliga"],
     "volleyball": ["volleyball", "eurovolley"],
     "esports": ["esports", "e-sports"],
