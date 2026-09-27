@@ -35,6 +35,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Install backend requirements for host-side API import
+        run: python -m pip install --disable-pip-version-check -r requirements.txt
       - name: Verify source lineage and no Live Scores implementation touched
         run: |
           set -euo pipefail
