@@ -246,6 +246,7 @@ def _openai(cfg: dict, prompt: str) -> Optional[str]:
 
 def reset_writer_state() -> None:
     _UNAVAILABLE.clear()
+    _LAST.set(("unknown", "unknown"))
     openai_writer.reset_openai_rate_limit()
 
 
@@ -312,4 +313,7 @@ def write_ninkosports_story(
             result = _openai(cfg, prompt)
         if result:
             return result
+        # A configured provider that returned no usable completion is held for
+        # the remainder of this cycle; the next provider gets the story.
+        _UNAVAILABLE.add(provider)
     return None
