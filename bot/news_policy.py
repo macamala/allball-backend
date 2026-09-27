@@ -114,11 +114,13 @@ def original_draft_reason(draft, source_title, source_body):
     tokens = lambda text: re.findall(r"[\w]+", text.lower())
     src, dst = tokens(source_body), tokens(body)
     if len(dst) < 25: return 'insufficient_original_body'
-    folded_output = output.casefold()
-    # Writer input is intentionally bounded; do not require a name the model never saw.
+    # A concise rewrite may legitimately omit secondary source names.
+    # What it must never do is introduce/rename a multi-word proper name that
+    # was not present in the bounded writer input.
     protected_source = f'{source_title}\n{(source_body or "")[:6000]}'
-    for name in protected_proper_names(protected_source):
-        if name.casefold() not in folded_output:
+    source_names = {name.casefold() for name in protected_proper_names(protected_source)}
+    for name in protected_proper_names(output):
+        if name.casefold() not in source_names:
             return 'missing_or_changed_proper_name'
     if src == dst: return 'copied_source_body'
     n = 8
