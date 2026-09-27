@@ -12,7 +12,7 @@ from database import SessionLocal
 from models import Article
 
 from .news_policy import fair_news_queue, freshness_reason, original_draft_reason
-from .news_budget import ai_budget_scope, configured_budget, ai_budget_exhausted
+from .news_budget import active_ai_budget, ai_budget_scope, configured_budget, ai_budget_exhausted
 from sports_registry.sports import SPORTS
 from .classify import classify_article
 from .dedupe import existing_by_url, existing_near_duplicate
@@ -473,7 +473,7 @@ def fetch_and_store_all_articles(max_per_league=3, hard_limit=None, use_ai=True,
     """
     if not use_ai or not isinstance(max_ai_articles, int) or max_ai_articles <= 0:
         return 0
-    budget = configured_budget(max_ai_articles)
+    budget = active_ai_budget() or configured_budget(max_ai_articles)
     if not ai_available() or not budget.can_start():
         logger.warning("[fetch_sources] permitted AI route/ledger/allowance missing; ingest not started")
         return 0
