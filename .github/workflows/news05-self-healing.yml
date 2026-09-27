@@ -1,0 +1,32 @@
+name: News05 self-healing gate
+
+on:
+  push:
+    branches:
+      - news/source-coverage-20260927-05
+  workflow_dispatch:
+
+jobs:
+  news-self-healing:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      DATABASE_URL: sqlite:////tmp/ninkosports-news05.db
+      OPENAI_API_KEY: isolated-test-not-a-real-key
+      NEWS_AI_LEDGER_PATH: /tmp/ninkosports-news05-ledger.db
+      PYTHONPATH: .
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install backend requirements
+        run: python -m pip install --disable-pip-version-check -r requirements.txt
+      - name: Run focused News safety gate
+        run: |
+          pytest -q \
+            tests/test_news05_self_healing.py \
+            tests/test_news03_policy.py \
+            tests/test_news03_http.py \
+            tests/test_news03_integration.py \
+            tests/test_classify.py
