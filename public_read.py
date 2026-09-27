@@ -22,6 +22,7 @@ from editorial import (
 from models import Article, ArticleTaxonomyResolution
 from related import rank_related
 from sport_match import MAIN_SPORTS, isolation_ok as sport_isolation_ok
+from sports_registry.sports import SPORTS
 from taxonomy_resolver import (
     RESOLVER_VERSION,
     TaxonomyResolution,
@@ -45,6 +46,11 @@ LIST_FIELDS = (
 )
 
 PublicPair = Tuple[Article, ArticleTaxonomyResolution]
+
+
+ESPORTS_CHILDREN = tuple(
+    row["id"] for row in SPORTS if row.get("parent_id") == "esports" and row.get("active")
+)
 
 
 def _sort_expr():
@@ -85,6 +91,10 @@ def apply_scope(
         query = query.filter(
             ArticleTaxonomyResolution.resolved_sport.isnot(None),
             ArticleTaxonomyResolution.resolved_sport.notin_(MAIN_SPORTS),
+        )
+    elif sport == "esports":
+        query = query.filter(
+            ArticleTaxonomyResolution.resolved_sport.in_(("esports", *ESPORTS_CHILDREN))
         )
     elif sport:
         query = query.filter(ArticleTaxonomyResolution.resolved_sport == sport)
