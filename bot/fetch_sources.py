@@ -29,11 +29,12 @@ from .quality import (
     quality_check,
 )
 from .site_chrome import is_site_chrome_text, strip_site_chrome
-from .rewrite_ai import (
-    openai_rate_limited,
-    parse_ai_output,
-    reset_openai_rate_limit,
+from .rewrite_ai import parse_ai_output
+from .news_writer_router import (
+    reset_writer_state as reset_openai_rate_limit,
+    writer_rate_limited as openai_rate_limited,
     write_ninkosports_story,
+    writer_policy_scope,
 )
 from .taxonomy import COMPETITIONS
 from .textutil import clean_text, looks_like_garbage, strip_truncation_markers
@@ -85,12 +86,21 @@ def source_article_facts(
     return "", "none"
 
 
-def _ai_story(title: str, facts: str, sport: str, league: str, max_ai_chars: int, correction_reason: str = "") -> tuple:
+def _ai_story(
+    title: str,
+    facts: str,
+    sport: str,
+    league: str,
+    max_ai_chars: int,
+    correction_reason: str = "",
+    deprioritize_writers=None,
+) -> tuple:
     """Returns (parsed_dict_or_None, reason). reason is ok|empty|too-short."""
     payload = facts[: max(1, max_ai_chars)]
     raw = write_ninkosports_story(
         title=title, facts=payload, sport=sport, league=league,
         correction_reason=correction_reason,
+        deprioritize_writers=deprioritize_writers,
     )
     parsed = parse_ai_output(raw or "")
     body = parsed.get("body") or ""
@@ -104,6 +114,7 @@ def _ai_story(title: str, facts: str, sport: str, league: str, max_ai_chars: int
             league=league,
             retry_for_length=True,
             correction_reason=correction_reason,
+            deprioritize_writers=deprioritize_writers,
         )
         parsed = parse_ai_output(raw or "")
         body = parsed.get("body") or ""
@@ -268,17 +279,20 @@ def _ingest_item(db: Session, item: Dict, use_ai: bool, max_ai_chars: int, ai_bu
     story_summary = facts[:400]
     used_ai = False
     if use_ai and ai_budget > 0 and not openai_rate_limited():
-        provider, model = writer_identity()
-        if isinstance(db, Session) and not writer_allowed(db, provider, model):
-            logger.error("[fetch_sources] writer circuit open provider=%s model=%s", provider, model)
-            return None, False
-        parsed, rewrite_reason = _ai_story(
-            title=item["title"],
-            facts=facts,
-            sport=tags.sport or "sports",
-            league=tags.league or "",
-            max_ai_chars=max_ai_chars,
+        policy = (
+            (lambda provider, model: writer_allowed(db, provider, model))
+            if isinstance(db, Session)
+            else None
         )
+        with writer_policy_scope(policy):
+            parsed, rewrite_reason = _ai_story(
+                title=item["title"],
+                facts=facts,
+                sport=tags.sport or "sports",
+                league=tags.league or "",
+                max_ai_chars=max_ai_chars,
+            )
+        provider, model = writer_identity()
         if rewrite_reason == "too-short":
             logger.info(
                 "[fetch_sources] skip substantial source with summary-only rewrite: %s",
@@ -313,14 +327,16 @@ def _ingest_item(db: Session, item: Dict, use_ai: bool, max_ai_chars: int, ai_bu
                     writer_model=model,
                     details={"applied_rule_ids": applied_rules},
                 )
-            retry_parsed, retry_reason = _ai_story(
-                title=item["title"],
-                facts=facts,
-                sport=tags.sport or "sports",
-                league=tags.league or "",
-                max_ai_chars=max_ai_chars,
-                correction_reason=lock_reason,
-            )
+            with writer_policy_scope(policy):
+                retry_parsed, retry_reason = _ai_story(
+                    title=item["title"],
+                    facts=facts,
+                    sport=tags.sport or "sports",
+                    league=tags.league or "",
+                    max_ai_chars=max_ai_chars,
+                    correction_reason=lock_reason,
+                    deprioritize_writers={(provider, model)},
+                )
             if retry_reason == "ok" and retry_parsed:
                 if isinstance(db, Session):
                     retry_parsed, retry_block, retry_rules = apply_confirmed_rules(
