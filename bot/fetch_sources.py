@@ -11,6 +11,8 @@ from database import SessionLocal
 from models import Article
 
 from .news_policy import fair_news_queue, freshness_reason, original_draft_reason
+from .news_fact_guard import fact_lock_reason
+from .news_learning import (apply_confirmed_rules, mark_auto_corrected, record_incident, writer_allowed, writer_identity)
 from .news_budget import ai_budget_scope, configured_budget, ai_budget_exhausted
 from sports_registry.sports import SPORTS
 from .classify import classify_article
@@ -82,10 +84,13 @@ def source_article_facts(
     return "", "none"
 
 
-def _ai_story(title: str, facts: str, sport: str, league: str, max_ai_chars: int) -> tuple:
+def _ai_story(title: str, facts: str, sport: str, league: str, max_ai_chars: int, correction_reason: str = "") -> tuple:
     """Returns (parsed_dict_or_None, reason). reason is ok|empty|too-short."""
     payload = facts[: max(1, max_ai_chars)]
-    raw = write_ninkosports_story(title=title, facts=payload, sport=sport, league=league)
+    raw = write_ninkosports_story(
+        title=title, facts=payload, sport=sport, league=league,
+        correction_reason=correction_reason,
+    )
     parsed = parse_ai_output(raw or "")
     body = parsed.get("body") or ""
     if not body:
@@ -97,6 +102,7 @@ def _ai_story(title: str, facts: str, sport: str, league: str, max_ai_chars: int
             sport=sport,
             league=league,
             retry_for_length=True,
+            correction_reason=correction_reason,
         )
         parsed = parse_ai_output(raw or "")
         body = parsed.get("body") or ""
@@ -248,6 +254,10 @@ def _ingest_item(db: Session, item: Dict, use_ai: bool, max_ai_chars: int, ai_bu
     story_summary = facts[:400]
     used_ai = False
     if use_ai and ai_budget > 0 and not openai_rate_limited():
+        provider, model = writer_identity()
+        if not writer_allowed(db, provider, model):
+            logger.error("[fetch_sources] writer circuit open provider=%s model=%s", provider, model)
+            return None, False
         parsed, rewrite_reason = _ai_story(
             title=item["title"],
             facts=facts,
@@ -261,6 +271,56 @@ def _ingest_item(db: Session, item: Dict, use_ai: bool, max_ai_chars: int, ai_bu
                 item["title"][:80],
             )
             return None, False
+
+        parsed, learned_block, applied_rules = apply_confirmed_rules(
+            db, parsed or {}, source_url=source_url, sport=tags.sport
+        )
+        lock_reason = learned_block or (
+            fact_lock_reason(parsed, item["title"], facts, expected_sport=tags.sport)
+            if parsed else "empty-rewrite"
+        )
+        if lock_reason:
+            incident = record_incident(
+                db,
+                reason_code=lock_reason,
+                source_url=source_url,
+                sport=tags.sport,
+                phase="prepublish",
+                draft=parsed,
+                writer_provider=provider,
+                writer_model=model,
+                details={"applied_rule_ids": applied_rules},
+            )
+            retry_parsed, retry_reason = _ai_story(
+                title=item["title"],
+                facts=facts,
+                sport=tags.sport or "sports",
+                league=tags.league or "",
+                max_ai_chars=max_ai_chars,
+                correction_reason=lock_reason,
+            )
+            if retry_reason == "ok" and retry_parsed:
+                retry_parsed, retry_block, retry_rules = apply_confirmed_rules(
+                    db, retry_parsed, source_url=source_url, sport=tags.sport
+                )
+                retry_lock = retry_block or fact_lock_reason(
+                    retry_parsed, item["title"], facts, expected_sport=tags.sport
+                )
+                if not retry_lock:
+                    parsed = retry_parsed
+                    mark_auto_corrected(
+                        db, incident,
+                        note="corrective rewrite passed deterministic fact lock",
+                    )
+                else:
+                    logger.warning(
+                        "[fetch_sources] fact lock held after retry reason=%s title=%s",
+                        retry_lock, item["title"][:80],
+                    )
+                    return None, False
+            else:
+                return None, False
+
         body = (parsed or {}).get("body") or ""
         title = (parsed or {}).get("title") or item["title"]
         ok_ai, reason_ai = quality_check(title, body, tags.sport, require_english=True) if body else (False, "empty-rewrite")
@@ -270,6 +330,16 @@ def _ingest_item(db: Session, item: Dict, use_ai: bool, max_ai_chars: int, ai_bu
             story_summary = parsed.get("summary") or body.split("\n", 1)[0][:280]
             used_ai = True
         else:
+            record_incident(
+                db,
+                reason_code=f"quality:{reason_ai}",
+                source_url=source_url,
+                sport=tags.sport,
+                phase="prepublish",
+                draft=parsed,
+                writer_provider=provider,
+                writer_model=model,
+            )
             logger.info(
                 "[fetch_sources] AI skipped/rejected: %s title=%s",
                 reason_ai,
