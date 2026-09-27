@@ -21,7 +21,7 @@ def settings(tmp_path=None):
             'NEWS_FETCH_INTERVAL_MINUTES': '10', 'NEWS_MAX_AI_ARTICLES': '2',
             'NEWS_LEGACY_REPAIR_ACK': '1', 'NEWS_AI_MAX_REQUESTS_PER_RUN': '2',
             'NEWS_AI_MAX_REQUESTS_PER_DAY': '3', 'NEWS_HISTORICAL_REPAIR_ENABLED': '0',
-            'NEWS_EXPANDED_FEEDS_ENABLED': '0', 'NEWS_DATA_NEWS_ENABLED': '0',
+            'NEWS_EXPANDED_FEEDS_ENABLED': '0',
             'NEWS_TRANSLATIONS_ENABLED': '0', 'NEWS_TRANSLATIONS_PER_CYCLE': '0',
             'NEWS_AI_PROVIDER_MODE': 'xkiro_free', 'XKIRO_API_KEY': 'NEVER_LOG_KEY',
             'NEWS_XKIRO_WRITER_MODEL': 'qwen/qwen3.5-397b-a17b:free',
@@ -73,11 +73,22 @@ def test_valid_config_does_not_certify_storage_or_user_approval():
 
 
 @pytest.mark.parametrize('key', ['NEWS_HISTORICAL_REPAIR_ENABLED','NEWS_EXPANDED_FEEDS_ENABLED',
-                                 'NEWS_DATA_NEWS_ENABLED','NEWS_TRANSLATIONS_ENABLED'])
+                                 'NEWS_TRANSLATIONS_ENABLED'])
 @pytest.mark.parametrize('value', [None,'','true','false','yes','2'])
 def test_history_and_expansion_flags_must_be_explicit(key, value):
     env = settings(); env[key] = value
     assert 'explicit_boolean_required:' + key in runtime_errors(env)
+
+
+
+def test_legacy_result_news_flag_cannot_enable_removed_lane():
+    env = settings()
+    env['NEWS_MAX_AI_ARTICLES'] = '0'
+    env['NEWS_TRANSLATIONS_ENABLED'] = '0'
+    env['NEWS_TRANSLATIONS_PER_CYCLE'] = '0'
+    env['NEWS_HISTORICAL_REPAIR_ENABLED'] = '0'
+    env['NEWS_DATA_NEWS_ENABLED'] = '1'
+    assert 'no_news_lane_enabled' in runtime_errors(env)
 
 
 def mount_line(point, *, fs='ext4', options='rw,relatime', super_options='rw'):
