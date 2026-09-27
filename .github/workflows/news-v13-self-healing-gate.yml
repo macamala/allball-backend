@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - integration/news-v13-self-healing-20260927
+      - news/official-gap-sources-20260927
       - news/availability-fairness-20260927
       - news/required-images-20260927
     paths:
