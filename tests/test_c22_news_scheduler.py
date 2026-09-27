@@ -23,6 +23,7 @@ def cycle(monkeypatch, tmp_path, *, history='0'):
     def summary(**kw): calls.append(('summary',kw)); return {}
     def contaminated(**kw): calls.append(('contaminated',kw)); return {}
     def index(db, **kw): calls.append(('index',kw)); return 400 if history == '1' else 1
+    def images(db, **kw): calls.append(('images',kw)); return 0
     def mislabels(db, **kw): calls.append(('mislabels',kw)); return 0
     def unresolved(db, **kw): calls.append(('unresolved',kw)); return 0
     def duplicates(db, **kw): calls.append(('duplicates',kw)); return 0
@@ -36,6 +37,7 @@ def cycle(monkeypatch, tmp_path, *, history='0'):
     module(
         'public_index',
         index_missing=index,
+        repair_recent_news_images=images,
         repair_recent_sport_mislabels=mislabels,
         repair_recent_unresolved=unresolved,
         repair_recent_duplicate_news=duplicates,
@@ -85,6 +87,7 @@ def test_exhausted_daily_quota_still_runs_zero_ai_public_repairs(monkeypatch,tmp
     probe=AiRequestBudget(3,env['NEWS_AI_LEDGER_PATH'],daily_limit=3)
     assert not probe.can_start()
     assert probe.blocked_reason == 'daily_request_limit'
+    assert ('images',{'limit':80,'max_age_hours':72,'recover_limit':8}) in calls
     assert ('mislabels',{'limit':600,'max_age_hours':168}) in calls
     assert ('unresolved',{'limit':24}) in calls
     assert ('duplicates',{'limit':600,'max_age_hours':168}) in calls
