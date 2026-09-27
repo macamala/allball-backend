@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 import pytest
-from bot.news_policy import canonical_news_url, fair_news_queue, freshness_reason, original_draft_reason
+from bot.news_policy import canonical_news_url, fair_news_queue, freshness_reason, original_draft_reason, source_path_sport_hint
 from sports_registry.sports import SPORTS
 
 NOW = datetime(2026, 9, 26, 6, tzinfo=timezone.utc)
@@ -136,3 +136,31 @@ def test_equally_empty_sports_prefer_admission_ready_candidate():
         coverage_floor=6,
     )
     assert result[0]['sport_fixture']=='netball'
+
+
+@pytest.mark.parametrize(
+    "url,sport",
+    [
+        ("https://www.record.pt/modalidades/tenis/detalhe/francisco-cabral", "tennis"),
+        ("https://www.novosti.rs/sport/fudbal/1653155/srbija-holandija", "football"),
+        ("https://www.blick.ch/sport/motorsport/buemi-toyota-japan-id1.html", "motorsport"),
+        ("https://www.bbc.co.uk/sport/rugby-union/articles/cx05r4gg209ro", "rugby"),
+        ("https://www.bbc.co.uk/sport/cricket/videos/cmdx0wvdlkwjo", "cricket"),
+        ("https://www.bbc.co.uk/sport/boxing/articles/c69w42r4zel9o", "boxing"),
+    ],
+)
+def test_trusted_source_path_sport_hints(url, sport):
+    assert source_path_sport_hint(url) == sport
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://evil.example/www.bbc.co.uk/sport/rugby-union/articles/x",
+        "https://www.bbc.co.uk/news/articles/x",
+        "https://www.record.pt/fora-de-campo/detalhe/x",
+        "https://blick.ch/sport/motorsport/x",
+    ],
+)
+def test_source_path_hint_requires_exact_trusted_host_and_path(url):
+    assert source_path_sport_hint(url) is None
