@@ -156,3 +156,19 @@ def test_ski_weltmeisterin_story_is_winter_sports():
         feed_kind="mixed",
     )
     assert result.sport == "winter-sports"
+
+
+
+def test_road_world_championships_beats_bad_american_football_feed_hint():
+    result = classify_article(
+        "Caroline Andersson conscious after heavy crash at Road World Championships",
+        (
+            "The Swedish rider crashed heavily during the road world championships. "
+            "Medical staff treated the cyclist before she was taken for further checks."
+        ),
+        feed_kind="league",
+        feed_sport="american-football",
+        feed_league=None,
+        feed_country="usa",
+    )
+    assert result.sport == "cycling"
