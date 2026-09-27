@@ -12,7 +12,8 @@ on:
       - "news_feedback_api.py"
       - "public_index.py"
       - "deploy/news/preflight.py"
-      - "tests/test_news_self_healing_v13.py"
+      - "tests/test_news*.py"
+      - "tests/test_c22_news*.py"
   workflow_dispatch:
 
 jobs:
@@ -39,6 +40,7 @@ jobs:
         run: |
           pytest -q -p no:cacheprovider \
             tests/test_news_self_healing_v13.py \
+            tests/test_news_data_news.py \
             tests/test_news03_integration.py \
             tests/test_news_free_ai.py \
             tests/test_news_official_indexes.py \
