@@ -148,7 +148,16 @@ def queue_priority_score(item, now):
     return score
 
 
-def fair_news_queue(items, classify, *, now=None, max_age_hours=72, sport_order=()):
+def fair_news_queue(
+    items,
+    classify,
+    *,
+    now=None,
+    max_age_hours=72,
+    sport_order=(),
+    sport_inventory=None,
+    coverage_floor=6,
+):
     """Newest per sport, then round robin; classify evidence before spending AI.
 
     Rotate starting sport across time slots so a small per-cycle budget does not
@@ -181,15 +190,38 @@ def fair_news_queue(items, classify, *, now=None, max_age_hours=72, sport_order=
         offset = int(now.timestamp() // 600) % len(order)
         rotated = order[offset:] + order[:offset]
         rotation_rank = {sport: index for index, sport in enumerate(rotated)}
-        # News value decides the tier; rotation only breaks ties so one sport
-        # cannot own the small free-AI budget forever.
-        order = sorted(
-            order,
-            key=lambda sport: (
-                -max(queue_priority_score(item, now) for item in buckets[sport]),
-                rotation_rank[sport],
-            ),
-        )
+        inventory = {
+            sport: max(0, int((sport_inventory or {}).get(sport, 0) or 0))
+            for sport in order
+        }
+        floor = max(0, int(coverage_floor or 0))
+        underfilled = {sport for sport in order if inventory[sport] < floor}
+
+        if underfilled:
+            # Coverage debt beats headline score. A sport with 0-5 current
+            # public stories gets the scarce writer slot before a sport with
+            # dozens/hundreds. Newsworthiness and rotation only break ties
+            # between equally underfilled sports.
+            order = sorted(
+                order,
+                key=lambda sport: (
+                    0 if sport in underfilled else 1,
+                    inventory[sport],
+                    -max(queue_priority_score(item, now) for item in buckets[sport]),
+                    rotation_rank[sport],
+                ),
+            )
+        else:
+            # Once every candidate sport has a basic floor, keep the inventory
+            # balanced instead of letting one source-rich sport dominate.
+            order = sorted(
+                order,
+                key=lambda sport: (
+                    inventory[sport],
+                    -max(queue_priority_score(item, now) for item in buckets[sport]),
+                    rotation_rank[sport],
+                ),
+            )
     queues = {
         sport: deque(
             sorted(
