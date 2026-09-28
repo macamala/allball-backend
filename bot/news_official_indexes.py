@@ -49,6 +49,16 @@ HTML_INDEXES = (
         "paths": ("/news/",),
     },
     {
+        "id": "chinese-olympic-sports-news",
+        "sport": None,
+        "kind": "mixed",
+        "publisher": "Chinese Olympic Committee",
+        "url": "https://en.olympic.cn/news/Sports_News/",
+        "host": "en.olympic.cn",
+        "paths": ("/news/Sports_News/",),
+        "visible_date": True,
+    },
+    {
         "id": "nba-basketball-news",
         "sport": "basketball",
         "publisher": "NBA",
