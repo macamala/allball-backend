@@ -123,7 +123,12 @@ def _groq(cfg: dict, system: str, user: str, max_tokens: int, json_mode: bool):
             {"role": "user", "content": user},
         ],
         "temperature": 0.1 if json_mode else 0.35,
-        "max_completion_tokens": max(256, min(int(max_tokens), 9000)),
+        "max_completion_tokens": (
+            max(700, min(int(max_tokens), 2200))
+            if json_mode
+            else max(4096, min(int(max_tokens), 9000))
+        ),
+        "reasoning_effort": "low",
         "stream": False,
     }
     if json_mode:
