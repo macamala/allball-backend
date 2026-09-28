@@ -197,3 +197,19 @@ def test_ihf_rss_keeps_exact_date_and_only_upgrades_verified_same_host(monkeypat
     rows=fetch._fetch_feed_entries(source,20)
     assert len(rows)==1 and rows[0]['url']=='https://www.ihf.info/media-center/news/usa-qualify'
     assert rows[0]['published_at']==now and not rows[0]['feed'].get('league')
+
+
+def test_promotional_roadshow_is_not_a_news_article_even_after_rewriting():
+    assert non_article_news_reason({'title':'WePlayStrong House on Tour opens in Paris for four days'}) == 'non_article_event_promotion'
+    assert non_article_news_reason({'title':'A football event opens','url':'https://www.uefa.com/news/123--weplaystrong-house-on-tour-visits-paris/'}) == 'non_article_event_promotion'
+
+
+def test_broad_sport_bucket_does_not_conflict_with_a_verified_competition(monkeypatch):
+    from bot import news_fact_guard as guard
+    from bot import classify
+    monkeypatch.setattr(guard,'original_draft_reason',lambda *a:None)
+    monkeypatch.setattr(guard,'_unsupported_known_entities',lambda *a:[])
+    monkeypatch.setattr(classify,'classify_article',lambda *a,**k:classify.Classification('basketball','euroleague','international','high','test'))
+    draft={'title':'EuroLeague venue proposal','body':'The clubs discussed the EuroLeague venue.'}
+    assert guard.fact_lock_reason(draft,'Izraelci hoće Evroligu da presele na Kipar','Klubovi su razgovarali o takmičenju.',expected_sport='basketball',expected_league='basketball-international') is None
+    assert guard.fact_lock_reason(draft,'Another league','Another league story.',expected_sport='basketball',expected_league='nba') == 'draft_competition_mismatch:euroleague'

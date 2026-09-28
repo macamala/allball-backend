@@ -166,6 +166,7 @@ def fact_lock_reason(
         # synonyms ("new CEO" vs "appointed") or cross-language source prose.
 
     if expected_sport:
+        from .taxonomy import BROAD_LEAGUE
         from .classify import classify_article
         classified = classify_article(output.split("\n", 1)[0], output, feed_kind="mixed")
         # A draft does not need to repeat the sport name when source evidence
@@ -174,6 +175,10 @@ def fact_lock_reason(
             return "draft_sport_mismatch:" + str(classified.sport)[:50]
         if (
             expected_league
+            # A broad sport bucket is not a verified competition. A concrete
+            # league in a multilingual draft still needs semantic source proof,
+            # but it cannot conflict with an unspecified source competition.
+            and expected_league not in set(BROAD_LEAGUE.values()) | {f"{expected_sport}-international"}
             and classified.league
             and classified.confidence in {"high", "medium"}
             and classified.league != expected_league

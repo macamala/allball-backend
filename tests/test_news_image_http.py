@@ -91,7 +91,7 @@ def _png(width, height):
 
 def test_image_probe_rejects_extreme_text_banner_geometry():
     client=Client([Response(content_type="image/png",body=_png(1200,180))])
-    ok,reason=images.probe_news_image("https://cdn.example/banner.png",client=client)
+    ok,reason=images.probe_news_image("https://cdn.example/wide-photo.png",client=client)
     assert ok is False and reason=="bad_aspect_ratio"
 
 
@@ -113,3 +113,7 @@ def test_image_probe_keeps_upgradable_small_bbc_photo():
 def test_composited_publisher_overlay_is_held_without_rewriting_or_fetching_url():
     for query in ['overlay-base64=brand','overlay=logo.png','mark64=brand','txt=headline']:
         assert images.probe_news_image('https://cdn.example/photo.jpg?'+query,client=object()) == (False,'composited_overlay')
+
+
+def test_publisher_banner_filename_is_held_before_http():
+    assert images.probe_news_image('https://editorial.uefa.com/resources/wpshot_paris_-_banner.jpeg?imwidth=158',client=object()) == (False,'promotional_banner')

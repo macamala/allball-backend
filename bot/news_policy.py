@@ -214,6 +214,8 @@ def non_article_news_reason(item):
     if path.rstrip("/") == "/internacional/paises/inglaterra/detalhe/liam-gallagher-revela-possivel-castigo-do-man-city-e-explode-calem-se-idiotas-neuroticos-desesperados":
         return "non_news_fan_speculation"
 
+    if "weplaystrong-house-on-tour" in path or re.search(r"\bweplaystrong house on tour\b", title):
+        return "non_article_event_promotion"
     if re.search(r"\b(?:predlozzi|tipovanja|ludi tiket|kladioničarski tipovi|kladionicarski tipovi)\b", title) or re.search(r"/(?:predlozzi-i-tipovanja|ludi-tiket|najava-dana)-", path):
         return "non_article_betting_product"
     if re.search(r"\b(?:biramo najlepši gol|biramo najlepsi gol|бирамо најлепши гол|vote for (?:the |your )?goal)\b", title):

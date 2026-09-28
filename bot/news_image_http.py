@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
+import re
 from typing import Iterable
 from urllib.parse import urljoin, urlsplit, parse_qs
 
@@ -131,6 +132,8 @@ def probe_news_image(url: str, *, client=None) -> tuple[bool, str]:
         keys = {key.lower() for key in parse_qs(urlsplit(value).query)}
     except ValueError:
         return False, "invalid_or_nonpublic_url"
+    if re.search(r"(?:^|[/_-])(?:banner|title[-_]card)(?:[._-]|$)", urlsplit(value).path, re.I):
+        return False, "promotional_banner"
     # Choose another real photograph from the same article. Do not strip an
     # overlay or modify a signed publisher image URL to manufacture a new one.
     if keys & {"overlay-base64", "overlay", "mark", "mark64", "txt"}:
