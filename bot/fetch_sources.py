@@ -848,6 +848,13 @@ def _fetch_and_store_all_articles(
                 queued.extend(fetch_official_index_entries(per_feed))
             except Exception as e:
                 logger.error("[fetch_sources] official index error: %s", type(e).__name__)
+        if os.getenv("NEWS_ESPN_NEWS_JSON_ENABLED") == "1":
+            try:
+                from .news_espn_api import fetch_espn_news_entries
+
+                queued.extend(fetch_espn_news_entries(12))
+            except Exception as e:
+                logger.error("[fetch_sources] ESPN News JSON discovery error: %s", type(e).__name__)
         if os.getenv("NEWS_NEWSAPI_AI_ENABLED") == "1":
             try:
                 from .news_aggregator import fetch_newsapi_ai_entries
