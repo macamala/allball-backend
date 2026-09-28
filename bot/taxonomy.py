@@ -452,7 +452,7 @@ SPORT_ALIASES: Dict[str, List[str]] = {
         "fairway",
         "the masters",
     ],
-    "boxing": ["boxing", "heavyweight title", "bout"],
+    "boxing": ["boxing", "heavyweight title", " bout "],
     "mma": ["mma", "ufc", "octagon", "mixed martial"],
     "cycling": ["cycling", "tour de france", "peloton", "uci world"],
     "snooker": ["snooker", "147 break", "crucible"],
