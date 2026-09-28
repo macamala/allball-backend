@@ -1,7 +1,23 @@
 import json
+import pytest
 
 import bot.free_ai_router as free_ai
 from bot.news_policy import original_draft_reason, protected_proper_names
+
+
+@pytest.fixture(autouse=True)
+def isolated_free_router_context():
+    # A previous integration test's corrective writer must not become the
+    # author of these standalone schema/transport fixtures.
+    writer = free_ai._LAST_WRITER.set(('unknown', 'unknown'))
+    validator = free_ai._LAST_JSON.set(('unknown', 'unknown'))
+    feedback = free_ai._LAST_VALIDATION.set({})
+    try:
+        yield
+    finally:
+        free_ai._LAST_WRITER.reset(writer)
+        free_ai._LAST_JSON.reset(validator)
+        free_ai._LAST_VALIDATION.reset(feedback)
 
 
 def test_free_ai_route_requires_key_and_explicit_free_model_ids(monkeypatch):

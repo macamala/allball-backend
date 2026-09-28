@@ -782,11 +782,13 @@ def _ingest_item(
         logger.exception("[fetch_sources] hold: public admission could not be verified")
         return None, False
     logger.info(
-        "[fetch_sources] published id=%s sport=%s slug=%s title=%s",
+        "[fetch_sources] published id=%s sport=%s slug=%s title=%s source_published_at=%s stored_published_at=%s",
         article.id,
         stamp_sport or "unknown",
         article.slug,
         (article.title or "")[:120],
+        published_at,
+        article.published_at,
     )
     return article, used_ai
 

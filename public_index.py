@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo
 from typing import Optional, Sequence
 from urllib.parse import urlsplit
 
-from sqlalchemy import func
+from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
 from editorial import classify_media_url, evaluate_quality, news_image_is_publishable
@@ -33,6 +33,7 @@ from taxonomy_resolver import (
 )
 
 logger = logging.getLogger("ninkosports.public_index")
+_NEWS_CLOCK_REPORTED = False
 
 
 def persist_public_article(db: Session, article: Article, resolution=None, commit: bool = False):
@@ -225,6 +226,15 @@ def load_cached_resolutions(db: Session, articles: Sequence[Article]) -> dict:
 
 def recent_public_sport_inventory(db: Session, max_age_hours: int = 72, *, editorial_timezone=None, now=None) -> dict[str, int]:
     """Counts the same current, image-valid News inventory readers can browse."""
+    global _NEWS_CLOCK_REPORTED
+    if not _NEWS_CLOCK_REPORTED and db.get_bind().dialect.name == 'postgresql':
+        try:
+            with db.begin_nested():
+                column = db.execute(text("SELECT data_type, datetime_precision FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='articles' AND column_name='published_at'")).first()
+            logger.info('[public_index] news_publication_clock_storage=%s', tuple(column) if column else 'unknown')
+            _NEWS_CLOCK_REPORTED = True
+        except Exception as exc:
+            logger.warning('[public_index] news clock storage diagnostic unavailable: %s', type(exc).__name__)
     clock = now or datetime.now(timezone.utc)
     if clock.tzinfo is None:
         raise ValueError("inventory clock must be timezone-aware")
