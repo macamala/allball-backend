@@ -146,6 +146,12 @@ FACT_RETRY_HINT = (
     "Rewrite it from the verified source facts only. Remove the unsupported "
     "detail instead of guessing, generalising, or replacing it with another fact."
 )
+QUOTE_RETRY_HINT = (
+    "The previous draft used direct quotation. Rewrite EVERY reported statement "
+    "as indirect speech with clear attribution. Use no straight or curly quotation "
+    "marks anywhere and do not copy the source quote wording verbatim. Preserve "
+    "only the meaning explicitly supported by the source."
+)
 
 LENGTH_RETRY_HINT = (
     "The previous draft was only a short summary of a substantial source article. "
@@ -356,7 +362,12 @@ def write_ninkosports_story(
         prompt = f"{LENGTH_RETRY_HINT}\n\n{prompt}"
     if correction_reason:
         safe_reason = re.sub(r"[^a-zA-Z0-9:_-]", "", correction_reason)[:160]
-        prompt = f"{FACT_RETRY_HINT}\nVALIDATION_FAILURE: {safe_reason}\n\n{prompt}"
+        retry_hint = (
+            QUOTE_RETRY_HINT
+            if safe_reason == "direct_quote_requires_review"
+            else FACT_RETRY_HINT
+        )
+        prompt = f"{retry_hint}\nVALIDATION_FAILURE: {safe_reason}\n\n{prompt}"
     return _call_selected_ai(prompt)
 
 
