@@ -97,6 +97,7 @@ def test_postgres_accounting_config_needs_no_railway_volume_when_news_ai_is_enab
         "NEWS_TRANSLATIONS_PER_CYCLE": "0",
         "NEWS_HISTORICAL_REPAIR_ENABLED": "0",
         "NEWS_EXPANDED_FEEDS_ENABLED": "0",
+        "NEWS_NEWSAPI_AI_ENABLED": "0",
         "NEWS_AI_MAX_REQUESTS_PER_RUN": "2",
         "NEWS_AI_MAX_REQUESTS_PER_DAY": "3",
         "NEWS_AI_PROVIDER_MODE": "xkiro_free",
@@ -116,6 +117,7 @@ def test_removed_data_news_flag_cannot_create_a_data_only_configuration():
         "NEWS_TRANSLATIONS_PER_CYCLE": "0",
         "NEWS_HISTORICAL_REPAIR_ENABLED": "0",
         "NEWS_EXPANDED_FEEDS_ENABLED": "0",
+        "NEWS_NEWSAPI_AI_ENABLED": "0",
     }
     assert news_runtime.configuration_errors(env) == ["no_news_lane_enabled"]
 
