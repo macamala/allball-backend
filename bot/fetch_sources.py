@@ -111,7 +111,7 @@ def source_article_facts(
     return "", "none"
 
 
-def _correction_retry_allowed(*, prefer_breadth: bool = False) -> bool:
+def _correction_retry_allowed(*, prefer_breadth: bool = False, force: bool = False) -> bool:
     """Conservatively preserve one request for translations when that lane is on."""
     budget = active_ai_budget()
     if budget is None:
@@ -119,9 +119,10 @@ def _correction_retry_allowed(*, prefer_breadth: bool = False) -> bool:
         return not prefer_breadth
     if getattr(budget, "blocked_reason", None):
         return False
-    if prefer_breadth:
-        # While many sports are below the coverage floor, a rejected draft is
-        # held fail-closed and the next request goes to a different candidate.
+    if prefer_breadth and not force:
+        # While many sports are below the coverage floor, ordinary rejected
+        # drafts yield to a different sport. A direct-quote correction may force
+        # one retry because it is a mechanical originality failure, not a fact guess.
         return False
     translation_reserve = 0
     if not prefer_breadth and os.getenv("NEWS_TRANSLATIONS_ENABLED") == "1":
@@ -537,7 +538,10 @@ def _ingest_item(
                 rewrite_reason not in {"empty", "too-short"}
                 and not openai_rate_limited()
                 and not ai_budget_exhausted()
-                and _correction_retry_allowed(prefer_breadth=prefer_breadth)
+                and _correction_retry_allowed(
+                    prefer_breadth=prefer_breadth,
+                    force=rewrite_reason == "direct_quote_requires_review",
+                )
             ):
                 retry_parsed, retry_reason = _ai_story(
                     title=item["title"],
