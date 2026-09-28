@@ -30,6 +30,15 @@ logger = logging.getLogger(__name__)
 
 HTML_INDEXES = (
     {
+        "id": "olympics-global-sports-news",
+        "sport": None,
+        "kind": "mixed",
+        "publisher": "Olympics.com",
+        "url": "https://www.olympics.com/en/news/",
+        "host": "www.olympics.com",
+        "paths": ("/en/news/",),
+    },
+    {
         "id": "mlb-baseball-news",
         "sport": "baseball",
         "publisher": "MLB",
@@ -509,8 +518,8 @@ def _hydrate(cfg: Dict, url: str, fallback_title: str) -> Optional[Dict]:
         image_candidates = []
     feed = {
         "url": cfg["url"],
-        "kind": "league",
-        "sport": cfg["sport"],
+        "kind": cfg.get("kind", "league"),
+        "sport": cfg.get("sport"),
         "league": None,
         "country": "international",
         "publisher": cfg["publisher"],
@@ -549,7 +558,7 @@ def fetch_official_index_entries(max_per_source: int = 3) -> List[Dict]:
                 break
         logger.info(
             "[official_index] source=%s sport=%s discovered=%s hydrated=%s",
-            cfg["id"], cfg["sport"], len(candidates), hydrated,
+            cfg["id"], cfg.get("sport") or "mixed", len(candidates), hydrated,
         )
     for cfg in SITEMAPS:
         hydrated = 0
