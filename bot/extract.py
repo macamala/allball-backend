@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from html.parser import HTMLParser
 from typing import List, Optional, Tuple
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
 
 import httpx
 
@@ -510,8 +510,10 @@ def _json_ld_article_body(html: str) -> str:
 
 class _ScopedNewsBody(HTMLParser):
     """Capture a known CMS article body, excluding later recommendation grids."""
-    def __init__(self):
+    def __init__(self, body_class="single-news-content"):
         super().__init__(convert_charrefs=False)
+        self.body_class = body_class
+        self.root_tag = None
         self.depth = 0
         self.finished = False
         self.parts = []
@@ -520,11 +522,12 @@ class _ScopedNewsBody(HTMLParser):
         if self.finished:
             return
         if not self.depth:
-            if 'single-news-content' in dict(attrs).get('class', '').split():
+            if self.body_class in dict(attrs).get('class', '').split():
+                self.root_tag = tag
                 self.depth = 1
             return
         self.parts.append(self.get_starttag_text())
-        if tag not in VOID_TAGS:
+        if tag == self.root_tag:
             self.depth += 1
 
     def handle_startendtag(self, tag, attrs):
@@ -533,7 +536,8 @@ class _ScopedNewsBody(HTMLParser):
 
     def handle_endtag(self, tag):
         if self.depth and tag not in VOID_TAGS:
-            self.depth -= 1
+            if tag == self.root_tag:
+                self.depth -= 1
             if self.depth:
                 self.parts.append(f'</{tag}>')
             else:
@@ -551,8 +555,18 @@ class _ScopedNewsBody(HTMLParser):
 
 
 def article_text_from_html(html: str) -> str:
-    if 'single-news-content' in (html or ''):
-        scoped = _ScopedNewsBody()
+    body_class = 'single-news-content' if 'single-news-content' in (html or '') else None
+    # Mozzart's article container is distinct from headline grids and betting
+    # widgets. Only apply its class under its own canonical publisher metadata.
+    canonical = _og(html or '', 'og:url') or _meta_name(html or '', 'url') or ''
+    try:
+        publisher_host = urlsplit(canonical).hostname
+    except ValueError:
+        publisher_host = None
+    if publisher_host == 'www.mozzartsport.com':
+        body_class = 'news-content'
+    if body_class:
+        scoped = _ScopedNewsBody(body_class)
         try:
             scoped.feed(html)
             scoped.close()

@@ -119,7 +119,7 @@ def is_site_chrome_text(text: Optional[str]) -> bool:
         return True
     if hits >= 1 and run >= 10:
         return True
-    if run >= 18 and _stop_ratio(raw) < 0.08:
+    if run >= 18 and run >= len(_tokens(raw)) * 0.6 and _stop_ratio(raw) < 0.08:
         return True
     tokens = _tokens(raw)
     if (

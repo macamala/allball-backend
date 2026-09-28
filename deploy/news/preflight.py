@@ -16,7 +16,7 @@ REQUIRED_FILES = (
     "requirements.txt", "news_runtime.py", "database.py", "models.py", "public_index.py",
     "public_read.py", "editorial.py", "taxonomy_resolver.py", "repair_content.py",
     "bot/__init__.py", "bot/scheduler.py", "bot/fetch_sources.py", "bot/extract.py",
-    "bot/feeds.py", "bot/news_feed_http.py", "bot/news_image_http.py", "bot/news_official_indexes.py",
+    "bot/feeds.py", "bot/news_feed_http.py", "bot/news_image_http.py", "bot/news_official_indexes.py", "bot/news_components.py",
     "bot/news_translations.py", "bot/news_source_holds.py", "bot/news_aggregator.py", "bot/news_espn_api.py", "bot/news_newsapi_org.py",
     "bot/free_ai_router.py", "bot/news_external_free.py", "bot/news_fact_guard.py",
     "bot/rewrite_ai.py",

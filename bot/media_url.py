@@ -245,6 +245,13 @@ def collect_feed_image_candidates(entry) -> List[Tuple[str, int]]:
     if hasattr(entry, "get"):
         summary = entry.get("summary") or entry.get("description") or ""
     candidates.extend(images_from_html(summary))
+    # WordPress content:encoded can carry the same article's real photographs
+    # even when RSS descriptions contain only an excerpt. Keep existing image
+    # quality and HTTP gates; this adds candidates, never a default image.
+    content = entry.get("content") if hasattr(entry, "get") else None
+    for row in content if isinstance(content, list) else []:
+        if isinstance(row, dict) and isinstance(row.get("value"), str):
+            candidates.extend(images_from_html(row["value"]))
     return candidates
 
 

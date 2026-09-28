@@ -29,11 +29,47 @@ from .extract import (
 )
 from .news_feed_http import read_news_feed
 from .news_policy import editorial_day_reason, freshness_reason, non_article_news_reason
+from .news_components import public_components
 from .textutil import clean_text
 
 logger = logging.getLogger(__name__)
 
 HTML_INDEXES = (
+    {
+        "id": "mozzart-serbian-football-news", "sport": "football", "publisher": "Mozzart Sport",
+        "url": "https://www.mozzartsport.com/fudbal/1", "host": "www.mozzartsport.com",
+        "paths": ("/fudbal/vesti/",), "article_path_re": r"^/fudbal/vesti/[^/]+/\d+$",
+        "exclude_paths": ("/fudbal/vesti/predlozzi-i-tipovanja-", "/fudbal/vesti/ludi-tiket-", "/fudbal/vesti/najava-dana-"),
+        "verified_official": False,
+    },
+    {
+        "id": "mozzart-serbian-basketball-news", "sport": "basketball", "publisher": "Mozzart Sport",
+        "url": "https://www.mozzartsport.com/kosarka/2", "host": "www.mozzartsport.com",
+        "paths": ("/kosarka/vesti/",), "article_path_re": r"^/kosarka/vesti/[^/]+/\d+$",
+        "verified_official": False,
+    },
+    {
+        "id": "liverpool-football-news", "sport": "football", "publisher": "Liverpool FC",
+        "url": "https://www.liverpoolfc.com/news", "host": "www.liverpoolfc.com",
+        "paths": ("/news/",), "exclude_paths": ("/news/road-rome-",),
+    },
+    {
+        "id": "chelsea-football-news", "sport": "football", "publisher": "Chelsea FC",
+        "url": "https://www.chelseafc.com/en/news/latest-news", "host": "www.chelseafc.com",
+        "paths": ("/en/news/article/",), "exclude_paths": ("/en/news/article/chelsea-diary-",),
+        "index_component": "NewsListModule",
+    },
+    {
+        "id": "cricket-australia-news", "sport": "cricket", "publisher": "Cricket Australia",
+        "url": "https://www.cricket.com.au/news", "host": "www.cricket.com.au",
+        "paths": ("/news/",), "article_path_re": r"^/news/\d+/[^/]+",
+        "anchor_class": "o-media-pod__link",
+    },
+    {
+        "id": "wta-tennis-news", "sport": "tennis", "publisher": "WTA",
+        "url": "https://www.wtatennis.com/news", "host": "www.wtatennis.com",
+        "paths": ("/news/",), "article_path_re": r"^/news/\d+/[^/]+",
+    },
     {
         "id": "olympics-global-sports-news",
         "enabled": False,
@@ -69,7 +105,7 @@ HTML_INDEXES = (
         "exclude_articles": ("key-dates", "writers-archive", "nba-guide", "2025-26-nba-player-pronunciation-guide", "2025-26-nba-trade-tracker"),
         "sport": "basketball",
         "publisher": "NBA",
-        "url": "https://www.nba.com/news",
+        "url": "https://www.nba.com/news/category/top-stories",
         "host": "www.nba.com",
         "paths": ("/news/",),
     },
@@ -416,6 +452,26 @@ def _anchor_candidates(cfg: Dict) -> List[tuple[str, str]]:
     except Exception as exc:
         logger.info("[official_index] index unavailable %s: %s", cfg["id"], type(exc).__name__)
         return []
+    if cfg.get("index_component") == "NewsListModule":
+        # Only the public Article records from this page's listing; no app
+        # promotion, video/gallery cards, login-only or premium records.
+        props = public_components(html, ("NewsListModule",)).get("NewsListModule", {})
+        content = props.get("initialContent") or {}
+        rows = content.get("items") if isinstance(content, dict) else None
+        output, seen = [], set()
+        for row in rows if isinstance(rows, list) else []:
+            if (not isinstance(row, dict) or row.get("type") != "Article"
+                    or row.get("requiresLogin") is not False
+                    or row.get("isPremiumContent") is not False):
+                continue
+            url = _same_host_url(cfg["url"], str(row.get("url") or ""), cfg["host"], cfg)
+            if not url or url in seen:
+                continue
+            seen.add(url)
+            output.append((url, clean_text(str(row.get("title") or ""))))
+            if len(output) >= MAX_LINKS_PER_SOURCE:
+                break
+        return output
     parser = _AnchorParser(cfg.get("anchor_class"))
     try:
         parser.feed(html)
@@ -586,6 +642,15 @@ def _hydrate(cfg: Dict, url: str, fallback_title: str, *, diagnostics=None) -> O
     ):
         return reject("non_article_photo_gallery")
     published_at = page_published_at_from_html(html)
+    if cfg["id"] == "chelsea-football-news":
+        components = public_components(html, ("ArticleHeader", "ArticleLoginOverlay"))
+        if components.get("ArticleLoginOverlay", {}).get("requiresLogin") is not False:
+            return reject("restricted_article")
+        # This is the current article header, not a recommended card or update
+        # timestamp. The publisher supplies an explicit UTC offset.
+        header = components.get("ArticleHeader", {}).get("articleHeaderDetails") or {}
+        from .extract import _parse_explicit_datetime
+        published_at = _parse_explicit_datetime(header.get("date")) if isinstance(header, dict) else None
     if published_at is None and cfg["id"] == "world-athletics-news":
         # This CMS exposes the article's publication field in its own page
         # state. Never use a related card's time or the page build/update time.
@@ -654,8 +719,9 @@ def _hydrate(cfg: Dict, url: str, fallback_title: str, *, diagnostics=None) -> O
         "league": None,
         "country": "international",
         "publisher": cfg["publisher"],
+        "verified_official": cfg.get("verified_official", True),
         "enabled": True,
-        "note": "first-party official index; article page hydrated before admission",
+        "note": "bounded publisher index; article page hydrated before admission",
     }
     return {
         "title": clean_text(title),

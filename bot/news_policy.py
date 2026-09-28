@@ -56,6 +56,11 @@ def canonical_news_url(value):
 
 
 _SOURCE_PATH_SPORTS = (
+    ("www.b92.net", "/sport/fudbal/", "football"),
+    ("www.b92.net", "/sport/kosarka/", "basketball"),
+    ("www.b92.net", "/sport/tenis/", "tennis"),
+    ("www.mozzartsport.com", "/fudbal/vesti/", "football"),
+    ("www.mozzartsport.com", "/kosarka/vesti/", "basketball"),
     ("www.bbc.co.uk", "/sport/football/", "football"),
     ("www.bbc.co.uk", "/sport/tennis/", "tennis"),
     ("www.bbc.co.uk", "/sport/formula1/", "motorsport"),
@@ -197,10 +202,19 @@ def non_article_news_reason(item):
     if path.rstrip("/") == "/internacional/paises/inglaterra/detalhe/liam-gallagher-revela-possivel-castigo-do-man-city-e-explode-calem-se-idiotas-neuroticos-desesperados":
         return "non_news_fan_speculation"
 
+    if re.search(r"\b(?:predlozzi|tipovanja|ludi tiket|kladioničarski tipovi|kladionicarski tipovi)\b", title) or re.search(r"/(?:predlozzi-i-tipovanja|ludi-tiket|najava-dana)-", path):
+        return "non_article_betting_product"
+    if re.search(r"\b(?:biramo najlepši gol|biramo najlepsi gol|бирамо најлепши гол|vote for (?:the |your )?goal)\b", title):
+        return "non_article_fan_poll"
+    if re.search(r"^(?:online|uživo|uzivo|уживо)\s*:", title):
+        return "non_article_live_program"
+    if re.search(r"^(?:na današnji dan|na danasnji dan|на данашњи дан)\b", title):
+        return "non_news_retrospective_commentary"
+
     if re.search(r"\b(?:quiz(?:zes)?|trivia|crosswords?|wordle|guess the|test your knowledge)\b", title):
         return "non_article_quiz"
 
-    if re.search(r"\bpodcast\b", title) or "/iplayer/episode/" in path or "/podcasts/" in path:
+    if re.search(r"\bpodcast\b|^nbl (?:overtime|now)\b", title) or "/iplayer/episode/" in path or "/podcasts/" in path:
         return "non_article_podcast"
     if re.search(r"\bscorecard\b", title) or "/scorecard/" in path:
         return "non_article_scorecard"
@@ -218,7 +232,7 @@ def non_article_news_reason(item):
     if path.rstrip("/") == "/news/2026/09/28/fans-march-across-harbour-bridge-to-launch-grand-final-week":
         return "non_article_photo_gallery"
     if "/fantasy/" in path or re.search(
-        r"\bfantasy (?:hockey|football|basketball|baseball|cricket|sports?|drafts?|rankings?|previews?)\b", title
+        r"\bfantasy (?:hockey|football|basketball|baseball|cricket|sports?|drafts?|rankings?|previews?)\b|\bsupercoach (?:nbl|classic)\b", title
     ):
         return "non_article_fantasy_product"
     # Confirmed legacy roundup mixes highlight cards and site acknowledgements.
@@ -227,10 +241,10 @@ def non_article_news_reason(item):
     if re.search(r"/(?:video|videos|clips)/", path) or re.search(
         r"(?:^|/|-)(?:best-moments|game-highlights|match-highlights|tries-of-the-week)(?:/|-|$)", path
     ) or re.search(
-        r"\b(?:game highlights|match highlights|top (?:plays|tries)|tries of the week|best moments)\b", title
+        r"\b(?:game highlights|match highlights|top (?:plays|tries)|tries of the week|best moments|moments that mattered)\b|^top \d+\s*:", title
     ):
         return "non_article_video_highlights"
-    if re.search(r"\b(?:race times|qualifying times|weather forecast|how to watch|where to watch)\b", title):
+    if re.search(r"\b(?:race times|qualifying times|weather forecast|how to watch|where to watch|all you need to know|everything you need to know)\b", title):
         return "non_article_service_guide"
     if re.search(r"\b(?:today[’']?s papers|paper talk|newspaper round[- ]?up)\b", title):
         return "non_article_newspaper_roundup"
@@ -238,7 +252,7 @@ def non_article_news_reason(item):
     # products that repeatedly fail semantic validation or add little news value.
     if re.search(
         r"\b(?:what we learned|takeaways?|power rankings?|waiver wire|player poll|"
-        r"most disappointing|our experts?|grades?)\b",
+        r"most disappointing|our experts?|grades?)\b|^starting (?:5|five):",
         title,
     ):
         return "non_article_analysis"
@@ -259,7 +273,7 @@ def non_article_news_reason(item):
 def publisher_branding_reason(item):
     """Hold outlet-branded drafts; never replace source names with our own."""
     text = "\n".join(str((item or {}).get(k) or "") for k in ("title", "summary", "body"))
-    if re.search(r"\b(?:BBC(?:\s+Sport)?|ESPN|Sky\s+Sports|Reuters|Associated\s+Press|BasketNews|TalkBasket|Eurohoops)\b", text, re.I):
+    if re.search(r"\b(?:BBC(?:\s+Sport)?|ESPN|Sky\s+Sports|Reuters|Associated\s+Press|BasketNews|TalkBasket|Eurohoops|Yahoo\s+Sports|The\s+Athletic|B92(?:\.sport|\.net)?|Mozzart\s+Sport|Marca)\b", text, re.I):
         return "publisher_branding"
     return None
 
@@ -323,7 +337,7 @@ def gossip_news_reason(item):
         r"\b(?:eyeing|monitoring|considering) (?:a |an |the )?(?:move|deal|transfer|player)\b",
         r"\breportedly (?:interested|keen|considering|targeting|wants?)\b",
         r"\b(?:transfer target|on the radar|tipped to join|set sights on)\b",
-        r"\b(?:navodno|mogao bi|mogla bi|mogući transfer|moguci transfer)\b",
+        r"\b(?:navodno|mogao bi|mogla bi|mogući transfer|moguci transfer|moguć transfer|moguc transfer|могућ трансфер|наводно|могао би)\b",
     )
     speculative = any(re.search(pattern, title, re.I) for pattern in speculation_patterns)
     confirmed = re.search(
@@ -433,6 +447,8 @@ def candidate_readiness_score(item):
     feed = (item or {}).get("feed") or {}
     if feed.get("kind") == "league" and feed.get("sport"):
         score += 1
+    if feed.get("verified_official") is True:
+        score += 2
     return score
 
 

@@ -368,7 +368,14 @@ location, table position, relationship, quote, prediction, consequence or
 stronger characterization not supported by the source.
 Reject any changed or invented proper name.
 Do not use outside knowledge or assumptions.
-When rejecting, identify only concrete unsupported factual claims actually
+The source and draft must describe a concrete current sporting development.
+Reject product/service descriptions, evergreen injury or roster trackers,
+photo captions expanded with filler, podcasts, highlight lists, quizzes and
+retrospective features presented as current news. Reject anonymous fan or
+celebrity predictions presented as a substitute for an official decision.
+For such a rejection, set approved=false and explain the concrete editorial
+problem in unsupported_claims; keep the same JSON schema.
+When rejecting factual support, identify only concrete unsupported claims actually
 present in the draft. Never reject a sentence merely because it is poetic.
 
 Return JSON only with exactly:
