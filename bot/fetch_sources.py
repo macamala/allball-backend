@@ -3,6 +3,7 @@
 import logging
 import os
 import time
+from contextvars import ContextVar
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
@@ -52,6 +53,7 @@ from .taxonomy import COMPETITIONS
 from .textutil import clean_text, looks_like_garbage, strip_truncation_markers, word_count
 
 logger = logging.getLogger(__name__)
+_LAST_STORY_FAILURE = ContextVar("news_last_story_failure", default={})
 
 from .news_source_holds import (
     held_source_urls as _held_ai_source_urls,
@@ -151,9 +153,19 @@ def _ai_story(
     trusted_context: str = "",
     correction_reason: str = "",
     learned_instructions: str = "",
+    correction_feedback: Optional[dict] = None,
 ) -> tuple:
     """Returns (parsed_dict_or_None, reason). reason is ok|empty|too-short."""
     payload = facts[: max(1, max_ai_chars)]
+    _LAST_STORY_FAILURE.set({})
+
+    def reject(reason, draft, feedback=None):
+        _LAST_STORY_FAILURE.set({
+            "draft": draft, "source_facts": payload[:6000],
+            "validator_feedback": feedback or {},
+        })
+        return None, reason
+
     raw = write_ninkosports_story(
         title=title,
         facts=payload,
@@ -161,11 +173,12 @@ def _ai_story(
         league=league,
         correction_reason=correction_reason,
         learned_instructions=learned_instructions,
+        correction_feedback=correction_feedback,
     )
     parsed = parse_ai_output(raw or "")
     body = parsed.get("body") or ""
     if not body:
-        return None, "empty"
+        return reject("empty", parsed)
     if is_dramatic_shortening(facts, body):
         raw = write_ninkosports_story(
             title=title,
@@ -175,6 +188,7 @@ def _ai_story(
             retry_for_length=True,
             correction_reason=correction_reason,
             learned_instructions=learned_instructions,
+            correction_feedback=correction_feedback,
         )
         parsed = parse_ai_output(raw or "")
         body = parsed.get("body") or ""
@@ -183,7 +197,7 @@ def _ai_story(
                 "[fetch_sources] reject summary-sized rewrite of substantial source: %s",
                 title[:80],
             )
-            return None, "too-short"
+            return reject("too-short", parsed)
         parsed["body"] = body
     deterministic_reason = original_draft_reason(
         {
@@ -200,7 +214,7 @@ def _ai_story(
             deterministic_reason,
             title[:80],
         )
-        return None, deterministic_reason
+        return reject(deterministic_reason, parsed)
     lock_reason = fact_lock_reason(
         parsed,
         title,
@@ -214,7 +228,7 @@ def _ai_story(
             lock_reason,
             title[:80],
         )
-        return None, lock_reason
+        return reject(lock_reason, parsed)
     facts_ok, facts_reason = validate_story_facts(
         title, payload, parsed, trusted_context=trusted_context
     )
@@ -224,7 +238,8 @@ def _ai_story(
             facts_reason,
             title[:80],
         )
-        return None, facts_reason
+        from .free_ai_router import last_validation_feedback
+        return reject(facts_reason, parsed, last_validation_feedback())
     return parsed, "ok"
 
 
@@ -503,6 +518,7 @@ def _ingest_item(
             if isinstance(db, Session)
             else ("", [])
         )
+        _LAST_STORY_FAILURE.set({})
         parsed, rewrite_reason = _ai_story(
             title=item["title"],
             facts=facts,
@@ -530,6 +546,8 @@ def _ingest_item(
 
         incident = None
         if rewrite_reason != "ok":
+            failure = _LAST_STORY_FAILURE.get()
+            feedback = failure.get("validator_feedback") or {}
             if isinstance(db, Session):
                 incident = record_incident(
                     db,
@@ -537,10 +555,12 @@ def _ingest_item(
                     source_url=source_url,
                     sport=tags.sport,
                     phase="prepublish",
-                    draft=parsed,
+                    draft=parsed or failure.get("draft"),
                     writer_provider=provider,
                     writer_model=model,
-                    details={"learned_rule_ids": learned_rule_ids},
+                    details={"learned_rule_ids": learned_rule_ids,
+                             "source_facts": failure.get("source_facts", ""),
+                             "validator_feedback": feedback},
                 )
             # One bounded self-correction. It still passes the same deterministic
             # and semantic validator gates inside _ai_story.
@@ -557,6 +577,13 @@ def _ingest_item(
                             "copied_source_headline",
                         }
                         or str(rewrite_reason or "").startswith("draft_sport_mismatch:")
+                        or (
+                            tags.sport in {"football", "basketball"}
+                            and rewrite_reason in {"validator-unsupported-claim", "validator-changed-name"}
+                            and any(feedback.values())
+                            and active_ai_budget() is not None
+                            and active_ai_budget().max_requests - active_ai_budget().attempts >= 4
+                        )
                     ),
                 )
             ):
@@ -569,6 +596,7 @@ def _ingest_item(
                     trusted_context=trusted_context,
                     correction_reason=rewrite_reason or "validation-failed",
                     learned_instructions=learned_instructions,
+                    correction_feedback=feedback,
                 )
                 if retry_parsed and isinstance(db, Session):
                     retry_violation = learned_rule_violation_reason(
@@ -978,6 +1006,7 @@ def _fetch_and_store_all_articles(
             ],
             sport_inventory=sport_inventory,
             coverage_floor=6,
+            prioritize_major_sports=True,
         )
         candidate_sports = {}
         for candidate in queued:
@@ -994,6 +1023,10 @@ def _fetch_and_store_all_articles(
             sport_inventory,
             candidate_sports,
         )
+        logger.info("[fetch_sources] editorial_queue_front=%s", [
+            {"sport": _classify_candidate(item).sport, "title": item["title"][:90]}
+            for item in queued[:8]
+        ])
         active_news_sports = [
             row["id"]
             for row in SPORTS

@@ -447,6 +447,59 @@ def test_ai_story_runs_deterministic_fact_lock_before_semantic_validator(monkeyp
     assert reason and reason.startswith("unsupported_claim_family:injury")
 
 
+def test_rejected_story_preserves_draft_and_specific_validator_feedback(monkeypatch):
+    from bot import free_ai_router
+    monkeypatch.setattr(ingest, 'write_ninkosports_story', lambda **kw: 'fixture')
+    monkeypatch.setattr(ingest, 'parse_ai_output', lambda raw: dict(DRAFT))
+    feedback = {'unsupported_claims': ['The draw has already taken place'], 'changed_names': []}
+    def reject(*args, **kwargs):
+        free_ai_router._LAST_VALIDATION.set(feedback)
+        return False, 'validator-unsupported-claim'
+    monkeypatch.setattr(ingest, 'validate_story_facts', reject)
+    parsed, reason = ingest._ai_story('Football cup format announced', FACTS, 'football', '', 6000)
+    assert parsed is None and reason == 'validator-unsupported-claim'
+    evidence = ingest._LAST_STORY_FAILURE.get()
+    assert evidence['draft'] == DRAFT
+    assert evidence['source_facts'] == FACTS
+    assert evidence['validator_feedback'] == feedback
+
+
+@pytest.mark.parametrize('corrected', [False, True])
+def test_major_sport_correction_retains_incident_and_requires_pass(monkeypatch, tmp_path, corrected):
+    import json
+    from database import SessionLocal
+    from models import Article, NewsIncident
+    item = prepare_ingest(monkeypatch)
+    item['url'] = f'https://example.test/priority-correction-{corrected}'
+    feedback = {'unsupported_claims': ['The draw has already taken place'], 'changed_names': []}
+    calls = []
+    def story(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            ingest._LAST_STORY_FAILURE.set({'draft': DRAFT, 'source_facts': FACTS,
+                                            'validator_feedback': feedback})
+            return None, 'validator-unsupported-claim'
+        assert kwargs['correction_feedback'] == feedback
+        return (DRAFT, 'ok') if corrected else (None, 'validator-unsupported-claim')
+    monkeypatch.setattr(ingest, '_ai_story', story)
+    db = SessionLocal()
+    try:
+        budget = AiRequestBudget(8, str(tmp_path/'correction.db'))
+        with ai_budget_scope(budget):
+            article, used = ingest._ingest_item(db, item, True, 6000, 1, prefer_breadth=True)
+        assert len(calls) == 2
+        assert bool(article) is corrected and used is corrected
+        incident = db.query(NewsIncident).filter_by(source_url=item['url']).one()
+        assert DRAFT['title'] in incident.draft_excerpt
+        assert json.loads(incident.details_json)['validator_feedback'] == feedback
+        assert incident.status == ('auto_corrected' if corrected else 'open')
+    finally:
+        db.query(NewsIncident).filter_by(source_url=item['url']).delete()
+        db.query(Article).filter_by(source_url=item['url']).delete()
+        db.commit()
+        db.close()
+
+
 def test_live_ingest_rejects_candidate_older_than_24_hours(monkeypatch):
     item=prepare_ingest(monkeypatch)
     item["published_at"]=datetime.now(timezone.utc)-timedelta(hours=25)

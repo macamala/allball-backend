@@ -11,6 +11,9 @@ from __future__ import annotations
 import logging
 import os
 import re
+import time
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Optional
 
 import httpx
@@ -25,6 +28,62 @@ _MODEL_RE = re.compile(r"^[A-Za-z0-9._/+:-]{3,160}$")
 _PURPOSES = ("writer", "validator", "translation")
 _UNAVAILABLE = {name: set() for name in _PURPOSES}
 _CURSOR = {name: 0 for name in _PURPOSES}
+_COOLDOWN_UNTIL = {}
+
+
+def _provider_ready(provider: str) -> bool:
+    return time.monotonic() >= _COOLDOWN_UNTIL.get(provider, 0.0)
+
+
+def _retry_seconds(value) -> Optional[float]:
+    text = str(value or "").strip()
+    try:
+        seconds = float(text)
+        return seconds if 0 < seconds <= 7 * 86400 else None
+    except ValueError:
+        pass
+    if re.fullmatch(r"(?:\d+(?:\.\d+)?[hms])+", text):
+        seconds = sum(float(n) * {"h": 3600, "m": 60, "s": 1}[unit]
+                      for n, unit in re.findall(r"(\d+(?:\.\d+)?)([hms])", text))
+        return seconds if 0 < seconds <= 7 * 86400 else None
+    try:
+        stamp = parsedate_to_datetime(text)
+        if stamp.tzinfo is not None:
+            seconds = max(1.0, (stamp - datetime.now(timezone.utc)).total_seconds())
+            return seconds if seconds <= 7 * 86400 else None
+    except (TypeError, ValueError, OverflowError):
+        pass
+    return None
+
+
+def _http_failure(provider: str, response) -> None:
+    """Share provider quota/auth failures across purposes; never log response bodies."""
+    status = response.status_code
+    if status not in {401, 403, 429}:
+        return
+    headers = getattr(response, "headers", {}) or {}
+    seconds = _retry_seconds(headers.get("retry-after"))
+    dimension = "unknown"
+    if status == 429:
+        try:
+            payload = response.json()
+            message = str((payload.get("error") or {}).get("message") or "").lower()
+            for marker, code in (("tokens per day", "tpd"), ("requests per day", "rpd"),
+                                 ("tokens per minute", "tpm"), ("requests per minute", "rpm")):
+                if marker in message or re.search(r"\b" + code + r"\b", message):
+                    dimension = code
+                    break
+        except (ValueError, TypeError, AttributeError):
+            pass
+        if seconds is None:
+            reset_key = "x-ratelimit-reset-requests" if dimension == "rpd" else "x-ratelimit-reset-tokens"
+            seconds = _retry_seconds(headers.get(reset_key)) if dimension in {"rpd", "tpm"} else None
+    seconds = seconds or (3600 if status in {401, 403} else 600)
+    _COOLDOWN_UNTIL[provider] = max(_COOLDOWN_UNTIL.get(provider, 0), time.monotonic() + seconds)
+    for unavailable in _UNAVAILABLE.values():
+        unavailable.add(provider)
+    logger.warning("[external_free] provider=%s status=%s cooldown_seconds=%s limit_dimension=%s",
+                   provider, status, int(seconds), dimension)
 
 
 def enabled() -> bool:
@@ -67,7 +126,7 @@ def configured_identities(purpose: str = "writer") -> tuple[tuple[str, str], ...
     rows = []
     for provider in ("groq", "cloudflare"):
         cfg = _config(provider)
-        if cfg and provider not in _UNAVAILABLE[purpose]:
+        if cfg and provider not in _UNAVAILABLE[purpose] and _provider_ready(provider):
             rows.append((provider, cfg["model"]))
     return tuple(rows)
 
@@ -77,6 +136,7 @@ def available(purpose: str = "writer") -> bool:
 
 
 def reset() -> None:
+    # A new News cycle does not reset the upstream provider's quota window.
     for values in _UNAVAILABLE.values():
         values.clear()
     for key in _CURSOR:
@@ -86,7 +146,8 @@ def reset() -> None:
 def _ordered_configs(purpose: str, avoid_provider: Optional[str] = None) -> list[dict]:
     purpose = purpose if purpose in _UNAVAILABLE else "writer"
     rows = [cfg for name in ("groq", "cloudflare") if (cfg := _config(name))]
-    rows = [row for row in rows if row["provider"] not in _UNAVAILABLE[purpose]]
+    rows = [row for row in rows if row["provider"] not in _UNAVAILABLE[purpose]
+            and _provider_ready(row["provider"])]
     if not rows:
         return []
     offset = _CURSOR[purpose] % len(rows)
@@ -151,6 +212,7 @@ def _groq(cfg: dict, system: str, user: str, max_tokens: int, json_mode: bool):
                 json=payload,
             )
         if response.status_code != 200:
+            _http_failure("groq", response)
             logger.warning("[external_free] groq http_status=%s", response.status_code)
             return None
         return _choice_text(response.json())
@@ -190,6 +252,7 @@ def _cloudflare(cfg: dict, system: str, user: str, max_tokens: int, json_mode: b
                 json=payload,
             )
         if response.status_code != 200:
+            _http_failure("cloudflare", response)
             logger.warning(
                 "[external_free] cloudflare http_status=%s", response.status_code
             )

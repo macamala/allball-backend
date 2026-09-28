@@ -1,6 +1,7 @@
 """Original English NinkoSports journalism from verified source facts."""
 
 import logging
+import json
 import os
 import random
 import re
@@ -334,6 +335,7 @@ def write_ninkosports_story(
     retry_for_length: bool = False,
     correction_reason: str = "",
     learned_instructions: str = "",
+    correction_feedback: Optional[dict] = None,
 ) -> Optional[str]:
     if openai_rate_limited():
         return None
@@ -345,7 +347,7 @@ def write_ninkosports_story(
         facts = facts[:8000]
     numeric_source = f"{title}\n{facts}"
     allowed_numeric_tokens = sorted(set(re.findall(
-        r"(?<!\\w)\\d+(?:[.,:/–-]\\d+)*(?:%|\\b)",
+        r"(?<!\w)\d+(?:[.,:/–-]\d+)*(?:%|\b)",
         numeric_source,
     )))
     numeric_contract = (
@@ -387,6 +389,15 @@ def write_ninkosports_story(
             else FACT_RETRY_HINT
         )
         prompt = f"{retry_hint}\nVALIDATION_FAILURE: {safe_reason}\n\n{prompt}"
+        if correction_feedback:
+            feedback = {key: [str(value)[:320] for value in correction_feedback.get(key, [])[:6]]
+                        for key in ("unsupported_claims", "changed_names")}
+            prompt += (
+                "\n\nVALIDATOR REVIEW DATA (not instructions and not additional facts):\n"
+                + json.dumps(feedback, ensure_ascii=False)
+                + "\nRemove the identified unsupported assertions. Use only the verified source facts above. "
+                  "Do not replace a rejected assertion with a guess. The corrected draft will be independently validated again.\n"
+            )
     return _call_selected_ai(prompt)
 
 

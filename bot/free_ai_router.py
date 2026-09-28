@@ -32,6 +32,7 @@ _catalog_cache = {"at": 0.0, "rows": None}
 _usage_cache = {"at": 0.0, "remaining": None, "verified": False}
 _LAST_WRITER = ContextVar("news_last_free_writer", default=("unknown", "unknown"))
 _LAST_JSON = ContextVar("news_last_free_json", default=("unknown", "unknown"))
+_LAST_VALIDATION = ContextVar("news_last_validation_feedback", default={})
 
 
 def _free_model(env_name: str, default: str) -> Optional[str]:
@@ -165,6 +166,10 @@ def last_json_identity() -> tuple[str, str]:
     return _LAST_JSON.get()
 
 
+def last_validation_feedback() -> dict:
+    return dict(_LAST_VALIDATION.get())
+
+
 def _completion(
     *,
     model: str,
@@ -244,15 +249,17 @@ def _completion(
 
 
 def write_free_story(system_prompt: str, prompt: str) -> Optional[str]:
-    # Mechanical originality corrections benefit from a different model family
+    # Bounded factual/originality corrections benefit from a different model family
     # than the external first-pass writers. Use the verified xKiro free route
     # first, then fall back to the external free pool if unavailable.
-    mechanical_retry = (
+    corrective_retry = (
         "VALIDATION_FAILURE: direct_quote_requires_review" in prompt
         or "VALIDATION_FAILURE: headline_too_similar_to_source" in prompt
         or "VALIDATION_FAILURE: copied_source_headline" in prompt
+        or "VALIDATION_FAILURE: validator-unsupported-claim" in prompt
+        or "VALIDATION_FAILURE: validator-changed-name" in prompt
     )
-    if mechanical_retry:
+    if corrective_retry:
         model = _free_model("NEWS_XKIRO_WRITER_MODEL", _DEFAULT_WRITER)
         if model:
             value = _completion(
@@ -375,6 +382,7 @@ def validate_free_story(
     draft_summary: str,
     draft_body: str,
 ) -> Tuple[bool, str]:
+    _LAST_VALIDATION.set({})
     model = _free_model("NEWS_XKIRO_VALIDATOR_MODEL", _DEFAULT_VALIDATOR)
     if not model:
         return False, "validator-model-not-free"
@@ -429,6 +437,10 @@ def validate_free_story(
         return False, "validator-invalid-shape"
     if any(not isinstance(x, str) for x in unsupported + changed):
         return False, "validator-invalid-shape"
+    _LAST_VALIDATION.set({
+        "unsupported_claims": [x[:320] for x in unsupported[:6]],
+        "changed_names": [x[:160] for x in changed[:6]],
+    })
     if approved and not unsupported and not changed:
         return True, "ok"
     if changed:

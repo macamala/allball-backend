@@ -38,6 +38,7 @@ FEEDS: List[Feed] = [
     {'url': 'https://www.espn.com/espn/rss/nfl/news', 'kind': 'league', 'sport': 'american-football', 'enabled': True, 'rss_fallback_only': True, 'note': 'ESPN NFL-only feed; sport hint only'},
     {'url': 'https://www.espn.com/espn/rss/nhl/news', 'kind': 'league', 'sport': 'ice-hockey', 'enabled': True, 'rss_fallback_only': True, 'note': 'ESPN NHL-only feed; sport hint only'},
     {'url': 'https://www.espn.com/espn/rss/golf/news', 'kind': 'league', 'sport': 'golf', 'enabled': True, 'rss_fallback_only': True, 'note': 'ESPN golf-only feed; sport hint only'},
+    {'url': 'https://basketnews.com/news/rss', 'kind': 'league', 'sport': 'basketball', 'enabled': True, 'note': 'RSS, article publication metadata, prose and images verified 2026-09-28; no league stamp; rumours/paywalls remain subject to admission gates'},
     {'url': 'https://feeds.bbci.co.uk/sport/football/german/rss.xml', 'kind': 'disabled', 'enabled': False, 'note': '404 / mismatched tags; Bundesliga still needs a replacement RSS'},
     {'url': 'https://www.skysports.com/rss/12040', 'kind': 'disabled', 'enabled': False, 'note': 'General Sky firehose mis-stamped as Premier League'},
     {'url': 'https://www.skysports.com/rss/12040/championship', 'kind': 'disabled', 'enabled': False, 'note': 'Not well-formed XML'},

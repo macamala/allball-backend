@@ -200,6 +200,8 @@ def non_article_news_reason(item):
         return "non_article_video_highlights"
     if re.search(r"\b(?:race times|qualifying times|weather forecast|how to watch|where to watch)\b", title):
         return "non_article_service_guide"
+    if re.search(r"\b(?:today[’']?s papers|paper talk|newspaper round[- ]?up)\b", title):
+        return "non_article_newspaper_roundup"
     # Keep scarce writer requests for factual news rather than opinion/listicle
     # products that repeatedly fail semantic validation or add little news value.
     if re.search(
@@ -438,6 +440,7 @@ def fair_news_queue(
     sport_inventory=None,
     coverage_floor=6,
     same_day_timezone=None,
+    prioritize_major_sports=False,
 ):
     """Newest per sport, then round robin; classify evidence before spending AI.
 
@@ -552,6 +555,51 @@ def fair_news_queue(
         )
         for sport in order
     }
+    if prioritize_major_sports:
+        # Editorial priority: Football, Basketball, another major sport, then
+        # a protected coverage lane. All candidates already passed the same
+        # freshness/content gates above; priority never creates supply.
+        major_weights = {
+            "football": 6, "basketball": 4, "tennis": 3,
+            "american-football": 2, "cricket": 2, "rugby": 2,
+            "rugby-league": 2, "australian-rules": 2, "motorsport": 2,
+            "baseball": 2, "ice-hockey": 2, "golf": 1,
+            "boxing": 1, "mma": 1, "cycling": 1, "athletics": 1,
+        }
+        scheduled = defaultdict(int)
+        breadth = deque(s for s in order if s not in major_weights)
+        major_rank = {s: n for n, s in enumerate(major_weights)}
+
+        def major(exclude=()):
+            choices = [s for s in major_weights if queues.get(s) and s not in exclude]
+            if not choices:
+                return None
+            return min(choices, key=lambda s: (
+                (max(0, int((sport_inventory or {}).get(s, 0) or 0)) + scheduled[s]) / major_weights[s],
+                major_rank[s],
+            ))
+
+        def coverage():
+            for _ in range(len(breadth)):
+                sport = breadth.popleft()
+                breadth.append(sport)
+                if queues[sport]:
+                    return sport
+            return None
+
+        output = []
+        while any(queues.values()):
+            for lane in ("football", "basketball", "major", "coverage"):
+                sport = lane if queues.get(lane) else None
+                if lane == "major":
+                    sport = major(exclude=("football", "basketball"))
+                elif lane == "coverage":
+                    sport = coverage()
+                sport = sport or major() or coverage()
+                if sport:
+                    output.append(queues[sport].popleft())
+                    scheduled[sport] += 1
+        return output, dict(rejected)
     output = []
     while any(queues.values()):
         for s in order:

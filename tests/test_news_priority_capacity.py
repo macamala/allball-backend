@@ -1,0 +1,153 @@
+"""Editorial priority, shared quota cooldown and corrective fact evidence."""
+from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
+import json
+
+import httpx
+import pytest
+
+from bot import news_external_free as external, free_ai_router as router, rewrite_ai as writer
+from bot.news_budget import AiRequestBudget, ai_budget_scope
+from bot.news_policy import fair_news_queue, non_article_news_reason
+from sports_registry.sports import SPORTS
+
+NOW = datetime(2026, 9, 28, 7, tzinfo=timezone.utc)
+
+
+def candidate(sport, index=0, stamp=NOW):
+    return dict(sport=sport, title=f'{sport} tournament announcement {index}',
+                url=f'https://example.test/{sport}/{index}', published_at=stamp)
+
+
+def queue(rows, inventory=None):
+    return fair_news_queue(rows, lambda r: SimpleNamespace(sport=r['sport']),
+                           now=NOW, same_day_timezone='Australia/Sydney',
+                           sport_inventory=inventory, prioritize_major_sports=True)
+
+
+def test_major_priority_with_protected_breadth_and_no_lost_candidates():
+    sports = [s['id'] for s in SPORTS if s['active'] and s['supports_news']]
+    rows = [candidate(s, n) for s in sports for n in range(3)]
+    before = repr(rows)
+    result, rejected = queue(rows, {'football': 4, 'basketball': 1})
+    assert not rejected
+    assert [r['sport'] for r in result[:2]] == ['football', 'basketball']
+    assert result[3]['sport'] not in {'football', 'basketball', 'tennis', 'cricket',
+        'rugby', 'rugby-league', 'australian-rules', 'motorsport', 'baseball',
+        'ice-hockey', 'golf', 'boxing', 'mma', 'cycling', 'athletics', 'american-football'}
+    assert len(result) == len(rows) == 123
+    assert {r['url'] for r in result} == {r['url'] for r in rows}
+    assert repr(rows) == before
+
+
+def test_missing_major_supply_falls_through_without_old_or_future_articles():
+    rows = [candidate('handball'), candidate('lacrosse'),
+            candidate('football', 1, NOW-timedelta(days=1)),
+            candidate('basketball', 1, NOW+timedelta(minutes=1))]
+    result, reasons = queue(rows)
+    assert {r['sport'] for r in result} == {'handball', 'lacrosse'}
+    assert reasons == {'not_editorial_today': 1, 'future_publication': 1}
+    assert queue([]) == ([], {})
+
+
+def test_minor_sports_rotate_in_reserved_lane():
+    rows = [candidate(s, n) for s in ('football', 'basketball', 'tennis', 'handball', 'lacrosse')
+            for n in range(4)]
+    result, _ = queue(rows)
+    assert [r['sport'] for r in result[:3]] == ['football', 'basketball', 'tennis']
+    assert {result[3]['sport'], result[7]['sport']} == {'handball', 'lacrosse'}
+
+
+@pytest.fixture
+def pool(monkeypatch):
+    monkeypatch.setenv('NEWS_EXTERNAL_FREE_WRITERS_ENABLED', '1')
+    monkeypatch.setenv('GROQ_API_KEY', 'test-only-groq')
+    monkeypatch.setenv('CLOUDFLARE_API_TOKEN', 'test-only-cloudflare')
+    monkeypatch.setenv('CLOUDFLARE_ACCOUNT_ID', 'a'*32)
+    monkeypatch.setattr(external, '_COOLDOWN_UNTIL', {})
+    monkeypatch.setattr(external, '_UNAVAILABLE', {s: set() for s in ('writer', 'validator', 'translation')})
+    monkeypatch.setattr(external, '_CURSOR', {s: 0 for s in ('writer', 'validator', 'translation')})
+    clock = [100.0]
+    monkeypatch.setattr(external.time, 'monotonic', lambda: clock[0])
+    return clock
+
+
+def test_429_shared_across_purposes_and_cycles_charges_only_actual_requests(pool, monkeypatch, tmp_path, caplog):
+    calls = []
+    class Client:
+        def __init__(self, **kwargs): pass
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def post(self, url, **kwargs):
+            calls.append(url)
+            if 'groq.com' in url:
+                return httpx.Response(429, headers={'retry-after': '1200'},
+                    json={'error': {'message': 'tokens per day (TPD) secret-do-not-log'}})
+            return httpx.Response(200, json={'success': True, 'result': {'response': 'accepted response'}})
+    monkeypatch.setattr(external.httpx, 'Client', Client)
+    budget = AiRequestBudget(8, str(tmp_path/'quota.db'))
+    with ai_budget_scope(budget):
+        for purpose in ('writer', 'validator', 'translation'):
+            text, identity = external.completion(system='s', user='u', max_tokens=700, purpose=purpose)
+            assert text and identity[0] == 'cloudflare'
+        external.reset()
+        assert external.configured_identities() == (('cloudflare', '@cf/qwen/qwen3-30b-a3b-fp8'),)
+        external.completion(system='s', user='u', max_tokens=700)
+    assert len(calls) == budget.attempts == 5
+    assert sum('groq.com' in u for u in calls) == 1
+    assert 'limit_dimension=tpd' in caplog.text
+    assert 'secret-do-not-log' not in caplog.text
+    pool[0] += 1201
+    external.reset()
+    assert any(provider == 'groq' for provider, _ in external.configured_identities())
+
+
+@pytest.mark.parametrize('value,seconds', [('7.66s', 7.66), ('2m59.56s', 179.56),
+    ('1h2m3s', 3723), ('45', 45), ('nan', None), ('999999h', None), ('garbage', None)])
+def test_provider_retry_windows(value, seconds):
+    assert external._retry_seconds(value) == seconds
+
+
+def test_numeric_contract_and_corrective_data_keep_source_authority(monkeypatch):
+    prompts = []
+    monkeypatch.setattr(writer, 'openai_rate_limited', lambda: False)
+    monkeypatch.setattr(writer, '_call_selected_ai', lambda prompt: prompts.append(prompt))
+    writer.write_ninkosports_story('Club confirms 2026 plan', 'There are 12 teams and a 3-1 result.',
+        correction_reason='validator-unsupported-claim',
+        correction_feedback={'unsupported_claims': ['Invented capacity of 999 seats'], 'changed_names': []})
+    numeric_line = next(line for line in prompts[0].splitlines() if 'ALLOWED NUMERIC TOKENS:' in line)
+    assert all(n in numeric_line for n in ('2026', '12', '3-1'))
+    assert '999' not in numeric_line
+    assert 'not instructions and not additional facts' in prompts[0]
+    assert 'Invented capacity of 999 seats' in prompts[0]
+
+
+def test_validator_keeps_bounded_failure_evidence_and_clears_it(monkeypatch):
+    monkeypatch.delenv('NEWS_EXTERNAL_FREE_WRITERS_ENABLED', raising=False)
+    monkeypatch.setattr(router, '_free_model', lambda *args: 'fixture:free')
+    monkeypatch.setattr(router, '_completion', lambda **kwargs: json.dumps({
+        'approved': False, 'unsupported_claims': ['Invented injury']*9, 'changed_names': []}))
+    assert router.validate_free_story('source', 'facts', 'title', 'summary', 'body')[0] is False
+    assert router.last_validation_feedback()['unsupported_claims'] == ['Invented injury']*6
+    monkeypatch.setattr(router, '_completion', lambda **kwargs: 'invalid json')
+    assert router.validate_free_story('source', 'facts', 'title', 'summary', 'body')[0] is False
+    assert router.last_validation_feedback() == {}
+
+
+@pytest.mark.parametrize('title', ["Today’s Papers – Italy thrill", "Today's Papers: club plans", 'Paper talk: transfer preview'])
+def test_newspaper_roundups_cannot_spend_writer_slots(title):
+    assert non_article_news_reason({'title': title}) == 'non_article_newspaper_roundup'
+
+
+def test_basketball_article_excludes_player_widgets_related_cards_and_hidden_templates():
+    from bot.extract import article_text_from_html
+    html = '''<div class="text_container"><p>The basketball club confirmed a new player signing.</p>
+      <div class="article-widget article-widget--player"><p>Age 40 Height 203 Profile Statistics</p></div>
+      <p>The club announced a one-year deal and confirmed the player will join training.</p></div>
+      <section class="news-aside-list news-aside-list--latest"><h3>Another club faces contract dilemma.</h3></section>
+      <a class="news-container-item"><h3>A different player is injured elsewhere.</h3></a>
+      <section class="latest-videos-block"><h3>We made some bold predictions.</h3></section>
+      <template><p>Unlock unlimited content and features built for basketball fans.</p></template>'''
+    body = article_text_from_html(html)
+    assert 'new player signing' in body and 'one-year deal' in body
+    assert not any(x in body for x in ('203', 'contract dilemma', 'injured', 'predictions', 'Unlock'))

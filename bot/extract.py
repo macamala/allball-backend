@@ -75,6 +75,7 @@ CHROME_TAGS = {
     "script",
     "style",
     "noscript",
+    "template",
     "iframe",
     "svg",
     "button",
@@ -115,7 +116,8 @@ def _metadata(html: str, key: str) -> Optional[str]:
     return parser.values.get(key.lower())
 CHROME_ATTR_RE = re.compile(
     r"\b(?:site-nav|global-nav|main-nav|footer-nav|skiplink|skip-link|"
-    r"cookie|consent|newsletter|subscribe|masthead|sidebar)\b",
+    r"cookie|consent|newsletter|subscribe|masthead|sidebar|"
+    r"article-widget--player|news-aside-list|news-container-item|latest-videos-block|bn-chat-premium)\b",
     re.IGNORECASE,
 )
 
