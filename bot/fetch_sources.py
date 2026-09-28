@@ -691,7 +691,7 @@ def _ingest_item(
 
     if not used_ai:
         hold_reason = rewrite_reason or "no-accepted-original-draft"
-        if hold_reason not in {"validator-unavailable", "empty"}:
+        if hold_reason not in {"validator-unavailable", "validator-independent-unavailable", "empty"}:
             _hold_ai_source(source_url, hold_reason)
         else:
             logger.info("[fetch_sources] transient AI failure not cooldowned: %s", hold_reason)

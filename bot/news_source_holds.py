@@ -27,6 +27,7 @@ def _retryable_reason(reason: str | None) -> bool:
             "headline_too_similar_to_source",
             "copied_source_headline",
             "validator-unavailable",
+            "validator-independent-unavailable",
             "empty",
         }
         or value.startswith("unsupported_proper_name:")

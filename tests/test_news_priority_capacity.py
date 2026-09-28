@@ -125,6 +125,28 @@ def test_xkiro_writer_does_not_fall_back_to_xkiro_self_validation(monkeypatch):
         router._LAST_WRITER.reset(token)
 
 
+def test_missing_independent_validator_does_not_blacklist_valid_source():
+    from bot.news_source_holds import _retryable_reason
+    assert _retryable_reason('validator-independent-unavailable')
+    assert not _retryable_reason('validator-unsupported-claim')
+
+
+def test_cloudflare_writer_can_use_independent_xkiro_fallback(monkeypatch):
+    monkeypatch.setattr(external, 'completion', lambda **kw: (None, ('unknown', 'unknown')))
+    token = router._LAST_WRITER.set(('cloudflare', 'fixture-model'))
+    calls = []
+    def independent(**kw):
+        calls.append(kw)
+        return json.dumps({'source_type': 'news', 'approved': True, 'unsupported_claims': [], 'changed_names': []})
+    monkeypatch.setattr(router, '_completion', independent)
+    try:
+        assert router.validate_free_story('source', 'facts', 'title', 'summary', 'body') == (True, 'ok')
+        assert len(calls) == 1
+        assert router._LAST_JSON.get()[0] == 'xkiro'
+    finally:
+        router._LAST_WRITER.reset(token)
+
+
 def test_numeric_contract_and_corrective_data_keep_source_authority(monkeypatch):
     prompts = []
     monkeypatch.setattr(writer, 'openai_rate_limited', lambda: False)

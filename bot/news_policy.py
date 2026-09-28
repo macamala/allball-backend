@@ -311,6 +311,10 @@ def non_article_news_reason(item):
         return "non_sports_entertainment"
     if re.search(r"\b(?:medal standings|trainer of the year standings)\b", title):
         return "non_article_rolling_tracker"
+    if re.search(r"\b(?:shop now|sale continues|merchandise sale|book your tickets|get your tickets)\b|\b\d+\s*%\s+off\b|\btickets? (?:now )?(?:on sale|available)\b", title):
+        return "non_article_commercial_promotion"
+    if re.search(r"\b(?:see|view|download) (?:the )?(?:final |full |playoff )?bracket\b", title):
+        return "non_article_service_guide"
     if re.search(r"\b(?:talking points|silver linings|most intriguing|season buzz|news and intel)\b", title):
         return "non_article_analysis"
     if title.strip() == "stars arrive in shenzhen":

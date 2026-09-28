@@ -66,6 +66,20 @@ def test_subjective_lists_and_compilations_stop_before_writer(title, reason):
     assert non_article_news_reason({'title': title}) == reason
 
 
+@pytest.mark.parametrize('title', [
+    'The Big Red Sale continues: Get 20% off everything now',
+    'Club shirts: shop now', 'Final tickets now on sale',
+])
+def test_official_shop_and_ticket_promotions_never_spend_writer_budget(title):
+    assert non_article_news_reason({'title': title}) == 'non_article_commercial_promotion'
+
+
+def test_transfer_sale_and_playoff_qualification_remain_sporting_news():
+    assert non_article_news_reason({'title': 'Lazio confirm permanent sale of Patric'}) is None
+    assert non_article_news_reason({'title': 'Cubs clinch playoff berth with victory'}) is None
+    assert non_article_news_reason({'title': 'The playoff field is set! See the final bracket'}) == 'non_article_service_guide'
+
+
 def test_rugby_world_cup_cannot_become_soccer_through_wales_or_world_cup_names():
     from public_index import _explicit_title_sport_override
     headline='Tayla Preston selected in Wales squad for 2026 Rugby League World Cup'
