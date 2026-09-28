@@ -94,3 +94,34 @@ def test_plain_formula_one_grand_prix_is_not_forced_to_cycling():
     assert public_index._explicit_title_sport_override(
         "Formula 1 Singapore Grand Prix qualifying report"
     ) is None
+
+
+def test_darts_world_grand_prix_stays_darts():
+    from bot.classify import classify_article
+    import public_index
+
+    title="Darts World Grand Prix to Begin with Unique Format"
+    classified=classify_article(title,title,feed_kind="mixed")
+    assert classified.sport == "darts"
+    assert public_index._explicit_title_sport_override(title) == "darts"
+
+
+def test_football_feed_about_text_cannot_trigger_boxing_bout():
+    from bot.classify import classify_article
+    import public_index
+
+    title="Napoli agree new deal with defender Amir Rrahmani"
+    body=(
+        "Napoli announced a new contract with defender Amir Rrahmani and spoke "
+        "about the agreement in a club update."
+    )
+    classified=classify_article(
+        title,
+        body,
+        feed_kind="league",
+        feed_sport="football",
+        feed_league="italy-serie-a",
+        feed_country="italy",
+    )
+    assert classified.sport == "football"
+    assert public_index._explicit_title_sport_override(title) == "football"
