@@ -244,6 +244,29 @@ def _completion(
 
 
 def write_free_story(system_prompt: str, prompt: str) -> Optional[str]:
+    # Mechanical originality corrections benefit from a different model family
+    # than the external first-pass writers. Use the verified xKiro free route
+    # first, then fall back to the external free pool if unavailable.
+    mechanical_retry = (
+        "VALIDATION_FAILURE: direct_quote_requires_review" in prompt
+        or "VALIDATION_FAILURE: headline_too_similar_to_source" in prompt
+        or "VALIDATION_FAILURE: copied_source_headline" in prompt
+    )
+    if mechanical_retry:
+        model = _free_model("NEWS_XKIRO_WRITER_MODEL", _DEFAULT_WRITER)
+        if model:
+            value = _completion(
+                model=model,
+                system=system_prompt,
+                user=prompt,
+                max_tokens=int(os.getenv("NEWS_XKIRO_WRITER_MAX_TOKENS", "1800") or "1800"),
+                json_mode=False,
+                temperature=0.25,
+            )
+            if value:
+                _LAST_WRITER.set(("xkiro", model))
+                logger.info("[free_ai] corrective writer provider=xkiro model=%s", model)
+                return value
     try:
         from .news_external_free import completion as external_completion
         value, identity = external_completion(
