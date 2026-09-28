@@ -341,8 +341,19 @@ def candidate_readiness_score(item):
     # retaining these candidates for later in the same fair queue.
     if re.search(r'["“”‘’][^"“”‘’]{6,}["“”‘’]', title):
         score -= 2
-    if str((item or {}).get("_extracted") or "").strip():
+    extracted = str((item or {}).get("_extracted") or "").strip()
+    summary = str((item or {}).get("summary") or "").strip()
+    if extracted:
         score += 4
+    else:
+        summary_words = len(re.findall(r"\b\w+\b", summary, re.UNICODE))
+        if summary_words >= 25:
+            # The ingest path accepts 25+ clean RSS words as a factual fallback
+            # when a publisher page is JS-only/202. Try these before candidates
+            # that depend entirely on a later page extraction.
+            score += 4
+        elif 0 < summary_words < 12:
+            score -= 2
     if str((item or {}).get("_extracted_image") or "").strip():
         score += 3
     elif (item or {}).get("image_candidates") or (item or {}).get("image"):
