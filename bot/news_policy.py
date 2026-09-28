@@ -297,7 +297,18 @@ def gossip_news_reason(item):
         title,
         re.I,
     )
-    if retrospective and not new_fact:
+    current_year = datetime.now(UTC).year
+    old_year_reference = any(
+        int(value) < current_year
+        for value in re.findall(r"(?<!\\d)(20\\d{2})(?!\\d)", title)
+    )
+    reflective_old_story = old_year_reference and re.search(
+        r"\\b(?:credits?|recalls?|remembers?|reflects?|opens up|looks back|"
+        r"revisits?|reveals?|reminisces?|explains what|says? .* meant)\\b",
+        title,
+        re.I,
+    )
+    if (retrospective or reflective_old_story) and not new_fact:
         return "non_news_retrospective_commentary"
 
     return None
