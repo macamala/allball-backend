@@ -233,3 +233,12 @@ def test_today_candidate_outranks_equivalent_yesterday_candidate(monkeypatch):
     today={"title":"Football squad update","published_at":datetime(2026,9,28,1,0,tzinfo=timezone.utc)}
     yesterday={"title":"Football squad update","published_at":datetime(2026,9,27,12,0,tzinfo=timezone.utc)}
     assert queue_priority_score(today,now) > queue_priority_score(yesterday,now)
+
+
+def test_editorial_day_reason_uses_sydney_calendar():
+    from bot.news_policy import editorial_day_reason
+    now=datetime(2026,9,28,4,0,tzinfo=timezone.utc)  # 14:00 Sydney
+    today=datetime(2026,9,27,15,0,tzinfo=timezone.utc)  # 01:00 Sydney Sep 28
+    yesterday=datetime(2026,9,27,13,0,tzinfo=timezone.utc)  # 23:00 Sydney Sep 27
+    assert editorial_day_reason(today,now,"Australia/Sydney") is None
+    assert editorial_day_reason(yesterday,now,"Australia/Sydney") == "not_editorial_today"
