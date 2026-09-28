@@ -341,6 +341,12 @@ def _fetch_feed_entries(feed_cfg: Dict, max_articles: int) -> List[Dict]:
         link = (entry.get("link") or "").strip()
         if not link or not title or looks_like_garbage(title):
             continue
+        if feed_cfg.get("rss_fallback_only") and word_count(summary) < 25:
+            logger.info(
+                "[fetch_sources] skip thin rss-only metadata: %s",
+                title[:80],
+            )
+            continue
         items.append(
             {
                 "title": title,
