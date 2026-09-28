@@ -318,3 +318,34 @@ def test_modal_may_is_not_a_month_but_real_may_dates_stay_locked():
     assert 'may' not in _calendar_terms('The player may improve and may seek another route.')
     for value in ['in May','May 12','late may','12 May','next may']:
         assert 'may' in _calendar_terms(value)
+
+
+def test_non_catalog_sport_cannot_become_football_from_world_cup_background():
+    from bot.fetch_sources import _classify_candidate
+    title='Bhaker returns empty-handed as India’s shooting campaign falls short of Hangzhou'
+    body='The 10m air pistol finalist had previously won World Cup medals.'
+    assert classify_article(title, body).sport is None
+    assert non_article_news_reason({'title':title,'body':body}) == 'unsupported_news_sport'
+    assert _classify_candidate({'title':title,'summary':body,'url':'https://www.bbc.co.uk/sport/football/example','feed':{}}).sport is None
+    # Published copy also stays held after the writer removes the sport label
+    # from its headline. The factual lead still identifies the discipline.
+    assert non_article_news_reason({'title':'Manu Bhaker finishes Asian Games 2026 without medal after four events','body':body}) == 'unsupported_news_sport'
+
+
+def test_shooting_terminology_in_supported_sports_is_not_rejected():
+    for title,body,sport in [
+        ('NBA shooting guard signs new contract','The basketball player joined the team.','basketball'),
+        ('Arsenal improve shooting ahead of World Cup break','The football club trained on Monday.','football'),
+    ]:
+        assert non_article_news_reason({'title':title,'body':body}) is None
+        assert classify_article(title,body).sport == sport
+
+
+def test_distinctive_asian_games_events_resolve_without_cross_sport_leakage():
+    assert classify_article('Top-ranked shuttler An Se-young cruises into women’s singles final','The player reached the Asian Games final.').sport == 'badminton'
+    assert classify_article('S. Korea advances to men’s 4x100m relay final after disqualification overturned','The quartet reached the Asian Games final.').sport == 'athletics'
+    assert classify_article('China wins 4x100m relay final','The swimming team won the freestyle relay in the pool.').sport == 'swimming'
+
+
+def test_entertainment_appearance_is_not_a_basketball_development():
+    assert non_article_news_reason({'title':"Jalen Brunson Hosts 'SNL' with Knicks Teammates in Attendance"}) == 'non_sports_entertainment'

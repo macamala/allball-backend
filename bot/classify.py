@@ -11,7 +11,7 @@ from .taxonomy import (
     TEAMS,
 )
 from .textutil import clean_text
-from .news_policy import CRICKET_TITLE_RE, VOLLEYBALL_TITLE_RE, RUGBY_LEAGUE_TITLE_RE, RUGBY_UNION_TITLE_RE
+from .news_policy import CRICKET_TITLE_RE, VOLLEYBALL_TITLE_RE, RUGBY_LEAGUE_TITLE_RE, RUGBY_UNION_TITLE_RE, unsupported_news_sport
 
 
 @dataclass
@@ -56,12 +56,24 @@ def classify_article(
     text = _norm(f"{title or ''} {body or ''}")
     if text.strip() == "":
         return Classification(None, None, None, "low", "empty-text")
+    if unsupported_news_sport(title, body):
+        return Classification(None, None, None, "low", "unsupported-news-sport")
 
     sport_scores: Dict[str, int] = {}
     for sport, aliases in SPORT_ALIASES.items():
         title_score = _score_aliases(title_text, aliases)
         body_score = _score_aliases(body_text, aliases)
         sport_scores[sport] = title_score * 3 + max(0, body_score - title_score)
+
+    # Mixed Asian Games reporting commonly uses these precise event terms
+    # instead of the sport label. Never classify a generic relay as athletics:
+    # medley/freestyle relays belong to swimming.
+    if re.search(r"\bshuttlers?\b", title_text):
+        sport_scores["badminton"] += 12
+    if re.search(r"\boktagon(?:u|e|em)?\b", title_text):
+        sport_scores["mma"] += 12
+    if re.search(r"\b(?:4\s*[x×]\s*(?:100|400)\s*m(?:etres?|eters?)?|100\s*m|200\s*m|400\s*m)\s+(?:relay|sprint|hurdles)\b", title_text) and not re.search(r"\b(?:swim\w*|freestyle|medley|pool)\b", text):
+        sport_scores["athletics"] += 12
 
     team_hits = []
     for team in TEAMS:

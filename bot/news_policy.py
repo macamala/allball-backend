@@ -20,6 +20,26 @@ RUGBY_LEAGUE_TITLE_RE = re.compile(r"(?<!\w)(?:rugby[\s-]+league|nrlw?)(?!\w)", 
 RUGBY_UNION_TITLE_RE = re.compile(r"(?<!\w)rugby[\s-]+union(?!\w)", re.I)
 
 
+def unsupported_news_sport(title, body=""):
+    """Do not force disciplines outside the News catalog into a nearby sport.
+
+    World Cup/national-team cues also occur in shooting and other disciplines.
+    Only distinctive discipline evidence is used; basketball shooting and
+    football shoot-outs must remain supported.
+    """
+    headline = str(title or "").casefold()
+    lead = str(body or "")[:650].casefold()
+    if re.search(r"\b(?:archery|archers?|fencing|fencers?|taekwondo|kurash|judo|judoka|gymnastics|gymnasts?|canoeing|canoeists?|rowing|rowers?|sport climbing)\b", headline):
+        return True
+    if re.search(r"\b(?:pistol|rifle|issf|skeet|trap shooting)\b", headline):
+        return True
+    if re.search(r"\bshooting (?:campaign|championships?|world cup|medals?|team|events?)\b", headline):
+        return True
+    if re.search(r"\b(?:air pistol|air rifle|pistol shooter|rifle shooter|sport pistol|issf|\d+\s*m(?:etre|eter)?\s+(?:air\s+)?(?:pistol|rifle))\b", lead):
+        return True
+    return False
+
+
 def numeric_tokens(text, *, include_spelled=False):
     tokens = set(re.findall(r'(?<!\w)\d+(?:[.,:/–-]\d+)*(?:%|\b)', text or ''))
     if not include_spelled:
@@ -239,6 +259,12 @@ def non_article_news_reason(item):
         path = urlsplit(url).path.casefold()
     except ValueError:
         path = ""
+
+    body = str((item or {}).get("body") or (item or {}).get("summary") or "")
+    if unsupported_news_sport(title, body):
+        return "unsupported_news_sport"
+    if re.search(r"\b(?:snl|saturday night live|talk show|reality show)\b", title):
+        return "non_sports_entertainment"
 
     # Confirmed legacy editorial incidents, shared with admission and the
     # bounded public repair. These texts contain no new sporting development.

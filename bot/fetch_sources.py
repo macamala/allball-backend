@@ -827,7 +827,7 @@ def _classify_item(item, evidence):
         feed_league=feed.get("league"),
         feed_country=feed.get("country"),
     )
-    if tags.sport is not None:
+    if tags.sport is not None or tags.reason == "unsupported-news-sport":
         return tags
     hinted = source_path_sport_hint(item.get("url"))
     if not hinted:
