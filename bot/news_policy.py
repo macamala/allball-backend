@@ -203,6 +203,86 @@ def non_article_news_reason(item):
     return None
 
 
+def gossip_news_reason(item):
+    """Reject tabloid/personal gossip and unconfirmed sports rumours before AI."""
+    title = str((item or {}).get("title") or "").casefold()
+    summary = str((item or {}).get("summary") or "").casefold()
+    url = str((item or {}).get("url") or "")
+    if not title:
+        return None
+    try:
+        parts = urlsplit(url)
+        host = (parts.hostname or "").lower()
+        path = (parts.path or "").casefold()
+    except ValueError:
+        host = ""
+        path = ""
+
+    # Known off-field/tabloid lanes that should never enter NinkoSports News.
+    if host == "isport.blesk.cz" and path.startswith("/clanek/blesk-sport/"):
+        return "gossip_tabloid_section"
+    if any(token in path for token in (
+        "/gossip/", "/celebrity/", "/celebrities/", "/wags/", "/lifestyle/",
+        "/entertainment/",
+    )):
+        return "gossip_tabloid_section"
+
+    personal_patterns = (
+        r"\b(?:wife|husband|girlfriend|boyfriend|fianc[eé]e?|spouse|partner)\b",
+        r"\b(?:ex[- ]?wife|ex[- ]?husband|ex[- ]?girlfriend|ex[- ]?boyfriend)\b",
+        r"\b(?:dating|romance|relationship|divorce|split up|breakup|break-up)\b",
+        r"\b(?:wedding|marries|married|pregnan\w*|newborn|baby|first child)\b",
+        r"\b(?:mansion|luxury home|luxury car|holiday photos?|vacation photos?)\b",
+        r"\b(?:instagram|tiktok|viral post|viral photo|social media feud|claps back|fires back)\b",
+        r"\b(?:bivš\w* suprug\w*|bivs\w* suprug\w*|suprug\w*|devojk\w*|djevojk\w*|razvod\w*|ljubav\w*|privatni život|privatni zivot)\b",
+        r"\b(?:exmanžel\w*|manžel\w*|rozvod\w*|přítelkyn\w*|partnerk\w*)\b",
+        r"\b(?:namorad\w*|espos\w*|ex-mulher|casamento|divórci\w*|divorci\w*)\b",
+        r"\b(?:novia|novio|esposa|esposo|exmujer|ex mujer|divorcio|romance)\b",
+    )
+    personal = any(re.search(pattern, title, re.I) for pattern in personal_patterns)
+
+    # Personal matters are allowed only when the headline itself makes a concrete
+    # competitive consequence the actual story (e.g. withdrawal/absence).
+    competitive_impact = re.search(
+        r"\b(?:miss(?:es|ed|ing)?|withdraw\w*|ruled out|unavailable|return\w*|"
+        r"injur\w*|suspend\w*|ban(?:ned)?|retires?|retirement|"
+        r"match|game|race|final|tournament|championship|qualif\w*)\b",
+        title,
+        re.I,
+    )
+    if personal and not competitive_impact:
+        return "gossip_personal_life"
+
+    # Rumour/speculation is not NinkoSports news. Confirmed transactions are.
+    speculation_patterns = (
+        r"\btransfer gossip\b",
+        r"\b(?:rumou?r|rumou?rs)\b",
+        r"\blinked (?:with|to)\b",
+        r"\b(?:could|might|may) (?:join|sign|move|leave)\b",
+        r"\b(?:eyeing|monitoring|considering) (?:a |an |the )?(?:move|deal|transfer|player)\b",
+        r"\breportedly (?:interested|keen|considering|targeting|wants?)\b",
+        r"\b(?:transfer target|on the radar|tipped to join|set sights on)\b",
+        r"\b(?:navodno|mogao bi|mogla bi|mogući transfer|moguci transfer)\b",
+    )
+    speculative = any(re.search(pattern, title, re.I) for pattern in speculation_patterns)
+    confirmed = re.search(
+        r"\b(?:official(?:ly)?|confirm(?:s|ed)?|announce(?:s|d)?|signed|signs|"
+        r"joined|joins|completed|completes|agreement|agreed deal|new contract|"
+        r"contract extension|loan completed|club confirms?)\b",
+        title,
+        re.I,
+    )
+    if speculative and not confirmed:
+        return "gossip_unconfirmed_rumour"
+
+    # Explicit gossip/rumour roundups are rejected even if a summary contains
+    # sports terms. This is title-led so normal factual reports are unaffected.
+    if re.search(r"\b(?:gossip|rumour mill|rumor mill|transfer whispers)\b", title, re.I):
+        return "gossip_roundup"
+
+    return None
+
+
 def non_sports_personal_life_reason(item):
     """Reject clearly personal/lifestyle headlines unless sport is the actual event."""
     title = str((item or {}).get("title") or "").casefold()
@@ -308,7 +388,11 @@ def fair_news_queue(
             rejected[reason or 'invalid_source_url'] += 1; continue
         if url in seen:
             rejected['duplicate_source_url'] += 1; continue
-        editorial_reason = non_article_news_reason(item) or non_sports_personal_life_reason(item)
+        editorial_reason = (
+            non_article_news_reason(item)
+            or gossip_news_reason(item)
+            or non_sports_personal_life_reason(item)
+        )
         if editorial_reason:
             rejected[editorial_reason] += 1; continue
         tags = classify(item)
