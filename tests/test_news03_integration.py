@@ -421,3 +421,26 @@ def test_writer_prompt_includes_numeric_and_quote_safety_contract(monkeypatch):
     assert "ALLOWED NUMERIC TOKENS:" in captured[0]
     assert "3:1" in captured[0] and "2026" in captured[0]
     assert "Do not output straight or curly double quotation marks anywhere" in captured[0]
+
+
+def test_ai_story_runs_deterministic_fact_lock_before_semantic_validator(monkeypatch):
+    draft={
+        "title":"Northbridge Athletic injury update",
+        "summary":"A player suffered a knee injury.",
+        "body":"Northbridge Athletic confirmed a knee injury. "*30,
+    }
+    monkeypatch.setattr(ingest,"write_ninkosports_story",lambda **kw:"fixture")
+    monkeypatch.setattr(ingest,"parse_ai_output",lambda raw:draft)
+    monkeypatch.setattr(
+        ingest,"validate_story_facts",
+        lambda *a,**k:pytest.fail("semantic validator must not run"),
+    )
+    parsed,reason=ingest._ai_story(
+        title="Northbridge Athletic schedule update",
+        facts="Northbridge Athletic published its schedule. "*40,
+        sport="football",
+        league="",
+        max_ai_chars=6000,
+    )
+    assert parsed is None
+    assert reason and reason.startswith("unsupported_claim_family:injury")

@@ -125,3 +125,16 @@ def test_protected_names_are_extracted_but_changed_name_rejection_is_semantic():
     # The brittle regex gate was intentionally removed from deterministic admission.
     # The xKiro semantic validator above is the authority for changed proper names.
     assert original_draft_reason(renamed, source_title, source_body) is None
+
+
+def test_external_free_pool_can_satisfy_router_availability(monkeypatch):
+    from bot import news_external_free as external
+    monkeypatch.setattr(
+        external,
+        "configured_identities",
+        lambda purpose="writer": (("groq","fixture-model"),),
+    )
+    monkeypatch.setattr(free_ai, "_xkiro_available", lambda: False)
+    assert external.available("writer")
+    assert external.available("validator")
+    assert free_ai.free_ai_available()
