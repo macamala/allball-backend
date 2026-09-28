@@ -169,7 +169,8 @@ def _run_cycle():
             # English freshness always wins. Translate only after new-story
             # ingestion, from whatever request allowance remains.
             if (
-                os.environ.get('NEWS_TRANSLATIONS_ENABLED') == '1'
+                rewritten > 0
+                and os.environ.get('NEWS_TRANSLATIONS_ENABLED') == '1'
                 and int(os.environ.get('NEWS_TRANSLATIONS_PER_CYCLE', '0')) > 0
                 and not ai_budget_exhausted()
             ):
