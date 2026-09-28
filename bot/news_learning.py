@@ -33,7 +33,10 @@ def writer_identity() -> tuple[str, str]:
         from . import rewrite_ai
         mode = str(getattr(rewrite_ai, "AI_PROVIDER_MODE", "") or "").strip().lower()
         if mode == "xkiro_free":
-            from .free_ai_router import selected_free_model_name
+            from .free_ai_router import last_writer_identity, selected_free_model_name
+            provider, model = last_writer_identity()
+            if provider != "unknown" and model != "unknown":
+                return provider, model
             return "xkiro", selected_free_model_name() or "unknown-free-model"
         if mode == "openai_legacy":
             return "openai", str(getattr(rewrite_ai, "OPENAI_MODEL", "") or "unknown")

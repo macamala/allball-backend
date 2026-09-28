@@ -14,6 +14,7 @@ from models import Article
 from editorial import news_image_is_publishable, pick_article_image, score_image_candidate
 
 from .news_policy import fair_news_queue, freshness_reason, non_article_news_reason, original_draft_reason, source_path_sport_hint
+from .news_fact_guard import fact_lock_reason
 from .news_learning import (
     learned_rule_violation_reason,
     mark_auto_corrected,
@@ -199,6 +200,20 @@ def _ai_story(
             title[:80],
         )
         return None, deterministic_reason
+    lock_reason = fact_lock_reason(
+        parsed,
+        title,
+        payload,
+        expected_sport=sport if sport and sport != "sports" else None,
+        expected_league=league or None,
+    )
+    if lock_reason:
+        logger.info(
+            "[fetch_sources] reject fact-lock=%s before semantic validator title=%s",
+            lock_reason,
+            title[:80],
+        )
+        return None, lock_reason
     facts_ok, facts_reason = validate_story_facts(
         title, payload, parsed, trusted_context=trusted_context
     )

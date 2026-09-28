@@ -11,6 +11,7 @@ import logging
 import os
 import re
 import time
+from contextvars import ContextVar
 from typing import Optional, Tuple
 
 import httpx
@@ -29,6 +30,8 @@ _DEFAULT_VALIDATOR = "qwen/qwen3.5-397b-a17b:free"
 _rate_limited = False
 _catalog_cache = {"at": 0.0, "rows": None}
 _usage_cache = {"at": 0.0, "remaining": None, "verified": False}
+_LAST_WRITER = ContextVar("news_last_free_writer", default=("unknown", "unknown"))
+_LAST_JSON = ContextVar("news_last_free_json", default=("unknown", "unknown"))
 
 
 def _free_model(env_name: str, default: str) -> Optional[str]:
@@ -109,7 +112,7 @@ def _free_tokens_available() -> bool:
 
 
 
-def free_ai_available() -> bool:
+def _xkiro_available() -> bool:
     writer = _free_model("NEWS_XKIRO_WRITER_MODEL", _DEFAULT_WRITER)
     validator = _free_model("NEWS_XKIRO_VALIDATOR_MODEL", _DEFAULT_VALIDATOR)
     return bool(
@@ -122,13 +125,44 @@ def free_ai_available() -> bool:
     )
 
 
+def free_ai_available() -> bool:
+    try:
+        from .news_external_free import available as external_available
+        if external_available("writer") and external_available("validator"):
+            return True
+    except Exception:
+        pass
+    return _xkiro_available()
+
+
 def free_ai_rate_limited() -> bool:
+    try:
+        from .news_external_free import available as external_available
+        if external_available("writer") and external_available("validator"):
+            return False
+    except Exception:
+        pass
     return _rate_limited
 
 
 def reset_free_ai_rate_limit() -> None:
     global _rate_limited
     _rate_limited = False
+    _LAST_WRITER.set(("unknown", "unknown"))
+    _LAST_JSON.set(("unknown", "unknown"))
+    try:
+        from .news_external_free import reset as reset_external
+        reset_external()
+    except Exception:
+        pass
+
+
+def last_writer_identity() -> tuple[str, str]:
+    return _LAST_WRITER.get()
+
+
+def last_json_identity() -> tuple[str, str]:
+    return _LAST_JSON.get()
 
 
 def _completion(
@@ -210,10 +244,26 @@ def _completion(
 
 
 def write_free_story(system_prompt: str, prompt: str) -> Optional[str]:
+    try:
+        from .news_external_free import completion as external_completion
+        value, identity = external_completion(
+            system=system_prompt,
+            user=prompt,
+            max_tokens=int(os.getenv("NEWS_XKIRO_WRITER_MAX_TOKENS", "1800") or "1800"),
+            json_mode=False,
+            purpose="writer",
+        )
+        if value:
+            _LAST_WRITER.set(identity)
+            logger.info("[free_ai] writer provider=%s model=%s", identity[0], identity[1])
+            return value
+    except Exception as exc:
+        logger.warning("[free_ai] external writer unavailable: %s", type(exc).__name__)
+
     model = _free_model("NEWS_XKIRO_WRITER_MODEL", _DEFAULT_WRITER)
     if not model:
         return None
-    return _completion(
+    value = _completion(
         model=model,
         system=system_prompt,
         user=prompt,
@@ -221,14 +271,32 @@ def write_free_story(system_prompt: str, prompt: str) -> Optional[str]:
         json_mode=False,
         temperature=0.45,
     )
+    if value:
+        _LAST_WRITER.set(("xkiro", model))
+    return value
 
 
 def free_json_completion(system_prompt: str, prompt: str, *, max_tokens: int = 5000) -> Optional[str]:
-    """Shared zero-price JSON lane for translation/validation work."""
+    """Shared free-tier JSON lane for translations and bounded JSON work."""
+    try:
+        from .news_external_free import completion as external_completion
+        value, identity = external_completion(
+            system=system_prompt,
+            user=prompt,
+            max_tokens=max_tokens,
+            json_mode=True,
+            purpose="translation",
+        )
+        if value:
+            _LAST_JSON.set(identity)
+            return value
+    except Exception as exc:
+        logger.warning("[free_ai] external JSON unavailable: %s", type(exc).__name__)
+
     model = _free_model("NEWS_XKIRO_WRITER_MODEL", _DEFAULT_WRITER)
     if not model:
         return None
-    return _completion(
+    value = _completion(
         model=model,
         system=system_prompt,
         user=prompt,
@@ -237,9 +305,15 @@ def free_json_completion(system_prompt: str, prompt: str, *, max_tokens: int = 5
         temperature=0.15,
         timeout_seconds=180.0,
     )
+    if value:
+        _LAST_JSON.set(("xkiro", model))
+    return value
 
 
 def selected_free_model_name() -> Optional[str]:
+    provider, model = _LAST_JSON.get()
+    if provider != "unknown" and model != "unknown":
+        return (provider + ":" + model)[:160]
     return _free_model("NEWS_XKIRO_WRITER_MODEL", _DEFAULT_WRITER)
 
 
@@ -288,14 +362,33 @@ def validate_free_story(
         + "\n\nDRAFT SUMMARY:\n" + (draft_summary or "")[:1200]
         + "\n\nDRAFT BODY:\n" + (draft_body or "")[:9000]
     )
-    raw = _completion(
-        model=model,
-        system=_VALIDATOR_SYSTEM,
-        user=user,
-        max_tokens=int(os.getenv("NEWS_XKIRO_VALIDATOR_MAX_TOKENS", "700") or "700"),
-        json_mode=True,
-        temperature=0.0,
-    )
+    raw = None
+    writer_provider, _writer_model = _LAST_WRITER.get()
+    try:
+        from .news_external_free import completion as external_completion
+        raw, identity = external_completion(
+            system=_VALIDATOR_SYSTEM,
+            user=user,
+            max_tokens=int(os.getenv("NEWS_XKIRO_VALIDATOR_MAX_TOKENS", "700") or "700"),
+            json_mode=True,
+            purpose="validator",
+            avoid_provider=writer_provider,
+        )
+        if raw:
+            _LAST_JSON.set(identity)
+    except Exception as exc:
+        logger.warning("[free_ai] external validator unavailable: %s", type(exc).__name__)
+    if not raw:
+        raw = _completion(
+            model=model,
+            system=_VALIDATOR_SYSTEM,
+            user=user,
+            max_tokens=int(os.getenv("NEWS_XKIRO_VALIDATOR_MAX_TOKENS", "700") or "700"),
+            json_mode=True,
+            temperature=0.0,
+        )
+        if raw:
+            _LAST_JSON.set(("xkiro", model))
     if not raw:
         return False, "validator-unavailable"
     try:
