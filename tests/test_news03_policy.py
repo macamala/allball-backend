@@ -266,3 +266,42 @@ def test_real_injury_and_result_news_are_not_filtered_as_analysis():
         "title":"South Africa beat Australia to seal series win",
         "url":"https://example.test/news/result",
     }) is None
+
+
+def test_gossip_and_unconfirmed_rumours_are_rejected_before_ai():
+    from bot.news_policy import gossip_news_reason
+    examples={
+        "Football star's ex-wife sends unexpected message":"gossip_personal_life",
+        "Premier League transfer gossip: striker linked with Arsenal":"gossip_unconfirmed_rumour",
+        "Forward could join Chelsea this summer":"gossip_unconfirmed_rumour",
+        "NBA star's girlfriend goes viral on Instagram":"gossip_personal_life",
+        "Fotbalista slavio, stigla neočekivana poruka exmanželky":"gossip_personal_life",
+    }
+    for title,reason in examples.items():
+        assert gossip_news_reason({
+            "title":title,
+            "url":"https://example.test/sport/story",
+        })==reason
+
+
+def test_confirmed_sports_transactions_and_competition_news_are_not_gossip():
+    from bot.news_policy import gossip_news_reason
+    clean=[
+        "Napoli confirm new contract with defender Amir Rrahmani",
+        "Hibs sign winger on two-year deal",
+        "South Africa beat Australia to seal series win",
+        "Player ruled out of final after knee injury",
+    ]
+    for title in clean:
+        assert gossip_news_reason({
+            "title":title,
+            "url":"https://example.test/sport/story",
+        }) is None
+
+
+def test_blesk_sport_tabloid_lane_is_rejected():
+    from bot.news_policy import gossip_news_reason
+    assert gossip_news_reason({
+        "title":"Fotbalista Baroš uspořádal rozlučku, nečekaný vzkaz exmanželky",
+        "url":"https://isport.blesk.cz/clanek/blesk-sport/480337/example.html",
+    })=="gossip_tabloid_section"
