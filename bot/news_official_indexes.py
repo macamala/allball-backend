@@ -30,6 +30,30 @@ logger = logging.getLogger(__name__)
 
 HTML_INDEXES = (
     {
+        "id": "mlb-baseball-news",
+        "sport": "baseball",
+        "publisher": "MLB",
+        "url": "https://www.mlb.com/news",
+        "host": "www.mlb.com",
+        "paths": ("/news/",),
+    },
+    {
+        "id": "pdc-darts-news",
+        "sport": "darts",
+        "publisher": "PDC",
+        "url": "https://www.pdc.tv/news",
+        "host": "www.pdc.tv",
+        "paths": ("/news/",),
+    },
+    {
+        "id": "ufc-mma-news",
+        "sport": "mma",
+        "publisher": "UFC",
+        "url": "https://www.ufc.com/news",
+        "host": "www.ufc.com",
+        "paths": ("/news/",),
+    },
+    {
         "id": "ihf-handball",
         "sport": "handball",
         "publisher": "IHF",
