@@ -20,6 +20,11 @@ logger = logging.getLogger(__name__)
 
 _SOURCES = (
     {
+        "sport": "motorsport",
+        "publisher": "ESPN F1",
+        "url": "https://site.api.espn.com/apis/site/v2/sports/racing/f1/news",
+    },
+    {
         "sport": "american-football",
         "publisher": "ESPN NFL",
         "url": "https://site.api.espn.com/apis/site/v2/sports/football/nfl/news",
