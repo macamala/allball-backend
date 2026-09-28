@@ -349,3 +349,44 @@ def test_distinctive_asian_games_events_resolve_without_cross_sport_leakage():
 
 def test_entertainment_appearance_is_not_a_basketball_development():
     assert non_article_news_reason({'title':"Jalen Brunson Hosts 'SNL' with Knicks Teammates in Attendance"}) == 'non_sports_entertainment'
+
+
+def test_snooker_federation_feed_does_not_stamp_billiards_or_promotional_products():
+    from bot.feeds import FEEDS
+    feed=next(f for f in FEEDS if f['url']=='https://www.wpbsa.com/feed/')
+    assert feed['sport']=='snooker' and feed['verified_official'] and not feed.get('league')
+    assert classify_article('Gilchrist Secures Canadian Double', 'The World Billiards tour continued in Canada.', feed_kind='league',feed_sport='snooker').sport is None
+    assert classify_article('Day Wins Maiden Seniors Title', 'Ryan Day defeated Andy Lavin to win his first World Seniors Snooker title.', feed_kind='league',feed_sport='snooker').sport == 'snooker'
+    assert non_article_news_reason({'title':'Stars Arrive In Shenzhen'}) == 'non_article_event_promotion'
+
+
+@pytest.mark.parametrize('title', ['WSL talking points: Chelsea punish Arsenal', 'Silver linings for MLB’s non-playoff teams', 'NBA preview: The most intriguing newcomers', '(Asiad) medal standings', 'Trainer of the Year standings – up to and including Sunday'])
+def test_rankings_tables_and_opinion_products_do_not_spend_writer_budget(title):
+    assert non_article_news_reason({'title':title})
+
+
+def test_editorial_inventory_excludes_yesterday_inside_rolling_24h_and_future():
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+    from models import Article, ArticleTaxonomyResolution
+    from public_index import recent_public_sport_inventory
+    from taxonomy_resolver import RESOLVER_VERSION
+    engine=create_engine('sqlite:///:memory:')
+    Article.__table__.create(engine)
+    ArticleTaxonomyResolution.__table__.create(engine)
+    with Session(engine) as db:
+        for i,stamp in enumerate([datetime(2026,9,27,13,59),datetime(2026,9,27,14),datetime(2026,9,28,6),datetime(2026,9,28,12)]):
+            a=Article(title='News',slug=f'inventory-{i}',external_id=f'inventory-{i}',sport='football',image_url='https://example.test/photo.jpg',published_at=stamp)
+            db.add(a);db.flush()
+            db.add(ArticleTaxonomyResolution(article_id=a.id,resolved_sport='football',resolver_version=RESOLVER_VERSION,public_ok=True,hero_media_kind='EDITORIAL_PHOTO'))
+        db.commit()
+        now=datetime(2026,9,28,11,tzinfo=timezone.utc)
+        assert recent_public_sport_inventory(db,max_age_hours=24,now=now)=={'football':3}
+        assert recent_public_sport_inventory(db,editorial_timezone='Australia/Sydney',now=now)=={'football':2}
+    engine.dispose()
+
+
+def test_handball_federation_evidence_beats_shared_champions_league_name():
+    assert classify_article('Nielsen targets another title with Veszprém','The handball goalkeeper won the Champions League and now targets the Club World Cup.').sport == 'handball'
+    assert classify_article('Nielsen targets another title with Veszprém','The EHF Champions League winner returns to the Club World Cup.').sport == 'handball'
+    assert classify_article('Liverpool prepare for Champions League','The football team visited a handball club during training.').sport == 'football'

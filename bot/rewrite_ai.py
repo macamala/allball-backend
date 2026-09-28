@@ -316,7 +316,7 @@ def write_ninkosports_story(
         "- Do not output straight or curly double quotation marks anywhere. Paraphrase every quoted statement.\n"
         f"- ALLOWED NUMERIC TOKENS: {numeric_contract}\n"
         "- Any numeric token not listed above is forbidden. Do not calculate or reformat numbers.\n"
-        f"- TAXONOMY LOCK: the exact article sport is {sport}. Keep it in that sport; do not relabel it as a related sport.\n\n"
+        f"- TAXONOMY LOCK: the exact article sport is {sport}. Keep it in that sport; do not relabel it as a related sport. Mention the sport naturally once in the headline or opening paragraph so shared club and tournament names remain unambiguous.\n\n"
         f"SPORT: {sport}\n"
         f"COMPETITION: {league or 'unspecified'}\n\n"
         f"{_ninkosports_style(sport)}\n\n"

@@ -175,6 +175,15 @@ def classify_article(
         sport_scores["football"] = 0
         if niche_context == "field-hockey":
             sport_scores["ice-hockey"] = 0
+    # Handball shares World Cup / Champions League with soccer. A clear sport
+    # word or its federations in clean article text beats those generic names.
+    football_exclusive = [a for a in SPORT_ALIASES['football']
+        if a.strip() not in {'world cup', 'champions league', 'premier league', 'bundesliga'}]
+    if (re.search(r'\b(?:handball|ehf|ihf|rukomet)\b', text)
+            and not _score_aliases(title_text, football_exclusive)
+            and not any(team['sport']=='football' and not team.get('ambiguous_sport') for _,team in team_hits)):
+        sport_scores['handball'] = max(sport_scores['handball'], sport_scores['football'] + 4)
+        sport_scores['football'] = 0
     if any(token in text for token in (" golf ", " pga ", "birdie", "bogey", "fairway")) and "us open" in text:
         sport_scores["tennis"] = 0
 

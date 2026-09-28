@@ -29,13 +29,15 @@ def unsupported_news_sport(title, body=""):
     """
     headline = str(title or "").casefold()
     lead = str(body or "")[:650].casefold()
-    if re.search(r"\b(?:archery|archers?|fencing|fencers?|taekwondo|kurash|judo|judoka|gymnastics|gymnasts?|canoeing|canoeists?|rowing|rowers?|sport climbing)\b", headline):
+    if re.search(r"\b(?:archery|archers?|fencing|fencers?|taekwondo|kurash|judo|judoka|gymnastics|gymnasts?|canoeing|canoeists?|rowing|rowers?|sport climbing|billiards)\b", headline):
         return True
     if re.search(r"\b(?:pistol|rifle|issf|skeet|trap shooting)\b", headline):
         return True
     if re.search(r"\bshooting (?:campaign|championships?|world cup|medals?|team|events?)\b", headline):
         return True
     if re.search(r"\b(?:air pistol|air rifle|pistol shooter|rifle shooter|sport pistol|issf|\d+\s*m(?:etre|eter)?\s+(?:air\s+)?(?:pistol|rifle))\b", lead):
+        return True
+    if re.search(r"\b(?:english billiards|world billiards)\b", lead):
         return True
     return False
 
@@ -265,6 +267,12 @@ def non_article_news_reason(item):
         return "unsupported_news_sport"
     if re.search(r"\b(?:snl|saturday night live|talk show|reality show)\b", title):
         return "non_sports_entertainment"
+    if re.search(r"\b(?:medal standings|trainer of the year standings)\b", title):
+        return "non_article_rolling_tracker"
+    if re.search(r"\b(?:talking points|silver linings|most intriguing|season buzz|news and intel)\b", title):
+        return "non_article_analysis"
+    if title.strip() == "stars arrive in shenzhen":
+        return "non_article_event_promotion"
 
     # Confirmed legacy editorial incidents, shared with admission and the
     # bounded public repair. These texts contain no new sporting development.

@@ -1,4 +1,5 @@
 import sys
+import pytest
 from types import SimpleNamespace
 
 import bot.scheduler as scheduler
@@ -32,14 +33,20 @@ def test_removed_result_news_lane_never_imports_or_runs(monkeypatch, tmp_path):
     assert scheduler._run_cycle() == 0
 
 
-def test_translation_lane_runs_after_english_ingest(monkeypatch, tmp_path):
+@pytest.mark.parametrize('debt,expected', [(0, ['english','translations']), (3,['english']), (None,['english'])])
+def test_translation_lane_runs_after_english_ingest_only_without_coverage_debt(monkeypatch, tmp_path, debt, expected):
     _base_env(monkeypatch, tmp_path, max_articles="1", translations="1")
     order = []
+    def ingest(**kwargs):
+        from bot.news_budget import active_ai_budget
+        active_ai_budget().english_coverage_debt = debt
+        order.append('english')
+        return 1
     monkeypatch.setitem(
         sys.modules,
         "bot.fetch_sources",
         SimpleNamespace(
-            fetch_and_store_all_articles=lambda **kwargs: order.append("english") or 1
+            fetch_and_store_all_articles=ingest
         ),
     )
     monkeypatch.setitem(
@@ -71,7 +78,7 @@ def test_translation_lane_runs_after_english_ingest(monkeypatch, tmp_path):
         SimpleNamespace(repair_recent_unresolved=lambda db, limit=24: 0),
     )
     assert scheduler._run_cycle() == 1
-    assert order == ["english", "translations"]
+    assert order == expected
 
 
 def test_ai_lane_failure_fails_closed_without_result_news_fallback(monkeypatch, tmp_path):

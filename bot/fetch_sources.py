@@ -1022,7 +1022,8 @@ def _fetch_and_store_all_articles(
         after_gossip = time.monotonic()
         duplicates = repair_recent_duplicate_news(db, limit=600, max_age_hours=168)
         after_dedupe = time.monotonic()
-        sport_inventory = recent_public_sport_inventory(db, max_age_hours=24)
+        sport_inventory = recent_public_sport_inventory(db, max_age_hours=24,
+            editorial_timezone=os.getenv("NEWS_EDITORIAL_TIMEZONE") or "Australia/Sydney")
         logger.info(
             "[fetch_sources] repair phases images=%s %.3fs mislabels=%s %.3fs "
             "unresolved=%s %.3fs gossip=%s %.3fs duplicates=%s %.3fs inventory=%.3fs",
@@ -1060,6 +1061,16 @@ def _fetch_and_store_all_articles(
                 sport = None
             if sport:
                 candidate_sports[sport] = candidate_sports.get(sport, 0) + 1
+        cycle_budget = active_ai_budget()
+
+        def update_coverage_debt():
+            debt = sum(1 for sport in candidate_sports
+                if sport_inventory.get(sport, 0) < {"football": 12, "basketball": 8}.get(sport, 6))
+            if cycle_budget is not None:
+                cycle_budget.english_coverage_debt = debt
+            return debt
+
+        update_coverage_debt()
         logger.info(
             "[fetch_sources] eligible=%s rejected=%s current_sport_inventory=%s candidate_sports=%s",
             len(queued),
@@ -1116,9 +1127,12 @@ def _fetch_and_store_all_articles(
                 continue
             if article:
                 created += 1
+                sport_inventory[article.sport] = sport_inventory.get(article.sport, 0) + 1
             if used_ai:
                 rewritten += 1
                 ai_budget = max(0, ai_budget - 1)
+        logger.info("[fetch_sources] remaining English coverage debt=%s candidate_sports=%s",
+            update_coverage_debt(), len(candidate_sports))
         return rewritten
     finally:
         db.close()

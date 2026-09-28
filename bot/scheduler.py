@@ -173,6 +173,7 @@ def _run_cycle():
                 and os.environ.get('NEWS_TRANSLATIONS_ENABLED') == '1'
                 and int(os.environ.get('NEWS_TRANSLATIONS_PER_CYCLE', '0')) > 0
                 and not ai_budget_exhausted()
+                and getattr(budget, 'english_coverage_debt', None) == 0
             ):
                 try:
                     from bot.news_translations import translate_latest_articles
@@ -181,6 +182,9 @@ def _run_cycle():
                     )
                 except Exception as exc:
                     logger.error('News translation lane failed: %s', type(exc).__name__)
+            elif os.environ.get('NEWS_TRANSLATIONS_ENABLED') == '1':
+                logger.info('News translations deferred: English coverage debt=%s',
+                    getattr(budget, 'english_coverage_debt', None))
             if historical:
                 from database import SessionLocal
                 from public_index import index_missing

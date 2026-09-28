@@ -17,6 +17,7 @@ class Feed(TypedDict, total=False):
 
 
 FEEDS: List[Feed] = [
+    {'url': 'https://www.wpbsa.com/feed/', 'kind': 'league', 'sport': 'snooker', 'publisher': 'WPBSA', 'verified_official': True, 'enabled': True, 'note': 'Governing body RSS: exact UTC timestamps, full match reports and same-article photography verified. Billiards, promotional ceremonies and viewing guides are held separately.'},
     {'url': 'https://en.yna.co.kr/RSS/sports.xml', 'kind': 'mixed', 'publisher': 'Yonhap', 'enabled': True, 'note': 'Verified +0900 RSS and exact article metadata; mixed Asian Games/global sports. Restrict extraction to story-news, excluding unrelated recommendation photos.'},
     {'url': 'https://pbsi.id/feed/', 'kind': 'league', 'sport': 'badminton', 'publisher': 'PBSI', 'verified_official': True, 'enabled': True, 'note': 'Indonesian badminton federation: verified exact UTC RSS, full player statements and same-article match photography; no league stamp.'},
     {'url': 'https://timesofindia.indiatimes.com/rssfeeds/4719148.cms', 'kind': 'mixed', 'enabled': True, 'note': 'Asian Games and global sport; verified timezone-aware RSS, free article prose and same-article JSON-LD photo. No sport/league stamp; liveblogs, medal tables and schedules held.'},

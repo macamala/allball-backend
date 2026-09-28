@@ -8,7 +8,8 @@ from __future__ import annotations
 import logging
 import re
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from typing import Optional, Sequence
 from urllib.parse import urlsplit
 
@@ -221,9 +222,17 @@ def load_cached_resolutions(db: Session, articles: Sequence[Article]) -> dict:
 
 
 
-def recent_public_sport_inventory(db: Session, max_age_hours: int = 72) -> dict[str, int]:
+def recent_public_sport_inventory(db: Session, max_age_hours: int = 72, *, editorial_timezone=None, now=None) -> dict[str, int]:
     """Counts the same current, image-valid News inventory readers can browse."""
-    cutoff = datetime.utcnow() - timedelta(hours=max(1, int(max_age_hours)))
+    clock = now or datetime.now(timezone.utc)
+    if clock.tzinfo is None:
+        raise ValueError("inventory clock must be timezone-aware")
+    end = clock.astimezone(timezone.utc).replace(tzinfo=None)
+    if editorial_timezone:
+        local = clock.astimezone(ZoneInfo(editorial_timezone))
+        cutoff = local.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc).replace(tzinfo=None)
+    else:
+        cutoff = end - timedelta(hours=max(1, int(max_age_hours)))
     rows = (
         db.query(
             ArticleTaxonomyResolution.resolved_sport,
@@ -238,6 +247,7 @@ def recent_public_sport_inventory(db: Session, max_age_hours: int = 72) -> dict[
             Article.image_url.isnot(None),
             Article.image_url != "",
             func.coalesce(Article.published_at, Article.created_at) >= cutoff,
+            func.coalesce(Article.published_at, Article.created_at) <= end,
         )
         .group_by(ArticleTaxonomyResolution.resolved_sport)
         .all()
