@@ -12,7 +12,7 @@ import logging
 import os
 import re
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from typing import Optional
 
@@ -68,6 +68,16 @@ def _http_failure(provider: str, response) -> None:
         try:
             payload = response.json()
             message = str((payload.get("error") or {}).get("message") or "").lower()
+            # Workers AI uses an errors array. Code 3036 explicitly means the
+            # daily free neuron allowance is exhausted, not a minute limit.
+            errors = payload.get('errors') if isinstance(payload, dict) else None
+            if provider == 'cloudflare' and isinstance(errors, list) and any(
+                isinstance(row, dict) and row.get('code') == 3036 for row in errors
+            ):
+                dimension = 'daily_free_neurons'
+                now = datetime.now(timezone.utc)
+                reset = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+                seconds = max(seconds or 0, (reset - now).total_seconds() + 60)
             for marker, code in (("tokens per day", "tpd"), ("requests per day", "rpd"),
                                  ("tokens per minute", "tpm"), ("requests per minute", "rpm")):
                 if marker in message or re.search(r"\b" + code + r"\b", message):

@@ -86,6 +86,21 @@ def pool(monkeypatch):
     return clock
 
 
+def test_cloudflare_daily_free_quota_waits_for_utc_reset_across_cycles(pool, monkeypatch):
+    class Clock:
+        @staticmethod
+        def now(tz):
+            return datetime(2026, 9, 28, 12, 40, tzinfo=timezone.utc)
+    monkeypatch.setattr(external, 'datetime', Clock)
+    response = httpx.Response(429, json={'success': False, 'errors': [
+        {'code': 3036, 'message': 'sensitive response must not be logged'}]})
+    external._http_failure('cloudflare', response)
+    assert external._COOLDOWN_UNTIL['cloudflare'] == 100 + 11*3600 + 20*60 + 60
+    external.reset()
+    assert not external._provider_ready('cloudflare')
+    assert external._provider_ready('groq')
+
+
 def test_429_shared_across_purposes_and_cycles_charges_only_actual_requests(pool, monkeypatch, tmp_path, caplog):
     calls = []
     class Client:
