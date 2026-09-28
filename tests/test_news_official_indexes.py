@@ -211,3 +211,10 @@ def test_official_source_hydration_helper_is_bounded(monkeypatch):
     )
     rows=idx._hydrate_source(cfg,1)
     assert rows==[{"title":"A","url":"https://example.test/a"}]
+
+
+def test_nrl_first_party_rugby_league_index_is_enabled():
+    row=next(x for x in idx.HTML_INDEXES if x["id"]=="nrl-rugby-league-news")
+    assert row["sport"]=="rugby-league"
+    assert row["host"]=="www.nrl.com"
+    assert row.get("enabled",True) is True
