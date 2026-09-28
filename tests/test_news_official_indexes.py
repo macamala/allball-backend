@@ -226,3 +226,16 @@ def test_chinese_olympic_source_is_taxonomy_neutral():
     assert row["sport"] is None
     assert row["host"]=="en.olympic.cn"
     assert row["visible_date"] is True
+
+
+def test_visible_iso_minute_date_uses_source_timezone():
+    stamp=idx._visible_published_date(
+        "<div>2026-09-28 09:25 Xinhua</div>",
+        "Asia/Shanghai",
+    )
+    assert stamp.isoformat()=="2026-09-28T01:25:00+00:00"
+
+
+def test_chinese_olympic_source_declares_shanghai_timezone():
+    row=next(x for x in idx.HTML_INDEXES if x["id"]=="chinese-olympic-sports-news")
+    assert row["visible_date_timezone"]=="Asia/Shanghai"
