@@ -116,12 +116,11 @@ def fact_lock_reason(
     if unsupported:
         return "unsupported_known_entity:" + unsupported[0]
 
-    src_phrases = _proper_phrases(source)
-    for phrase in sorted(_proper_phrases(output) - src_phrases):
-        # A long multi-word proper name is rarely safe to invent during rewrite.
-        if len(phrase.split()) >= 2:
-            return "unsupported_proper_name:" + phrase[:80]
-
+    # Do not use title-case phrase subtraction as a hard publication gate.
+    # It creates false positives at sentence boundaries and possessives
+    # (for example "Luke Humphries. Humphries" or "England's ODI").
+    # Changed/invented names remain fail-closed in the semantic validator,
+    # while known entity IDs and acronym checks below stay deterministic.
     src_acronyms = _acronyms(source)
     extra_acronyms = sorted(_acronyms(output) - src_acronyms)
     if extra_acronyms:
