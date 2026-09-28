@@ -7,7 +7,7 @@ from bot.news_budget import AiRequestBudget, ai_budget_scope, reserve_ai_request
 def test_invalid_request_caps(bad):
     with pytest.raises(ValueError): AiRequestBudget(bad)
 
-@pytest.mark.parametrize('bad', [-1,201,True,'4',None])
+@pytest.mark.parametrize('bad', [-1,1441,True,'4',None])
 def test_invalid_daily_caps(bad):
     with pytest.raises(ValueError): AiRequestBudget(2,daily_limit=bad)
 

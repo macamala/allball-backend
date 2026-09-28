@@ -224,3 +224,12 @@ def test_record_sport_sections_are_not_blocked_by_section_filter():
         "url":"https://www.record.pt/modalidades/tenis/detalhe/francisco-cabral",
     }
     assert non_article_news_reason(row) is None
+
+
+def test_today_candidate_outranks_equivalent_yesterday_candidate(monkeypatch):
+    from bot.news_policy import queue_priority_score
+    monkeypatch.setenv("NEWS_EDITORIAL_TIMEZONE","Australia/Sydney")
+    now=datetime(2026,9,28,3,0,tzinfo=timezone.utc)
+    today={"title":"Football squad update","published_at":datetime(2026,9,28,1,0,tzinfo=timezone.utc)}
+    yesterday={"title":"Football squad update","published_at":datetime(2026,9,27,12,0,tzinfo=timezone.utc)}
+    assert queue_priority_score(today,now) > queue_priority_score(yesterday,now)
