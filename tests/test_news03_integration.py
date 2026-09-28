@@ -444,3 +444,14 @@ def test_ai_story_runs_deterministic_fact_lock_before_semantic_validator(monkeyp
     )
     assert parsed is None
     assert reason and reason.startswith("unsupported_claim_family:injury")
+
+
+def test_live_ingest_rejects_candidate_older_than_24_hours(monkeypatch):
+    item=prepare_ingest(monkeypatch)
+    item["published_at"]=datetime.now(timezone.utc)-timedelta(hours=25)
+    monkeypatch.setattr(
+        ingest,
+        "extract_from_url",
+        lambda *a: pytest.fail("stale article reached extraction"),
+    )
+    assert ingest._ingest_item(Mock(),item,True,6000,1)==(None,False)
