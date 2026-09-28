@@ -184,3 +184,13 @@ def test_olympics_global_source_is_mixed_and_never_stamps_sport():
     assert row["kind"]=="mixed"
     assert row["sport"] is None
     assert row["host"]=="www.olympics.com"
+
+
+def test_major_north_american_league_indexes_are_first_party():
+    by_id={row["id"]:row for row in idx.HTML_INDEXES}
+    assert by_id["nba-basketball-news"]["sport"]=="basketball"
+    assert by_id["nfl-american-football-news"]["sport"]=="american-football"
+    assert by_id["nhl-ice-hockey-news"]["sport"]=="ice-hockey"
+    assert by_id["nba-basketball-news"]["host"]=="www.nba.com"
+    assert by_id["nfl-american-football-news"]["host"]=="www.nfl.com"
+    assert by_id["nhl-ice-hockey-news"]["host"]=="www.nhl.com"
