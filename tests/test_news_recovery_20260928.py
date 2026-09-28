@@ -99,6 +99,13 @@ def test_provider_copy_is_held_not_rebranded():
     assert original_draft_reason(draft, "Source", "Facts") == "publisher_branding"
 
 
+def test_rewritten_retrospective_is_held_before_semantic_request():
+    draft = {"title": "Roosters Legends Reflect on 2002-2004 Era",
+             "summary": "Former players remember their previous seasons.",
+             "body": "The players described their memories of the old side."}
+    assert original_draft_reason(draft, "A new interview", "Source facts") == "non_news_retrospective_commentary"
+
+
 def test_real_news_is_not_rejected_as_a_media_product():
     assert non_article_news_reason({"title": "Club confirms new head coach after review", "url": "https://example.test/news/coach"}) is None
 

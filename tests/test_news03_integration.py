@@ -470,3 +470,30 @@ def test_sport_mismatch_retry_gets_taxonomy_correction_prompt(monkeypatch):
     assert captured
     assert "previous draft changed the article's sport taxonomy" in captured[0]
     assert "TAXONOMY LOCK: the exact article sport is rugby-league" in captured[0]
+
+
+@pytest.mark.parametrize("index_failure", [False, True])
+def test_nonpublic_original_is_never_counted_as_published(monkeypatch, index_failure):
+    from database import SessionLocal
+    from models import Article, ArticleTaxonomyResolution
+    item = prepare_ingest(monkeypatch)
+    item['url'] = f'https://example.test/held-public-admission-{index_failure}'
+    persist = public_index.persist_public_article
+
+    def hold(db, article, *args, **kwargs):
+        if index_failure:
+            raise RuntimeError('synthetic index failure')
+        persist(db, article, *args, **kwargs)
+        row = db.query(ArticleTaxonomyResolution).filter_by(article_id=article.id).one()
+        row.public_ok = False
+        db.commit()
+
+    monkeypatch.setattr(public_index, 'persist_public_article', hold)
+    db = SessionLocal()
+    try:
+        assert ingest._ingest_item(db, item, True, 6000, 1) == (None, False)
+        assert db.query(Article).filter_by(source_url=item['url']).count() == 1
+        from public_read import public_query
+        assert public_query(db).filter(Article.source_url == item['url']).first() is None
+    finally:
+        db.close()

@@ -703,11 +703,18 @@ def _ingest_item(
         from public_index import persist_public_article
 
         persist_public_article(db, article, resolved, commit=True)
+        from public_read import public_query
+
+        if public_query(db).filter(Article.id == article.id).first() is None:
+            logger.info("[fetch_sources] hold public admission id=%s", article.id)
+            return None, False
         from public_cache import bump_public_cache
 
         bump_public_cache()
     except Exception:
         db.rollback()
+        logger.exception("[fetch_sources] hold: public admission could not be verified")
+        return None, False
     logger.info(
         "[fetch_sources] published id=%s sport=%s slug=%s title=%s",
         article.id,

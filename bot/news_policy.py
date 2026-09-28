@@ -565,7 +565,8 @@ def original_draft_reason(draft, source_title, source_body):
     title, summary, body = (draft.get(k) for k in ('title', 'summary', 'body'))
     if not all(isinstance(x, str) and x.strip() for x in (title, summary, body)):
         return 'missing_original_draft'
-    admission = non_article_news_reason(draft) or publisher_branding_reason(draft)
+    admission = (non_article_news_reason(draft) or publisher_branding_reason(draft)
+                 or gossip_news_reason(draft))
     if admission:
         return admission
     source = f'{source_title}\n{source_body}'
