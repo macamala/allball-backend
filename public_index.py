@@ -584,6 +584,15 @@ def _explicit_title_sport_override(title: str) -> Optional[str]:
     # incidental city/club words such as Brighton that otherwise resemble football.
     if re.search(r"(?<!\w)(?:mma|ufc|mixed\s+martial\s+arts|oktagon)(?!\w)", value, re.I):
         return "mma"
+    # Strong road-cycling phrases outrank the generic words "Grand Prix".
+    # This is intentionally narrow so motorsport Grand Prix stories are unchanged.
+    if re.search(
+        r"(?<!\w)(?:road\s+race\s+world\s+(?:title|champion|championships?)|"
+        r"road\s+cycling|uci\s+road(?:\s+world)?|peloton)(?!\w)",
+        value,
+        re.I,
+    ):
+        return "cycling"
     return None
 
 
