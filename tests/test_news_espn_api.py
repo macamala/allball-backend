@@ -32,3 +32,8 @@ def test_espn_candidate_rejects_premium_or_missing_source_fields():
         "description":"facts",
         "links":{"web":{"href":"https://www.espn.com/nba/story/_/id/123/example"}},
     },source) is None
+
+
+def test_espn_sources_include_motorsport():
+    row=next(source for source in espn._SOURCES if source["sport"]=="motorsport")
+    assert row["url"]=="https://site.api.espn.com/apis/site/v2/sports/racing/f1/news"
