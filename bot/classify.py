@@ -1,6 +1,7 @@
 """Classify sport / competition / country from article evidence, not feed buckets."""
 
 from dataclasses import dataclass
+import re
 from typing import Dict, Optional
 
 from .taxonomy import (
@@ -26,11 +27,18 @@ def _norm(text: str) -> str:
 
 
 def _score_aliases(text: str, aliases) -> int:
+    """Score aliases as complete words/phrases, never arbitrary substrings."""
     score = 0
     for alias in aliases:
-        needle = alias.lower()
-        if needle in text:
-            score += max(1, len(needle.split()) )
+        needle = clean_text(str(alias or "")).lower().strip()
+        if not needle:
+            continue
+        pattern = re.compile(
+            r"(?<!\\w)" + re.escape(needle).replace(r"\\ ", r"\\s+") + r"(?!\\w)",
+            re.IGNORECASE,
+        )
+        if pattern.search(text):
+            score += max(1, len(needle.split()))
     return score
 
 
