@@ -192,6 +192,10 @@ def non_article_news_reason(item):
     # Azerbaijan result in its background must never become a Bahrain result.
     if path.rstrip("/") == "/sport/formula1/articles/ckz7zzy4d995o":
         return "non_article_service_guide"
+    # Confirmed source: an entertainer's anonymous prediction of a football
+    # disciplinary outcome, not an announcement from the club or competition.
+    if path.rstrip("/") == "/internacional/paises/inglaterra/detalhe/liam-gallagher-revela-possivel-castigo-do-man-city-e-explode-calem-se-idiotas-neuroticos-desesperados":
+        return "non_news_fan_speculation"
 
     if re.search(r"\b(?:quiz(?:zes)?|trivia|crosswords?|wordle|guess the|test your knowledge)\b", title):
         return "non_article_quiz"
@@ -200,7 +204,13 @@ def non_article_news_reason(item):
         return "non_article_podcast"
     if re.search(r"\bscorecard\b", title) or "/scorecard/" in path:
         return "non_article_scorecard"
-    if re.search(r"/(?:photos|photo-gallery|gallery|galleries)/", path) or re.search(
+    if re.search(r"\binjury (?:reports?|updates?|trackers?)\b", title) and re.search(
+        r"\b(?:updated daily|daily updates?|real[- ]time|fantasy (?:players|managers)|latest)\b", title
+    ):
+        return "non_article_rolling_tracker"
+    if re.search(r"\b(?:roster tracker|off-season tracker|player movement tracker)\b", title):
+        return "non_article_rolling_tracker"
+    if re.search(r"/(?:photos|photo-gallery|gallery|galleries)/|/news/(?:gallery|photos|in-pictures)-", path) or re.search(
         r"\b(?:photo gallery|in pictures|in photos)\b", title
     ):
         return "non_article_photo_gallery"
@@ -249,7 +259,7 @@ def non_article_news_reason(item):
 def publisher_branding_reason(item):
     """Hold outlet-branded drafts; never replace source names with our own."""
     text = "\n".join(str((item or {}).get(k) or "") for k in ("title", "summary", "body"))
-    if re.search(r"\b(?:BBC(?:\s+Sport)?|ESPN|Sky\s+Sports|Reuters|Associated\s+Press)\b", text, re.I):
+    if re.search(r"\b(?:BBC(?:\s+Sport)?|ESPN|Sky\s+Sports|Reuters|Associated\s+Press|BasketNews|TalkBasket|Eurohoops)\b", text, re.I):
         return "publisher_branding"
     return None
 

@@ -142,6 +142,7 @@ def test_world_athletics_time_must_belong_to_the_current_article(monkeypatch):
     ('NinkoSports Daily Football Quizzes Test Knowledge and Instinct', 'non_article_quiz', 'quiz'),
     ('NHL fantasy hockey previews roll out for all 32 teams', 'non_article_fantasy_product', 'fantasy'),
     ('Grand Final week in pictures', 'non_article_photo_gallery', 'gallery'),
+    ('EuroLeague Injury Report Offers Daily Updates for Fans and Fantasy Players', 'non_article_rolling_tracker', 'injury-tracker'),
 ])
 def test_public_quiz_cleanup_is_durable_and_does_not_delete_article(headline, reason, slug):
     from database import SessionLocal
@@ -192,3 +193,18 @@ def test_site_acknowledgement_is_excluded_without_removing_real_sports_prose():
     body = article_text_from_html(html)
     assert prose.rstrip('.') in body
     assert 'Traditional Custodians' not in body
+
+
+def test_rolling_tracker_and_publisher_promotion_do_not_replace_real_injury_news():
+    assert non_article_news_reason({'title': 'EuroLeague Injury Report (updated daily)'}) == 'non_article_rolling_tracker'
+    assert non_article_news_reason({'title': 'Lakers confirm Davis will miss opener with ankle injury'}) is None
+    assert publisher_branding_reason({'body': 'BasketNews tracks every injury for fantasy players.'}) == 'publisher_branding'
+    assert publisher_branding_reason({'body': 'The National Basketball League confirmed a new coaching appointment.'}) is None
+
+
+def test_confirmed_non_authoritative_sanction_prediction_remains_held():
+    assert non_article_news_reason({
+        'title': 'Manchester City disciplinary outcome discussed',
+        'url': 'https://www.record.pt/internacional/paises/inglaterra/detalhe/liam-gallagher-revela-possivel-castigo-do-man-city-e-explode-calem-se-idiotas-neuroticos-desesperados'
+    }) == 'non_news_fan_speculation'
+    assert non_article_news_reason({'title': 'Premier League confirms disciplinary sanction', 'url': 'https://www.premierleague.com/en/news/sanction'}) is None
