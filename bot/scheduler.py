@@ -243,7 +243,11 @@ def main():
         first_image_run.isoformat(),
     )
     try:
-        # Do not run a one-shot cycle on every Railway deployment. Repeated
+        # A bounded zero-AI public sanity pass is safe on deploy and immediately
+        # removes bad taxonomy / hero media. This is deliberately NOT the AI
+        # writer cycle, so deploys cannot consume the durable request allowance.
+        image_health_job()
+        # Do not run a one-shot AI cycle on every Railway deployment. Repeated
         # deploys previously spent the same durable daily AI allowance before
         # the regular 30-minute schedule had a chance to control cadence.
         scheduler.add_job(
