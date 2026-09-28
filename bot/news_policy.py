@@ -280,6 +280,26 @@ def gossip_news_reason(item):
     if re.search(r"\b(?:gossip|rumour mill|rumor mill|transfer whispers)\b", title, re.I):
         return "gossip_roundup"
 
+    # NinkoSports main News is current reporting, not nostalgia/opinion around
+    # old matches. Keep genuinely new factual events, reject retrospective copy.
+    retrospective = re.search(
+        r"\b(?:look(?:s|ed)? back|looking back|recall(?:s|ed)?|remember(?:s|ed)?|"
+        r"revisit(?:s|ed)?|reflect(?:s|ed)? on|years? on|anniversary|"
+        r"cast in new light|in new light|nostalgia|opinion|column|commentary)\b",
+        title,
+        re.I,
+    )
+    new_fact = re.search(
+        r"\b(?:wins?|won|beats?|defeats?|signs?|signed|joins?|joined|"
+        r"confirm(?:s|ed)?|announce(?:s|d)?|appoint(?:s|ed)?|sack(?:s|ed)?|"
+        r"injur\w*|ruled out|suspend\w*|ban(?:ned)?|qualif\w*|"
+        r"record|contract|transfer completed|agreed deal)\b",
+        title,
+        re.I,
+    )
+    if retrospective and not new_fact:
+        return "non_news_retrospective_commentary"
+
     return None
 
 
