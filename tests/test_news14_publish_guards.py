@@ -125,3 +125,32 @@ def test_football_feed_about_text_cannot_trigger_boxing_bout():
     )
     assert classified.sport == "football"
     assert public_index._explicit_title_sport_override(title) == "football"
+
+
+def test_short_mma_alias_is_word_bounded():
+    from bot.classify import classify_article
+    cricket=classify_article(
+        "South Africa seal series win over Australia",
+        "A commanding performance helped South Africa win the cricket series.",
+        feed_kind="mixed",
+    )
+    assert cricket.sport == "cricket"
+
+    cycling=classify_article(
+        "World road race title decided in Canada",
+        "A commanding ride in the peloton decided the road cycling championship.",
+        feed_kind="mixed",
+    )
+    assert cycling.sport == "cycling"
+
+
+def test_fact_guard_allows_sport_implicit_draft_when_source_sport_is_known():
+    from bot.news_fact_guard import fact_lock_reason
+    draft={
+        "title":"South Africa seal the series",
+        "summary":"South Africa completed the series win over Australia.",
+        "body":"South Africa completed the series win over Australia after the supplied match report.",
+    }
+    source_title="Superb South Africa seal series win over Australia"
+    source_body="South Africa beat Australia in the cricket series and completed the contest."
+    assert fact_lock_reason(draft,source_title,source_body,expected_sport="cricket") is None
