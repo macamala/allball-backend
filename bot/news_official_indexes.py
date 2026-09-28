@@ -41,6 +41,14 @@ HTML_INDEXES = (
         "paths": ("/en/news/",),
     },
     {
+        "id": "nrl-rugby-league-news",
+        "sport": "rugby-league",
+        "publisher": "NRL",
+        "url": "https://www.nrl.com/news/",
+        "host": "www.nrl.com",
+        "paths": ("/news/",),
+    },
+    {
         "id": "nba-basketball-news",
         "sport": "basketball",
         "publisher": "NBA",
