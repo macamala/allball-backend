@@ -8,6 +8,7 @@ publication timestamps or missing article prose.
 """
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from html.parser import HTMLParser
 import logging
@@ -564,41 +565,45 @@ def _hydrate(cfg: Dict, url: str, fallback_title: str) -> Optional[Dict]:
     }
 
 
+def _hydrate_source(cfg: Dict, limit: int, *, sitemap: bool = False) -> List[Dict]:
+    """Hydrate one allowlisted source serially; safe unit for bounded host parallelism."""
+    candidates = _sitemap_candidates(cfg) if sitemap else _anchor_candidates(cfg)
+    rows: List[Dict] = []
+    for url, title in candidates:
+        item = _hydrate(cfg, url, title)
+        if item is None:
+            continue
+        rows.append(item)
+        if len(rows) >= limit:
+            break
+    logger.info(
+        "[official_index] source=%s sport=%s discovered=%s hydrated=%s",
+        cfg["id"], cfg.get("sport") or "mixed", len(candidates), len(rows),
+    )
+    return rows
+
+
 def fetch_official_index_entries(max_per_source: int = 3) -> List[Dict]:
     """Return fresh hydrated official stories; never writes DB or calls AI."""
     limit = max(1, min(int(max_per_source), 5))
     items: List[Dict] = []
-    for cfg in HTML_INDEXES:
-        if cfg.get("enabled", True) is False:
-            continue
-        hydrated = 0
-        candidates = _anchor_candidates(cfg)
-        for url, title in candidates:
-            item = _hydrate(cfg, url, title)
-            if item is None:
-                continue
-            items.append(item)
-            hydrated += 1
-            if hydrated >= limit:
-                break
-        logger.info(
-            "[official_index] source=%s sport=%s discovered=%s hydrated=%s",
-            cfg["id"], cfg.get("sport") or "mixed", len(candidates), hydrated,
-        )
-    for cfg in SITEMAPS:
-        hydrated = 0
-        candidates = _sitemap_candidates(cfg)
-        for url, title in candidates:
-            item = _hydrate(cfg, url, title)
-            if item is None:
-                continue
-            items.append(item)
-            hydrated += 1
-            if hydrated >= limit:
-                break
-        logger.info(
-            "[official_index] source=%s sport=%s discovered=%s hydrated=%s",
-            cfg["id"], cfg["sport"], len(candidates), hydrated,
-        )
+
+    active_html = [cfg for cfg in HTML_INDEXES if cfg.get("enabled", True) is not False]
+    if active_html:
+        workers = min(4, len(active_html))
+        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="news-official") as pool:
+            for rows in pool.map(lambda cfg: _hydrate_source(cfg, limit), active_html):
+                items.extend(rows)
+
+    active_sitemaps = [cfg for cfg in SITEMAPS if cfg.get("enabled", True) is not False]
+    if active_sitemaps:
+        workers = min(2, len(active_sitemaps))
+        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="news-sitemap") as pool:
+            for rows in pool.map(
+                lambda cfg: _hydrate_source(cfg, limit, sitemap=True),
+                active_sitemaps,
+            ):
+                items.extend(rows)
+
     logger.info("[official_index] total_hydrated=%s", len(items))
     return items
