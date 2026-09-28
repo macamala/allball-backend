@@ -306,6 +306,18 @@ def test_unknown_enrichment_skips_non_articles_and_prefers_sport_hinted_story(mo
     assert "_extracted" not in candidates[1]
 
 
+def test_public_image_repair_never_revives_live_score_derived_legacy_rows(monkeypatch):
+    from bot import extract as extract_module
+    monkeypatch.setattr(
+        extract_module,
+        "extract_image_candidates_from_url",
+        lambda *a, **k: pytest.fail("legacy live-score source must not be fetched"),
+    )
+    assert public_index._reachable_source_image(
+        "https://ninkosports.com/live-scores?date=2026-09-27&sport=football"
+    ) is None
+
+
 def test_public_image_repair_falls_back_to_second_source_candidate(monkeypatch):
     from bot import extract as extract_module
     from bot import news_image_http

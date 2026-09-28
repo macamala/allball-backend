@@ -9,6 +9,7 @@ import logging
 import re
 from datetime import datetime, timedelta
 from typing import Optional, Sequence
+from urllib.parse import urlsplit
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -224,6 +225,17 @@ def recent_public_sport_inventory(db: Session, max_age_hours: int = 72) -> dict[
 
 
 
+def _legacy_non_news_source_url(url: str) -> bool:
+    """Never resurrect historical score-derived rows as News."""
+    try:
+        parts = urlsplit(str(url or "").strip())
+    except ValueError:
+        return False
+    host = (parts.hostname or "").lower()
+    path = (parts.path or "").lower()
+    return host in {"ninkosports.com", "www.ninkosports.com"} and path.startswith("/live-scores")
+
+
 def _reachable_source_image(
     source_url: str,
     *,
@@ -233,6 +245,9 @@ def _reachable_source_image(
     """Pick a reachable editorial image from one canonical source page."""
     from bot.extract import extract_image_candidates_from_url
     from bot.news_image_http import news_image_is_reachable
+
+    if _legacy_non_news_source_url(source_url):
+        return None
 
     try:
         candidates = extract_image_candidates_from_url(source_url, timeout=12.0)
