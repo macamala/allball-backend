@@ -177,3 +177,10 @@ def test_first_party_baseball_darts_mma_indexes_are_enabled():
     assert all(by_id[name].get("enabled",True) for name in (
         "mlb-baseball-news","pdc-darts-news","ufc-mma-news"
     ))
+
+
+def test_olympics_global_source_is_mixed_and_never_stamps_sport():
+    row=next(x for x in idx.HTML_INDEXES if x["id"]=="olympics-global-sports-news")
+    assert row["kind"]=="mixed"
+    assert row["sport"] is None
+    assert row["host"]=="www.olympics.com"
