@@ -292,7 +292,7 @@ def non_article_news_reason(item):
 def publisher_branding_reason(item):
     """Hold outlet-branded drafts; never replace source names with our own."""
     text = "\n".join(str((item or {}).get(k) or "") for k in ("title", "summary", "body"))
-    if re.search(r"\b(?:BBC(?:\s+Sport)?|ESPN|Sky\s+Sports|Reuters|Associated\s+Press|BasketNews|TalkBasket|Eurohoops|Yahoo\s+Sports|The\s+Athletic|B92(?:\.sport|\.net)?|Mozzart\s+Sport|Marca)\b", text, re.I):
+    if re.search(r"\b(?:BBC(?:\s+Sport)?|ESPN|Sky\s+Sports|Reuters|Associated\s+Press|BasketNews|TalkBasket|Eurohoops|Yahoo\s+Sports|The\s+Athletic|B92(?:\.sport|\.net)?|Mozzart\s+Sport|Marca|The\s+Guardian|Sportschau|Motorsport\.com)\b", text, re.I):
         return "publisher_branding"
     return None
 

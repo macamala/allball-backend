@@ -8,7 +8,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
 from typing import Iterable
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit, parse_qs
 
 import httpx
 
@@ -127,6 +127,14 @@ def probe_news_image(url: str, *, client=None) -> tuple[bool, str]:
     value = str(url or "").strip()
     if not value:
         return False, "missing"
+    try:
+        keys = {key.lower() for key in parse_qs(urlsplit(value).query)}
+    except ValueError:
+        return False, "invalid_or_nonpublic_url"
+    # Choose another real photograph from the same article. Do not strip an
+    # overlay or modify a signed publisher image URL to manufacture a new one.
+    if keys & {"overlay-base64", "overlay", "mark", "mark64", "txt"}:
+        return False, "composited_overlay"
     cached = _cache_get(value)
     if cached is not None:
         return cached

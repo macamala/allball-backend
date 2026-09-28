@@ -108,3 +108,8 @@ def test_image_probe_keeps_upgradable_small_bbc_photo():
         client=client,
     )
     assert ok is True and reason=="ok"
+
+
+def test_composited_publisher_overlay_is_held_without_rewriting_or_fetching_url():
+    for query in ['overlay-base64=brand','overlay=logo.png','mark64=brand','txt=headline']:
+        assert images.probe_news_image('https://cdn.example/photo.jpg?'+query,client=object()) == (False,'composited_overlay')
