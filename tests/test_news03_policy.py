@@ -242,3 +242,27 @@ def test_editorial_day_reason_uses_sydney_calendar():
     yesterday=datetime(2026,9,27,13,0,tzinfo=timezone.utc)  # 23:00 Sydney Sep 27
     assert editorial_day_reason(today,now,"Australia/Sydney") is None
     assert editorial_day_reason(yesterday,now,"Australia/Sydney") == "not_editorial_today"
+
+
+def test_non_article_analysis_products_are_rejected_before_ai():
+    from bot.news_policy import non_article_news_reason
+    examples={
+        "2026 NFL season, Week 3: What We Learned from Sunday's games":"non_article_analysis",
+        "Most disappointing team in the NFL? Our experts' Week 3 takeaways":"non_article_analysis",
+        "Fantasy waiver wire pickups for Week 4":"non_article_analysis",
+        "AFL Trade Radio is back: Watch LIVE from 12pm AEST":"non_article_live_program",
+    }
+    for title,reason in examples.items():
+        assert non_article_news_reason({"title":title,"url":"https://example.test/news/x"})==reason
+
+
+def test_real_injury_and_result_news_are_not_filtered_as_analysis():
+    from bot.news_policy import non_article_news_reason
+    assert non_article_news_reason({
+        "title":"Buccaneers QB Baker Mayfield suffers thumb injury in loss",
+        "url":"https://example.test/news/injury",
+    }) is None
+    assert non_article_news_reason({
+        "title":"South Africa beat Australia to seal series win",
+        "url":"https://example.test/news/result",
+    }) is None
