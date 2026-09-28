@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from datetime import datetime, timedelta
 from typing import Optional, Sequence
 from urllib.parse import urlsplit
@@ -14,7 +15,8 @@ from urllib.parse import urlsplit
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from editorial import classify_media_url, evaluate_quality, news_image_is_publishable, score_image_candidate
+from editorial import classify_media_url, evaluate_quality, news_image_is_publishable
+from bot.news_image_http import score_news_image_candidate
 from models import Article, ArticleTaxonomyResolution
 from sport_match import MAIN_SPORTS, isolation_ok
 from bot.taxonomy import COMPETITIONS
@@ -260,6 +262,7 @@ def _reachable_source_image(
     *,
     current_url: Optional[str] = None,
     max_checks: int = 6,
+    include_current: bool = False,
 ) -> Optional[str]:
     """Pick a reachable editorial image from one canonical source page."""
     from bot.extract import extract_image_candidates_from_url
@@ -271,7 +274,7 @@ def _reachable_source_image(
     # Repair a verified same-photo hero size before fetching a whole source page.
     # The stored thumbnail is never approved merely because a variant exists.
     upgraded = news_hero_url(current_url or "")
-    if (upgraded and upgraded != current_url and news_image_is_publishable(upgraded)
+    if (not include_current and upgraded and upgraded != current_url and news_image_is_publishable(upgraded)
             and news_image_is_reachable(upgraded)):
         return upgraded
 
@@ -289,12 +292,12 @@ def _reachable_source_image(
         if (
             not url
             or url in seen
-            or url == str(current_url or "").strip()
+            or (not include_current and url == str(current_url or "").strip())
             or len(url) > 500
             or not news_image_is_publishable(url)
         ):
             continue
-        score = score_image_candidate(candidate)
+        score = score_news_image_candidate(candidate)
         if score < 0:
             continue
         seen.add(url)
@@ -327,6 +330,9 @@ def _image_repair_resolution(article, cached):
             sport_confidence=0.99, competition_confidence=0,
             evidence=["verified-uefa-football-article-path"])
     return resolved
+
+
+_SOURCE_IMAGE_CHECKED = {}
 
 
 def repair_recent_news_images(
@@ -475,16 +481,44 @@ def repair_recent_news_images(
         if tax.public_ok:
             recovered += 1
 
-    changed = refreshed + hidden + recovered
+    # A reachable photograph can still belong to a recommendation card. Audit
+    # a bounded set against each original article, using the same hero ordering
+    # as new ingestion. Cache by source+stored image, so a change is rechecked.
+    aligned = 0
+    checks = 0
+    now = time.monotonic()
+    for key, expires in list(_SOURCE_IMAGE_CHECKED.items()):
+        if expires <= now:
+            _SOURCE_IMAGE_CHECKED.pop(key, None)
+    for article, tax in rows:
+        if not tax.public_ok or int(article.id) in touched_ids or not article.source_url:
+            continue
+        key = (int(article.id), article.source_url, article.image_url)
+        if key in _SOURCE_IMAGE_CHECKED or checks >= min(6, refresh_budget):
+            continue
+        checks += 1
+        preferred = _reachable_source_image(article.source_url,
+            current_url=article.image_url, max_checks=6, include_current=True)
+        _SOURCE_IMAGE_CHECKED[key] = now + (6 * 3600 if preferred else 900)
+        if preferred and preferred != article.image_url:
+            article.image_url = preferred
+            tax.hero_media_kind = classify_media_url(preferred)
+            db.add(article)
+            db.add(tax)
+            _SOURCE_IMAGE_CHECKED[(int(article.id), article.source_url, preferred)] = now + 6 * 3600
+            aligned += 1
+            logger.info("[public_index] aligned hero with source article=%s", article.id)
+    changed = refreshed + hidden + recovered + aligned
     if changed:
         try:
             db.commit()
         except Exception:
             db.rollback()
+            _SOURCE_IMAGE_CHECKED.clear()
             logger.exception("recent News image repair failed")
             return 0
         logger.info(
-            "[public_index] image repair checked=%s failed=%s definitive=%s refreshed=%s hidden=%s recovered=%s reasons=%s",
+            "[public_index] image repair checked=%s failed=%s definitive=%s refreshed=%s hidden=%s recovered=%s reasons=%s aligned=%s",
             len(rows),
             len(failed),
             len(broken),
@@ -492,6 +526,7 @@ def repair_recent_news_images(
             hidden,
             recovered,
             dict(reasons),
+            aligned,
         )
     elif broken:
         logger.info(

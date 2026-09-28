@@ -328,7 +328,7 @@ def test_public_image_repair_falls_back_to_second_source_candidate(monkeypatch):
         extract_module,
         "extract_image_candidates_from_url",
         lambda *a, **k: [
-            {"url":"https://example.test/dead.jpg","source":"body","width":1600,"in_article":True},
+            {"url":"https://example.test/dead.jpg","source":"og","width":1600,"in_article":True},
             {"url":"https://example.test/good.jpg","source":"jsonld","width":1200,"in_article":True},
         ],
     )
@@ -350,8 +350,8 @@ def test_reachable_image_selector_falls_back_to_second_candidate(monkeypatch):
         lambda url: seen.append(url) or url.endswith("good.jpg"),
     )
     candidates=[
-        {"url":"https://example.test/best.jpg","source":"body","width":1600,"in_article":True},
-        {"url":"https://example.test/good.jpg","source":"og","width":1200,"in_article":False},
+        {"url":"https://example.test/best.jpg","source":"og","width":1600,"in_article":True},
+        {"url":"https://example.test/good.jpg","source":"body","width":1200,"in_article":False},
     ]
     assert ingest._pick_reachable_article_image(candidates)=="https://example.test/good.jpg"
     assert seen==["https://example.test/best.jpg","https://example.test/good.jpg"]

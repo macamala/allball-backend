@@ -311,3 +311,10 @@ def test_ufc_drupal_column_layout_is_not_discarded_as_a_sidebar():
     h='<meta property="og:url" content="https://www.ufc.com/news/week-8-preview"><main><div class="l-two-col--right-sidebar"><div class="field--name-body-structured"><p>The fighters will compete in the next round of the series.</p></div><aside><p>Unrelated fight promotion.</p></aside></div></main>'
     body=article_text_from_html(h)
     assert 'fighters will compete' in body and 'Unrelated' not in body
+
+
+def test_modal_may_is_not_a_month_but_real_may_dates_stay_locked():
+    from bot.news_fact_guard import _calendar_terms
+    assert 'may' not in _calendar_terms('The player may improve and may seek another route.')
+    for value in ['in May','May 12','late may','12 May','next may']:
+        assert 'may' in _calendar_terms(value)

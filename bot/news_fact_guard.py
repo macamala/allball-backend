@@ -21,9 +21,16 @@ MONTHS_DAYS = {
 
 
 def _calendar_terms(text: str) -> set[str]:
-    # Modal "may be/need/have ..." is not the month May. Keep actual date
-    # phrases (in May, May 12, late May) subject to the existing calendar lock.
-    normalized = _norm(text)
+    # Lower-case modal "may" can precede any verb, not a fixed verb shortlist.
+    # Preserve actual date contexts and capitalised May as calendar evidence.
+    def may_word(match):
+        before = str(text or '')[:match.start()]
+        after = str(text or '')[match.end():]
+        dated = (re.search(r'\b(?:in|by|until|from|since|during|before|after|next|last|this|early|late|mid|of)\s+$', before, re.I)
+                 or re.search(r'\b\d{1,2}\s+$', before)
+                 or re.match(r'\s+\d', after))
+        return match[0] if dated or match[0] != 'may' else ''
+    normalized = _norm(re.sub(r'\bmay\b', may_word, text or '', flags=re.I))
     normalized = re.sub(
         r"\bmay\s+(?=(?:not\s+)?(?:be|have|need|require|face|remain|return|leave|join|play|miss|keep|make|take|come|go)\b)",
         "", normalized,

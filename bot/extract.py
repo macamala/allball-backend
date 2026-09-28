@@ -664,9 +664,9 @@ def extract_from_url(url: str, timeout: float = 18.0) -> Tuple[str, Optional[str
 
     image = None
     try:
-        from editorial import pick_article_image
+        from .news_image_http import pick_news_article_image
 
-        image = pick_article_image(collect_page_image_candidates(html))
+        image = pick_news_article_image(collect_page_image_candidates(html))
     except Exception:
         image = _og(html, "og:image")
     text = article_text_from_html(html)

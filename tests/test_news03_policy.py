@@ -350,3 +350,23 @@ def test_old_year_reflective_interview_is_not_current_news():
         "title":"Totti credits his 2006 World Cup role for lifting him beyond Rome",
         "url":"https://example.test/sport/story",
     })=="non_news_retrospective_commentary"
+
+
+def test_spelled_source_numbers_are_exact_lexical_equivalents_not_invented_counts():
+    from bot.news_policy import numeric_tokens
+    assert numeric_tokens('Twelve-year-old player won three games.',include_spelled=True) == {'12','3'}
+    assert numeric_tokens('twenty-one points',include_spelled=True) == {'21'}
+    assert numeric_tokens('one hundred and seventy points',include_spelled=True) == set()
+    assert numeric_tokens('someone alone in a twosome',include_spelled=True) == set()
+    # Digit punctuation/score structure stays strict and no subtraction occurs.
+    assert numeric_tokens('21-10, 21-11',include_spelled=True) == {'21-10','21-11'}
+    assert '11' not in numeric_tokens('12-year-old player',include_spelled=True)
+
+
+def test_uefa_competition_aliases_share_article_identity_but_preserve_fetch_url():
+    from bot.news_policy import news_source_identity
+    a='https://www.uefa.com/uefachampionsleague/news/0295-1cd661bbe9cd-ded5a1c8b04d-1000--yellow-cards/'
+    b=a.replace('uefachampionsleague','uefaeuropaleague')
+    assert news_source_identity(a) == news_source_identity(b)
+    assert news_source_identity(a) != news_source_identity(a.replace('1cd661bbe9cd','1cd661bbe9ce'))
+    assert canonical_news_url(a) == a

@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from database import SessionLocal
 from models import Article
-from editorial import news_image_is_publishable, pick_article_image, score_image_candidate
+from editorial import news_image_is_publishable, pick_article_image
 
 from .news_policy import editorial_day_reason, fair_news_queue, freshness_reason, non_article_news_reason, numeric_tokens, original_draft_reason, source_path_sport_hint
 from .news_fact_guard import fact_lock_reason
@@ -33,7 +33,7 @@ from .dedupe import existing_by_url, existing_near_duplicate, unprocessed_source
 from .extract import extract_from_url, parse_feed_datetime, paragraphs_from_html
 from .feeds import enabled_feeds
 from .news_feed_http import read_news_feed
-from .news_image_http import news_image_is_reachable, news_hero_url
+from .news_image_http import news_image_is_reachable, news_hero_url, score_news_image_candidate
 from .media_url import collect_feed_image_candidates, pick_source_image, width_from_url
 from .quality import (
     enough_for_brief,
@@ -213,7 +213,7 @@ def _ai_story(
         feedback = None
         if deterministic_reason == "unsupported_number":
             output = "\n".join(str(parsed.get(k) or "") for k in ("title", "summary", "body"))
-            missing = sorted(numeric_tokens(output) - numeric_tokens(title + "\n" + payload))
+            missing = sorted(numeric_tokens(output) - numeric_tokens(title + "\n" + payload, include_spelled=True))
             feedback = {"unsupported_claims": ["Numeric token absent from source: " + token for token in missing[:6]],
                         "changed_names": []}
             logger.info("[fetch_sources] unsupported_numeric_tokens=%s title=%s", missing[:6], title[:80])
@@ -279,7 +279,7 @@ def _pick_reachable_article_image(candidates: list, max_checks: int = 6) -> Opti
     for candidate in candidates or []:
         if not isinstance(candidate, dict):
             continue
-        score = score_image_candidate(candidate)
+        score = score_news_image_candidate(candidate)
         url = news_hero_url(str(candidate.get("url") or "").strip())
         if score < 0 or not url or not news_image_is_publishable(url):
             continue
@@ -766,7 +766,11 @@ def _ingest_item(
         from public_read import public_query
 
         if public_query(db).filter(Article.id == article.id).first() is None:
-            logger.info("[fetch_sources] hold public admission id=%s", article.id)
+            from editorial import evaluate_quality
+            quality = evaluate_quality(title=article.title, summary=article.summary,
+                body=article.ai_content or article.content, image_url=article.image_url)
+            logger.info("[fetch_sources] hold public admission id=%s sport=%s confidence=%s quality_flags=%s",
+                article.id, resolved.sport, resolved.sport_confidence, quality.get("flags"))
             return None, False
         from public_cache import bump_public_cache
 

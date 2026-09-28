@@ -714,7 +714,7 @@ def _hydrate(cfg: Dict, url: str, fallback_title: str, *, diagnostics=None, site
     image = None
     image_candidates = []
     try:
-        from editorial import pick_article_image
+        from .news_image_http import pick_news_article_image
 
         for candidate in collect_page_image_candidates(html):
             if not isinstance(candidate, dict):
@@ -729,7 +729,7 @@ def _hydrate(cfg: Dict, url: str, fallback_title: str, *, diagnostics=None, site
             row = dict(candidate)
             row["url"] = resolved_url
             image_candidates.append(row)
-        image = pick_article_image(image_candidates)
+        image = pick_news_article_image(image_candidates)
     except Exception:
         image = None
         image_candidates = []

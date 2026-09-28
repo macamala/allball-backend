@@ -305,7 +305,7 @@ def write_ninkosports_story(
     if len(facts) > 8000:
         facts = facts[:8000]
     numeric_source = f"{title}\n{facts}"
-    allowed_numeric_tokens = sorted(numeric_tokens(numeric_source))
+    allowed_numeric_tokens = sorted(numeric_tokens(numeric_source, include_spelled=True))
     numeric_contract = (
         ", ".join(allowed_numeric_tokens)
         if allowed_numeric_tokens

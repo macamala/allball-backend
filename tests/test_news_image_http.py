@@ -191,3 +191,38 @@ def test_nbl_navigation_logo_never_becomes_a_hero_even_if_large():
     assert images.probe_news_image(url,client=object()) == (False,'publisher_default_image')
     photo='https://cdn.prod.website-files.com/64a50350adad23f0f1ef8f43/6ab9be9cc5c4fb977f7f8a29_knight_colour_corrected.jpg'
     assert images.probe_news_image(photo,client=Client([Response()])) == (True,'ok')
+
+
+def test_article_metadata_photo_outranks_unrelated_card_inside_main():
+    candidates=[
+        {'url':'https://cdn.example/other-story.jpg','source':'body','in_article':True,'width':1600},
+        {'url':'https://cdn.example/current-story.jpg','source':'og'},
+    ]
+    assert images.pick_news_article_image(candidates) == 'https://cdn.example/current-story.jpg'
+
+
+def test_public_repair_aligns_reachable_but_unrelated_photo_and_remembers_check(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    import public_index
+    from bot import extract
+    old='https://cdn.example/other-story.jpg';good='https://cdn.example/current-story.jpg'
+    article=SimpleNamespace(id=901,image_url=old,source_url='https://publisher.example/story')
+    tax=SimpleNamespace(public_ok=True,hero_media_kind='EDITORIAL_PHOTO')
+    db=Mock()
+    query=db.query.return_value.join.return_value.filter.return_value.order_by.return_value.limit.return_value
+    query.all.side_effect=[[(article,tax)],[],[(article,tax)],[]]
+    public_index._SOURCE_IMAGE_CHECKED.clear()
+    monkeypatch.setattr(images,'probe_news_images',lambda urls,**kw:{u:(True,'ok') for u in urls})
+    monkeypatch.setattr(images,'news_image_is_reachable',lambda u:True)
+    pages=[]
+    monkeypatch.setattr(extract,'extract_image_candidates_from_url',lambda url,**kw:pages.append(url) or [
+        {'url':old,'source':'body','in_article':True,'width':1600},
+        {'url':good,'source':'og'},
+    ])
+    assert public_index.repair_recent_news_images(db,recover_limit=2) == 1
+    assert article.image_url == good and tax.public_ok
+    assert public_index.repair_recent_news_images(db,recover_limit=2) == 0
+    assert pages == [article.source_url]
+    db.commit.assert_called_once()
+    public_index._SOURCE_IMAGE_CHECKED.clear()

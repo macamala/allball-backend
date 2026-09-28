@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session, load_only
 
 from models import Article
 from .textutil import normalize_title
-from .news_policy import canonical_news_url
+from .news_policy import news_source_identity
 
 
 def unprocessed_source_items(db: Session, items: list) -> list:
@@ -29,12 +29,12 @@ def unprocessed_source_items(db: Session, items: list) -> list:
         Article.source_url.isnot(None)
     ).order_by(Article.id.desc()).limit(500).all()
     known = {
-        canonical_news_url(value)
+        news_source_identity(value)
         for source, external in [*exact, *recent]
         for value in (source, external)
-        if value and canonical_news_url(value)
+        if value and news_source_identity(value)
     }
-    return [item for item in items if canonical_news_url(item.get('url')) not in known]
+    return [item for item in items if news_source_identity(item.get('url')) not in known]
 
 
 def existing_by_url(db: Session, source_url: str) -> Optional[Article]:
@@ -49,7 +49,7 @@ def existing_by_url(db: Session, source_url: str) -> Optional[Article]:
     )
     if exact is not None:
         return exact
-    target = canonical_news_url(source_url)
+    target = news_source_identity(source_url)
     if not target:
         return None
     recent = (
@@ -61,7 +61,7 @@ def existing_by_url(db: Session, source_url: str) -> Optional[Article]:
         .all()
     )
     for article in recent:
-        if canonical_news_url(article.source_url or article.external_id or "") == target:
+        if news_source_identity(article.source_url or article.external_id or "") == target:
             return article
     return None
 

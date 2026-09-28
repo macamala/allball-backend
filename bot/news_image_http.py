@@ -28,6 +28,23 @@ _CACHE_TTL_BAD = 30 * 60
 _CACHE: dict[str, tuple[float, bool, str]] = {}
 
 
+def score_news_image_candidate(candidate: dict) -> float:
+    """Prefer this article's explicit hero over images in recommendation cards."""
+    from editorial import score_image_candidate
+    score = score_image_candidate(candidate)
+    if score < 0:
+        return score
+    # <main> and even <article> often also wrap unrelated story cards. Publisher
+    # OG/NewsArticle metadata is stronger subject evidence than DOM position.
+    return score + {"og": 24, "jsonld": 20, "twitter": 14}.get(candidate.get("source"), 0)
+
+
+def pick_news_article_image(candidates):
+    ranked = [row for row in candidates or [] if isinstance(row, dict)]
+    best = max(ranked, key=score_news_image_candidate, default=None)
+    return best.get("url") if best and score_news_image_candidate(best) >= 0 else None
+
+
 def news_hero_url(url: str) -> str:
     """Select a same-photo size; callers MUST probe and persist this exact URL."""
     value = str(url or "").strip()

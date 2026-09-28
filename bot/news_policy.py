@@ -20,8 +20,27 @@ RUGBY_LEAGUE_TITLE_RE = re.compile(r"(?<!\w)(?:rugby[\s-]+league|nrlw?)(?!\w)", 
 RUGBY_UNION_TITLE_RE = re.compile(r"(?<!\w)rugby[\s-]+union(?!\w)", re.I)
 
 
-def numeric_tokens(text):
-    return set(re.findall(r'(?<!\w)\d+(?:[.,:/–-]\d+)*(?:%|\b)', text or ''))
+def numeric_tokens(text, *, include_spelled=False):
+    tokens = set(re.findall(r'(?<!\w)\d+(?:[.,:/–-]\d+)*(?:%|\b)', text or ''))
+    if not include_spelled:
+        return tokens
+    # Source-only lexical equivalents, not calculations. Confirmed false hold:
+    # the source said "Twelve-year-old" and the draft correctly wrote "12".
+    units = dict(zip('zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen'.split(), range(20)))
+    tens = dict(zip('twenty thirty forty fifty sixty seventy eighty ninety'.split(), range(20,100,10)))
+    single = '|'.join(units)
+    pattern = re.compile(r'\b(?:(' + '|'.join(tens) + r')(?:[\s-]+(' + '|'.join(list(units)[1:10]) + r'))?|(' + single + r'))\b', re.I)
+    value = str(text or '')
+    for match in pattern.finditer(value):
+        # Larger spelled quantities require a separate parser; never split
+        # "one hundred" into an apparent source-supported quantity of 1.
+        if (re.search(r'\b(?:hundred|thousand|million|billion)(?:\s+and)?[\s-]+$', value[:match.start()], re.I)
+                or re.match(r'[\s-]+(?:hundred|thousand|million|billion)\b', value[match.end():], re.I)):
+            continue
+        number = (tens[match[1].lower()] + units.get((match[2] or '').lower(), 0)
+                  if match[1] else units[match[3].lower()])
+        tokens.add(str(number))
+    return tokens
 _NAME_START_STOP = {'The','This','That','These','Those','After','Before','With','When','While','But','And','For','From','Into','During'}
 _PROPER_NAME_RE = re.compile(
     r"\b(?:[A-Z][A-Za-zÀ-ÖØ-öø-ÿ'’.-]{1,})(?:[ \t]+(?:[A-Z][A-Za-zÀ-ÖØ-öø-ÿ'’.-]{1,}|de|da|del|di|la|le|van|von)){1,4}\b"
@@ -126,6 +145,20 @@ def source_path_sport_hint(url):
         if host == expected_host and path.startswith(prefix):
             return sport
     return None
+
+
+def news_source_identity(value):
+    """Comparison key only; never replace a fetch URL with this identity."""
+    canonical = canonical_news_url(value)
+    if not canonical:
+        return None
+    parts = urlsplit(canonical)
+    if parts.hostname in {'www.uefa.com', 'uefa.com'}:
+        article = re.search(r'/news/([0-9a-f]{4}-[0-9a-f]{12}-[0-9a-f]{12}-[0-9]{4})(?:--|/|$)', parts.path, re.I)
+        if article:
+            # UEFA syndicates one article ID under multiple competition paths.
+            return 'uefa-article:' + article[1].lower()
+    return canonical
 
 
 def publication_time(stamp):
@@ -566,7 +599,7 @@ def fair_news_queue(
         reason = freshness_reason(item.get('published_at'), now, max_age_hours)
         if not reason and same_day_timezone:
             reason = editorial_day_reason(item.get('published_at'), now, same_day_timezone)
-        url = canonical_news_url(item.get('url'))
+        url = news_source_identity(item.get('url'))
         if reason or not url:
             rejected[reason or 'invalid_source_url'] += 1; continue
         if url in seen:
@@ -749,7 +782,7 @@ def original_draft_reason(draft, source_title, source_body):
         and SequenceMatcher(None, source_title_norm, draft_title_norm).ratio() > 0.88
     ):
         return 'headline_too_similar_to_source'
-    if numeric_tokens(output) - numeric_tokens(source): return 'unsupported_number'
+    if numeric_tokens(output) - numeric_tokens(source, include_spelled=True): return 'unsupported_number'
     tokens = lambda text: re.findall(r"[\w]+", text.lower())
     src, dst = tokens(source_body), tokens(body)
     if len(dst) < 25: return 'insufficient_original_body'
