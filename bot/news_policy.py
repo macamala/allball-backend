@@ -299,6 +299,12 @@ def non_article_news_reason(item):
         path = ""
 
     body = str((item or {}).get("body") or (item or {}).get("summary") or "")
+    # Confirmed actor-role swap in this source: Cuesta was Arsenal's assistant,
+    # not Gilardino. Preserve the source row and record a durable public hold.
+    if path.rstrip('/') == '/parma-agreement-gilardino-italy-return-coach' and re.search(
+        r"\bgilardino\s+(?:previously\s+)?(?:served|worked|was)\s+(?:as\s+)?(?:an?\s+|the\s+)?assistant\b[^.!?\n]{0,50}\barsenal\b", body, re.I
+    ):
+        return "known_entity_role_misattribution"
     if unsupported_news_sport(title, body):
         return "unsupported_news_sport"
     if re.search(r"\b(?:snl|saturday night live|talk show|reality show)\b", title):

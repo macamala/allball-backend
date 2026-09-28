@@ -48,6 +48,15 @@ def test_actual_team_declining_to_give_injury_details_remains_news():
         'body': 'The club did not specify a return date for its injured captain.'}) is None
 
 
+def test_confirmed_cuesta_gilardino_role_swap_cannot_remain_public():
+    item = {'title': 'Alberto Gilardino agrees to return as Parma football coach',
+        'url': 'https://football-italia.net/parma-agreement-gilardino-italy-return-coach/',
+        'body': 'Gilardino previously served as an assistant coach at Arsenal.'}
+    assert non_article_news_reason(item) == 'known_entity_role_misattribution'
+    item['body'] = 'Carlos Cuesta, the former Arsenal assistant, departed Parma. Gilardino agreed to join the club.'
+    assert non_article_news_reason(item) is None
+
+
 @pytest.mark.parametrize('title,reason', [
     ('MLB playoffs: Ranking teams by World Series pressure', 'non_article_analysis'),
     ("51 reasons to fear the Kings' bench", 'non_article_analysis'),

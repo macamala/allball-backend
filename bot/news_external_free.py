@@ -153,7 +153,11 @@ def _ordered_configs(purpose: str, avoid_provider: Optional[str] = None) -> list
     offset = _CURSOR[purpose] % len(rows)
     _CURSOR[purpose] += 1
     rows = rows[offset:] + rows[:offset]
-    if avoid_provider and len(rows) > 1:
+    if avoid_provider and purpose == "validator":
+        # Validation independence is a requirement, including quota fallback.
+        # A single surviving writer provider cannot approve its own drafts.
+        rows = [row for row in rows if row["provider"] != avoid_provider]
+    elif avoid_provider and len(rows) > 1:
         rows.sort(key=lambda row: row["provider"] == avoid_provider)
     return rows
 

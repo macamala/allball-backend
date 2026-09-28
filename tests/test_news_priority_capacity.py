@@ -108,6 +108,23 @@ def test_provider_retry_windows(value, seconds):
     assert external._retry_seconds(value) == seconds
 
 
+def test_single_surviving_writer_provider_cannot_be_its_own_validator(pool, monkeypatch):
+    external._UNAVAILABLE['validator'].add('groq')
+    assert external._ordered_configs('validator', avoid_provider='cloudflare') == []
+    rows = external._ordered_configs('validator', avoid_provider='groq')
+    assert [row['provider'] for row in rows] == ['cloudflare']
+
+
+def test_xkiro_writer_does_not_fall_back_to_xkiro_self_validation(monkeypatch):
+    monkeypatch.setattr(external, 'completion', lambda **kw: (None, ('unknown', 'unknown')))
+    token = router._LAST_WRITER.set(('xkiro', 'fixture:free'))
+    monkeypatch.setattr(router, '_completion', lambda **kw: pytest.fail('self-validation must not spend a request'))
+    try:
+        assert router.validate_free_story('source', 'facts', 'title', 'summary', 'body') == (False, 'validator-independent-unavailable')
+    finally:
+        router._LAST_WRITER.reset(token)
+
+
 def test_numeric_contract_and_corrective_data_keep_source_authority(monkeypatch):
     prompts = []
     monkeypatch.setattr(writer, 'openai_rate_limited', lambda: False)

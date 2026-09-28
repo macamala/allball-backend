@@ -365,6 +365,10 @@ importance, chronology, atmosphere, crowd reaction, tactics, injury, statistic,
 location, table position, relationship, quote, prediction, consequence or
 stronger characterization not supported by the source.
 Reject any changed or invented proper name.
+Check WHO did each action, not just whether the names and action appear somewhere
+in the source. Never transfer one person's employment, biography, injury, result
+or quotation to another person named in the same article. Resolve pronouns from
+their source context. If the actor is uncertain, reject the claim.
 Do not use outside knowledge or assumptions.
 The source and draft must describe a concrete current sporting development.
 Reject product/service descriptions, evergreen injury or roster trackers,
@@ -431,11 +435,15 @@ def validate_free_story(
             purpose="validator",
             avoid_provider=writer_provider,
         )
+        if raw and identity[0] == writer_provider and writer_provider != "unknown":
+            raw = None
         if raw:
             _LAST_JSON.set(identity)
     except Exception as exc:
         logger.warning("[free_ai] external validator unavailable: %s", type(exc).__name__)
     if not raw:
+        if writer_provider == "xkiro":
+            return False, "validator-independent-unavailable"
         raw = _completion(
             model=model,
             system=_VALIDATOR_SYSTEM,
@@ -448,6 +456,9 @@ def validate_free_story(
             _LAST_JSON.set(("xkiro", model))
     if not raw:
         return False, "validator-unavailable"
+    validator_provider, validator_model = _LAST_JSON.get()
+    logger.info("[free_ai] validator provider=%s model=%s writer_provider=%s",
+                validator_provider, validator_model, writer_provider)
     try:
         result = json.loads(raw)
     except (TypeError, ValueError):
