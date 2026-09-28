@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
 import re
 from typing import Iterable
-from urllib.parse import urljoin, urlsplit, parse_qs
+from urllib.parse import urljoin, urlsplit, parse_qs, parse_qsl, urlencode, urlunsplit
 
 import httpx
 
@@ -26,6 +26,30 @@ MAX_SNIFF_BYTES = 64 * 1024
 _CACHE_TTL_OK = 6 * 60 * 60
 _CACHE_TTL_BAD = 30 * 60
 _CACHE: dict[str, tuple[float, bool, str]] = {}
+
+
+def news_hero_url(url: str) -> str:
+    """Select a same-photo size; callers MUST probe and persist this exact URL."""
+    value = str(url or "").strip()
+    try:
+        parts = urlsplit(value)
+        pairs = parse_qsl(parts.query, keep_blank_values=True)
+        # Never alter signed URLs or publisher overlays.
+        if {k.lower() for k, _ in pairs} & {
+            "signature", "sig", "token", "policy", "expires", "st", "hmac",
+            "overlay-base64", "overlay", "mark", "mark64", "txt",
+        }:
+            return value
+        # Verified UEFA image endpoint: 158x89 thumbnail -> 988x556 original.
+        # Preserve the image identity, crop and every unrelated query value.
+        if parts.hostname == "editorial.uefa.com":
+            pairs = [(k, "1600" if k.lower() == "imwidth" and v.isdigit() else v)
+                     for k, v in pairs]
+            value = urlunsplit((parts.scheme, parts.netloc, parts.path,
+                               urlencode(pairs), parts.fragment))
+        return upgrade_hero_image_url(value) or value
+    except ValueError:
+        return value
 
 
 def _looks_like_image_bytes(data: bytes) -> bool:
@@ -46,6 +70,19 @@ def _looks_like_image_bytes(data: bytes) -> bool:
 def _image_dimensions(data: bytes):
     """Return (width, height) from common image headers when available."""
     raw = bytes(data or b"")
+    # All three WebP headers, per the RIFF container specification. CDN content
+    # negotiation can return WebP even when the URL ends in .jpeg.
+    if len(raw) >= 30 and raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
+        kind, payload = raw[12:16], raw[20:]
+        if kind == b"VP8X":
+            return (1 + int.from_bytes(payload[4:7], "little"),
+                    1 + int.from_bytes(payload[7:10], "little"))
+        if kind == b"VP8 " and payload[3:6] == b"\x9d\x01\x2a":
+            return (int.from_bytes(payload[6:8], "little") & 0x3fff,
+                    int.from_bytes(payload[8:10], "little") & 0x3fff)
+        if kind == b"VP8L" and payload[0] == 0x2f:
+            packed = int.from_bytes(payload[1:5], "little")
+            return (1 + (packed & 0x3fff), 1 + ((packed >> 14) & 0x3fff))
     # PNG: signature + IHDR width/height.
     if len(raw) >= 24 and raw.startswith(b"\x89PNG\r\n\x1a\n") and raw[12:16] == b"IHDR":
         return int.from_bytes(raw[16:20], "big"), int.from_bytes(raw[20:24], "big")
@@ -86,20 +123,17 @@ def _image_dimensions(data: bytes):
 def _image_geometry_reason(data: bytes, url: str = ""):
     dims = _image_dimensions(data)
     if not dims:
-        return None
+        return "image_dimensions_unverified"
     width, height = dims
     if width <= 0 or height <= 0:
-        return None
-    if width < 320 or height < 140:
-        # Some publishers (notably BBC ichef) encode the requested display
-        # width in the URL. The public UI rewrites that same-photo URL to the
-        # hero role, so a 240px transport variant is not inherently a bad hero.
-        upgraded = upgrade_hero_image_url(url)
-        if not upgraded or upgraded == url:
-            return "image_too_small"
+        return "image_dimensions_unverified"
     ratio = width / max(height, 1)
     if ratio > 3.5 or ratio < 0.35:
         return "bad_aspect_ratio"
+    if width < 640 or height < 320:
+        # A possible larger URL is not proof. Probe the selected hero itself;
+        # never approve a thumbnail on the assumption that the UI upgrades it.
+        return "image_too_small"
     return None
 
 
@@ -157,7 +191,7 @@ def probe_news_image(url: str, *, client=None) -> tuple[bool, str]:
             headers={
                 "User-Agent": USER_AGENT,
                 "Referer": "https://ninkosports.com/",
-                "Accept": "image/avif,image/webp,image/*,*/*;q=0.5",
+                "Accept": "image/jpeg,image/png,image/webp,image/gif;q=0.8",
                 "Range": f"bytes=0-{MAX_SNIFF_BYTES - 1}",
             },
         )
@@ -189,12 +223,11 @@ def probe_news_image(url: str, *, client=None) -> tuple[bool, str]:
                         if len(data) >= MAX_SNIFF_BYTES:
                             break
                     magic_ok = _looks_like_image_bytes(bytes(data))
-                    type_ok = content_type.startswith("image/")
                     if not data:
                         result = (False, "empty_image_response")
                         _cache_put(value, *result)
                         return result
-                    if not type_ok and not magic_ok:
+                    if not magic_ok:
                         result = (False, "not_image_content")
                         _cache_put(value, *result)
                         return result

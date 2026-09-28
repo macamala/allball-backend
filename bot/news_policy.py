@@ -216,6 +216,19 @@ def non_article_news_reason(item):
 
     if "weplaystrong-house-on-tour" in path or re.search(r"\bweplaystrong house on tour\b", title):
         return "non_article_event_promotion"
+    # Fan engagement is a product, even when the publisher is an official club
+    # and the poll mentions historical sporting results or an MVP award.
+    poll_title = title + " " + path.replace("-", " ")
+    if (re.search(r"\bultimate goal of the season\b|\bfans?[’']? mvp\b", poll_title)
+            or re.search(r"\b(?:fan voting|fan poll|voting opens|cast your vote|vote now|vote for)\b", poll_title)
+            or (re.search(r"\b(?:goal|player|try|save) of the (?:week|month|season)\b", poll_title)
+                and re.search(r"\b(?:vote|voting|poll|nominees)\b", poll_title))):
+        return "non_article_fan_poll"
+    if re.search(r"\b(?:fixtures by team|fixtures and results|full fixture list)\b", title):
+        return "non_article_service_guide"
+    copy = " ".join(str((item or {}).get(k) or "") for k in ("summary", "body"))
+    if re.search(r"\bno (?:further|additional|specific) .{0,100}\b(?:provided|mentioned|supplied) (?:in|by) (?:the )?(?:source|release|material)\b", copy, re.I):
+        return "non_news_source_meta_filler"
     if re.search(r"\b(?:predlozzi|tipovanja|ludi tiket|kladioničarski tipovi|kladionicarski tipovi)\b", title) or re.search(r"/(?:predlozzi-i-tipovanja|ludi-tiket|najava-dana)-", path):
         return "non_article_betting_product"
     if re.search(r"\b(?:biramo najlepši gol|biramo najlepsi gol|бирамо најлепши гол|vote for (?:the |your )?goal)\b", title):
@@ -361,6 +374,15 @@ def gossip_news_reason(item):
         r"\b(?:navodno|mogao bi|mogla bi|mogući transfer|moguci transfer|moguć transfer|moguc transfer|могућ трансфер|наводно|могао би)\b",
     )
     speculative = any(re.search(pattern, title, re.I) for pattern in speculation_patterns)
+    # Confirmed incident: a third-party prediction about an athlete changing
+    # nationality became a sensational headline without an actual decision.
+    citizenship = re.search(r"\b(?:citizenship|nationality|passport|državljanstv\w*|drzavljanstv\w*|држављанств\w*)\b", title + " " + summary)
+    if citizenship and re.search(
+        r"\b(?:considers?|considering|reportedly|could|might|may|potential|"
+        r"mogla bi|mogao bi|mogla da|mogao da|наводно|могла би|могао би)\b",
+        title + " " + summary,
+    ):
+        speculative = True
     confirmed = re.search(
         r"\b(?:official(?:ly)?|confirm(?:s|ed)?|announce(?:s|d)?|signed|signs|"
         r"joined|joins|completed|completes|agreement|agreed deal|new contract|"
@@ -615,8 +637,8 @@ def fair_news_queue(
             sorted(
                 buckets[sport],
                 key=lambda item: (
+                    queue_priority_score(item, now) + candidate_readiness_score(item),
                     candidate_readiness_score(item),
-                    queue_priority_score(item, now),
                     publication_time(item['published_at']),
                 ),
                 reverse=True,

@@ -9,6 +9,31 @@ from bot import news_official_indexes as idx
 from bot.news_policy import non_article_news_reason, original_draft_reason, publisher_branding_reason
 
 
+@pytest.mark.parametrize('title', [
+    'Chelsea’s Ultimate Goal of the Season Group C results confirm two goals advanced to quarter-final voting',
+    'NBL27 Champion Fans MVP Voting Opens Weekly with $4000 Prize',
+    'Vote for your Player of the Month',
+])
+def test_official_fan_products_cannot_be_rewritten_as_sports_news(title):
+    assert non_article_news_reason({'title':title}) == 'non_article_fan_poll'
+
+
+def test_actual_sporting_award_is_not_a_fan_engagement_product():
+    assert non_article_news_reason({'title':'Guard wins league MVP award after record season'}) is None
+
+
+def test_unconfirmed_citizenship_prediction_is_held_but_actual_change_is_allowed():
+    from bot.news_policy import gossip_news_reason
+    assert gossip_news_reason({'title':'Tennis World in Turmoil as Top Russian Player Considers Citizenship Change',
+        'summary':'A top Russian tennis player may soon renounce her citizenship.'}) == 'gossip_unconfirmed_rumour'
+    assert gossip_news_reason({'title':'Tennis player confirms citizenship change'}) is None
+
+
+def test_absent_source_details_are_not_news_content():
+    assert non_article_news_reason({'title':'Basketball update','body':
+        'No specific player names or additional details about the nomination criteria were provided in the source material.'}) == 'non_news_source_meta_filler'
+
+
 @pytest.mark.parametrize("word", ["command", "summary", "summarize", "commander", "grammar", "summation"])
 def test_short_mma_alias_is_never_a_substring(word):
     assert _score_aliases(word, ["mma"]) == 0
@@ -143,6 +168,9 @@ def test_world_athletics_time_must_belong_to_the_current_article(monkeypatch):
     ('NHL fantasy hockey previews roll out for all 32 teams', 'non_article_fantasy_product', 'fantasy'),
     ('Grand Final week in pictures', 'non_article_photo_gallery', 'gallery'),
     ('EuroLeague Injury Report Offers Daily Updates for Fans and Fantasy Players', 'non_article_rolling_tracker', 'injury-tracker'),
+    ('Chelsea Ultimate Goal of the Season Group C results', 'non_article_fan_poll', 'goal-voting'),
+    ('NBL27 Champion Fans MVP Voting Opens Weekly with $4000 Prize', 'non_article_fan_poll', 'mvp-voting'),
+    ('Top Russian Player Considers Citizenship Change', 'gossip_unconfirmed_rumour', 'citizenship'),
 ])
 def test_public_quiz_cleanup_is_durable_and_does_not_delete_article(headline, reason, slug):
     from database import SessionLocal

@@ -4,7 +4,7 @@ from bot import news_image_http as images
 
 
 class Response:
-    def __init__(self, status=200, content_type="image/jpeg", body=b"\xff\xd8\xfffixture", location=""):
+    def __init__(self, status=200, content_type="image/jpeg", body=b"\xff\xd8\xff\xc0\x00\x11\x08\x03\x20\x04\xb0\x03"+b"x"*32, location=""):
         self.status_code=status
         self.headers={"content-type":content_type}
         if location:
@@ -59,7 +59,7 @@ def test_image_probe_rejects_hotlink_http_failure():
 def test_image_probe_follows_bounded_public_redirect():
     client=Client([
         Response(status=302,content_type="",body=b"",location="https://media.example/final.jpg"),
-        Response(status=200,content_type="image/jpeg",body=b"\xff\xd8\xffimage"),
+        Response(status=200,content_type="image/jpeg",body=b"\xff\xd8\xff\xc0\x00\x11\x08\x03\x20\x04\xb0\x03"+b"x"*32),
     ])
     ok,reason=images.probe_news_image("https://cdn.example/photo",client=client)
     assert ok is True and reason=="ok"
@@ -101,13 +101,13 @@ def test_image_probe_accepts_normal_photo_geometry():
     assert ok is True and reason=="ok"
 
 
-def test_image_probe_keeps_upgradable_small_bbc_photo():
+def test_image_probe_rejects_small_bbc_photo_until_actual_hero_is_checked():
     client=Client([Response(content_type="image/jpeg",body=b"\xff\xd8\xff\xc0\x00\x11\x08\x00\x87\x00\xf0\x03"+b"x"*32)])
     ok,reason=images.probe_news_image(
         "https://ichef.bbci.co.uk/ace/standard/240/cpsprodpb/example.jpg",
         client=client,
     )
-    assert ok is True and reason=="ok"
+    assert ok is False and reason=="image_too_small"
 
 
 def test_composited_publisher_overlay_is_held_without_rewriting_or_fetching_url():
@@ -117,3 +117,45 @@ def test_composited_publisher_overlay_is_held_without_rewriting_or_fetching_url(
 
 def test_publisher_banner_filename_is_held_before_http():
     assert images.probe_news_image('https://editorial.uefa.com/resources/wpshot_paris_-_banner.jpeg?imwidth=158',client=object()) == (False,'promotional_banner')
+
+
+@pytest.mark.parametrize('kind', ['VP8 ', 'VP8L', 'VP8X'])
+@pytest.mark.parametrize('width,height,ok', [(158,89,False),(480,356,False),(988,556,True)])
+def test_cdn_webp_dimensions_are_checked_even_under_jpeg_url(kind,width,height,ok):
+    if kind == 'VP8 ':
+        payload = b'\x00\x00\x00\x9d\x01\x2a' + width.to_bytes(2,'little') + height.to_bytes(2,'little')
+    elif kind == 'VP8L':
+        payload = b'\x2f' + ((width-1) | ((height-1)<<14)).to_bytes(4,'little') + b'\x00'*5
+    else:
+        payload = b'\x00'*4 + (width-1).to_bytes(3,'little') + (height-1).to_bytes(3,'little')
+    body = b'RIFF' + (12+len(payload)).to_bytes(4,'little') + b'WEBP' + kind.encode() + len(payload).to_bytes(4,'little') + payload
+    result=images.probe_news_image('https://cdn.example/photo.jpeg',client=Client([Response(body=body,content_type='image/webp')]))
+    assert result == (ok, 'ok' if ok else 'image_too_small')
+
+
+def test_mime_and_magic_without_verified_dimensions_do_not_approve_a_hero():
+    result=images.probe_news_image('https://cdn.example/broken.jpeg',client=Client([Response(body=b'\xff\xd8\xffincomplete')]))
+    assert result == (False,'image_dimensions_unverified')
+    assert images.probe_news_image('https://cdn.example/fake.jpeg',client=Client([Response(body=b'<html>error</html>')])) == (False,'not_image_content')
+
+
+def test_uefa_size_upgrade_keeps_same_photo_and_signed_urls_are_untouched():
+    small='https://editorial.uefa.com/resources/same-photo.jpeg?imwidth=158'
+    assert images.news_hero_url(small) == small.replace('158','1600')
+    assert images.news_hero_url(small+'&sig=abc') == small+'&sig=abc'
+
+
+def test_uefa_ingest_and_repair_both_probe_and_return_the_actual_hero(monkeypatch):
+    from bot import fetch_sources
+    import public_index
+    small='https://editorial.uefa.com/resources/same-photo.jpeg?imwidth=158'
+    large=small.replace('158','1600')
+    seen=[]
+    def probe(url):
+        seen.append(url)
+        return url == large
+    monkeypatch.setattr(fetch_sources,'news_image_is_reachable',probe)
+    monkeypatch.setattr(images,'news_image_is_reachable',probe)
+    assert fetch_sources._pick_reachable_article_image([{'url':small,'source':'og'}]) == large
+    assert public_index._reachable_source_image('https://www.uefa.com/news/story',current_url=small) == large
+    assert seen == [large,large]

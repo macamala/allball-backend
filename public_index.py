@@ -262,10 +262,17 @@ def _reachable_source_image(
 ) -> Optional[str]:
     """Pick a reachable editorial image from one canonical source page."""
     from bot.extract import extract_image_candidates_from_url
-    from bot.news_image_http import news_image_is_reachable
+    from bot.news_image_http import news_image_is_reachable, news_hero_url
 
     if _legacy_non_news_source_url(source_url):
         return None
+
+    # Repair a verified same-photo hero size before fetching a whole source page.
+    # The stored thumbnail is never approved merely because a variant exists.
+    upgraded = news_hero_url(current_url or "")
+    if (upgraded and upgraded != current_url and news_image_is_publishable(upgraded)
+            and news_image_is_reachable(upgraded)):
+        return upgraded
 
     try:
         candidates = extract_image_candidates_from_url(source_url, timeout=12.0)
@@ -277,7 +284,7 @@ def _reachable_source_image(
     for candidate in candidates:
         if not isinstance(candidate, dict):
             continue
-        url = str(candidate.get("url") or "").strip()
+        url = news_hero_url(str(candidate.get("url") or "").strip())
         if (
             not url
             or url in seen
@@ -357,6 +364,7 @@ def repair_recent_news_images(
         "http_451",
         "bad_aspect_ratio",
         "image_too_small",
+        "image_dimensions_unverified",
         "composited_overlay",
         "promotional_banner",
     }

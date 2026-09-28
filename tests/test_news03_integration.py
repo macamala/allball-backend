@@ -326,7 +326,7 @@ def test_public_image_repair_falls_back_to_second_source_candidate(monkeypatch):
         extract_module,
         "extract_image_candidates_from_url",
         lambda *a, **k: [
-            {"url":"https://example.test/dead.jpg","source":"og","width":1600,"in_article":False},
+            {"url":"https://example.test/dead.jpg","source":"body","width":1600,"in_article":True},
             {"url":"https://example.test/good.jpg","source":"jsonld","width":1200,"in_article":True},
         ],
     )
@@ -426,9 +426,9 @@ def test_writer_prompt_includes_numeric_and_quote_safety_contract(monkeypatch):
 
 def test_ai_story_runs_deterministic_fact_lock_before_semantic_validator(monkeypatch):
     draft={
-        "title":"Northbridge Athletic injury update",
+        "title":"Northbridge Athletic injury update on Friday",
         "summary":"A player suffered a knee injury.",
-        "body":"Northbridge Athletic confirmed a knee injury. "*30,
+        "body":"Northbridge Athletic confirmed a knee injury. "*15 + "\n\n" + "Northbridge Athletic confirmed a knee injury. "*15,
     }
     monkeypatch.setattr(ingest,"write_ninkosports_story",lambda **kw:"fixture")
     monkeypatch.setattr(ingest,"parse_ai_output",lambda raw:draft)
@@ -438,13 +438,13 @@ def test_ai_story_runs_deterministic_fact_lock_before_semantic_validator(monkeyp
     )
     parsed,reason=ingest._ai_story(
         title="Northbridge Athletic schedule update",
-        facts="Northbridge Athletic published its schedule. "*40,
+        facts="The Northbridge Athletic club has published its schedule for the season. "*40,
         sport="football",
         league="",
         max_ai_chars=6000,
     )
     assert parsed is None
-    assert reason and reason.startswith("unsupported_claim_family:injury")
+    assert reason == "unsupported_time_reference:friday"
 
 
 def test_rejected_story_preserves_draft_and_specific_validator_feedback(monkeypatch):

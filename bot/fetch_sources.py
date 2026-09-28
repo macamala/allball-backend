@@ -33,7 +33,7 @@ from .dedupe import existing_by_url, existing_near_duplicate, unprocessed_source
 from .extract import extract_from_url, parse_feed_datetime, paragraphs_from_html
 from .feeds import enabled_feeds
 from .news_feed_http import read_news_feed
-from .news_image_http import news_image_is_reachable
+from .news_image_http import news_image_is_reachable, news_hero_url
 from .media_url import collect_feed_image_candidates, pick_source_image, width_from_url
 from .quality import (
     enough_for_brief,
@@ -280,7 +280,7 @@ def _pick_reachable_article_image(candidates: list, max_checks: int = 6) -> Opti
         if not isinstance(candidate, dict):
             continue
         score = score_image_candidate(candidate)
-        url = str(candidate.get("url") or "").strip()
+        url = news_hero_url(str(candidate.get("url") or "").strip())
         if score < 0 or not url or not news_image_is_publishable(url):
             continue
         ranked.append((score, url))
