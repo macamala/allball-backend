@@ -598,6 +598,7 @@ def _ingest_item(
             # and semantic validator gates inside _ai_story.
             if (
                 rewrite_reason not in {"empty", "too-short"}
+                and not str(rewrite_reason or '').startswith('validator-source-type:')
                 and not openai_rate_limited()
                 and not ai_budget_exhausted()
                 and _correction_retry_allowed(

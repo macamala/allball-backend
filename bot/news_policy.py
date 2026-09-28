@@ -33,6 +33,8 @@ def unsupported_news_sport(title, body=""):
         return True
     if re.search(r"\b(?:pistol|rifle|issf|skeet|trap shooting)\b", headline):
         return True
+    if re.search(r"\b(?:divers?|springboard|platform diving|diving (?:medals?|final|championship))\b", headline):
+        return True
     if re.search(r"\bshooting (?:campaign|championships?|world cup|medals?|team|events?)\b", headline):
         return True
     if re.search(r"\b(?:air pistol|air rifle|pistol shooter|rifle shooter|sport pistol|issf|\d+\s*m(?:etre|eter)?\s+(?:air\s+)?(?:pistol|rifle))\b", lead):
@@ -273,6 +275,9 @@ def non_article_news_reason(item):
         return "non_article_analysis"
     if title.strip() == "stars arrive in shenzhen":
         return "non_article_event_promotion"
+    if (re.search(r"^what (?:is|was|are|were) .{0,90}\bbest\b", title)
+            or re.search(r"\b(?:invite[sd]?|ask[sed]*|inviting)\b.{0,40}\b(?:fans|supporters)\b.{0,35}\b(?:rank|choose|pick|select|vote|rate)\b", title)):
+        return "non_article_fan_poll"
 
     # Confirmed legacy editorial incidents, shared with admission and the
     # bounded public repair. These texts contain no new sporting development.

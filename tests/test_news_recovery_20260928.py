@@ -390,3 +390,37 @@ def test_handball_federation_evidence_beats_shared_champions_league_name():
     assert classify_article('Nielsen targets another title with Veszprém','The handball goalkeeper won the Champions League and now targets the Club World Cup.').sport == 'handball'
     assert classify_article('Nielsen targets another title with Veszprém','The EHF Champions League winner returns to the Club World Cup.').sport == 'handball'
     assert classify_article('Liverpool prepare for Champions League','The football team visited a handball club during training.').sport == 'football'
+
+
+def test_ncaa_is_not_basketball_and_primary_lead_beats_biographical_polo():
+    body='Former USA Swimming National Team Director and university swimming coach Frank Busch has died.\n\nEarlier in his life he played water polo and entered an athletics hall of fame.'
+    assert classify_article('Frank Busch, NCAA Title Winning Coach, Dies',body,feed_kind='league',feed_sport='swimming').sport == 'swimming'
+    assert classify_article('NCAA basketball coach named','The basketball program appointed a coach.').sport == 'basketball'
+    assert classify_article('The outcome remains unknown','No sporting evidence available.').sport is None
+
+
+def test_shared_competition_in_water_polo_cannot_stamp_soccer_but_real_soccer_still_wins():
+    assert classify_article('Novi Beograd keeps perfect record beating Budva','The Champions League qualifiers returned to domestic competition.',feed_kind='league',feed_sport='water-polo').sport == 'water-polo'
+    assert classify_article('Liverpool football squad confirmed','The soccer club prepared for the Champions League.',feed_kind='league',feed_sport='water-polo').sport == 'football'
+
+
+def test_swimswam_wordpress_category_news_class_is_article_not_recommendations():
+    h='<meta property="og:url" content="https://swimswam.com/report/"><aside><p>Unrelated story.</p></aside><article class="post type-post category-news"><p>The university swimming team won its season opener against a visiting conference opponent on Saturday.</p></article><p>Other unrelated news.</p>'
+    text=article_text_from_html(h)
+    assert 'university swimming team won' in text and 'Unrelated' not in text and 'Other' not in text
+
+
+def test_lazy_article_photo_and_jsonld_reference_resolve_to_real_urls_only():
+    h='<script type="application/ld+json">'+json.dumps({'@graph':[
+        {'@type':'Article','image':{'@id':'https://publisher.test/story/#primaryimage'}},
+        {'@type':'ImageObject','@id':'https://publisher.test/story/#primaryimage','contentUrl':'https://publisher.test/athlete.jpg','width':1200,'height':800},
+        {'@type':'Article','image':{'@id':'https://publisher.test/unresolved/#image'}},
+    ]})+'</script><article><img src="data:image/svg+xml;base64,placeholder" data-src="https://publisher.test/athlete-alt.jpg" width="853" height="480"></article>'
+    candidates=collect_page_image_candidates(h)
+    assert {r['url'] for r in candidates} == {'https://publisher.test/athlete.jpg','https://publisher.test/athlete-alt.jpg'}
+    assert candidates[0]['width']==1200 and candidates[1]['in_article']
+
+
+def test_rewritten_club_fan_ranking_is_still_a_poll():
+    for title in ["What is Liverpool's best Premier League win over Manchester City? - Liverpool FC",'Liverpool invite fans to rank top Premier League clashes with Manchester City']:
+        assert non_article_news_reason({'title':title}) == 'non_article_fan_poll'

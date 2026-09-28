@@ -212,6 +212,8 @@ def _json_ld_images(html: str) -> List[dict]:
         items = data if isinstance(data, list) else [data]
         if isinstance(data, dict) and isinstance(data.get("@graph"), list):
             items = data["@graph"]
+        references = {row.get('@id'): row for row in items
+            if isinstance(row, dict) and isinstance(row.get('@id'), str)}
         for item in items:
             if not isinstance(item, dict):
                 continue
@@ -222,9 +224,13 @@ def _json_ld_images(html: str) -> List[dict]:
                 width = 0
                 height = 0
                 if isinstance(row, str):
-                    url = row
+                    linked = references.get(row)
+                    url = (linked.get('contentUrl') or linked.get('url') or '') if isinstance(linked, dict) else row
                 elif isinstance(row, dict):
-                    url = row.get("url") or row.get("@id") or ""
+                    linked = references.get(row.get('@id')) if isinstance(row.get('@id'), str) else None
+                    if isinstance(linked, dict):
+                        row = {**linked, **row}
+                    url = row.get('contentUrl') or row.get("url") or row.get("@id") or ""
                     try:
                         width = int(row.get("width") or 0)
                     except (TypeError, ValueError):
@@ -233,7 +239,7 @@ def _json_ld_images(html: str) -> List[dict]:
                         height = int(row.get("height") or 0)
                     except (TypeError, ValueError):
                         height = 0
-                if url:
+                if isinstance(url, str) and url and not urlsplit(url).fragment:
                     out.append(
                         {
                             "url": url,
@@ -272,7 +278,10 @@ class _LeadImageExtractor(HTMLParser):
             self.in_main += 1
         if tag != "img":
             return
-        src = attrs_map.get("src") or attrs_map.get("data-src") or ""
+        # WordPress lazy loaders put an inline transparent SVG in src and the
+        # actual article photograph in data-src. Never return the placeholder.
+        src = next((value for value in (attrs_map.get('data-src'), attrs_map.get('src'))
+            if value and not value.lower().startswith(('data:', 'javascript:', 'blob:'))), '')
         if not src:
             return
         width = 0
@@ -583,6 +592,10 @@ def article_text_from_html(html: str) -> str:
         # class name. That is not the sidebar itself; scope to the article's
         # structured prose before the normal chrome filter runs.
         body_class = 'field--name-body-structured'
+    if publisher_host in {'swimswam.com', 'www.swimswam.com'}:
+        # WordPress tags the real article "category-news", which resembles a
+        # related-news widget to the generic chrome filter. Scope to its post.
+        body_class = 'type-post'
     if body_class:
         scoped = _ScopedNewsBody(body_class)
         try:

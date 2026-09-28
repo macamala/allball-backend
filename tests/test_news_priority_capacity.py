@@ -126,7 +126,7 @@ def test_validator_keeps_bounded_failure_evidence_and_clears_it(monkeypatch):
     monkeypatch.delenv('NEWS_EXTERNAL_FREE_WRITERS_ENABLED', raising=False)
     monkeypatch.setattr(router, '_free_model', lambda *args: 'fixture:free')
     monkeypatch.setattr(router, '_completion', lambda **kwargs: json.dumps({
-        'approved': False, 'unsupported_claims': ['Invented injury']*9, 'changed_names': []}))
+        'source_type': 'news', 'approved': False, 'unsupported_claims': ['Invented injury']*9, 'changed_names': []}))
     assert router.validate_free_story('source', 'facts', 'title', 'summary', 'body')[0] is False
     assert router.last_validation_feedback()['unsupported_claims'] == ['Invented injury']*6
     monkeypatch.setattr(router, '_completion', lambda **kwargs: 'invalid json')

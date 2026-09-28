@@ -69,7 +69,7 @@ def test_free_validator_fails_closed_on_bad_or_unsupported_output(monkeypatch):
     assert free_ai.validate_free_story('A', 'facts', 'B', 'summary', 'body') == (False, 'validator-invalid-json')
 
     rejected=json.dumps({
-        'approved': False,
+        'source_type': 'news', 'approved': False,
         'unsupported_claims': ['invented early lead'],
         'changed_names': [],
     })
@@ -77,7 +77,7 @@ def test_free_validator_fails_closed_on_bad_or_unsupported_output(monkeypatch):
     assert free_ai.validate_free_story('A', 'facts', 'B', 'summary', 'body') == (False, 'validator-unsupported-claim')
 
     renamed=json.dumps({
-        'approved': False,
+        'source_type': 'news', 'approved': False,
         'unsupported_claims': [],
         'changed_names': ['Northbridge Athletic -> North Club'],
     })
@@ -87,13 +87,24 @@ def test_free_validator_fails_closed_on_bad_or_unsupported_output(monkeypatch):
 
 def test_free_validator_accepts_only_exact_clean_shape(monkeypatch):
     monkeypatch.setenv('NEWS_XKIRO_VALIDATOR_MODEL', 'qwen/qwen3.5-397b-a17b:free')
-    approved=json.dumps({'approved': True, 'unsupported_claims': [], 'changed_names': []})
+    approved=json.dumps({'source_type': 'news', 'approved': True, 'unsupported_claims': [], 'changed_names': []})
     monkeypatch.setattr(free_ai, '_completion', lambda **kwargs: approved)
     assert free_ai.validate_free_story('A', 'facts', 'B', 'summary', 'body') == (True, 'ok')
 
-    extra=json.dumps({'approved': True, 'unsupported_claims': [], 'changed_names': [], 'note': 'ok'})
+    extra=json.dumps({'source_type': 'news', 'approved': True, 'unsupported_claims': [], 'changed_names': [], 'note': 'ok'})
     monkeypatch.setattr(free_ai, '_completion', lambda **kwargs: extra)
     assert free_ai.validate_free_story('A', 'facts', 'B', 'summary', 'body') == (False, 'validator-invalid-shape')
+
+
+def test_source_type_must_be_news_even_if_validator_approves_facts(monkeypatch):
+    monkeypatch.setenv('NEWS_XKIRO_VALIDATOR_MODEL', 'qwen/qwen3.5-397b-a17b:free')
+    for source_type in ['fan_poll','promotion','analysis','entertainment','unknown']:
+        raw=json.dumps({'source_type':source_type,'approved':True,'unsupported_claims':[],'changed_names':[]})
+        monkeypatch.setattr(free_ai,'_completion',lambda **kw:raw)
+        assert free_ai.validate_free_story('Source','facts','Draft','summary','body') == (False,'validator-source-type:'+source_type)
+    for source_type in [[],None,'invented']:
+        raw=json.dumps({'source_type':source_type,'approved':True,'unsupported_claims':[],'changed_names':[]})
+        assert free_ai.validate_free_story('Source','facts','Draft','summary','body') == (False,'validator-schema-invalid')
 
 
 def test_protected_names_are_extracted_but_changed_name_rejection_is_semantic():

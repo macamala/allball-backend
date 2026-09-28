@@ -60,9 +60,21 @@ def classify_article(
         return Classification(None, None, None, "low", "unsupported-news-sport")
 
     sport_scores: Dict[str, int] = {}
+    title_evidence = 0
+    lead_scores = {}
     for sport, aliases in SPORT_ALIASES.items():
+        if sport == 'basketball':
+            # NCAA administers many sports; its name alone cannot prove basketball.
+            aliases = [a for a in aliases if a.strip() != 'ncaa']
+        if sport == 'football' and feed_kind == 'league' and feed_sport and feed_sport != 'football':
+            # These competitions exist in several sports. A dedicated source
+            # disambiguates them, while real soccer words/club evidence still win.
+            shared = {'world cup', 'champions league', 'premier league', 'bundesliga', 'serie a', 'ligue 1'}
+            aliases = [a for a in aliases if a.strip() not in shared]
         title_score = _score_aliases(title_text, aliases)
         body_score = _score_aliases(body_text, aliases)
+        title_evidence += title_score
+        lead_scores[sport] = _score_aliases(_norm((body or '').split('\n',1)[0][:400]), aliases)
         sport_scores[sport] = title_score * 3 + max(0, body_score - title_score)
 
     # Mixed Asian Games reporting commonly uses these precise event terms
@@ -87,6 +99,11 @@ def classify_article(
         elif hit:
             # Body-only team mentions are often related-link chrome.
             continue
+    if not title_evidence and not team_hits:
+        # When the headline omits the sport, the factual lead is stronger than
+        # a later biographical aside (e.g. a swimming coach once played polo).
+        for sport, score in lead_scores.items():
+            sport_scores[sport] += score * 2
 
     basketball_context = sport_scores.get("basketball", 0) >= 4 or any(
         token in title_text
@@ -97,7 +114,7 @@ def classify_article(
             "euroliga",
             "košarka",
             "kosarka",
-            "nba",
+            " nba ",
             "liga endesa",
             "baloncesto",
         )

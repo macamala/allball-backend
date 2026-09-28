@@ -17,6 +17,8 @@ class Feed(TypedDict, total=False):
 
 
 FEEDS: List[Feed] = [
+    {'url': 'https://swimswam.com/feed/', 'kind': 'league', 'sport': 'swimming', 'publisher': 'SwimSwam', 'enabled': True, 'note': 'Exact UTC RSS and public article dates, scoped WordPress prose and same-article photographs verified. NCAA alone is not basketball evidence; diving and sponsored products remain held.'},
+    {'url': 'https://total-waterpolo.com/feed/', 'kind': 'league', 'sport': 'water-polo', 'publisher': 'Total Waterpolo', 'enabled': True, 'note': 'Exact UTC RSS, full original reporting and article photos verified; international and club water polo without a league stamp. Shared Champions League names never imply soccer.'},
     {'url': 'https://www.wpbsa.com/feed/', 'kind': 'league', 'sport': 'snooker', 'publisher': 'WPBSA', 'verified_official': True, 'enabled': True, 'note': 'Governing body RSS: exact UTC timestamps, full match reports and same-article photography verified. Billiards, promotional ceremonies and viewing guides are held separately.'},
     {'url': 'https://en.yna.co.kr/RSS/sports.xml', 'kind': 'mixed', 'publisher': 'Yonhap', 'enabled': True, 'note': 'Verified +0900 RSS and exact article metadata; mixed Asian Games/global sports. Restrict extraction to story-news, excluding unrelated recommendation photos.'},
     {'url': 'https://pbsi.id/feed/', 'kind': 'league', 'sport': 'badminton', 'publisher': 'PBSI', 'verified_official': True, 'enabled': True, 'note': 'Indonesian badminton federation: verified exact UTC RSS, full player statements and same-article match photography; no league stamp.'},

@@ -383,8 +383,16 @@ problem in unsupported_claims; keep the same JSON schema.
 When rejecting factual support, identify only concrete unsupported claims actually
 present in the draft. Do not demand that a concise report repeat all source facts.
 
+First explicitly classify the SOURCE product, not just the rewritten headline.
+source_type must be one of: news, analysis, fan_poll, promotion, entertainment,
+scorecard, tracker, podcast, gallery, retrospective, unknown.
+Only news may be approved. Rewriting a poll as an announcement that the club
+invited supporters to rank past wins does NOT make it news. A factual report
+about new competition events, appointments, injuries, contracts or sporting
+decisions is news; instructions for audience participation are not.
+
 Return JSON only with exactly:
-{"approved": boolean, "unsupported_claims": [string], "changed_names": [string]}
+{"source_type": string, "approved": boolean, "unsupported_claims": [string], "changed_names": [string]}
 Keep both arrays empty when approved.
 """
 
@@ -442,11 +450,14 @@ def validate_free_story(
         return False, "validator-invalid-json"
     if not isinstance(result, dict):
         return False, "validator-invalid-shape"
-    if set(result) != {"approved", "unsupported_claims", "changed_names"}:
+    if set(result) != {"source_type", "approved", "unsupported_claims", "changed_names"}:
         return False, "validator-invalid-shape"
     unsupported = result.get("unsupported_claims")
     changed = result.get("changed_names")
     approved = result.get("approved")
+    source_type = result.get("source_type")
+    if not isinstance(source_type, str) or source_type not in {'news', 'analysis', 'fan_poll', 'promotion', 'entertainment', 'scorecard', 'tracker', 'podcast', 'gallery', 'retrospective', 'unknown'}:
+        return False, 'validator-schema-invalid'
     if type(approved) is not bool or not isinstance(unsupported, list) or not isinstance(changed, list):
         return False, "validator-invalid-shape"
     if any(not isinstance(x, str) for x in unsupported + changed):
@@ -455,6 +466,9 @@ def validate_free_story(
         "unsupported_claims": [x[:320] for x in unsupported[:6]],
         "changed_names": [x[:160] for x in changed[:6]],
     })
+    if source_type != 'news':
+        _LAST_VALIDATION.set({'unsupported_claims': ['Source product is '+source_type+'; it cannot be converted into news.'], 'changed_names': []})
+        return False, 'validator-source-type:' + source_type
     if approved and not unsupported and not changed:
         return True, "ok"
     if changed:
