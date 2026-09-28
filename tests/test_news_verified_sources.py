@@ -74,3 +74,10 @@ def test_espn_dedicated_sport_feeds_are_enabled_without_league_stamp():
         assert row["enabled"] is True
         assert row["sport"]==sport
         assert row.get("league") is None
+
+
+def test_espn_feeds_are_rss_fallback_only():
+    from bot.feeds import FEEDS
+    rows=[row for row in FEEDS if row["url"].startswith("https://www.espn.com/espn/rss/")]
+    assert rows
+    assert all(row.get("rss_fallback_only") is True for row in rows)
