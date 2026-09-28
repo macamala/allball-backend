@@ -323,7 +323,21 @@ def write_ninkosports_story(
         return None
     if len(facts) > 8000:
         facts = facts[:8000]
+    numeric_source = f"{title}\n{facts}"
+    allowed_numeric_tokens = sorted(set(re.findall(
+        r"(?<!\\w)\\d+(?:[.,:/–-]\\d+)*(?:%|\\b)",
+        numeric_source,
+    )))
+    numeric_contract = (
+        ", ".join(allowed_numeric_tokens)
+        if allowed_numeric_tokens
+        else "NONE — output no digits"
+    )
     prompt = (
+        "DRAFT SAFETY CONTRACT:\n"
+        "- Do not output straight or curly double quotation marks anywhere. Paraphrase every quoted statement.\n"
+        f"- ALLOWED NUMERIC TOKENS: {numeric_contract}\n"
+        "- Any numeric token not listed above is forbidden. Do not calculate or reformat numbers.\n\n"
         f"SPORT: {sport}\n"
         f"COMPETITION: {league or 'unspecified'}\n\n"
         f"{_ninkosports_style(sport)}\n\n"

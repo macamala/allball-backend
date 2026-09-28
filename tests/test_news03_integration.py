@@ -406,4 +406,18 @@ def test_coverage_debt_does_not_reserve_writer_budget_for_translations(monkeypat
     monkeypatch.setenv("NEWS_TRANSLATIONS_PER_CYCLE","3")
     budget=AiRequestBudget(6,str(tmp_path/"ledger.db"))
     with ai_budget_scope(budget):
-        assert ingest._correction_retry_allowed(prefer_breadth=True) is True
+        assert ingest._correction_retry_allowed(prefer_breadth=True) is False
+
+
+def test_writer_prompt_includes_numeric_and_quote_safety_contract(monkeypatch):
+    captured=[]
+    monkeypatch.setattr(writer, "_call_selected_ai", lambda prompt: captured.append(prompt) or "draft")
+    writer.write_ninkosports_story(
+        "Club wins 3:1 in 2026 final",
+        "The club won 3:1 in the 2026 final.",
+        sport="football",
+    )
+    assert captured
+    assert "ALLOWED NUMERIC TOKENS:" in captured[0]
+    assert "3:1" in captured[0] and "2026" in captured[0]
+    assert "Do not output straight or curly double quotation marks anywhere" in captured[0]

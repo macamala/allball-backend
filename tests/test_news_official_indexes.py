@@ -144,3 +144,25 @@ def test_ihf_uses_direct_news_index():
     ihf=next(row for row in HTML_INDEXES if row["id"]=="ihf-handball")
     assert ihf["url"]=="https://www.ihf.info/media-center/news"
     assert ihf["paths"]==("/media-center/news/",)
+
+
+def test_ihf_visible_date_and_relative_image_are_hydrated(monkeypatch):
+    cfg=next(row for row in idx.HTML_INDEXES if row["id"]=="ihf-handball")
+    body=" ".join([
+        "Barcelona and Zamalek played at the IHF Men's Club World Championship with confirmed match details."
+    ]*12)
+    html=f'''<html><head>
+      <meta property="og:title" content="Barcelona secure finals berth">
+      <meta property="og:image" content="/sites/default/files/handball-photo.jpg">
+    </head><body><div>27 Sep. 2026</div><main><p>{body}</p></main></body></html>'''.encode()
+    monkeypatch.setattr(idx, "read_news_feed", lambda url: html)
+    monkeypatch.setattr(idx, "freshness_reason", lambda stamp, now, **kwargs: None)
+    item=idx._hydrate(
+        cfg,
+        "https://www.ihf.info/media-center/news/seventh-barcelona",
+        "fallback",
+    )
+    assert item is not None
+    assert item["published_at"].isoformat().startswith("2026-09-27T00:00:00")
+    assert item["image"]=="https://www.ihf.info/sites/default/files/handball-photo.jpg"
+    assert item["image_candidates"][0]["url"]==item["image"]

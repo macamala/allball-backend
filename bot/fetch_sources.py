@@ -114,9 +114,13 @@ def _correction_retry_allowed(*, prefer_breadth: bool = False) -> bool:
     """Conservatively preserve one request for translations when that lane is on."""
     budget = active_ai_budget()
     if budget is None:
-        # Isolated unit callers do not own a live request ledger.
-        return True
+        # Isolated callers still mirror production breadth policy.
+        return not prefer_breadth
     if getattr(budget, "blocked_reason", None):
+        return False
+    if prefer_breadth:
+        # While many sports are below the coverage floor, a rejected draft is
+        # held fail-closed and the next request goes to a different candidate.
         return False
     translation_reserve = 0
     if not prefer_breadth and os.getenv("NEWS_TRANSLATIONS_ENABLED") == "1":
@@ -127,7 +131,7 @@ def _correction_retry_allowed(*, prefer_breadth: bool = False) -> bool:
     # While multiple sports remain underfilled, reserve one complete writer +
     # validator attempt for a different sport instead of spending the whole
     # cycle correcting one rejected draft.
-    breadth_reserve = 2 if prefer_breadth else 0
+    breadth_reserve = 0
     source_ceiling = max(
         0,
         int(budget.max_requests) - translation_reserve - breadth_reserve,

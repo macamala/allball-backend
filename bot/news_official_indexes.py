@@ -36,6 +36,7 @@ HTML_INDEXES = (
         "url": "https://www.ihf.info/media-center/news",
         "host": "www.ihf.info",
         "paths": ("/media-center/news/",),
+        "visible_date": True,
     },
     {
         "id": "volleyball-world-news",
@@ -404,6 +405,35 @@ def _sitemap_candidates(cfg: Dict) -> List[tuple[str, str]]:
     return output
 
 
+_VISIBLE_ENGLISH_DATE_RE = re.compile(
+    r"(?<!\\d)(\\d{1,2})\\s+"
+    r"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)\\.?\\s+"
+    r"(20\\d{2})(?!\\d)",
+    re.IGNORECASE,
+)
+_VISIBLE_MONTHS = {
+    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
+    "jul": 7, "aug": 8, "sep": 9, "sept": 9, "oct": 10, "nov": 11, "dec": 12,
+}
+
+
+def _visible_published_date(html: str) -> Optional[datetime]:
+    """Parse an explicit human-visible English source date; never invent 'now'."""
+    text = clean_text(re.sub(r"<[^>]+>", " ", html or ""))
+    match = _VISIBLE_ENGLISH_DATE_RE.search(text)
+    if not match:
+        return None
+    try:
+        return datetime(
+            int(match.group(3)),
+            _VISIBLE_MONTHS[match.group(2).lower()],
+            int(match.group(1)),
+            tzinfo=timezone.utc,
+        )
+    except (ValueError, KeyError):
+        return None
+
+
 def _hydrate(cfg: Dict, url: str, fallback_title: str) -> Optional[Dict]:
     try:
         raw = read_news_feed(url)
@@ -415,6 +445,8 @@ def _hydrate(cfg: Dict, url: str, fallback_title: str) -> Optional[Dict]:
         return None
 
     published_at = page_published_at_from_html(html)
+    if published_at is None and cfg.get("visible_date"):
+        published_at = _visible_published_date(html)
     max_age = max(24, min(int(cfg.get("max_age_hours") or 72), 168))
     if published_at is None or freshness_reason(
         published_at, datetime.now(timezone.utc), max_age_hours=max_age
@@ -430,12 +462,27 @@ def _hydrate(cfg: Dict, url: str, fallback_title: str) -> Optional[Dict]:
         if not any(marker in evidence for marker in required):
             return None
     image = None
+    image_candidates = []
     try:
         from editorial import pick_article_image
 
-        image = pick_article_image(collect_page_image_candidates(html))
+        for candidate in collect_page_image_candidates(html):
+            if not isinstance(candidate, dict):
+                continue
+            raw_url = str(candidate.get("url") or "").strip()
+            if not raw_url:
+                continue
+            resolved_url = urljoin(url, raw_url)
+            parts = urlsplit(resolved_url)
+            if parts.scheme not in {"http", "https"} or not parts.hostname:
+                continue
+            row = dict(candidate)
+            row["url"] = resolved_url
+            image_candidates.append(row)
+        image = pick_article_image(image_candidates)
     except Exception:
         image = None
+        image_candidates = []
     feed = {
         "url": cfg["url"],
         "kind": "league",
@@ -451,7 +498,7 @@ def _hydrate(cfg: Dict, url: str, fallback_title: str) -> Optional[Dict]:
         "summary": "",
         "url": url,
         "image": image,
-        "image_candidates": [],
+        "image_candidates": image_candidates,
         "published_at": published_at,
         "feed": feed,
         "_extracted": body,
