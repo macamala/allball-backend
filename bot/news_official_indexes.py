@@ -15,6 +15,7 @@ import logging
 import re
 from typing import Dict, List, Optional
 from urllib.parse import urljoin, urlsplit
+from zoneinfo import ZoneInfo
 import xml.etree.ElementTree as ET
 
 from .extract import (
@@ -57,6 +58,7 @@ HTML_INDEXES = (
         "host": "en.olympic.cn",
         "paths": ("/news/Sports_News/",),
         "visible_date": True,
+        "visible_date_timezone": "Asia/Shanghai",
     },
     {
         "id": "nba-basketball-news",
@@ -494,9 +496,34 @@ _VISIBLE_MONTHS = {
 }
 
 
-def _visible_published_date(html: str) -> Optional[datetime]:
-    """Parse an explicit human-visible English source date; never invent 'now'."""
+_VISIBLE_ISO_MINUTE_RE = re.compile(
+    r"(?<!\\d)(20\\d{2})-(\\d{2})-(\\d{2})(?:\\s+|T)(\\d{2}):(\\d{2})(?!\\d)"
+)
+
+
+def _visible_published_date(
+    html: str,
+    source_timezone: str = "UTC",
+) -> Optional[datetime]:
+    """Parse only explicit human-visible source dates; never invent 'now'."""
     text = clean_text(re.sub(r"<[^>]+>", " ", html or ""))
+    iso = _VISIBLE_ISO_MINUTE_RE.search(text)
+    if iso:
+        try:
+            zone = ZoneInfo(source_timezone)
+        except Exception:
+            zone = timezone.utc
+        try:
+            return datetime(
+                int(iso.group(1)),
+                int(iso.group(2)),
+                int(iso.group(3)),
+                int(iso.group(4)),
+                int(iso.group(5)),
+                tzinfo=zone,
+            ).astimezone(timezone.utc)
+        except ValueError:
+            return None
     match = _VISIBLE_ENGLISH_DATE_RE.search(text)
     if not match:
         return None
@@ -523,7 +550,10 @@ def _hydrate(cfg: Dict, url: str, fallback_title: str) -> Optional[Dict]:
 
     published_at = page_published_at_from_html(html)
     if published_at is None and cfg.get("visible_date"):
-        published_at = _visible_published_date(html)
+        published_at = _visible_published_date(
+            html,
+            cfg.get("visible_date_timezone") or "UTC",
+        )
     max_age = max(24, min(int(cfg.get("max_age_hours") or 72), 168))
     if published_at is None or freshness_reason(
         published_at, datetime.now(timezone.utc), max_age_hours=max_age
