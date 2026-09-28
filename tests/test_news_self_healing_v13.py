@@ -307,3 +307,21 @@ def test_correction_retry_yields_to_breadth_when_coverage_is_sparse(monkeypatch,
         budget.attempts = 2
         assert ingest._correction_retry_allowed(prefer_breadth=False)
         assert not ingest._correction_retry_allowed(prefer_breadth=True)
+
+
+def test_fact_lock_does_not_false_positive_normal_proper_names():
+    from bot.news_fact_guard import fact_lock_reason
+    source_title="England win series as Banton delivers on potential"
+    source_body=(
+        "Jacob Bethell played for England while Luke Humphries was discussed in a separate sports update. "
+        "Brandon McNulty also appeared in the supplied source material without any invented injury or transfer."
+    )
+    draft={
+        "title":"England finish series with Banton delivering",
+        "summary":"Jacob Bethell featured for England.",
+        "body":(
+            "Jacob Bethell featured for England as the series was completed. "
+            "The supplied account also names Luke Humphries and Brandon McNulty without adding a new claim."
+        ),
+    }
+    assert fact_lock_reason(draft,source_title,source_body) is None
