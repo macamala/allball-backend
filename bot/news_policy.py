@@ -113,6 +113,19 @@ def freshness_reason(stamp, now, max_age_hours=72):
     return None
 
 
+def editorial_day_reason(stamp, now, timezone_name="Australia/Sydney"):
+    value = publication_time(stamp)
+    if value is None:
+        return "publication_time_unverified"
+    try:
+        zone = ZoneInfo(timezone_name or "Australia/Sydney")
+    except Exception:
+        zone = UTC
+    if value.astimezone(zone).date() != now.astimezone(zone).date():
+        return "not_editorial_today"
+    return None
+
+
 def newsworthiness_score(item):
     """Editorial value only; never changes factual admission."""
     blob = " ".join(
@@ -212,6 +225,12 @@ def non_sports_personal_life_reason(item):
 def candidate_readiness_score(item):
     """Cheap admission-readiness hint; never grants publication permission."""
     score = 0
+    title = str((item or {}).get("title") or "")
+    # Quote-heavy interview headlines are valid news but are harder for the
+    # automated no-direct-quote lane. Prefer clean factual reports first while
+    # retaining these candidates for later in the same fair queue.
+    if re.search(r'["“”‘’][^"“”‘’]{6,}["“”‘’]', title):
+        score -= 2
     if str((item or {}).get("_extracted") or "").strip():
         score += 4
     if str((item or {}).get("_extracted_image") or "").strip():
@@ -259,6 +278,7 @@ def fair_news_queue(
     sport_order=(),
     sport_inventory=None,
     coverage_floor=6,
+    same_day_timezone=None,
 ):
     """Newest per sport, then round robin; classify evidence before spending AI.
 
@@ -271,6 +291,8 @@ def fair_news_queue(
     seen = set()
     for item in items:
         reason = freshness_reason(item.get('published_at'), now, max_age_hours)
+        if not reason and same_day_timezone:
+            reason = editorial_day_reason(item.get('published_at'), now, same_day_timezone)
         url = canonical_news_url(item.get('url'))
         if reason or not url:
             rejected[reason or 'invalid_source_url'] += 1; continue
