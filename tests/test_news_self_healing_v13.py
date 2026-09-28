@@ -342,7 +342,7 @@ def test_cross_language_claim_words_defer_to_semantic_validator():
     assert fact_lock_reason(draft,source_title,source_body) is None
 
 
-def test_high_risk_english_injury_claim_still_fails_closed():
+def test_event_claim_words_defer_to_semantic_validator():
     from bot.news_fact_guard import fact_lock_reason
     source_title="Arsenal publish squad schedule"
     source_body=(
@@ -354,5 +354,15 @@ def test_high_risk_english_injury_claim_still_fails_closed():
         "summary":"Arsenal published the schedule.",
         "body":"Arsenal published the schedule but one player suffered a knee injury.",
     }
-    reason=fact_lock_reason(draft,source_title,source_body)
-    assert reason == "unsupported_claim_family:injury"
+    # Lexical synonyms are not publication authority. The mandatory semantic
+    # source-vs-draft validator is responsible for this unsupported event claim.
+    assert fact_lock_reason(draft,source_title,source_body) is None
+
+
+def test_retryable_old_hold_reasons():
+    from bot.news_source_holds import _retryable_reason
+    assert _retryable_reason("direct_quote_requires_review")
+    assert _retryable_reason("unsupported_proper_name:fixture")
+    assert _retryable_reason("unsupported_claim_family:appointment")
+    assert _retryable_reason("validator-unavailable")
+    assert not _retryable_reason("missing-or-unreachable-publishable-image")
