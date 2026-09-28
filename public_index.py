@@ -26,6 +26,7 @@ from taxonomy_resolver import (
     persist_resolution,
     resolve_article_competition,
     TaxonomyResolution,
+    cache_row_to_resolution,
 )
 
 logger = logging.getLogger("ninkosports.public_index")
@@ -306,6 +307,28 @@ def _reachable_source_image(
     return None
 
 
+def _image_repair_resolution(article, cached):
+    """An image change must not discard source-backed ingest taxonomy."""
+    resolved = resolve_article_competition(article)
+    if (cached and cached.resolver_version == RESOLVER_VERSION
+            and cached.resolved_sport
+            and float(cached.sport_confidence or 0) >= MIN_SPORT_CONFIDENCE
+            and (not resolved.sport or resolved.sport == cached.resolved_sport)):
+        return cache_row_to_resolution(cached)
+    # Recover UEFA football source evidence lost by older image-only repair.
+    # The football competition path is explicit; UEFA futsal never matches.
+    parts = urlsplit(str(article.source_url or ""))
+    if (not resolved.sport and parts.hostname == "www.uefa.com"
+            and parts.path.startswith(("/uefachampionsleague/news/", "/uefaeuropaleague/news/",
+                                       "/uefaconferenceleague/news/", "/uefanationsleague/news/",
+                                       "/womenschampionsleague/news/", "/european-qualifiers/news/"))
+            and re.search(r"\b(?:UEFA|Champions League|Europa League|Conference League|Nations League)\b", article.title or "", re.I)):
+        return TaxonomyResolution(sport="football", competition=None,
+            sport_confidence=0.99, competition_confidence=0,
+            evidence=["verified-uefa-football-article-path"])
+    return resolved
+
+
 def repair_recent_news_images(
     db: Session,
     *,
@@ -394,7 +417,7 @@ def repair_recent_news_images(
         if replacement:
             article.image_url = replacement
             db.add(article)
-            resolved = resolve_article_competition(article)
+            resolved = _image_repair_resolution(article, tax)
             persist_public_article(db, article, resolved, commit=False)
             if tax.public_ok:
                 refreshed += 1
@@ -446,7 +469,7 @@ def repair_recent_news_images(
             continue
         article.image_url = candidate
         db.add(article)
-        resolved = resolve_article_competition(article)
+        resolved = _image_repair_resolution(article, tax)
         persist_public_article(db, article, resolved, commit=False)
         if tax.public_ok:
             recovered += 1

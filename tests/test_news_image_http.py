@@ -159,3 +159,28 @@ def test_uefa_ingest_and_repair_both_probe_and_return_the_actual_hero(monkeypatc
     assert fetch_sources._pick_reachable_article_image([{'url':small,'source':'og'}]) == large
     assert public_index._reachable_source_image('https://www.uefa.com/news/story',current_url=small) == large
     assert seen == [large,large]
+
+
+def test_image_only_repair_preserves_source_backed_taxonomy_without_forcing_conflicts(monkeypatch):
+    from types import SimpleNamespace
+    import public_index
+    from taxonomy_resolver import TaxonomyResolution, RESOLVER_VERSION
+    article=SimpleNamespace(source_url='https://example.test/news/article',title='Club changes rules')
+    cached=SimpleNamespace(resolver_version=RESOLVER_VERSION,resolved_sport='football',
+        sport_confidence='0.990',resolved_competition=None,competition_confidence='0')
+    monkeypatch.setattr(public_index,'resolve_article_competition',lambda a:TaxonomyResolution(None,None,0,0,[]))
+    assert public_index._image_repair_resolution(article,cached).sport == 'football'
+    monkeypatch.setattr(public_index,'resolve_article_competition',lambda a:TaxonomyResolution('mma',None,.99,0,[]))
+    assert public_index._image_repair_resolution(article,cached).sport == 'mma'
+
+
+def test_uefa_football_path_recovery_never_stamps_futsal(monkeypatch):
+    from types import SimpleNamespace
+    import public_index
+    from taxonomy_resolver import TaxonomyResolution
+    monkeypatch.setattr(public_index,'resolve_article_competition',lambda a:TaxonomyResolution(None,None,0,0,[]))
+    a=SimpleNamespace(source_url='https://www.uefa.com/uefachampionsleague/news/yellow-cards/',
+        title='UEFA updates yellow card suspension rules for 2026/27 club competitions')
+    assert public_index._image_repair_resolution(a,None).sport == 'football'
+    a.source_url='https://www.uefa.com/uefafutsalchampionsleague/news/yellow-cards/'
+    assert public_index._image_repair_resolution(a,None).sport is None
