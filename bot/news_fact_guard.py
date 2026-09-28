@@ -158,9 +158,9 @@ def fact_lock_reason(
     if expected_sport:
         from .classify import classify_article
         classified = classify_article(output.split("\n", 1)[0], output, feed_kind="mixed")
-        if not classified.sport:
-            return "draft_sport_unrecognized"
-        if classified.sport != expected_sport:
+        # A draft does not need to repeat the sport name when source evidence
+        # already established it. Reject only a positive contradictory sport.
+        if classified.sport and classified.sport != expected_sport:
             return "draft_sport_mismatch:" + str(classified.sport)[:50]
         if (
             expected_league
