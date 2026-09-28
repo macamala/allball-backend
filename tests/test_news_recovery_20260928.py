@@ -34,6 +34,33 @@ def test_absent_source_details_are_not_news_content():
         'No specific player names or additional details about the nomination criteria were provided in the source material.'}) == 'non_news_source_meta_filler'
 
 
+def test_rugby_world_cup_cannot_become_soccer_through_wales_or_world_cup_names():
+    from public_index import _explicit_title_sport_override
+    headline='Tayla Preston selected in Wales squad for 2026 Rugby League World Cup'
+    assert classify_article(headline, 'Wales named its squad.').sport == 'rugby-league'
+    assert _explicit_title_sport_override(headline) == 'rugby-league'
+    assert classify_article('Preston named in Wales squad for World Cup',
+        'Tayla Preston has been selected for the Wales rugby league squad.').sport == 'rugby-league'
+    assert classify_article('Wales rugby union squad named for World Cup', '').sport == 'rugby'
+
+
+def test_incidental_rugby_background_does_not_override_explicit_soccer_headline():
+    assert classify_article('Wales football squad announced',
+        'The coach watched a rugby league match during his break.').sport == 'football'
+
+
+def test_mixed_source_liveblog_and_medal_tables_never_reach_writer():
+    assert non_article_news_reason({'title':'Asian Games latest',
+        'url':'https://timesofindia.indiatimes.com/sports/liveblog/123.cms'}) == 'non_article_live_program'
+    assert non_article_news_reason({'title':'Asian Games India medal winners: Full list of athletes'}) == 'non_article_service_guide'
+
+
+def test_boxers_plural_is_sport_evidence_but_boxing_day_is_not():
+    assert classify_article('Priya, Lovlina storm into semis as India’s boxers continue to assure medals',
+        'India’s boxing campaign continued at the Asian Games.').sport == 'boxing'
+    assert classify_article('Arsenal beat Chelsea on Boxing Day in Premier League', '').sport == 'football'
+
+
 @pytest.mark.parametrize("word", ["command", "summary", "summarize", "commander", "grammar", "summation"])
 def test_short_mma_alias_is_never_a_substring(word):
     assert _score_aliases(word, ["mma"]) == 0

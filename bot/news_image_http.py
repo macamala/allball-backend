@@ -172,6 +172,8 @@ def probe_news_image(url: str, *, client=None) -> tuple[bool, str]:
     # overlay or modify a signed publisher image URL to manufacture a new one.
     if keys & {"overlay-base64", "overlay", "mark", "mark64", "txt"}:
         return False, "composited_overlay"
+    if re.search(r"(?:[,/])overlay[-_,]", urlsplit(value).path, re.I):
+        return False, "composited_overlay"
     cached = _cache_get(value)
     if cached is not None:
         return cached

@@ -17,6 +17,7 @@ class Feed(TypedDict, total=False):
 
 
 FEEDS: List[Feed] = [
+    {'url': 'https://timesofindia.indiatimes.com/rssfeeds/4719148.cms', 'kind': 'mixed', 'enabled': True, 'note': 'Asian Games and global sport; verified timezone-aware RSS, free article prose and same-article JSON-LD photo. No sport/league stamp; liveblogs, medal tables and schedules held.'},
     {'url': 'https://www.ihf.info/news/rss.xml', 'kind': 'league', 'sport': 'handball', 'enabled': True, 'verified_official': True, 'article_https_host': 'www.ihf.info', 'note': 'Official RSS provides exact UTC publication times missing from article pages. Verified same-host HTTPS articles; no league stamp.'},
     {'url': 'https://www.theguardian.com/football/rss', 'kind': 'league', 'sport': 'football', 'enabled': True, 'note': 'Global club and national-team football; never stamp a domestic league.'},
     {'url': 'https://www.theguardian.com/au/sport/rss', 'kind': 'mixed', 'enabled': True, 'note': 'Multi-sport reporting; independently classify; opinion/blog/live products held.'},

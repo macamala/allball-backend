@@ -19,7 +19,7 @@ from models import Article, ArticleTaxonomyResolution
 from sport_match import MAIN_SPORTS, isolation_ok
 from bot.taxonomy import COMPETITIONS
 from bot.news_learning import article_has_open_incident
-from bot.news_policy import CRICKET_TITLE_RE, VOLLEYBALL_TITLE_RE, gossip_news_reason, non_article_news_reason, publisher_branding_reason
+from bot.news_policy import CRICKET_TITLE_RE, VOLLEYBALL_TITLE_RE, RUGBY_LEAGUE_TITLE_RE, RUGBY_UNION_TITLE_RE, gossip_news_reason, non_article_news_reason, publisher_branding_reason
 from taxonomy_resolver import (
     MIN_SPORT_CONFIDENCE,
     RESOLVER_VERSION,
@@ -708,6 +708,10 @@ def _explicit_title_sport_override(title: str) -> Optional[str]:
         return "cricket"
     if VOLLEYBALL_TITLE_RE.search(value):
         return "volleyball"
+    if RUGBY_LEAGUE_TITLE_RE.search(value) and not RUGBY_UNION_TITLE_RE.search(value):
+        return "rugby-league"
+    if RUGBY_UNION_TITLE_RE.search(value) and not RUGBY_LEAGUE_TITLE_RE.search(value):
+        return "rugby"
     # Strong road-cycling phrases outrank the generic words "Grand Prix".
     # This is intentionally narrow so motorsport Grand Prix stories are unchanged.
     if re.search(

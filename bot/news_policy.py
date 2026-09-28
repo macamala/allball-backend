@@ -16,6 +16,8 @@ VOLLEYBALL_TITLE_RE = re.compile(
     r"(?<!\w)(?:volleyball|fivb|eurovolley|odbojka|odbojku|odbojkaš(?:i|e|a|ima|ice|ica|ki|ke)|"
     r"odbojkas(?:i|e|a|ima|ice|ica|ki|ke))(?!\w)", re.I
 )
+RUGBY_LEAGUE_TITLE_RE = re.compile(r"(?<!\w)(?:rugby[\s-]+league|nrlw?)(?!\w)", re.I)
+RUGBY_UNION_TITLE_RE = re.compile(r"(?<!\w)rugby[\s-]+union(?!\w)", re.I)
 
 
 def numeric_tokens(text):
@@ -225,6 +227,10 @@ def non_article_news_reason(item):
                 and re.search(r"\b(?:vote|voting|poll|nominees)\b", poll_title))):
         return "non_article_fan_poll"
     if re.search(r"\b(?:fixtures by team|fixtures and results|full fixture list)\b", title):
+        return "non_article_service_guide"
+    if re.search(r"/(?:liveblog|live-blog|live-scores)(?:/|$)", path):
+        return "non_article_live_program"
+    if re.search(r"\b(?:full schedule|medal (?:tally|winners)|full list of (?:athletes|medals))\b", title):
         return "non_article_service_guide"
     copy = " ".join(str((item or {}).get(k) or "") for k in ("summary", "body"))
     if re.search(r"\bno (?:further|additional|specific) .{0,100}\b(?:provided|mentioned|supplied) (?:in|by) (?:the )?(?:source|release|material)\b", copy, re.I):

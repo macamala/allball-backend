@@ -11,7 +11,7 @@ from .taxonomy import (
     TEAMS,
 )
 from .textutil import clean_text
-from .news_policy import CRICKET_TITLE_RE, VOLLEYBALL_TITLE_RE
+from .news_policy import CRICKET_TITLE_RE, VOLLEYBALL_TITLE_RE, RUGBY_LEAGUE_TITLE_RE, RUGBY_UNION_TITLE_RE
 
 
 @dataclass
@@ -108,6 +108,9 @@ def classify_article(
 
     if basketball_context:
         sport_scores["football"] = max(0, sport_scores.get("football", 0) - 3)
+    if re.search(r"\b(?:boxing(?!\s+day)|boxers?)\b", title_text):
+        sport_scores["boxing"] = max(sport_scores.get("boxing", 0), 12)
+        sport_scores["football"] = 0
     if CRICKET_TITLE_RE.search(title_text):
         # World Cup and national-team names are shared with football. Explicit
         # cricket formats, including Unicode hyphens, resolve that ambiguity.
@@ -117,6 +120,22 @@ def classify_article(
         sport_scores["volleyball"] = max(sport_scores.get("volleyball", 0), 12)
         sport_scores["boxing"] = 0
         sport_scores["tennis"] = 0
+    # National teams and World Cup appear in both codes and soccer. Explicit
+    # rugby evidence in the title/lead must outrank those shared names.
+    explicit_other_title = re.search(
+        r"\b(?:soccer|football|basketball|tennis|cricket|volleyball|handball|futsal|hockey|"
+        r"baseball|boxing|mma|ufc|golf|cycling|athletics|swimming|netball|lacrosse|"
+        r"snooker|darts|afl|nba|nfl|nhl|badminton|esports)\b", title_text,
+    )
+    rugby_evidence = title_text + (" " + body_text[:900] if not explicit_other_title else "")
+    if RUGBY_LEAGUE_TITLE_RE.search(rugby_evidence) and not RUGBY_UNION_TITLE_RE.search(rugby_evidence):
+        sport_scores["rugby-league"] = max(sport_scores.get("rugby-league", 0), 12)
+        sport_scores["football"] = 0
+        sport_scores["rugby"] = 0
+    elif RUGBY_UNION_TITLE_RE.search(rugby_evidence) and not RUGBY_LEAGUE_TITLE_RE.search(rugby_evidence):
+        sport_scores["rugby"] = max(sport_scores.get("rugby", 0), 12)
+        sport_scores["football"] = 0
+        sport_scores["rugby-league"] = 0
     if tennis_context:
         sport_scores["football"] = min(sport_scores.get("football", 0), sport_scores.get("football", 0))
         sport_scores["basketball"] = min(sport_scores.get("basketball", 0), 1)
