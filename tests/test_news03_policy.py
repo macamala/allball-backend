@@ -120,6 +120,37 @@ def test_lowest_inventory_wins_after_basic_floor():
     assert result[0]['sport_fixture']=='tennis'
 
 
+def test_major_sport_gets_early_lane_while_emptiest_sport_stays_first():
+    football=item('football', 1)
+    lacrosse=item('lacrosse', 1)
+    netball=item('netball', 1)
+    result,_=fair_news_queue(
+        [football,lacrosse,netball],
+        classify,
+        now=NOW,
+        sport_order=['football','lacrosse','netball'],
+        sport_inventory={'football':4,'lacrosse':0,'netball':0},
+        coverage_floor=6,
+    )
+    assert result[0]['sport_fixture'] in {'lacrosse','netball'}
+    assert result[1]['sport_fixture']=='football'
+
+
+def test_major_sport_anchor_stops_after_target_is_reached():
+    football=item('football', 1)
+    lacrosse=item('lacrosse', 1)
+    netball=item('netball', 1)
+    result,_=fair_news_queue(
+        [football,lacrosse,netball],
+        classify,
+        now=NOW,
+        sport_order=['football','lacrosse','netball'],
+        sport_inventory={'football':12,'lacrosse':0,'netball':0},
+        coverage_floor=6,
+    )
+    assert {result[0]['sport_fixture'], result[1]['sport_fixture']} == {'lacrosse','netball'}
+
+
 def test_equally_empty_sports_prefer_admission_ready_candidate():
     raw=item('lacrosse', 1)
     raw['title']='Lacrosse team prepares for international match'

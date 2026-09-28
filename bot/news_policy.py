@@ -315,6 +315,33 @@ def fair_news_queue(
                     rotation_rank[sport],
                 ),
             )
+
+        # Keep one early lane for source-rich headline sports while they are
+        # still thin, without taking the first slot away from the emptiest sport.
+        # This prevents football/basketball/tennis etc. from sitting at only a
+        # handful of stories while the fairness floor is being built across
+        # dozens of smaller sports. The anchor rotates every 30 minutes and is
+        # disabled once that sport reaches its own modest target.
+        if sport_inventory is not None and len(order) > 1:
+            anchor_targets = {
+                "football": 12,
+                "basketball": 8,
+                "tennis": 8,
+                "cricket": 8,
+                "rugby": 8,
+                "motorsport": 8,
+            }
+            anchor_candidates = [
+                sport
+                for sport, target in anchor_targets.items()
+                if sport in buckets and inventory.get(sport, 0) < target
+            ]
+            if anchor_candidates:
+                anchor_index = int(now.timestamp() // 1800) % len(anchor_candidates)
+                anchor = anchor_candidates[anchor_index]
+                if anchor in order and order[0] != anchor:
+                    order.remove(anchor)
+                    order.insert(1, anchor)
     queues = {
         sport: deque(
             sorted(
