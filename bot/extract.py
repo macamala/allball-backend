@@ -29,10 +29,41 @@ EXTRACT_HEADERS = {
 }
 ARTICLE_TAGS = {"p", "h2", "h3", "blockquote"}
 MAX_PARAGRAPHS = 40
-JSON_LD_RE = re.compile(
-    r'<script\b[^>]*\btype\s*=\s*["\']?application/ld\+json(?:["\']|(?=\s|>))[^>]*>(.*?)</script\s*>',
-    re.IGNORECASE | re.DOTALL,
-)
+
+class _JsonLdParser(HTMLParser):
+    """Decode HTML attributes, while preserving the JSON script text verbatim."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.collecting = False
+        self.parts = []
+        self.blocks = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag.lower() == "script":
+            mime = str(dict(attrs).get("type") or "").strip().lower()
+            self.collecting = mime == "application/ld+json"
+            self.parts = []
+
+    def handle_data(self, data):
+        if self.collecting:
+            self.parts.append(data)
+
+    def handle_endtag(self, tag):
+        if tag.lower() == "script" and self.collecting:
+            self.blocks.append("".join(self.parts))
+            self.collecting = False
+            self.parts = []
+
+
+def _json_ld_blocks(html: str) -> List[str]:
+    parser = _JsonLdParser()
+    try:
+        parser.feed(html or "")
+        parser.close()
+    except Exception:
+        return []
+    return parser.blocks
 
 CHROME_TAGS = {
     "nav",
@@ -121,7 +152,7 @@ def page_title_from_html(html: str) -> str:
     title = _og(html or "", "og:title") or _meta_name(html or "", "twitter:title")
     if title:
         return clean_text(title)
-    for raw in JSON_LD_RE.findall(html or ""):
+    for raw in _json_ld_blocks(html):
         try:
             data = json.loads(raw)
         except Exception:
@@ -146,7 +177,7 @@ def page_published_at_from_html(html: str) -> Optional[datetime]:
         _meta_name(html or "", "date"),
         _meta_name(html or "", "pubdate"),
     ]
-    for raw in JSON_LD_RE.findall(html or ""):
+    for raw in _json_ld_blocks(html):
         try:
             data = json.loads(raw)
         except Exception:
@@ -170,7 +201,7 @@ def page_published_at_from_html(html: str) -> Optional[datetime]:
 
 def _json_ld_images(html: str) -> List[dict]:
     out: List[dict] = []
-    for raw in JSON_LD_RE.findall(html or ""):
+    for raw in _json_ld_blocks(html):
         try:
             data = json.loads(raw)
         except Exception:
@@ -454,7 +485,7 @@ def parse_feed_datetime(entry) -> Optional[datetime]:
 
 def _json_ld_article_body(html: str) -> str:
     """Same article prose from JSON-LD; never a different story or RSS blurb."""
-    for raw in JSON_LD_RE.findall(html or ""):
+    for raw in _json_ld_blocks(html):
         try:
             data = json.loads(raw)
         except Exception:

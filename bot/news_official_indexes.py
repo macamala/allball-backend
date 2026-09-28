@@ -285,6 +285,9 @@ HTML_INDEXES = (
     },
     {
         "id": "world-netball-news",
+        # WordPress news cards have empty stretched-link anchors; the site's
+        # navigation also lives at root paths and must not spend this budget.
+        "anchor_class": "stretched-link",
         "sport": "netball",
         "publisher": "World Netball",
         "url": "https://netball.sport/news/",
@@ -343,8 +346,9 @@ ABSOLUTE_URL_RE = re.compile(r'''https://[^"'<>\\\s]+''', re.IGNORECASE)
 
 
 class _AnchorParser(HTMLParser):
-    def __init__(self):
+    def __init__(self, anchor_class=None):
         super().__init__(convert_charrefs=True)
+        self.anchor_class = anchor_class
         self.current_href: Optional[str] = None
         self.current_text: List[str] = []
         self.links: List[tuple[str, str]] = []
@@ -353,6 +357,8 @@ class _AnchorParser(HTMLParser):
         if tag.lower() != "a" or self.current_href is not None:
             return
         values = {str(key).lower(): str(value or "") for key, value in attrs}
+        if self.anchor_class and self.anchor_class not in values.get("class", "").split():
+            return
         href = values.get("href", "").strip()
         if href:
             self.current_href = href
@@ -410,7 +416,7 @@ def _anchor_candidates(cfg: Dict) -> List[tuple[str, str]]:
     except Exception as exc:
         logger.info("[official_index] index unavailable %s: %s", cfg["id"], type(exc).__name__)
         return []
-    parser = _AnchorParser()
+    parser = _AnchorParser(cfg.get("anchor_class"))
     try:
         parser.feed(html)
         parser.close()
@@ -428,13 +434,16 @@ def _anchor_candidates(cfg: Dict) -> List[tuple[str, str]]:
         for href, _title in parser.links
         if (url := _same_host_url(cfg["url"], href, cfg["host"], cfg))
     }
-    for match in EMBEDDED_URL_RE.findall(html):
+    # A source scoped to verified article-card markup must not re-admit
+    # navigation from the unscoped embedded-URL fallback.
+    embedded_html = "" if cfg.get("anchor_class") else html
+    for match in EMBEDDED_URL_RE.findall(embedded_html):
         href = match.replace("\\/","/")
         url = _same_host_url(cfg["url"], href, cfg["host"], cfg)
         if url and url in anchor_urls:
             continue
         discovered.append((href, ""))
-    for match in ABSOLUTE_URL_RE.findall(html):
+    for match in ABSOLUTE_URL_RE.findall(embedded_html):
         href = match.replace("\\/","/")
         url = _same_host_url(cfg["url"], href, cfg["host"], cfg)
         if url and url in anchor_urls:

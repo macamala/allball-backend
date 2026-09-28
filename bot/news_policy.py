@@ -189,7 +189,12 @@ def non_article_news_reason(item):
         return "non_article_podcast"
     if re.search(r"\bscorecard\b", title) or "/scorecard/" in path:
         return "non_article_scorecard"
+    # Confirmed legacy roundup mixes highlight cards and site acknowledgements.
+    if title.strip() == "nrl finals week 3 moments":
+        return "non_article_video_highlights"
     if re.search(r"/(?:video|videos|clips)/", path) or re.search(
+        r"(?:^|/|-)(?:best-moments|game-highlights|match-highlights|tries-of-the-week)(?:/|-|$)", path
+    ) or re.search(
         r"\b(?:game highlights|match highlights|top (?:plays|tries)|tries of the week|best moments)\b", title
     ):
         return "non_article_video_highlights"

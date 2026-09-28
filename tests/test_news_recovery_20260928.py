@@ -30,6 +30,23 @@ def test_minified_jsonld_preserves_real_publication_and_article_body():
     assert "Poland defended" in article_text_from_html(doc)
 
 
+@pytest.mark.parametrize("mime", ["application/ld&#x2B;json", "application/ld&#43;json", "APPLICATION/LD+JSON"])
+def test_encoded_jsonld_mime_preserves_publication_body_and_image(mime):
+    body = "The club confirmed its new captain after consulting the playing group. " * 15
+    doc = f'<script type="{mime}">' + json.dumps({
+        "@type": "NewsArticle", "datePublished": "2026-09-27T17:13:00Z",
+        "articleBody": body, "image": "https://example.test/captain.jpg",
+    }) + '</script>'
+    assert page_published_at_from_html(doc) == datetime(2026, 9, 27, 17, 13, tzinfo=timezone.utc)
+    assert "club confirmed its new captain" in article_text_from_html(doc)
+    assert any(row["url"] == "https://example.test/captain.jpg" for row in collect_page_image_candidates(doc))
+
+
+def test_non_jsonld_script_is_never_treated_as_publication_metadata():
+    doc = '<script type="application/json">{"datePublished":"2026-09-28T01:00:00Z"}</script>'
+    assert page_published_at_from_html(doc) is None
+
+
 def test_void_tags_in_navigation_cannot_hide_article_or_image():
     doc = '''<nav><input><img src=/logo.png><img src=/other.png/><p>Navigation text.</p></nav>
       <main><p>Barcelona prepared for the handball final with their complete first team.
@@ -56,10 +73,20 @@ def test_official_navigation_never_consumes_article_limit(monkeypatch):
     assert idx._anchor_candidates(cfg) == [("https://www.nba.com/news/team-announces-coach", "Team announces coach")]
 
 
+def test_netball_discovers_only_news_cards_and_does_not_reenter_navigation(monkeypatch):
+    cfg = next(c for c in idx.HTML_INDEXES if c["id"] == "world-netball-news")
+    html = ''.join(f'<a href="https://netball.sport/game/netball-{n}/">Netball guide</a>' for n in range(15))
+    html += '<a href="https://netball.sport/netball-announces-officials/" class="card stretched-link"></a>'
+    html += '<script>{"url":"https://netball.sport/world-netball-foundation/"}</script>'
+    monkeypatch.setattr(idx, "read_news_feed", lambda u: html.encode())
+    assert idx._anchor_candidates(cfg) == [("https://netball.sport/netball-announces-officials/", "")]
+
+
 @pytest.mark.parametrize("title,reason", [
     ("NinkoSports Daily Football Quizzes Test Knowledge and Instinct", "non_article_quiz"),
     ("Los Angeles Angels vs Seattle Mariners: Game Highlights", "non_article_video_highlights"),
     ("Samoa-eligible players tries of the week", "non_article_video_highlights"),
+    ("NRL Finals Week 3 Moments", "non_article_video_highlights"),
     ("Bahrain Grand Prix race times and weather forecast", "non_article_service_guide"),
 ])
 def test_non_news_is_rejected_before_writer(title, reason):
@@ -74,6 +101,10 @@ def test_provider_copy_is_held_not_rebranded():
 
 def test_real_news_is_not_rejected_as_a_media_product():
     assert non_article_news_reason({"title": "Club confirms new head coach after review", "url": "https://example.test/news/coach"}) is None
+
+
+def test_rewritten_highlight_title_cannot_hide_its_source_product():
+    assert non_article_news_reason({"title": "Standout performances", "url": "https://www.nrl.com/news/2026/09/28/best-moments-finals-week-3/"}) == "non_article_video_highlights"
 
 
 def test_current_day_hydration_reports_missing_body(monkeypatch):
