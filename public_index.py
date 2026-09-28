@@ -19,6 +19,7 @@ from models import Article, ArticleTaxonomyResolution
 from sport_match import MAIN_SPORTS, isolation_ok
 from bot.taxonomy import COMPETITIONS
 from bot.news_learning import article_has_open_incident
+from bot.news_policy import gossip_news_reason
 from taxonomy_resolver import (
     MIN_SPORT_CONFIDENCE,
     RESOLVER_VERSION,
@@ -58,14 +59,27 @@ def persist_public_article(db: Session, article: Article, resolution=None, commi
         isolated = isolation_ok(
             article, resolved.sport, strict=True, resolution=resolved
         )
+    editorial_hold = gossip_news_reason({
+        "title": article.title,
+        "summary": article.summary,
+        "url": article.source_url,
+    })
     public = bool(
         quality.get("ok")
         and resolved.sport
         and resolved.sport_confidence >= MIN_SPORT_CONFIDENCE
         and isolated
         and news_image_is_publishable(article.image_url)
+        and not editorial_hold
         and not article_has_open_incident(db, article.id)
     )
+    if editorial_hold:
+        logger.warning(
+            "[public_index] hold gossip article=%s reason=%s title=%s",
+            getattr(article, "id", None),
+            editorial_hold,
+            (article.title or "")[:120],
+        )
     row = (
         db.query(ArticleTaxonomyResolution)
         .filter(ArticleTaxonomyResolution.article_id == article.id)
@@ -451,6 +465,67 @@ def repair_recent_news_images(
             dict(reasons),
         )
     return changed
+
+def repair_recent_gossip_news(
+    db: Session,
+    *,
+    limit: int = 600,
+    max_age_hours: int = 168,
+) -> int:
+    """Hide recent public gossip/rumour rows without deleting source records."""
+    cutoff = datetime.utcnow() - timedelta(hours=max(1, int(max_age_hours)))
+    rows = (
+        db.query(Article, ArticleTaxonomyResolution)
+        .join(
+            ArticleTaxonomyResolution,
+            ArticleTaxonomyResolution.article_id == Article.id,
+        )
+        .filter(
+            ArticleTaxonomyResolution.resolver_version == RESOLVER_VERSION,
+            ArticleTaxonomyResolution.public_ok.is_(True),
+            func.coalesce(Article.published_at, Article.created_at) >= cutoff,
+        )
+        .order_by(
+            func.coalesce(Article.published_at, Article.created_at).desc(),
+            Article.id.desc(),
+        )
+        .limit(max(1, min(int(limit), 1200)))
+        .all()
+    )
+    hidden = 0
+    reasons = {}
+    for article, tax in rows:
+        reason = gossip_news_reason({
+            "title": article.title,
+            "summary": article.summary,
+            "url": article.source_url,
+        })
+        if not reason:
+            continue
+        tax.public_ok = False
+        db.add(tax)
+        hidden += 1
+        reasons[reason] = reasons.get(reason, 0) + 1
+        logger.warning(
+            "[public_index] hide gossip article=%s reason=%s title=%s",
+            article.id,
+            reason,
+            (article.title or "")[:120],
+        )
+    if hidden:
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("recent News gossip repair failed")
+            return 0
+        logger.info(
+            "[public_index] gossip repair hidden=%s reasons=%s",
+            hidden,
+            reasons,
+        )
+    return hidden
+
 
 def repair_recent_duplicate_news(
     db: Session,
