@@ -24,15 +24,15 @@ def test_free_ai_route_requires_key_and_explicit_free_model_ids(monkeypatch):
     monkeypatch.setattr(free_ai, '_free_catalog_model', lambda model: True)
     monkeypatch.setattr(free_ai, '_free_tokens_available', lambda: True)
     monkeypatch.delenv('XKIRO_API_KEY', raising=False)
-    assert not free_ai.free_ai_available()
+    assert not free_ai._xkiro_available()
 
     monkeypatch.setenv('XKIRO_API_KEY', 'fixture-key')
     monkeypatch.setenv('NEWS_XKIRO_WRITER_MODEL', 'qwen/qwen3.5-397b-a17b')
     monkeypatch.setenv('NEWS_XKIRO_VALIDATOR_MODEL', 'qwen/qwen3.5-397b-a17b:free')
-    assert not free_ai.free_ai_available()
+    assert not free_ai._xkiro_available()
 
     monkeypatch.setenv('NEWS_XKIRO_WRITER_MODEL', 'qwen/qwen3.5-397b-a17b:free')
-    assert free_ai.free_ai_available()
+    assert free_ai._xkiro_available()
 
 
 
@@ -159,9 +159,24 @@ def test_external_free_pool_can_satisfy_router_availability(monkeypatch):
     monkeypatch.setattr(
         external,
         "configured_identities",
-        lambda purpose="writer": (("groq","fixture-model"),),
+        lambda purpose="writer": (("groq","fixture-model"), ("cloudflare","fixture-model")),
     )
     monkeypatch.setattr(free_ai, "_xkiro_available", lambda: False)
     assert external.available("writer")
     assert external.available("validator")
     assert free_ai.free_ai_available()
+
+
+@pytest.mark.parametrize('providers,xkiro,expected', [
+    (('cloudflare',), False, False),
+    ((), True, False),
+    (('cloudflare',), True, True),
+    (('groq','cloudflare'), False, True),
+])
+def test_provider_outage_cannot_start_writer_without_independent_validator(monkeypatch, providers, xkiro, expected):
+    from bot import news_external_free as external
+    monkeypatch.setattr(external, 'configured_identities', lambda purpose='writer': tuple((p, 'fixture') for p in providers))
+    monkeypatch.setattr(free_ai, '_xkiro_available', lambda: xkiro)
+    monkeypatch.setattr(free_ai, '_rate_limited', False)
+    assert free_ai.free_ai_available() is expected
+    assert free_ai.free_ai_rate_limited() is (not expected)

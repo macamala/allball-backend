@@ -127,23 +127,24 @@ def _xkiro_available() -> bool:
 
 
 def free_ai_available() -> bool:
+    """A writer is usable only when a different provider can validate it."""
+    writers, validators = set(), set()
     try:
-        from .news_external_free import available as external_available
-        if external_available("writer") and external_available("validator"):
-            return True
+        from .news_external_free import configured_identities
+        writers = {provider for provider, _model in configured_identities('writer')}
+        validators = {provider for provider, _model in configured_identities('validator')}
     except Exception:
         pass
-    return _xkiro_available()
+    if any(writer != validator for writer in writers for validator in validators):
+        return True
+    if not _rate_limited and _xkiro_available():
+        writers.add('xkiro')
+        validators.add('xkiro')
+    return any(writer != validator for writer in writers for validator in validators)
 
 
 def free_ai_rate_limited() -> bool:
-    try:
-        from .news_external_free import available as external_available
-        if external_available("writer") and external_available("validator"):
-            return False
-    except Exception:
-        pass
-    return _rate_limited
+    return not free_ai_available()
 
 
 def reset_free_ai_rate_limit() -> None:

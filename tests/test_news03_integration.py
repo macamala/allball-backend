@@ -21,6 +21,9 @@ DRAFT = {'title':'Football cup format confirmed for participating clubs','summar
 
 @pytest.fixture(autouse=True)
 def no_real_writer(monkeypatch):
+    # These tests replace provider I/O and exercise admission/request accounting;
+    # independent provider health has its own router tests.
+    monkeypatch.setattr(writer, 'free_ai_rate_limited', lambda: False)
     monkeypatch.setattr(writer,'_rate_limited',False)
     monkeypatch.setattr(writer,'_hard_quota',False)
     monkeypatch.setattr(writer,'OPENAI_API_KEY','isolated-test-not-a-real-key')
