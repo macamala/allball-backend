@@ -152,6 +152,11 @@ QUOTE_RETRY_HINT = (
     "marks anywhere and do not copy the source quote wording verbatim. Preserve "
     "only the meaning explicitly supported by the source."
 )
+HEADLINE_RETRY_HINT = (
+    "The previous headline was too close to the source headline. Create a genuinely "
+    "new NinkoSports headline using different wording and structure while preserving "
+    "the exact supported meaning. Do not add a fact or sensationalise."
+)
 
 LENGTH_RETRY_HINT = (
     "The previous draft was only a short summary of a substantial source article. "
@@ -365,6 +370,8 @@ def write_ninkosports_story(
         retry_hint = (
             QUOTE_RETRY_HINT
             if safe_reason == "direct_quote_requires_review"
+            else HEADLINE_RETRY_HINT
+            if safe_reason in {"headline_too_similar_to_source", "copied_source_headline"}
             else FACT_RETRY_HINT
         )
         prompt = f"{retry_hint}\nVALIDATION_FAILURE: {safe_reason}\n\n{prompt}"
