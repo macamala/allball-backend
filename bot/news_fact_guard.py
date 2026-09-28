@@ -24,6 +24,7 @@ COMMON_CAPITALIZED = {
     "As","By","It","He","She","They","We","His","Her","Their","Club","Team",
     "League","Championship","World","Cup","Final","Finals","Season","News",
 }
+HIGH_RISK_CLAIM_FAMILIES = {"injury", "discipline", "retirement", "death", "appointment"}
 CLAIM_FAMILIES = {
     "transfer": (
         " transfer "," signed "," signing "," contract "," loan "," fee ",
@@ -90,6 +91,20 @@ def _acronyms(text: str) -> set[str]:
     return {m.group(0) for m in ACRONYM_RE.finditer(text or "") if m.group(0) not in ignored}
 
 
+def _source_probably_english(text: str) -> bool:
+    """Cheap guard scope check; false means defer lexical claims to semantic validation."""
+    words = re.findall(r"[a-z]+", (text or "").lower())
+    if len(words) < 12:
+        return False
+    common = {
+        "the","and","to","of","in","for","on","with","after","before","as","at",
+        "from","that","this","was","were","is","are","has","have","had","will",
+        "his","her","their","they","he","she","a","an",
+    }
+    hits = sum(1 for word in words if word in common)
+    return hits >= max(4, len(words) // 18)
+
+
 def fact_lock_reason(
     draft: dict,
     source_title: str,
@@ -128,13 +143,19 @@ def fact_lock_reason(
 
     src_norm = _norm(source)
     out_norm = _norm(output)
-    src_calendar = {term for term in MONTHS_DAYS if f" {term} " in src_norm}
-    for term in sorted({term for term in MONTHS_DAYS if f" {term} " in out_norm} - src_calendar):
-        return "unsupported_time_reference:" + term
+    # Calendar/claim vocabulary below is English-only. For non-English source
+    # material, use the cross-language semantic validator instead of pretending
+    # absence of an English keyword proves absence of the underlying fact.
+    if _source_probably_english(source):
+        src_calendar = {term for term in MONTHS_DAYS if f" {term} " in src_norm}
+        for term in sorted({term for term in MONTHS_DAYS if f" {term} " in out_norm} - src_calendar):
+            return "unsupported_time_reference:" + term
 
-    for family, terms in CLAIM_FAMILIES.items():
-        if _contains_any(out_norm, terms) and not _contains_any(src_norm, terms):
-            return "unsupported_claim_family:" + family
+        for family, terms in CLAIM_FAMILIES.items():
+            if family not in HIGH_RISK_CLAIM_FAMILIES:
+                continue
+            if _contains_any(out_norm, terms) and not _contains_any(src_norm, terms):
+                return "unsupported_claim_family:" + family
 
     if expected_sport:
         from .classify import classify_article
