@@ -143,7 +143,7 @@ def _run_cycle():
                 from repair_content import repair_summary_only
                 repair_summary_only(max_pages=1, max_rewrite=maximum)
             rewritten = fetch_and_store_all_articles(
-                max_per_league=3, hard_limit=None, use_ai=True,
+                max_per_league=6, hard_limit=None, use_ai=True,
                 max_ai_chars=6000, max_ai_articles=maximum,
             )
             try:
