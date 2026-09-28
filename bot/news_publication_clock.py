@@ -1,6 +1,7 @@
 """Preserve verified source times in News; no score tables or invented times."""
 from datetime import datetime, time, timezone
 import logging
+import re
 
 from sqlalchemy import text
 
@@ -30,11 +31,16 @@ def ensure_news_publication_clock(db):
             db.execute(text('ALTER TABLE articles ALTER COLUMN published_at TYPE timestamp without time zone USING published_at::timestamp without time zone'))
             db.commit()
             logger.warning('[news_clock] restored source time precision: articles.published_at date -> timestamp')
-        except Exception:
+        except Exception as exc:
             db.rollback()
+            original = getattr(exc, 'orig', None)
+            state = getattr(original, 'pgcode', None) or getattr(original, 'sqlstate', None)
+            state = state if isinstance(state, str) and re.fullmatch(r'[A-Z0-9]{5}', state) else 'unknown'
+            logger.error('[news_clock] migration refused sqlstate=%s error_type=%s', state, type(exc).__name__)
             raise RuntimeError('news_publication_clock_migration_unavailable') from None
     elif column not in {'timestamp without time zone', 'timestamp with time zone'}:
         db.rollback()
+        logger.error('[news_clock] publication column is absent or has an unsupported type')
         raise RuntimeError('news_publication_clock_type_unverified')
     else:
         db.commit()
