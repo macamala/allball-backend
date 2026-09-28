@@ -593,6 +593,19 @@ def _explicit_title_sport_override(title: str) -> Optional[str]:
         re.I,
     ):
         return "cycling"
+    if re.search(r"(?<!\w)(?:darts|pdc)(?!\w)", value, re.I):
+        return "darts"
+    if re.search(r"(?<!\w)snooker(?!\w)", value, re.I):
+        return "snooker"
+    if (
+        re.search(r"(?<!\w)napoli(?!\w)", value, re.I)
+        and re.search(
+            r"(?<!\w)(?:defender|midfielder|striker|goalkeeper|contract|new\s+deal|serie\s+a)(?!\w)",
+            value,
+            re.I,
+        )
+    ):
+        return "football"
     return None
 
 
