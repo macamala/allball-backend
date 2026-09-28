@@ -6,6 +6,7 @@ import time
 from contextvars import ContextVar
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
+from urllib.parse import urlsplit, urlunsplit
 
 import feedparser
 from sqlalchemy.orm import Session
@@ -363,6 +364,18 @@ def _fetch_feed_entries(feed_cfg: Dict, max_articles: int) -> List[Dict]:
                 parsed_candidates.append(cleaned)
         summary = max(parsed_candidates, key=len) if parsed_candidates else ""
         link = (entry.get("link") or "").strip()
+        if feed_cfg.get("article_https_host"):
+            try:
+                parts = urlsplit(link)
+                if (parts.hostname != feed_cfg["article_https_host"] or parts.username
+                        or parts.password or parts.scheme not in {"http", "https"}
+                        or parts.port not in {None, 80, 443}):
+                    continue
+                # This publisher advertises legacy HTTP links in its RSS. Its
+                # same-path HTTPS article endpoint has been independently verified.
+                link = urlunsplit(("https", parts.hostname, parts.path, parts.query, parts.fragment))
+            except ValueError:
+                continue
         if not link or not title or looks_like_garbage(title):
             continue
         if feed_cfg.get("rss_fallback_only") and word_count(summary) < 25:

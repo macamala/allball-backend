@@ -184,3 +184,16 @@ def test_uefa_discovery_keeps_futsal_separate_and_does_not_use_naive_dates(monke
     monkeypatch.setattr(idx,'read_news_feed',lambda u:page.encode())
     dates={}; rows=idx._sitemap_candidates(source,publication_times=dates)
     assert len(rows)==1 and '124-report' in rows[0][0] and dates=={}
+
+
+def test_ihf_rss_keeps_exact_date_and_only_upgrades_verified_same_host(monkeypatch):
+    from bot import fetch_sources as fetch
+    from bot.feeds import FEEDS
+    from email.utils import format_datetime
+    source=next(x for x in FEEDS if x['url']=='https://www.ihf.info/news/rss.xml')
+    now=datetime.now(timezone.utc).replace(microsecond=0)
+    page=f'<rss version="2.0"><channel><title>IHF News</title><link>https://www.ihf.info/</link><description>News</description><item><title>USA qualify for Pan American Games</title><link>http://www.ihf.info/media-center/news/usa-qualify</link><pubDate>{format_datetime(now)}</pubDate></item><item><title>Untrusted cross-host link</title><link>http://other.example/article</link><pubDate>{format_datetime(now)}</pubDate></item></channel></rss>'
+    monkeypatch.setattr(fetch,'read_news_feed',lambda u:page.encode())
+    rows=fetch._fetch_feed_entries(source,20)
+    assert len(rows)==1 and rows[0]['url']=='https://www.ihf.info/media-center/news/usa-qualify'
+    assert rows[0]['published_at']==now and not rows[0]['feed'].get('league')

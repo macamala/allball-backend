@@ -151,6 +151,7 @@ HTML_INDEXES = (
     },
     {
         "id": "ihf-handball",
+        "enabled": False,  # Exact publication times now come from official /news/rss.xml.
         "sport": "handball",
         "publisher": "IHF",
         "url": "https://www.ihf.info/media-center/news",

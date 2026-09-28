@@ -17,6 +17,7 @@ class Feed(TypedDict, total=False):
 
 
 FEEDS: List[Feed] = [
+    {'url': 'https://www.ihf.info/news/rss.xml', 'kind': 'league', 'sport': 'handball', 'enabled': True, 'verified_official': True, 'article_https_host': 'www.ihf.info', 'note': 'Official RSS provides exact UTC publication times missing from article pages. Verified same-host HTTPS articles; no league stamp.'},
     {'url': 'https://www.theguardian.com/football/rss', 'kind': 'league', 'sport': 'football', 'enabled': True, 'note': 'Global club and national-team football; never stamp a domestic league.'},
     {'url': 'https://www.theguardian.com/au/sport/rss', 'kind': 'mixed', 'enabled': True, 'note': 'Multi-sport reporting; independently classify; opinion/blog/live products held.'},
     {'url': 'https://www.sportschau.de/index~rss2.xml', 'kind': 'mixed', 'enabled': True, 'note': 'German international and domestic sports reporting; verified article prose, timestamps and image candidates.'},
