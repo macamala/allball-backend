@@ -408,7 +408,11 @@ def _ingest_item(
     # Budget absence is never permission to publish copied source prose.
     if not use_ai or ai_budget <= 0 or openai_rate_limited():
         return None, False
-    if freshness_reason(item.get("published_at"), datetime.now(timezone.utc)):
+    if freshness_reason(
+        item.get("published_at"),
+        datetime.now(timezone.utc),
+        max_age_hours=24,
+    ):
         return None, False
     source_url = item["url"]
     if existing_by_url(db, source_url):
@@ -907,6 +911,7 @@ def _fetch_and_store_all_articles(
         queued, admission = fair_news_queue(
             queued,
             _classify_candidate,
+            max_age_hours=24,
             sport_order=[
                 row["id"]
                 for row in SPORTS
