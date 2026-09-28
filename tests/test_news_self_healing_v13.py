@@ -325,3 +325,34 @@ def test_fact_lock_does_not_false_positive_normal_proper_names():
         ),
     }
     assert fact_lock_reason(draft,source_title,source_body) is None
+
+
+def test_cross_language_claim_words_defer_to_semantic_validator():
+    from bot.news_fact_guard import fact_lock_reason
+    source_title="Lierse laat zich verrassen in de beker"
+    source_body=(
+        "De ploeg verloor de wedstrijd na een spannend duel en de tegenstander ging door. "
+        "Het verslag beschrijft de uitslag, spelers en wedstrijd zonder Engelse formulering."
+    )
+    draft={
+        "title":"Lierse beaten in cup tie",
+        "summary":"Lierse suffered defeat in the cup.",
+        "body":"Lierse were defeated in the cup match and their opponents advanced.",
+    }
+    assert fact_lock_reason(draft,source_title,source_body) is None
+
+
+def test_high_risk_english_injury_claim_still_fails_closed():
+    from bot.news_fact_guard import fact_lock_reason
+    source_title="Arsenal publish squad schedule"
+    source_body=(
+        "The club published the schedule for the next match and confirmed the squad list. "
+        "The update contained no medical announcement and no change to player availability."
+    )
+    draft={
+        "title":"Arsenal squad schedule update",
+        "summary":"Arsenal published the schedule.",
+        "body":"Arsenal published the schedule but one player suffered a knee injury.",
+    }
+    reason=fact_lock_reason(draft,source_title,source_body)
+    assert reason == "unsupported_claim_family:injury"
