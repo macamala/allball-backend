@@ -13,6 +13,7 @@ class Feed(TypedDict, total=False):
     country: Optional[str]
     enabled: bool
     note: str
+    rss_fallback_only: bool
 
 
 FEEDS: List[Feed] = [
@@ -21,8 +22,8 @@ FEEDS: List[Feed] = [
     {'url': 'https://as.com/rss/futbol/primera.xml', 'kind': 'league', 'sport': 'football', 'league': 'spain-la-liga', 'country': 'spain', 'enabled': True},
     {'url': 'https://as.com/rss/futbol/segunda.xml', 'kind': 'league', 'sport': 'football', 'league': 'spain-la-liga-2', 'country': 'spain', 'enabled': True},
     {'url': 'https://www.football-italia.net/feed', 'kind': 'league', 'sport': 'football', 'league': 'italy-serie-a', 'country': 'italy', 'enabled': True},
-    {'url': 'https://www.espn.com/espn/rss/nba/news', 'kind': 'league', 'sport': 'basketball', 'league': 'nba', 'country': 'usa', 'enabled': True},
-    {'url': 'https://www.espn.com/espn/rss/ncb/news', 'kind': 'league', 'sport': 'basketball', 'league': 'ncaa-basketball', 'country': 'usa', 'enabled': True},
+    {'url': 'https://www.espn.com/espn/rss/nba/news', 'kind': 'league', 'sport': 'basketball', 'league': 'nba', 'country': 'usa', 'enabled': True, 'rss_fallback_only': True},
+    {'url': 'https://www.espn.com/espn/rss/ncb/news', 'kind': 'league', 'sport': 'basketball', 'league': 'ncaa-basketball', 'country': 'usa', 'enabled': True, 'rss_fallback_only': True},
     {'url': 'https://feeds.bbci.co.uk/sport/football/scottish-premiership/rss.xml', 'kind': 'league', 'sport': 'football', 'league': 'scotland-premiership', 'country': 'scotland', 'enabled': True},
     {'url': 'https://www.skysports.com/rss/29328', 'kind': 'league', 'sport': 'football', 'league': 'scotland-premiership', 'country': 'scotland', 'enabled': True},
     {'url': 'https://www.hln.be/sport/voetbal/rss.xml', 'kind': 'league', 'sport': 'football', 'enabled': True, 'note': 'Belgian football-only feed; sport hint only, never league stamp'},
@@ -32,11 +33,11 @@ FEEDS: List[Feed] = [
     {'url': 'https://www.talkbasket.net/feed', 'kind': 'disabled', 'enabled': False, 'note': 'Runtime robots 403; ESPN basketball feeds remain active'},
     {'url': 'https://www.getfootballnewsfrance.com/feed/', 'kind': 'disabled', 'enabled': False, 'note': 'Extract returns HTTP 403; skip until a usable source exists'},
     {'url': 'https://www.blick.ch/sport/rss.xml', 'kind': 'mixed', 'enabled': True},
-    {'url': 'https://www.espn.com/espn/rss/soccer/news', 'kind': 'league', 'sport': 'football', 'enabled': True, 'note': 'Global football-only feed; sport hint only, never league stamp'},
-    {'url': 'https://www.espn.com/espn/rss/mlb/news', 'kind': 'league', 'sport': 'baseball', 'enabled': True, 'note': 'ESPN baseball-only feed; sport hint only'},
-    {'url': 'https://www.espn.com/espn/rss/nfl/news', 'kind': 'league', 'sport': 'american-football', 'enabled': True, 'note': 'ESPN NFL-only feed; sport hint only'},
-    {'url': 'https://www.espn.com/espn/rss/nhl/news', 'kind': 'league', 'sport': 'ice-hockey', 'enabled': True, 'note': 'ESPN NHL-only feed; sport hint only'},
-    {'url': 'https://www.espn.com/espn/rss/golf/news', 'kind': 'league', 'sport': 'golf', 'enabled': True, 'note': 'ESPN golf-only feed; sport hint only'},
+    {'url': 'https://www.espn.com/espn/rss/soccer/news', 'kind': 'league', 'sport': 'football', 'enabled': True, 'rss_fallback_only': True, 'note': 'Global football-only feed; sport hint only, never league stamp'},
+    {'url': 'https://www.espn.com/espn/rss/mlb/news', 'kind': 'league', 'sport': 'baseball', 'enabled': True, 'rss_fallback_only': True, 'note': 'ESPN baseball-only feed; sport hint only'},
+    {'url': 'https://www.espn.com/espn/rss/nfl/news', 'kind': 'league', 'sport': 'american-football', 'enabled': True, 'rss_fallback_only': True, 'note': 'ESPN NFL-only feed; sport hint only'},
+    {'url': 'https://www.espn.com/espn/rss/nhl/news', 'kind': 'league', 'sport': 'ice-hockey', 'enabled': True, 'rss_fallback_only': True, 'note': 'ESPN NHL-only feed; sport hint only'},
+    {'url': 'https://www.espn.com/espn/rss/golf/news', 'kind': 'league', 'sport': 'golf', 'enabled': True, 'rss_fallback_only': True, 'note': 'ESPN golf-only feed; sport hint only'},
     {'url': 'https://feeds.bbci.co.uk/sport/football/german/rss.xml', 'kind': 'disabled', 'enabled': False, 'note': '404 / mismatched tags; Bundesliga still needs a replacement RSS'},
     {'url': 'https://www.skysports.com/rss/12040', 'kind': 'disabled', 'enabled': False, 'note': 'General Sky firehose mis-stamped as Premier League'},
     {'url': 'https://www.skysports.com/rss/12040/championship', 'kind': 'disabled', 'enabled': False, 'note': 'Not well-formed XML'},
