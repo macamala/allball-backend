@@ -56,10 +56,12 @@ def test_hydrate_requires_explicit_timestamp_and_article_prose(monkeypatch):
     body=' '.join(['Handball teams prepared for the international championship with confirmed event details.']*12)
     html=f'''<html><head>
       <meta property="og:title" content="International handball championship update">
+      <meta property="og:image" content="https://www.ihf.info/photo.jpg">
       <meta property="article:published_time" content="2026-09-26T12:00:00+00:00">
     </head><body><main><p>{body}</p></main></body></html>'''.encode()
     monkeypatch.setattr(idx, 'read_news_feed', lambda url: html)
     monkeypatch.setattr(idx, 'freshness_reason', lambda stamp, now, **kwargs: None)
+    monkeypatch.setattr(idx, 'editorial_day_reason', lambda *args: None)
     item=idx._hydrate(cfg, 'https://www.ihf.info/media-center/news/test-story', 'fallback')
     assert item
     assert item['feed']['sport']=='handball'
@@ -146,17 +148,19 @@ def test_ihf_uses_direct_news_index():
     assert ihf["paths"]==("/media-center/news/",)
 
 
-def test_ihf_visible_date_and_relative_image_are_hydrated(monkeypatch):
+def test_ihf_explicit_timestamp_and_relative_image_are_hydrated(monkeypatch):
     cfg=next(row for row in idx.HTML_INDEXES if row["id"]=="ihf-handball")
     body=" ".join([
         "Barcelona and Zamalek played at the IHF Men's Club World Championship with confirmed match details."
     ]*12)
     html=f'''<html><head>
       <meta property="og:title" content="Barcelona secure finals berth">
+      <meta property="article:published_time" content="2026-09-27T00:00:00Z">
       <meta property="og:image" content="/sites/default/files/handball-photo.jpg">
     </head><body><div>27 Sep. 2026</div><main><p>{body}</p></main></body></html>'''.encode()
     monkeypatch.setattr(idx, "read_news_feed", lambda url: html)
     monkeypatch.setattr(idx, "freshness_reason", lambda stamp, now, **kwargs: None)
+    monkeypatch.setattr(idx, "editorial_day_reason", lambda *args: None)
     item=idx._hydrate(
         cfg,
         "https://www.ihf.info/media-center/news/seventh-barcelona",
@@ -207,7 +211,7 @@ def test_official_source_hydration_helper_is_bounded(monkeypatch):
     monkeypatch.setattr(
         idx,
         "_hydrate",
-        lambda row,url,title:{"title":title,"url":url},
+        lambda row,url,title,**kwargs:{"title":title,"url":url},
     )
     rows=idx._hydrate_source(cfg,1)
     assert rows==[{"title":"A","url":"https://example.test/a"}]

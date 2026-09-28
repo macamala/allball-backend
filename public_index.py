@@ -19,7 +19,7 @@ from models import Article, ArticleTaxonomyResolution
 from sport_match import MAIN_SPORTS, isolation_ok
 from bot.taxonomy import COMPETITIONS
 from bot.news_learning import article_has_open_incident
-from bot.news_policy import gossip_news_reason
+from bot.news_policy import gossip_news_reason, non_article_news_reason, publisher_branding_reason
 from taxonomy_resolver import (
     MIN_SPORT_CONFIDENCE,
     RESOLVER_VERSION,
@@ -59,11 +59,14 @@ def persist_public_article(db: Session, article: Article, resolution=None, commi
         isolated = isolation_ok(
             article, resolved.sport, strict=True, resolution=resolved
         )
-    editorial_hold = gossip_news_reason({
+    admission_item = {
         "title": article.title,
         "summary": article.summary,
+        "body": article.ai_content or article.content or "",
         "url": article.source_url,
-    })
+    }
+    editorial_hold = (gossip_news_reason(admission_item) or non_article_news_reason(admission_item)
+                      or publisher_branding_reason(admission_item))
     public = bool(
         quality.get("ok")
         and resolved.sport
@@ -472,7 +475,7 @@ def repair_recent_gossip_news(
     limit: int = 600,
     max_age_hours: int = 168,
 ) -> int:
-    """Hide recent public gossip/rumour rows without deleting source records."""
+    """Hold recent public non-news, branded copy and gossip; retain source rows."""
     cutoff = datetime.utcnow() - timedelta(hours=max(1, int(max_age_hours)))
     rows = (
         db.query(Article, ArticleTaxonomyResolution)
@@ -495,15 +498,24 @@ def repair_recent_gossip_news(
     hidden = 0
     reasons = {}
     for article, tax in rows:
-        reason = gossip_news_reason({
+        item = {
             "title": article.title,
             "summary": article.summary,
+            "body": article.ai_content or article.content or "",
             "url": article.source_url,
-        })
+        }
+        reason = (gossip_news_reason(item) or non_article_news_reason(item)
+                  or publisher_branding_reason(item))
         if not reason:
             continue
         tax.public_ok = False
         db.add(tax)
+        from bot.news_learning import record_incident
+        record_incident(
+            db, reason_code=reason, article_id=article.id, source_url=article.source_url,
+            phase="postpublish", draft=item, writer_provider="news-audit",
+            writer_model="deterministic", details={"gate": "public_news_admission"},
+        )
         hidden += 1
         reasons[reason] = reasons.get(reason, 0) + 1
         logger.warning(
@@ -873,4 +885,3 @@ def repair_recent_sport_mislabels(
             hidden,
         )
     return changed
-

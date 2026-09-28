@@ -34,7 +34,7 @@ def _score_aliases(text: str, aliases) -> int:
         if not needle:
             continue
         pattern = re.compile(
-            r"(?<!\\w)" + re.escape(needle).replace(r"\\ ", r"\\s+") + r"(?!\\w)",
+            r"(?<!\w)" + r"\s+".join(re.escape(part) for part in needle.split()) + r"(?!\w)",
             re.IGNORECASE,
         )
         if pattern.search(text):

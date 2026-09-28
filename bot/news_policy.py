@@ -177,10 +177,24 @@ def non_article_news_reason(item):
     except ValueError:
         path = ""
 
+    # Confirmed incident: this is a future race schedule/weather guide. A prior
+    # Azerbaijan result in its background must never become a Bahrain result.
+    if path.rstrip("/") == "/sport/formula1/articles/ckz7zzy4d995o":
+        return "non_article_service_guide"
+
+    if re.search(r"\b(?:quiz(?:zes)?|trivia|crosswords?|wordle|guess the|test your knowledge)\b", title):
+        return "non_article_quiz"
+
     if re.search(r"\bpodcast\b", title) or "/iplayer/episode/" in path or "/podcasts/" in path:
         return "non_article_podcast"
     if re.search(r"\bscorecard\b", title) or "/scorecard/" in path:
         return "non_article_scorecard"
+    if re.search(r"/(?:video|videos|clips)/", path) or re.search(
+        r"\b(?:game highlights|match highlights|top (?:plays|tries)|tries of the week|best moments)\b", title
+    ):
+        return "non_article_video_highlights"
+    if re.search(r"\b(?:race times|qualifying times|weather forecast|how to watch|where to watch)\b", title):
+        return "non_article_service_guide"
     # Keep scarce writer requests for factual news rather than opinion/listicle
     # products that repeatedly fail semantic validation or add little news value.
     if re.search(
@@ -200,6 +214,14 @@ def non_article_news_reason(item):
         return "non_sports_lifestyle_section"
     if host == "www.record.pt" and path.startswith("/fora-de-campo/"):
         return "non_sports_off_field_section"
+    return None
+
+
+def publisher_branding_reason(item):
+    """Hold outlet-branded drafts; never replace source names with our own."""
+    text = "\n".join(str((item or {}).get(k) or "") for k in ("title", "summary", "body"))
+    if re.search(r"\b(?:BBC(?:\s+Sport)?|ESPN|Sky\s+Sports|Reuters|Associated\s+Press)\b", text, re.I):
+        return "publisher_branding"
     return None
 
 
@@ -300,11 +322,11 @@ def gossip_news_reason(item):
     current_year = datetime.now(UTC).year
     old_year_reference = any(
         int(value) < current_year
-        for value in re.findall(r"(?<!\\d)(20\\d{2})(?!\\d)", title)
+        for value in re.findall(r"(?<!\d)(20\d{2})(?!\d)", title)
     )
     reflective_old_story = old_year_reference and re.search(
-        r"\\b(?:credits?|recalls?|remembers?|reflects?|opens up|looks back|"
-        r"revisits?|reveals?|reminisces?|explains what|says? .* meant)\\b",
+        r"\b(?:credits?|recalls?|remembers?|reflects?|opens up|looks back|"
+        r"revisits?|reveals?|reminisces?|explains what|says? .* meant)\b",
         title,
         re.I,
     )
@@ -538,6 +560,9 @@ def original_draft_reason(draft, source_title, source_body):
     title, summary, body = (draft.get(k) for k in ('title', 'summary', 'body'))
     if not all(isinstance(x, str) and x.strip() for x in (title, summary, body)):
         return 'missing_original_draft'
+    admission = non_article_news_reason(draft) or publisher_branding_reason(draft)
+    if admission:
+        return admission
     source = f'{source_title}\n{source_body}'
     output = f'{title}\n{summary}\n{body}'
     if re.search(r'https?://|www\.', output, re.I): return 'external_link_in_copy'

@@ -30,7 +30,7 @@ EXTRACT_HEADERS = {
 ARTICLE_TAGS = {"p", "h2", "h3", "blockquote"}
 MAX_PARAGRAPHS = 40
 JSON_LD_RE = re.compile(
-    r'<script[^>]*type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
+    r'<script\b[^>]*\btype\s*=\s*["\']?application/ld\+json(?:["\']|(?=\s|>))[^>]*>(.*?)</script\s*>',
     re.IGNORECASE | re.DOTALL,
 )
 
@@ -60,6 +60,28 @@ CHROME_ROLES = {
     "search",
     "menu",
 }
+VOID_TAGS = {"area", "base", "br", "col", "embed", "hr", "img", "input",
+             "link", "meta", "param", "source", "track", "wbr"}
+
+
+class _MetaParser(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.values = {}
+
+    def handle_starttag(self, tag, attrs):
+        if tag.lower() == "meta":
+            row = dict(attrs)
+            key = row.get("property") or row.get("name")
+            if key and row.get("content"):
+                self.values[str(key).lower()] = row["content"].strip()
+
+
+def _metadata(html: str, key: str) -> Optional[str]:
+    parser = _MetaParser()
+    for tag in re.findall(r"<meta\b[^>]*>", html or "", re.I):
+        parser.feed(tag)
+    return parser.values.get(key.lower())
 CHROME_ATTR_RE = re.compile(
     r"\b(?:site-nav|global-nav|main-nav|footer-nav|skiplink|skip-link|"
     r"cookie|consent|newsletter|subscribe|masthead|sidebar)\b",
@@ -68,35 +90,11 @@ CHROME_ATTR_RE = re.compile(
 
 
 def _og(html: str, prop: str) -> Optional[str]:
-    match = re.search(
-        rf'<meta[^>]+property=["\']{re.escape(prop)}["\'][^>]+content=["\']([^"\']+)',
-        html,
-        re.IGNORECASE,
-    )
-    if match:
-        return match.group(1).strip()
-    match = re.search(
-        rf'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']{re.escape(prop)}["\']',
-        html,
-        re.IGNORECASE,
-    )
-    return match.group(1).strip() if match else None
+    return _metadata(html, prop)
 
 
 def _meta_name(html: str, name: str) -> Optional[str]:
-    match = re.search(
-        rf'<meta[^>]+name=["\']{re.escape(name)}["\'][^>]+content=["\']([^"\']+)',
-        html,
-        re.IGNORECASE,
-    )
-    if match:
-        return match.group(1).strip()
-    match = re.search(
-        rf'<meta[^>]+content=["\']([^"\']+)["\'][^>]+name=["\']{re.escape(name)}["\']',
-        html,
-        re.IGNORECASE,
-    )
-    return match.group(1).strip() if match else None
+    return _metadata(html, name)
 
 
 def _parse_explicit_datetime(raw: Optional[str]) -> Optional[datetime]:
@@ -221,13 +219,19 @@ class _LeadImageExtractor(HTMLParser):
         self.in_main = 0
         self.images: List[dict] = []
 
+    def handle_startendtag(self, tag, attrs):
+        self.handle_starttag(tag, attrs)
+        if tag.lower() not in VOID_TAGS:
+            self.handle_endtag(tag)
+
     def handle_starttag(self, tag, attrs):
         tag = tag.lower()
         if self.ignore:
-            self.ignore += 1
+            if tag not in VOID_TAGS:
+                self.ignore += 1
             return
         if _is_chrome_open(tag, attrs):
-            self.ignore = 1
+            self.ignore = 0 if tag in VOID_TAGS else 1
             return
         attrs_map = _attr_map(attrs)
         if tag in {"article", "main"} or attrs_map.get("role", "").lower() == "main":
@@ -317,20 +321,38 @@ class _ArticleExtractor(HTMLParser):
         self.main_parts: List[str] = []
         self.body_parts: List[str] = []
 
+    def handle_startendtag(self, tag, attrs):
+        self.handle_starttag(tag, attrs)
+        if tag.lower() not in VOID_TAGS:
+            self.handle_endtag(tag)
+
     def handle_starttag(self, tag, attrs):
         tag = tag.lower()
         if self.ignore:
-            self.ignore += 1
+            if tag not in VOID_TAGS:
+                self.ignore += 1
             return
         if _is_chrome_open(tag, attrs):
-            self.ignore = 1
+            self.ignore = 0 if tag in VOID_TAGS else 1
             return
         attrs_map = _attr_map(attrs)
         if tag in {"article", "main"} or attrs_map.get("role", "").lower() == "main":
             self.in_main += 1
         if tag in ARTICLE_TAGS:
-            self.in_p += 1
+            # HTML permits omitted </p> before the next paragraph.
+            self._flush_paragraph()
+            self.in_p = 1
             self.buf = []
+
+    def _flush_paragraph(self):
+        if not self.in_p:
+            return
+        text = clean_text("".join(self.buf))
+        self.buf = []
+        self.in_p = 0
+        if _keep_paragraph(text):
+            target = self.main_parts if self.in_main else self.body_parts
+            target.append(text)
 
     def handle_endtag(self, tag):
         tag = tag.lower()
@@ -338,13 +360,9 @@ class _ArticleExtractor(HTMLParser):
             self.ignore = max(0, self.ignore - 1)
             return
         if tag in ARTICLE_TAGS and self.in_p:
-            self.in_p -= 1
-            text = clean_text("".join(self.buf))
-            self.buf = []
-            if _keep_paragraph(text):
-                target = self.main_parts if self.in_main else self.body_parts
-                target.append(text)
+            self._flush_paragraph()
         if tag in {"article", "main"} and self.in_main:
+            self._flush_paragraph()
             self.in_main -= 1
 
     def handle_data(self, data):

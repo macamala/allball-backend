@@ -9,9 +9,12 @@ publication timestamps or missing article prose.
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from collections import Counter
 from datetime import datetime, timezone
 from html.parser import HTMLParser
 import logging
+import json
+import os
 import re
 from typing import Dict, List, Optional
 from urllib.parse import urljoin, urlsplit
@@ -25,7 +28,7 @@ from .extract import (
     page_title_from_html,
 )
 from .news_feed_http import read_news_feed
-from .news_policy import freshness_reason
+from .news_policy import editorial_day_reason, freshness_reason, non_article_news_reason
 from .textutil import clean_text
 
 logger = logging.getLogger(__name__)
@@ -62,6 +65,8 @@ HTML_INDEXES = (
     },
     {
         "id": "nba-basketball-news",
+        "exclude_paths": ("/news/category/",),
+        "exclude_articles": ("key-dates", "writers-archive", "nba-guide", "2025-26-nba-player-pronunciation-guide", "2025-26-nba-trade-tracker"),
         "sport": "basketball",
         "publisher": "NBA",
         "url": "https://www.nba.com/news",
@@ -205,6 +210,16 @@ HTML_INDEXES = (
         "hydrate_keywords_only": True,
     },
     {
+        "id": "world-aquatics-swimming",
+        "sport": "swimming",
+        "publisher": "World Aquatics",
+        "url": "https://www.worldaquatics.com/news",
+        "host": "www.worldaquatics.com",
+        "paths": ("/news/",),
+        "keywords": ("swimming", "swimmer", "freestyle", "backstroke", "breaststroke"),
+        "hydrate_keywords_only": True,
+    },
+    {
         "id": "fih-field-hockey-news",
         "enabled": False,
         "sport": "field-hockey",
@@ -243,6 +258,7 @@ HTML_INDEXES = (
     },
     {
         "id": "world-athletics-news",
+        "article_path_re": r"^/news/[^/]+/[^/]+",
         "sport": "athletics",
         "publisher": "World Athletics",
         "url": "https://worldathletics.org/news",
@@ -364,6 +380,14 @@ def _same_host_url(base: str, href: str, expected_host: str, cfg: Dict) -> Optio
     if parts.scheme != "https" or parts.hostname != expected_host:
         return None
     path = parts.path or "/"
+    if path.rstrip("/") == urlsplit(base).path.rstrip("/"):
+        return None
+    if path.rstrip("/").split("/")[-1] in cfg.get("exclude_articles", ()):
+        return None
+    if re.search(r"/(?:category|topic|series|pages|tag)/|\.(?:json|xml|js|css)$", path, re.I):
+        return None
+    if cfg.get("article_path_re") and not re.search(cfg["article_path_re"], path):
+        return None
     if not any(path.startswith(prefix) for prefix in cfg.get("paths", ())):
         return None
     if any(path.startswith(prefix) for prefix in cfg.get("exclude_paths", ())):
@@ -485,9 +509,9 @@ def _sitemap_candidates(cfg: Dict) -> List[tuple[str, str]]:
 
 
 _VISIBLE_ENGLISH_DATE_RE = re.compile(
-    r"(?<!\\d)(\\d{1,2})\\s+"
-    r"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)\\.?\\s+"
-    r"(20\\d{2})(?!\\d)",
+    r"(?<!\d)(\d{1,2})\s+"
+    r"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)\.?\s+"
+    r"(20\d{2})(?!\d)",
     re.IGNORECASE,
 )
 _VISIBLE_MONTHS = {
@@ -497,22 +521,23 @@ _VISIBLE_MONTHS = {
 
 
 _VISIBLE_ISO_MINUTE_RE = re.compile(
-    r"(?<!\\d)(20\\d{2})-(\\d{2})-(\\d{2})(?:\\s+|T)(\\d{2}):(\\d{2})(?!\\d)"
+    r"(?<!\d)(20\d{2})-(\d{2})-(\d{2})(?:\s+|T)(\d{2}):(\d{2})(?!\d)"
 )
 
 
 def _visible_published_date(
     html: str,
-    source_timezone: str = "UTC",
+    source_timezone: Optional[str] = None,
 ) -> Optional[datetime]:
     """Parse only explicit human-visible source dates; never invent 'now'."""
-    text = clean_text(re.sub(r"<[^>]+>", " ", html or ""))
+    visible = re.sub(r"<(script|style)\b[^>]*>.*?</\1\s*>", " ", html or "", flags=re.I | re.S)
+    text = clean_text(re.sub(r"<[^>]+>", " ", visible))
     iso = _VISIBLE_ISO_MINUTE_RE.search(text)
-    if iso:
+    if iso and source_timezone:
         try:
             zone = ZoneInfo(source_timezone)
         except Exception:
-            zone = timezone.utc
+            return None
         try:
             return datetime(
                 int(iso.group(1)),
@@ -524,50 +549,65 @@ def _visible_published_date(
             ).astimezone(timezone.utc)
         except ValueError:
             return None
-    match = _VISIBLE_ENGLISH_DATE_RE.search(text)
-    if not match:
-        return None
-    try:
-        return datetime(
-            int(match.group(3)),
-            _VISIBLE_MONTHS[match.group(2).lower()],
-            int(match.group(1)),
-            tzinfo=timezone.utc,
-        )
-    except (ValueError, KeyError):
-        return None
+    # A date without a time/offset does not establish a Sydney calendar day.
+    # Keep it unverified instead of inventing midnight UTC.
+    return None
 
 
-def _hydrate(cfg: Dict, url: str, fallback_title: str) -> Optional[Dict]:
+def _hydrate(cfg: Dict, url: str, fallback_title: str, *, diagnostics=None) -> Optional[Dict]:
+    def reject(reason):
+        if diagnostics is not None:
+            diagnostics[reason] += 1
+        logger.info("[official_index] rejected source=%s reason=%s url=%s", cfg["id"], reason, url)
+        return None
+
     try:
         raw = read_news_feed(url)
         if len(raw) > MAX_INDEX_BYTES:
-            return None
+            return reject("response_too_large")
         html = raw.decode("utf-8", "replace")
     except Exception as exc:
         logger.info("[official_index] article unavailable %s: %s", cfg["id"], type(exc).__name__)
-        return None
+        return reject("transport_" + type(exc).__name__)
 
     published_at = page_published_at_from_html(html)
+    if published_at is None and cfg["id"] == "world-athletics-news":
+        # This CMS exposes the article's publication field in its own page
+        # state. Never use a related card's time or the page build/update time.
+        match = re.search(r'<script\b[^>]*\bid=["\']__NEXT_DATA__["\'][^>]*>(.*?)</script>', html, re.I | re.S)
+        if match:
+            try:
+                article = json.loads(match.group(1))["props"]["pageProps"]["article"]
+                if article.get("urlSlug") == urlsplit(url).path.rstrip("/").split("/")[-1]:
+                    from .extract import _parse_explicit_datetime
+                    published_at = _parse_explicit_datetime(article.get("liveFrom"))
+            except (ValueError, KeyError, TypeError, AttributeError):
+                pass
     if published_at is None and cfg.get("visible_date"):
         published_at = _visible_published_date(
             html,
-            cfg.get("visible_date_timezone") or "UTC",
+            cfg.get("visible_date_timezone"),
         )
     max_age = max(24, min(int(cfg.get("max_age_hours") or 72), 168))
-    if published_at is None or freshness_reason(
-        published_at, datetime.now(timezone.utc), max_age_hours=max_age
-    ):
-        return None
+    if published_at is None:
+        return reject("publication_time_unverified")
+    now = datetime.now(timezone.utc)
+    reason = freshness_reason(published_at, now, max_age_hours=max_age)
+    reason = reason or editorial_day_reason(published_at, now, os.getenv("NEWS_EDITORIAL_TIMEZONE") or "Australia/Sydney")
+    if reason:
+        return reject(reason)
     title = page_title_from_html(html) or fallback_title
     body = article_text_from_html(html)
     if not title or not body:
-        return None
+        return reject("missing_title" if not title else "missing_article_body")
+    reason = non_article_news_reason({"title": title, "url": url})
+    if reason:
+        return reject(reason)
     required = tuple(str(x).lower() for x in cfg.get("keywords", ()))
     if required:
         evidence = f"{title} {body[:1600]}".lower()
         if not any(marker in evidence for marker in required):
-            return None
+            return reject("sport_evidence_mismatch")
     image = None
     image_candidates = []
     try:
@@ -590,6 +630,8 @@ def _hydrate(cfg: Dict, url: str, fallback_title: str) -> Optional[Dict]:
     except Exception:
         image = None
         image_candidates = []
+    if not image_candidates:
+        return reject("missing_image_candidates")
     feed = {
         "url": cfg["url"],
         "kind": cfg.get("kind", "league"),
@@ -617,16 +659,17 @@ def _hydrate_source(cfg: Dict, limit: int, *, sitemap: bool = False) -> List[Dic
     """Hydrate one allowlisted source serially; safe unit for bounded host parallelism."""
     candidates = _sitemap_candidates(cfg) if sitemap else _anchor_candidates(cfg)
     rows: List[Dict] = []
+    reasons = Counter()
     for url, title in candidates:
-        item = _hydrate(cfg, url, title)
+        item = _hydrate(cfg, url, title, diagnostics=reasons)
         if item is None:
             continue
         rows.append(item)
         if len(rows) >= limit:
             break
     logger.info(
-        "[official_index] source=%s sport=%s discovered=%s hydrated=%s",
-        cfg["id"], cfg.get("sport") or "mixed", len(candidates), len(rows),
+        "[official_index] source=%s sport=%s discovered=%s hydrated=%s reasons=%s",
+        cfg["id"], cfg.get("sport") or "mixed", len(candidates), len(rows), dict(reasons),
     )
     return rows
 

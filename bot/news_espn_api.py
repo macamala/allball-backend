@@ -128,6 +128,11 @@ def _candidate(row: Dict, source: Dict) -> Optional[Dict]:
     url = _web_href(row)
     if not title or not facts or published is None or not url:
         return None
+    from .news_policy import non_article_news_reason
+    if str(row.get("type") or "").lower() in {"video", "media", "audio"}:
+        return None
+    if non_article_news_reason({"title": title, "url": url}):
+        return None
     images = _images(row)
     lead = images[0]["url"] if images else None
     return {
