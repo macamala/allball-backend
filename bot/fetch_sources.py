@@ -13,7 +13,7 @@ from database import SessionLocal
 from models import Article
 from editorial import news_image_is_publishable, pick_article_image, score_image_candidate
 
-from .news_policy import fair_news_queue, freshness_reason, non_article_news_reason, original_draft_reason, source_path_sport_hint
+from .news_policy import editorial_day_reason, fair_news_queue, freshness_reason, non_article_news_reason, original_draft_reason, source_path_sport_hint
 from .news_fact_guard import fact_lock_reason
 from .news_learning import (
     learned_rule_violation_reason,
@@ -413,6 +413,10 @@ def _ingest_item(
         item.get("published_at"),
         datetime.now(timezone.utc),
         max_age_hours=24,
+    ) or editorial_day_reason(
+        item.get("published_at"),
+        datetime.now(timezone.utc),
+        os.getenv("NEWS_EDITORIAL_TIMEZONE") or "Australia/Sydney",
     ):
         return None, False
     source_url = item["url"]
@@ -540,7 +544,11 @@ def _ingest_item(
                 and not ai_budget_exhausted()
                 and _correction_retry_allowed(
                     prefer_breadth=prefer_breadth,
-                    force=rewrite_reason == "direct_quote_requires_review",
+                    force=rewrite_reason in {
+                        "direct_quote_requires_review",
+                        "headline_too_similar_to_source",
+                        "copied_source_headline",
+                    },
                 )
             ):
                 retry_parsed, retry_reason = _ai_story(
@@ -611,7 +619,11 @@ def _ingest_item(
             )
 
     if not used_ai:
-        _hold_ai_source(source_url, rewrite_reason or "no-accepted-original-draft")
+        hold_reason = rewrite_reason or "no-accepted-original-draft"
+        if hold_reason not in {"validator-unavailable", "empty"}:
+            _hold_ai_source(source_url, hold_reason)
+        else:
+            logger.info("[fetch_sources] transient AI failure not cooldowned: %s", hold_reason)
         logger.info("[fetch_sources] hold: no accepted original draft")
         return None, False
     draft_reason = original_draft_reason(
@@ -916,6 +928,7 @@ def _fetch_and_store_all_articles(
             queued,
             _classify_candidate,
             max_age_hours=24,
+            same_day_timezone=os.getenv("NEWS_EDITORIAL_TIMEZONE") or "Australia/Sydney",
             sport_order=[
                 row["id"]
                 for row in SPORTS
@@ -924,11 +937,20 @@ def _fetch_and_store_all_articles(
             sport_inventory=sport_inventory,
             coverage_floor=6,
         )
+        candidate_sports = {}
+        for candidate in queued:
+            try:
+                sport = _classify_candidate(candidate).sport
+            except Exception:
+                sport = None
+            if sport:
+                candidate_sports[sport] = candidate_sports.get(sport, 0) + 1
         logger.info(
-            "[fetch_sources] eligible=%s rejected=%s current_sport_inventory=%s",
+            "[fetch_sources] eligible=%s rejected=%s current_sport_inventory=%s candidate_sports=%s",
             len(queued),
             admission,
             sport_inventory,
+            candidate_sports,
         )
         active_news_sports = [
             row["id"]
