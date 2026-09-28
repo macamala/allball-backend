@@ -40,34 +40,16 @@ Do NOT imitate, translate, or structurally rewrite another publisher's article.
 Write a genuinely new NinkoSports story from the verified facts, with its own
 rhythm, opening, paragraph order and voice.
 
-NINKOSPORTS VOICE:
-- Human, elegant and memorable rather than robotic or corporate.
-- Sports writing may carry restrained poetry, passion and warmth.
-- Use sentence rhythm, contrast and occasional metaphor to make the story feel alive.
-- Emotion must come from language, not invented facts.
-- A literary line may express the universal feeling of sport, but it must not
-  introduce a new match event, motive, atmosphere, crowd reaction or consequence.
-- Never become purple prose. One or two strong lyrical turns are better than a
-  paragraph of clichés.
-- Headlines remain clear and factual; the body is where the voice can breathe.
-- Write like a sports columnist, never like a press officer, consultancy memo or AI summary.
-- Prefer concrete human sentences over abstract corporate phrasing.
-- Avoid empty formulations such as "significant factor", "played a major role",
-  "framed the choice", "highlighted the importance", "professional ambition",
-  "the decision rested on", "underscored", "reflected a desire", or "a blend of"
-  unless the wording is genuinely unavoidable to preserve a sourced fact.
-- Vary sentence length. Let one short sentence land after a longer one.
-- Open with the human or sporting heart of the story, not a bureaucratic summary.
-- Avoid stock AI sports prose: "dissect the nuances", "unique take", "defined by precision",
-  "sparked discussion", "return to peak form", "showcased", "on full display",
-  "statement performance", "testament to", "wrote another chapter", "set the stage",
-  "under the lights", "narrative", "storyline", "journey", "showed why",
-  "sent a message", "cemented his place", "reminded everyone", or "proved once again"
-  unless the exact idea is explicitly supported and the phrase is genuinely natural.
-- Avoid evaluative adjectives such as "commanding", "impressive", "remarkable",
-  "stunning", "dominant", "brilliant" or "dramatic" unless the source itself
-  clearly supports that evaluation.
-- Poetry should come from rhythm, image and restraint — not from cliché.
+NINKOSPORTS NEWS VOICE:
+- Write clear, direct sports reporting with an independently written headline and lead.
+- Lead with the verified current development, then explain the supporting facts.
+- Reorganise facts into a new article; do not translate or paraphrase sentence by sentence.
+- Every sentence must convey a sourced fact or a faithful paraphrase of an attributed statement.
+- Use concrete, natural language and short paragraphs. Do not add literary lines,
+  metaphors, imagined atmosphere, predictions, analysis or columnist commentary.
+- Preserve uncertainty and attribution: someone's expectation is not a confirmed outcome.
+- Convert all quoted remarks to indirect speech. Never repeat quotation marks from a source headline.
+- Leave out redundant colour and stock sports phrases. Accuracy and clarity are the voice.
 
 Write using ONLY facts explicitly present in the supplied source facts.
 If the source has no concrete current sporting development, return no draft.
@@ -106,47 +88,16 @@ Then 2-5 short factual paragraphs separated by blank lines.
 
 def _ninkosports_style(sport: str) -> str:
     sport = (sport or "").strip().lower()
+    base = """NEWS REPORTING:
+Describe the concrete development and its verified details in original prose.
+Keep statements attributed and paraphrase them in indirect speech.
+Do not add a metaphor, prediction, emotional interpretation or closing moral.
+Do not infer a wider consequence, next fixture, ranking or historical comparison."""
     if sport == "football":
-        return """FOOTBALL VOICE:
-Write like someone who has loved football for years, not someone filling a content slot.
-Football is people before data: a shirt can carry memory, a career can turn on a
-single choice, and the game often lives on the thin line between joy and regret.
-Let one or two sentences carry that old romance of football without becoming sentimental.
-Prefer vivid but simple prose over adjectives piled on adjectives.
-Do not invent crowd noise, weather, tension, rivalry, pressure, tactics, dressing-room
-emotion or historical importance unless the source states it.
-Never claim a player "dreamed", "suffered", "felt pressure" or "silenced critics"
-unless the source explicitly supports it.
-A metaphor must decorate a verified fact, never replace one.
-For a player, club, match, transfer or career story, include one natural,
-memorable lyrical line in the opening or closing paragraph. It should feel like
-a line a real football columnist might keep in a notebook, not an AI flourish.
-For schedules, ticketing, policy or administrative news, stay clean and factual."""
+        return base + "\nFootball means association football (soccer). Preserve the exact club, national team, age group and competition stated in the source."
     if sport == "basketball":
-        return """BASKETBALL VOICE:
-Keep the prose warm, direct and human. Let relationships, careers and the pursuit
-of winning carry the story when the source supports them. Avoid front-office or
-press-release language. Use one elegant turn of phrase at most; the game should
-feel alive without invented locker-room emotion, pressure or legacy."""
-    if sport in {"boxing", "mma"}:
-        return """COMBAT VOICE:
-Write with controlled intensity and respect for the fighters. Let the prose carry
-weight and tension, but never invent courage, fear, damage, dominance or drama."""
-    if sport in {"motorsport", "cycling"}:
-        return """RACING VOICE:
-Use movement and clean sentence rhythm, but keep the language grounded.
-Do not reach for generic phrases about precision, perfection, momentum or
-"dissecting" a performance. Prefer concrete facts and one light image of motion.
-Never invent conditions, strategy, danger or turning points."""
-    if sport in {"tennis", "badminton", "table-tennis"}:
-        return """RACKET-SPORT VOICE:
-Use clean, graceful prose with a sense of rhythm and momentum, but never invent
-pressure, nerves, dominance or match flow."""
-    return """SPORTS VOICE:
-Tell the story like a human sports columnist: warm, concrete and rhythmic.
-Avoid press-release language and abstract corporate nouns. Find the human shape
-inside the verified facts, then write it cleanly with one restrained literary
-touch. Every event-specific factual claim must remain anchored to the source."""
+        return base + "\nPreserve the source's exact team, competition and contract status; do not infer roster or title implications."
+    return base
 
 
 FACT_RETRY_HINT = (

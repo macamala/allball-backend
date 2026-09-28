@@ -246,7 +246,9 @@ def _ai_story(
             title[:80],
         )
         from .free_ai_router import last_validation_feedback
-        return reject(facts_reason, parsed, last_validation_feedback())
+        feedback = last_validation_feedback()
+        logger.info("[fetch_sources] validation_review=%s title=%s", feedback, title[:80])
+        return reject(facts_reason, parsed, feedback)
     return parsed, "ok"
 
 
