@@ -132,7 +132,11 @@ def _groq(cfg: dict, system: str, user: str, max_tokens: int, json_mode: bool):
         "stream": False,
     }
     if json_mode:
-        payload["response_format"] = {"type": "json_object"}
+        # Some Groq free models reject response_format even though they can emit
+        # strict JSON when directly instructed.
+        payload["messages"][0]["content"] += (
+            "\nReturn one valid JSON object only, with no markdown fences or prose."
+        )
     try:
         with httpx.Client(
             timeout=httpx.Timeout(95, connect=8), follow_redirects=False
