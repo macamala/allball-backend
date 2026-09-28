@@ -514,7 +514,8 @@ def fetch_official_index_entries(max_per_source: int = 3) -> List[Dict]:
         if cfg.get("enabled", True) is False:
             continue
         hydrated = 0
-        for url, title in _anchor_candidates(cfg):
+        candidates = _anchor_candidates(cfg)
+        for url, title in candidates:
             item = _hydrate(cfg, url, title)
             if item is None:
                 continue
@@ -522,9 +523,14 @@ def fetch_official_index_entries(max_per_source: int = 3) -> List[Dict]:
             hydrated += 1
             if hydrated >= limit:
                 break
+        logger.info(
+            "[official_index] source=%s sport=%s discovered=%s hydrated=%s",
+            cfg["id"], cfg["sport"], len(candidates), hydrated,
+        )
     for cfg in SITEMAPS:
         hydrated = 0
-        for url, title in _sitemap_candidates(cfg):
+        candidates = _sitemap_candidates(cfg)
+        for url, title in candidates:
             item = _hydrate(cfg, url, title)
             if item is None:
                 continue
@@ -532,4 +538,9 @@ def fetch_official_index_entries(max_per_source: int = 3) -> List[Dict]:
             hydrated += 1
             if hydrated >= limit:
                 break
+        logger.info(
+            "[official_index] source=%s sport=%s discovered=%s hydrated=%s",
+            cfg["id"], cfg["sport"], len(candidates), hydrated,
+        )
+    logger.info("[official_index] total_hydrated=%s", len(items))
     return items
