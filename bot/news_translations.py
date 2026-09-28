@@ -24,7 +24,7 @@ from .news_policy import protected_proper_names
 logger = logging.getLogger(__name__)
 
 LANGUAGES = ("sr", "es", "de", "fr", "it", "pt")
-TRANSLATION_PROVIDER = "xkiro-free-v14"
+TRANSLATION_PROVIDER = "multi-free-v15"
 # v14 protects both proper names and numeric values with reversible tokens.
 CYRILLIC_RE = re.compile(r"[\u0400-\u04FF]")
 NUMBER_RE = re.compile(r"(?<!\w)\d+(?:[.,:/–-]\d+)*(?:st|nd|rd|th|%|\b)", re.I)

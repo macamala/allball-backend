@@ -12,7 +12,7 @@ import stat
 from urllib.parse import urlsplit
 
 REQUEST_LIMITS = {'NEWS_AI_MAX_REQUESTS_PER_RUN': 20,
-                  'NEWS_AI_MAX_REQUESTS_PER_DAY': 300}
+                  'NEWS_AI_MAX_REQUESTS_PER_DAY': 1440}
 
 
 def request_limits(env):
@@ -24,7 +24,7 @@ def request_limits(env):
             return None
         value = value.strip()
         if (not value or not value.isascii() or not value.isdigit()
-                or len(value) > 3 or int(value) > maximum):
+                or len(value) > 4 or int(value) > maximum):
             return None
         values.append(int(value))
     return tuple(values)
@@ -91,12 +91,22 @@ def configuration_errors(env):
 
         mode = str(env.get('NEWS_AI_PROVIDER_MODE') or 'xkiro_free').strip().lower()
         if mode == 'xkiro_free':
-            if not str(env.get('XKIRO_API_KEY') or '').strip():
+            external = env.get('NEWS_EXTERNAL_FREE_WRITERS_ENABLED') == '1'
+            has_groq = external and bool(str(env.get('GROQ_API_KEY') or '').strip())
+            cf_account = str(env.get('CLOUDFLARE_ACCOUNT_ID') or '').strip()
+            has_cloudflare = (
+                external
+                and bool(str(env.get('CLOUDFLARE_API_TOKEN') or '').strip())
+                and bool(re.fullmatch(r'[A-Fa-f0-9]{32}', cf_account))
+            )
+            has_xkiro = bool(str(env.get('XKIRO_API_KEY') or '').strip())
+            if not (has_xkiro or has_groq or has_cloudflare):
                 errors.append('news_ai_key_missing')
-            for key in ('NEWS_XKIRO_WRITER_MODEL', 'NEWS_XKIRO_VALIDATOR_MODEL'):
-                model = str(env.get(key) or '').strip()
-                if model and (not model.endswith(':free') or not re.fullmatch(r'[A-Za-z0-9._/+:-]{3,160}:free', model)):
-                    errors.append('non_free_news_model_refused:' + key)
+            if has_xkiro:
+                for key in ('NEWS_XKIRO_WRITER_MODEL', 'NEWS_XKIRO_VALIDATOR_MODEL'):
+                    model = str(env.get(key) or '').strip()
+                    if model and (not model.endswith(':free') or not re.fullmatch(r'[A-Za-z0-9._/+:-]{3,160}:free', model)):
+                        errors.append('non_free_news_model_refused:' + key)
         elif mode == 'openai_legacy':
             if env.get('NEWS_ALLOW_PAID_AI') != '1' or not str(env.get('OPENAI_API_KEY') or '').strip():
                 errors.append('legacy_paid_ai_not_explicitly_allowed')

@@ -20,8 +20,8 @@ class AiRequestBudget:
     def __init__(self, max_requests, ledger_path=None, daily_limit=40, clock=None):
         if type(max_requests) is not int or not 0 <= max_requests <= 20:
             raise ValueError('max_requests must be 0..20')
-        if type(daily_limit) is not int or not 0 <= daily_limit <= 300:
-            raise ValueError('daily_limit must be 0..300')
+        if type(daily_limit) is not int or not 0 <= daily_limit <= 1440:
+            raise ValueError('daily_limit must be 0..1440')
         self.max_requests = max_requests
         self.daily_limit = daily_limit
         self.ledger_path = ledger_path
@@ -90,8 +90,8 @@ class PostgresAiRequestBudget:
     def __init__(self, max_requests, dsn, daily_limit=40, clock=None, connect_fn=None):
         if type(max_requests) is not int or not 0 <= max_requests <= 20:
             raise ValueError('max_requests must be 0..20')
-        if type(daily_limit) is not int or not 0 <= daily_limit <= 300:
-            raise ValueError('daily_limit must be 0..300')
+        if type(daily_limit) is not int or not 0 <= daily_limit <= 1440:
+            raise ValueError('daily_limit must be 0..1440')
         self.max_requests = max_requests
         self.daily_limit = daily_limit
         self.dsn = dsn

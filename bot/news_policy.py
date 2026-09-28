@@ -1,7 +1,9 @@
 """Deterministic News admission checks. Heuristics, not fact/rights certification."""
 from collections import defaultdict, deque
 from datetime import date, datetime, timedelta, timezone
+import os
 import re
+from zoneinfo import ZoneInfo
 from difflib import SequenceMatcher
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
@@ -223,11 +225,17 @@ def candidate_readiness_score(item):
 
 
 def queue_priority_score(item, now):
-    """Blend editorial value with freshness without altering admission."""
+    """Blend editorial value with freshness; today's verified news comes first."""
     score = newsworthiness_score(item)
     stamp = publication_time(item.get("published_at"))
     if stamp is None:
         return score
+    try:
+        editorial_tz = ZoneInfo(os.getenv("NEWS_EDITORIAL_TIMEZONE") or "Australia/Sydney")
+    except Exception:
+        editorial_tz = UTC
+    if stamp.astimezone(editorial_tz).date() == now.astimezone(editorial_tz).date():
+        score += 12
     age_hours = max(0.0, (now - stamp).total_seconds() / 3600.0)
     if age_hours <= 2:
         score += 6
