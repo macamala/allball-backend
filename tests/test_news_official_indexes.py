@@ -137,3 +137,10 @@ def test_disabled_html_indexes_are_not_fetched(monkeypatch):
     assert 'fifa-futsal-news' not in calls
     assert 'rocket-league-blast-partner' in calls
     assert 'hockey-australia-news' in calls
+
+
+def test_ihf_uses_direct_news_index():
+    from bot.news_official_indexes import HTML_INDEXES
+    ihf=next(row for row in HTML_INDEXES if row["id"]=="ihf-handball")
+    assert ihf["url"]=="https://www.ihf.info/media-center/news"
+    assert ihf["paths"]==("/media-center/news/",)
