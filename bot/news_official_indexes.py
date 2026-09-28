@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 HTML_INDEXES = (
     {
         "id": "olympics-global-sports-news",
+        "enabled": False,
         "sport": None,
         "kind": "mixed",
         "publisher": "Olympics.com",
