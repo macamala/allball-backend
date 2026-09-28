@@ -181,6 +181,16 @@ def non_article_news_reason(item):
         return "non_article_podcast"
     if re.search(r"\bscorecard\b", title) or "/scorecard/" in path:
         return "non_article_scorecard"
+    # Keep scarce writer requests for factual news rather than opinion/listicle
+    # products that repeatedly fail semantic validation or add little news value.
+    if re.search(
+        r"\b(?:what we learned|takeaways?|power rankings?|waiver wire|player poll|"
+        r"most disappointing|our experts?|grades?)\b",
+        title,
+    ):
+        return "non_article_analysis"
+    if re.search(r"\b(?:trade radio|watch live|listen live)\b", title):
+        return "non_article_live_program"
 
     try:
         host = (urlsplit(url).hostname or "").lower()
