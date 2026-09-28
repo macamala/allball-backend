@@ -263,3 +263,10 @@ def test_confirmed_non_authoritative_sanction_prediction_remains_held():
         'url': 'https://www.record.pt/internacional/paises/inglaterra/detalhe/liam-gallagher-revela-possivel-castigo-do-man-city-e-explode-calem-se-idiotas-neuroticos-desesperados'
     }) == 'non_news_fan_speculation'
     assert non_article_news_reason({'title': 'Premier League confirms disciplinary sanction', 'url': 'https://www.premierleague.com/en/news/sanction'}) is None
+
+
+def test_confirmed_legacy_editorial_incidents_are_held_without_blocking_real_final_report():
+    assert non_article_news_reason({'title':'Linda Nosková’s Ambitious Path Toward Tennis Supremacy'}) == 'non_news_retrospective_commentary'
+    assert non_article_news_reason({'title':'Premier League possession football faces questions as tactics evolve'}) == 'non_article_analysis'
+    assert non_article_news_reason({'title':'Grand Final Week Opens with a Harbour Bridge March'}) == 'non_article_event_promotion'
+    assert non_article_news_reason({'title':'Knights fans fill Sydney Harbour Bridge ahead of Grand Final'}) is None

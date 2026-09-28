@@ -166,6 +166,11 @@ def probe_news_image(url: str, *, client=None) -> tuple[bool, str]:
         keys = {key.lower() for key in parse_qs(urlsplit(value).query)}
     except ValueError:
         return False, "invalid_or_nonpublic_url"
+    # Confirmed NBL incident: a repeated navigation/product logo outranked the
+    # article's player photograph. Large dimensions do not make a logo a hero.
+    if (urlsplit(value).hostname == "cdn.prod.website-files.com"
+            and re.search(r"[_/]nblplus(?:%20|[ ._(%-])", urlsplit(value).path, re.I)):
+        return False, "publisher_default_image"
     if re.search(r"(?:^|[/_-])(?:banner|title[-_]card)(?:[._-]|$)", urlsplit(value).path, re.I):
         return False, "promotional_banner"
     # Choose another real photograph from the same article. Do not strip an

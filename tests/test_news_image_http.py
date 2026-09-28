@@ -184,3 +184,10 @@ def test_uefa_football_path_recovery_never_stamps_futsal(monkeypatch):
     assert public_index._image_repair_resolution(a,None).sport == 'football'
     a.source_url='https://www.uefa.com/uefafutsalchampionsleague/news/yellow-cards/'
     assert public_index._image_repair_resolution(a,None).sport is None
+
+
+def test_nbl_navigation_logo_never_becomes_a_hero_even_if_large():
+    url='https://cdn.prod.website-files.com/64a4f0de3648103ab3295afa/670f29ec6cffa3066d5d58ec_nblplus%20(1).webp'
+    assert images.probe_news_image(url,client=object()) == (False,'publisher_default_image')
+    photo='https://cdn.prod.website-files.com/64a50350adad23f0f1ef8f43/6ab9be9cc5c4fb977f7f8a29_knight_colour_corrected.jpg'
+    assert images.probe_news_image(photo,client=Client([Response()])) == (True,'ok')

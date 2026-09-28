@@ -390,6 +390,7 @@ def repair_recent_news_images(
         "image_dimensions_unverified",
         "composited_overlay",
         "promotional_banner",
+        "publisher_default_image",
     }
     failed = [
         (article, tax, probes.get(str(article.image_url or "").strip(), (False, "probe_missing"))[1])

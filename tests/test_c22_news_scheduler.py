@@ -27,6 +27,7 @@ def cycle(monkeypatch, tmp_path, *, history='0'):
     def mislabels(db, **kw): calls.append(('mislabels',kw)); return 0
     def unresolved(db, **kw): calls.append(('unresolved',kw)); return 0
     def duplicates(db, **kw): calls.append(('duplicates',kw)); return 0
+    def gossip(db, **kw): calls.append(('gossip',kw)); return 0
     def inventory(db, **kw): calls.append(('inventory',kw)); return {'football': 2}
     def session(): calls.append('session'); return Session()
     sources=module('bot.fetch_sources',fetch_and_store_all_articles=fetch)
@@ -41,6 +42,7 @@ def cycle(monkeypatch, tmp_path, *, history='0'):
         repair_recent_sport_mislabels=mislabels,
         repair_recent_unresolved=unresolved,
         repair_recent_duplicate_news=duplicates,
+        repair_recent_gossip_news=gossip,
         recent_public_sport_inventory=inventory,
     )
     path=Path(__file__).parents[1]/'bot/scheduler.py'
@@ -54,7 +56,8 @@ def cycle(monkeypatch, tmp_path, *, history='0'):
 def test_historical_off_scheduler_does_not_open_legacy_index_database(monkeypatch,tmp_path):
     scheduler,calls,_,_,_=cycle(monkeypatch,tmp_path)
     scheduler.job()
-    assert 'session' not in calls
+    # Bounded current-News maintenance still runs; legacy backfill stays off.
+    assert calls.count('session') == calls.count('close') == 1
     assert not any(isinstance(c,tuple) and c[0] in ('index','summary','contaminated') for c in calls)
     assert sum(isinstance(c,tuple) and c[0]=='fetch' for c in calls)==1
 
@@ -64,7 +67,7 @@ def test_opt_in_history_is_bounded_to_one_index_batch(monkeypatch,tmp_path):
     assert scheduler.job()==1
     assert ('summary',{'max_pages':1,'max_rewrite':2}) in calls
     assert [c for c in calls if isinstance(c,tuple) and c[0]=='index']==[('index',{'limit':400})]
-    assert ('contaminated',{'max_pages':1}) in calls and calls.count('close')==1
+    assert ('contaminated',{'max_pages':1}) in calls and calls.count('close')==2
 
 
 def test_historical_and_new_requests_share_same_cycle_limit(monkeypatch,tmp_path):
@@ -166,6 +169,8 @@ def test_main_releases_cycle_owner_before_scheduler_shutdown(monkeypatch,tmp_pat
             assert kw['start_date'].tzinfo is not None
             if func is scheduler.job:
                 assert kw['id']=='news-interval-cycle'
+                assert kw['next_run_time'] == kw['start_date']
+                assert kw['misfire_grace_time'] == 120
             elif func is scheduler.image_health_job:
                 assert kw['id']=='news-image-health-cycle'
                 assert kw['minutes']==10

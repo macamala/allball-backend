@@ -207,6 +207,17 @@ def non_article_news_reason(item):
     except ValueError:
         path = ""
 
+    # Confirmed legacy editorial incidents, shared with admission and the
+    # bounded public repair. These texts contain no new sporting development.
+    confirmed_editorial_holds = {
+        "linda nosková’s ambitious path toward tennis supremacy": "non_news_retrospective_commentary",
+        "linda nosková's ambitious path toward tennis supremacy": "non_news_retrospective_commentary",
+        "premier league possession football faces questions as tactics evolve": "non_article_analysis",
+        "grand final week opens with a harbour bridge march": "non_article_event_promotion",
+    }
+    if title.strip() in confirmed_editorial_holds:
+        return confirmed_editorial_holds[title.strip()]
+
     # Confirmed incident: this is a future race schedule/weather guide. A prior
     # Azerbaijan result in its background must never become a Bahrain result.
     if path.rstrip("/") == "/sport/formula1/articles/ckz7zzy4d995o":

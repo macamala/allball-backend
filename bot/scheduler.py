@@ -242,7 +242,7 @@ def main():
     now = datetime.now(timezone.utc)
     first_run = _next_interval_boundary(now, interval)
     image_interval = 10
-    # Offset by five minutes so image maintenance never races the :00/:30 writer lock.
+    # Offset by five minutes from the regular writer boundaries.
     first_image_run = _next_interval_boundary(now, image_interval, offset_minutes=5)
     logger.info(
         'Starting NinkoSports News scheduler every %s minutes; first cycle=%s; image-health=%s minutes first=%s (offset=5m)',
@@ -258,12 +258,16 @@ def main():
         image_health_job()
         # Do not run a one-shot AI cycle on every Railway deployment. Repeated
         # deploys previously spent the same durable daily AI allowance before
-        # the regular 30-minute schedule had a chance to control cadence.
+        # the regular schedule had a chance to control cadence.
         scheduler.add_job(
             job,
             'interval',
             minutes=interval,
             start_date=first_run,
+            # Startup image maintenance can cross this already scheduled tick.
+            # Preserve it with bounded grace instead of silently skipping it.
+            next_run_time=first_run,
+            misfire_grace_time=120,
             max_instances=1,
             coalesce=True,
             id='news-interval-cycle',
