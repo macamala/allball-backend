@@ -579,6 +579,12 @@ def _hydrate(cfg: Dict, url: str, fallback_title: str, *, diagnostics=None) -> O
         logger.info("[official_index] article unavailable %s: %s", cfg["id"], type(exc).__name__)
         return reject("transport_" + type(exc).__name__)
 
+    # NRL galleries share /news/ paths and article metadata. Their captions
+    # plus site footer must never become the factual basis for a news story.
+    if cfg["id"] == "nrl-rugby-league-news" and re.search(
+        r'\bid\s*=\s*["\']vue-gallery-list["\']', html, re.I
+    ):
+        return reject("non_article_photo_gallery")
     published_at = page_published_at_from_html(html)
     if published_at is None and cfg["id"] == "world-athletics-news":
         # This CMS exposes the article's publication field in its own page

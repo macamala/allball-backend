@@ -141,6 +141,7 @@ def test_world_athletics_time_must_belong_to_the_current_article(monkeypatch):
 @pytest.mark.parametrize('headline,reason,slug', [
     ('NinkoSports Daily Football Quizzes Test Knowledge and Instinct', 'non_article_quiz', 'quiz'),
     ('NHL fantasy hockey previews roll out for all 32 teams', 'non_article_fantasy_product', 'fantasy'),
+    ('Grand Final week in pictures', 'non_article_photo_gallery', 'gallery'),
 ])
 def test_public_quiz_cleanup_is_durable_and_does_not_delete_article(headline, reason, slug):
     from database import SessionLocal
@@ -163,3 +164,31 @@ def test_public_quiz_cleanup_is_durable_and_does_not_delete_article(headline, re
         assert repair_recent_gossip_news(db) == 0
     finally:
         db.close()
+
+
+def test_confirmed_gallery_stays_held_after_ai_headline_changes():
+    assert non_article_news_reason({
+        'title': 'Fans gathered in Sydney to celebrate Grand Final Week',
+        'url': 'https://www.nrl.com/news/2026/09/28/fans-march-across-harbour-bridge-to-launch-grand-final-week/'
+    }) == 'non_article_photo_gallery'
+
+
+def test_nrl_gallery_cms_fails_before_facts_or_writer(monkeypatch):
+    from collections import Counter
+    from bot import news_official_indexes as idx
+    cfg = next(c for c in idx.HTML_INDEXES if c['id'] == 'nrl-rugby-league-news')
+    monkeypatch.setattr(idx, 'read_news_feed', lambda u: b'<div id="vue-gallery-list"><p>Photo caption</p></div>')
+    reasons = Counter()
+    assert idx._hydrate(cfg, 'https://www.nrl.com/news/2026/09/28/another-gallery/', 'Fans celebrate', diagnostics=reasons) is None
+    assert reasons == {'non_article_photo_gallery': 1}
+
+
+def test_site_acknowledgement_is_excluded_without_removing_real_sports_prose():
+    from bot.extract import article_text_from_html
+    prose = 'The league announced a new programme for Indigenous players and coaches across the country.'
+    html = ('<main><p>' + prose + '</p></main>'
+            '<div class="acknowledgement-of-country"><p>National Rugby League respects and honours '
+            'the Traditional Custodians of the land and their Elders past, present and future.</p></div>')
+    body = article_text_from_html(html)
+    assert prose.rstrip('.') in body
+    assert 'Traditional Custodians' not in body

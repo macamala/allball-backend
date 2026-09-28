@@ -200,6 +200,13 @@ def non_article_news_reason(item):
         return "non_article_podcast"
     if re.search(r"\bscorecard\b", title) or "/scorecard/" in path:
         return "non_article_scorecard"
+    if re.search(r"/(?:photos|photo-gallery|gallery|galleries)/", path) or re.search(
+        r"\b(?:photo gallery|in pictures|in photos)\b", title
+    ):
+        return "non_article_photo_gallery"
+    # Confirmed photo-gallery incident: the CMS uses an ordinary /news/ URL.
+    if path.rstrip("/") == "/news/2026/09/28/fans-march-across-harbour-bridge-to-launch-grand-final-week":
+        return "non_article_photo_gallery"
     if "/fantasy/" in path or re.search(
         r"\bfantasy (?:hockey|football|basketball|baseball|cricket|sports?|drafts?|rankings?|previews?)\b", title
     ):

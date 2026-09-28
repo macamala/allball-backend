@@ -118,7 +118,7 @@ CHROME_ATTR_RE = re.compile(
     r"\b(?:site-nav|global-nav|main-nav|footer-nav|skiplink|skip-link|"
     r"cookie|consent|newsletter|subscribe|masthead|sidebar|"
     r"article-widget--player|news-aside-list|news-container-item|latest-videos-block|bn-chat-premium|"
-    r"recommended-news|related-news|category-news|miya-galerija-video|mobile-app|google-follow|footer-top)\b",
+    r"recommended-news|related-news|category-news|miya-galerija-video|mobile-app|google-follow|footer-top|acknowledgement-of-country)\b",
     re.IGNORECASE,
 )
 
