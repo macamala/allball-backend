@@ -19,6 +19,21 @@ _MEMORY_MAX = 1000
 _SCHEMA_READY = False
 
 
+def _retryable_reason(reason: str | None) -> bool:
+    value = str(reason or "")
+    return (
+        value in {
+            "direct_quote_requires_review",
+            "headline_too_similar_to_source",
+            "copied_source_headline",
+            "validator-unavailable",
+            "empty",
+        }
+        or value.startswith("unsupported_proper_name:")
+        or value.startswith("unsupported_claim_family:")
+    )
+
+
 def _fingerprint(url: str) -> str:
     return hashlib.sha256((url or "").strip().encode("utf-8")).hexdigest()
 
@@ -98,13 +113,13 @@ def source_on_cooldown(url: str) -> bool:
         cursor.execute("SET LOCAL statement_timeout = '5s'")
         _ensure_schema(cursor)
         cursor.execute(
-            "SELECT 1 FROM news_ai_source_holds "
+            "SELECT reason FROM news_ai_source_holds "
             "WHERE source_hash=%s AND expires_at > NOW()",
             (key,),
         )
         row = cursor.fetchone()
         connection.commit()
-        return bool(row)
+        return bool(row) and not _retryable_reason(row[0])
     except Exception as exc:
         if connection is not None:
             try:
@@ -205,11 +220,14 @@ def held_source_urls(urls) -> set[str]:
         _ensure_schema(cursor)
         keys = [hashes[url] for url in values]
         cursor.execute(
-            "SELECT source_hash FROM news_ai_source_holds "
+            "SELECT source_hash, reason FROM news_ai_source_holds "
             "WHERE source_hash = ANY(%s) AND expires_at > NOW()",
             (keys,),
         )
-        held_hashes = {row[0] for row in cursor.fetchall() if row and row[0]}
+        held_hashes = {
+            row[0] for row in cursor.fetchall()
+            if row and row[0] and not _retryable_reason(row[1] if len(row) > 1 else None)
+        }
         connection.commit()
         return {url for url in values if hashes[url] in held_hashes}
     except Exception as exc:
