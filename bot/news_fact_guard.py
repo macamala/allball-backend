@@ -151,11 +151,9 @@ def fact_lock_reason(
         for term in sorted({term for term in MONTHS_DAYS if f" {term} " in out_norm} - src_calendar):
             return "unsupported_time_reference:" + term
 
-        for family, terms in CLAIM_FAMILIES.items():
-            if family not in HIGH_RISK_CLAIM_FAMILIES:
-                continue
-            if _contains_any(out_norm, terms) and not _contains_any(src_norm, terms):
-                return "unsupported_claim_family:" + family
+        # Event-specific claim families are intentionally left to the semantic
+        # source-vs-draft validator. Keyword subtraction cannot safely understand
+        # synonyms ("new CEO" vs "appointed") or cross-language source prose.
 
     if expected_sport:
         from .classify import classify_article
