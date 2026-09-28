@@ -487,14 +487,6 @@ def _ingest_item(
             f"VERIFIED COMPETITION HINT: {tags.league or 'unspecified'}."
             if trusted_feed else ""
         )
-        provider, model = writer_identity()
-        if isinstance(db, Session) and not writer_allowed(db, provider, model):
-            logger.error(
-                "[fetch_sources] writer circuit open provider=%s model=%s",
-                provider,
-                model,
-            )
-            return None, False
         learned_instructions, learned_rule_ids = (
             rule_prompt_instructions(db, source_url=source_url, sport=tags.sport)
             if isinstance(db, Session)
@@ -509,6 +501,14 @@ def _ingest_item(
             trusted_context=trusted_context,
             learned_instructions=learned_instructions,
         )
+        provider, model = writer_identity()
+        if isinstance(db, Session) and not writer_allowed(db, provider, model):
+            logger.error(
+                "[fetch_sources] writer circuit open provider=%s model=%s",
+                provider,
+                model,
+            )
+            return None, False
         if parsed and isinstance(db, Session):
             learned_violation = learned_rule_violation_reason(
                 db, parsed, source_url=source_url, sport=tags.sport
