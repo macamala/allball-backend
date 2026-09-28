@@ -367,7 +367,7 @@ def test_unreachable_image_stops_before_ai_writer(monkeypatch):
     assert holds[-1][1]=="missing-or-unreachable-publishable-image"
 
 
-def test_source_path_sport_hint_resolves_only_unclassified_text():
+def test_source_path_sport_hint_resolves_unclassified_text():
     item={
         "title":"Four men down - but Australia still beat South Africa",
         "url":"https://www.bbc.co.uk/sport/rugby-union/articles/cx05r4gg209ro",
@@ -377,6 +377,24 @@ def test_source_path_sport_hint_resolves_only_unclassified_text():
     tags=ingest._classify_item(item,item["summary"])
     assert tags.sport=="rugby"
     assert tags.reason=="trusted-source-path"
+
+
+def test_trusted_rugby_section_beats_shared_football_city_alias():
+    item = {
+        'title': 'Cornish Pirates concede club-record 73 points in Championship defeat at Coventry',
+        'url': 'https://www.bbc.co.uk/sport/rugby-union/articles/cmzxzj8n9wwwo',
+        'feed': {'kind': 'mixed', 'publisher': 'BBC Sport'},
+    }
+    tags = ingest._classify_item(item, 'The Pirates lost at Coventry in the Championship.')
+    assert tags.sport == 'rugby'
+    assert tags.reason == 'trusted-source-path'
+
+
+def test_explicit_ufc_headline_survives_misplaced_football_source_path():
+    item = {'title': 'UFC fighter announces next MMA bout',
+        'url': 'https://www.bbc.co.uk/sport/football/articles/misplaced',
+        'feed': {'kind': 'mixed'}}
+    assert ingest._classify_item(item, 'The fighter visited Brighton before the fight.').sport == 'mma'
 
 
 def test_textual_sport_evidence_beats_conflicting_source_path():
@@ -512,6 +530,23 @@ def test_live_ingest_rejects_candidate_older_than_24_hours(monkeypatch):
         lambda *a: pytest.fail("stale article reached extraction"),
     )
     assert ingest._ingest_item(Mock(),item,True,6000,1)==(None,False)
+
+
+@pytest.mark.parametrize('first_coverage,reason,attempts',[(False,'validator-unsupported-claim',1),(True,'validator-unsupported-claim',2),(True,'validator-source-type:fan_poll',1)])
+def test_first_coverage_can_correct_facts_but_never_rewrite_a_non_news_source(monkeypatch,tmp_path,first_coverage,reason,attempts):
+    item=prepare_ingest(monkeypatch)
+    monkeypatch.setattr(ingest,'classify_article',lambda *a,**kw:SimpleNamespace(sport='snooker',league='snooker-international',country='international'))
+    calls=[]
+    def story(**kwargs):
+        calls.append(kwargs)
+        ingest._LAST_STORY_FAILURE.set({'draft':DRAFT,'source_facts':FACTS,'validator_feedback':{'unsupported_claims':['Unsupported draw timing'],'changed_names':[]}})
+        return None,reason
+    monkeypatch.setattr(ingest,'_ai_story',story)
+    db=Mock()
+    with ai_budget_scope(AiRequestBudget(8,str(tmp_path/'coverage.db'))):
+        assert ingest._ingest_item(db,item,True,6000,1,prefer_breadth=True,first_coverage=first_coverage)==(None,False)
+    assert len(calls)==attempts
+    db.add.assert_not_called()
 
 
 def test_sport_mismatch_retry_gets_taxonomy_correction_prompt(monkeypatch):

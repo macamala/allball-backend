@@ -390,6 +390,10 @@ Only news may be approved. Rewriting a poll as an announcement that the club
 invited supporters to rank past wins does NOT make it news. A factual report
 about new competition events, appointments, injuries, contracts or sporting
 decisions is news; instructions for audience participation are not.
+Subjective pressure rankings, predictions, listicles and generic claims that a
+future tournament matters are analysis, not news. A teaser without identified
+people, teams or a concrete new event is insufficient. Never approve prose
+describing facts that were not supplied, unspecified teams or missing details.
 
 Return JSON only with exactly:
 {"source_type": string, "approved": boolean, "unsupported_claims": [string], "changed_names": [string]}

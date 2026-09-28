@@ -447,6 +447,7 @@ def _ingest_item(
     ai_budget: int,
     *,
     prefer_breadth: bool = False,
+    first_coverage: bool = False,
 ) -> tuple:
     """Returns (created_article_or_None, ai_used_bool)."""
     # Budget absence is never permission to publish copied source prose.
@@ -611,7 +612,7 @@ def _ingest_item(
                         }
                         or str(rewrite_reason or "").startswith("draft_sport_mismatch:")
                         or (
-                            tags.sport in {"football", "basketball"}
+                            (tags.sport in {"football", "basketball"} or first_coverage)
                             and rewrite_reason in {"validator-unsupported-claim", "validator-changed-name", "unsupported_number"}
                             and any(feedback.values())
                             and active_ai_budget() is not None
@@ -828,11 +829,16 @@ def _classify_item(item, evidence):
         feed_league=feed.get("league"),
         feed_country=feed.get("country"),
     )
-    if tags.sport is not None or tags.reason == "unsupported-news-sport":
+    if getattr(tags, "reason", "") == "unsupported-news-sport":
         return tags
     hinted = source_path_sport_hint(item.get("url"))
-    if not hinted:
+    if not hinted or tags.sport == hinted:
         return tags
+    from .news_policy import explicit_headline_sport
+    explicit = explicit_headline_sport(item.get('title'))
+    if explicit and explicit != hinted:
+        return Classification(explicit, tags.league if tags.sport == explicit else None,
+            feed.get('country'), 'high', 'explicit-headline-sport')
     return Classification(
         sport=hinted,
         league=None,
@@ -1121,6 +1127,7 @@ def _fetch_and_store_all_articles(
                     max_ai_chars=max_ai_chars,
                     ai_budget=ai_budget,
                     prefer_breadth=prefer_breadth,
+                    first_coverage=sport_inventory.get(_classify_candidate(item).sport, 0) == 0,
                 )
             except Exception as e:
                 logger.exception("[fetch_sources] item failed: %s", e)

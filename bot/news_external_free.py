@@ -95,7 +95,7 @@ def _config(provider: str) -> Optional[dict]:
         return None
     if provider == "groq":
         key = (os.getenv("GROQ_API_KEY") or "").strip()
-        model = (os.getenv("NEWS_GROQ_MODEL") or "openai/gpt-oss-20b").strip()
+        model = (os.getenv("NEWS_GROQ_MODEL") or "openai/gpt-oss-120b").strip()
         if not key or not _MODEL_RE.fullmatch(model):
             return None
         return {"provider": "groq", "model": model, "key": key}

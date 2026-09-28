@@ -154,8 +154,8 @@ _SOURCE_PATH_SPORTS = (
 def source_path_sport_hint(url):
     """Conservative publisher-owned URL-path sport evidence.
 
-    This is only a fallback when article text classification is unresolved. A
-    strong textual sport classification always wins over the publisher path.
+    A trusted sport section outweighs shared city and competition aliases.
+    An explicit sport in the headline can still override a misplaced URL.
     """
     if not isinstance(url, str) or not url.strip():
         return None
@@ -168,6 +168,40 @@ def source_path_sport_hint(url):
     for expected_host, prefix, sport in _SOURCE_PATH_SPORTS:
         if host == expected_host and path.startswith(prefix):
             return sport
+    return None
+
+
+def explicit_headline_sport(title):
+    """Unambiguous sport words, never shared city/team or competition names."""
+    value = str(title or '').casefold()
+    for sport, pattern in (
+        ('table-tennis', r'\b(?:table[ -]tennis|ping pong)\b'),
+        ('american-football', r'\b(?:american football|nfl)\b'),
+        ('australian-rules', r'\b(?:australian rules|aflw?)\b'),
+        ('rugby-league', RUGBY_LEAGUE_TITLE_RE), ('rugby', RUGBY_UNION_TITLE_RE),
+        ('water-polo', r'\b(?:water[ -]polo|vaterpolo)\b'),
+        ('field-hockey', r'\bfield hockey\b'), ('ice-hockey', r'\b(?:ice hockey|nhl)\b'),
+        ('mma', r'\b(?:mma|ufc|mixed martial arts|oktagon(?:u|e|em)?)\b'),
+        ('cricket', CRICKET_TITLE_RE), ('volleyball', VOLLEYBALL_TITLE_RE),
+        ('basketball', r'\b(?:basketball|nba|wnba|košarka|kosarka)\b'),
+        ('football', r'\b(?:football|soccer|fudbal|futebol|fußball)\b'),
+        ('handball', r'\b(?:handball|ehf|ihf|rukomet)\b'),
+        ('tennis', r'\b(?:tennis|atp|wta)\b'), ('badminton', r'\b(?:badminton|shuttlers?)\b'),
+        ('swimming', r'\b(?:swimming|swimmers?)\b'), ('baseball', r'\b(?:baseball|mlb)\b'),
+        ('cycling', r'\b(?:cycling|peloton|uci road)\b'), ('boxing', r'\b(?:boxing|boxers?)\b'),
+        ('darts', r'\b(?:darts|pdc)\b'), ('snooker', r'\bsnooker\b'),
+        ('golf', r'\b(?:golf|lpga|pga)\b'), ('motorsport', r'\b(?:formula (?:1|one)|f1|motogp|motorsport)\b'),
+        ('futsal', r'\bfutsal\b'), ('netball', r'\bnetball\b'), ('lacrosse', r'\blacrosse\b'),
+    ):
+        if re.search(pattern, value):
+            return sport
+    return None
+
+
+def source_path_conflict_reason(item, sport):
+    expected = source_path_sport_hint((item or {}).get('url'))
+    if expected and sport and expected != sport and explicit_headline_sport((item or {}).get('title')) != sport:
+        return 'taxonomy_source_path_conflict'
     return None
 
 
@@ -319,7 +353,9 @@ def non_article_news_reason(item):
     if re.search(r"\b(?:full schedule|medal (?:tally|winners)|full list of (?:athletes|medals))\b", title):
         return "non_article_service_guide"
     copy = " ".join(str((item or {}).get(k) or "") for k in ("summary", "body"))
-    if re.search(r"\bno (?:further|additional|specific) .{0,100}\b(?:provided|mentioned|supplied) (?:in|by) (?:the )?(?:source|release|material)\b", copy, re.I):
+    if re.search(r"\bno (?:further|additional|specific) .{0,100}\b(?:provided|mentioned|supplied|detailed) (?:in|by) (?:the )?(?:(?:verified|reported|supplied) )?(?:source|release|material|facts|context)\b", copy, re.I):
+        return "non_news_source_meta_filler"
+    if re.search(r"\b(?:source|reported context|verified facts|provided information|supplied material|statement)\b.{0,80}\b(?:does not|did not|doesn't|didn't) (?:specify|identify|detail|provide)\b|\bno specific (?:teams|players|athletes|scenarios|details)\b.{0,60}\b(?:detailed|provided|identified|specified)\b", copy, re.I):
         return "non_news_source_meta_filler"
     if re.search(r"\b(?:predlozzi|tipovanja|ludi tiket|kladioničarski tipovi|kladionicarski tipovi)\b", title) or re.search(r"/(?:predlozzi-i-tipovanja|ludi-tiket|najava-dana)-", path):
         return "non_article_betting_product"
@@ -362,7 +398,7 @@ def non_article_news_reason(item):
     if re.search(r"/(?:video|videos|clips)/", path) or re.search(
         r"(?:^|/|-)(?:best-moments|game-highlights|match-highlights|tries-of-the-week)(?:/|-|$)", path
     ) or re.search(
-        r"\b(?:game highlights|match highlights|top (?:plays|tries)|tries of the week|best moments|moments that mattered)\b|^top \d+\s*:", title
+        r"\b(?:game highlights|match highlights|top (?:plays|tries)|tries of the week|best moments|moments that mattered)\b|^top \d+\s*:|^compilation\s*:", title
     ):
         return "non_article_video_highlights"
     if re.search(r"\b(?:race times|qualifying times|weather forecast|how to watch|where to watch|all you need to know|everything you need to know)\b", title):
@@ -373,7 +409,7 @@ def non_article_news_reason(item):
     # products that repeatedly fail semantic validation or add little news value.
     if re.search(
         r"\b(?:what we learned|takeaways?|power rankings?|waiver wire|player poll|"
-        r"most disappointing|our experts?|grades?)\b|^starting (?:5|five):",
+        r"most disappointing|our experts?|grades?)\b|^starting (?:5|five):|\branking (?:the )?(?:teams|clubs|players|contenders)\b|^\d+ reasons to\b",
         title,
     ):
         return "non_article_analysis"

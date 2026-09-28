@@ -149,8 +149,8 @@ def test_fact_guard_allows_sport_implicit_draft_when_source_sport_is_known():
     draft={
         "title":"South Africa seal the series",
         "summary":"South Africa completed the series win over Australia.",
-        "body":"South Africa completed the series win over Australia after the supplied match report.",
+        "body":"South Africa secured the series against Australia with a victory in the final contest. The visitors completed their campaign ahead of the home side after the deciding match.",
     }
     source_title="Superb South Africa seal series win over Australia"
-    source_body="South Africa beat Australia in the cricket series and completed the contest."
+    source_body="South Africa, the visiting cricket team, beat Australia in the final match to win the series. The result decided the series and ended the campaign."
     assert fact_lock_reason(draft,source_title,source_body,expected_sport="cricket") is None

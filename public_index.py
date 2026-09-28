@@ -22,7 +22,7 @@ from models import Article, ArticleTaxonomyResolution
 from sport_match import MAIN_SPORTS, isolation_ok
 from bot.taxonomy import COMPETITIONS
 from bot.news_learning import article_has_open_incident
-from bot.news_policy import CRICKET_TITLE_RE, VOLLEYBALL_TITLE_RE, RUGBY_LEAGUE_TITLE_RE, RUGBY_UNION_TITLE_RE, gossip_news_reason, non_article_news_reason, publisher_branding_reason
+from bot.news_policy import CRICKET_TITLE_RE, VOLLEYBALL_TITLE_RE, RUGBY_LEAGUE_TITLE_RE, RUGBY_UNION_TITLE_RE, gossip_news_reason, non_article_news_reason, publisher_branding_reason, source_path_conflict_reason
 from taxonomy_resolver import (
     MIN_SPORT_CONFIDENCE,
     RESOLVER_VERSION,
@@ -70,7 +70,8 @@ def persist_public_article(db: Session, article: Article, resolution=None, commi
         "url": article.source_url,
     }
     editorial_hold = (gossip_news_reason(admission_item) or non_article_news_reason(admission_item)
-                      or publisher_branding_reason(admission_item))
+                      or publisher_branding_reason(admission_item)
+                      or source_path_conflict_reason(admission_item, resolved.sport))
     public = bool(
         quality.get("ok")
         and resolved.sport
@@ -584,7 +585,8 @@ def repair_recent_gossip_news(
             "url": article.source_url,
         }
         reason = (gossip_news_reason(item) or non_article_news_reason(item)
-                  or publisher_branding_reason(item))
+                  or publisher_branding_reason(item)
+                  or source_path_conflict_reason(item, tax.resolved_sport))
         if not reason:
             continue
         tax.public_ok = False

@@ -34,6 +34,29 @@ def test_absent_source_details_are_not_news_content():
         'No specific player names or additional details about the nomination criteria were provided in the source material.'}) == 'non_news_source_meta_filler'
 
 
+@pytest.mark.parametrize('body', [
+    'No specific teams or scenarios were detailed in the reported context about the MLB playoffs.',
+    'The statement about heightened pressure does not specify which teams or factors contribute.',
+    'No additional details about scheduling or competitive balance were provided in the verified facts.',
+])
+def test_generic_teaser_padding_never_passes_original_draft_or_public_admission(body):
+    assert non_article_news_reason({'title': 'MLB playoffs bring pressure', 'body': body}) == 'non_news_source_meta_filler'
+
+
+def test_actual_team_declining_to_give_injury_details_remains_news():
+    assert non_article_news_reason({'title': 'Club confirms injury absence',
+        'body': 'The club did not specify a return date for its injured captain.'}) is None
+
+
+@pytest.mark.parametrize('title,reason', [
+    ('MLB playoffs: Ranking teams by World Series pressure', 'non_article_analysis'),
+    ("51 reasons to fear the Kings' bench", 'non_article_analysis'),
+    ('Compilation: 11 brilliant acrobatic goals scored for Liverpool', 'non_article_video_highlights'),
+])
+def test_subjective_lists_and_compilations_stop_before_writer(title, reason):
+    assert non_article_news_reason({'title': title}) == reason
+
+
 def test_rugby_world_cup_cannot_become_soccer_through_wales_or_world_cup_names():
     from public_index import _explicit_title_sport_override
     headline='Tayla Preston selected in Wales squad for 2026 Rugby League World Cup'
@@ -227,6 +250,41 @@ def test_confirmed_gallery_stays_held_after_ai_headline_changes():
         'title': 'Fans gathered in Sydney to celebrate Grand Final Week',
         'url': 'https://www.nrl.com/news/2026/09/28/fans-march-across-harbour-bridge-to-launch-grand-final-week/'
     }) == 'non_article_photo_gallery'
+
+
+def test_wrong_public_sport_against_trusted_source_is_held_durably():
+    from database import SessionLocal
+    from models import Article, ArticleTaxonomyResolution, NewsIncident
+    from public_index import repair_recent_gossip_news
+    from taxonomy_resolver import RESOLVER_VERSION
+    db = SessionLocal()
+    try:
+        article = Article(title='Cornish Pirates concede club-record 73 points at Coventry',
+            summary='The Pirates suffered a Championship defeat.', slug='recovery-coventry-source-sport',
+            source_url='https://www.bbc.co.uk/sport/rugby-union/articles/cmzxzj8n9wwwo',
+            published_at=datetime.now(timezone.utc).replace(tzinfo=None))
+        db.add(article); db.flush()
+        tax = ArticleTaxonomyResolution(article_id=article.id, resolver_version=RESOLVER_VERSION,
+            resolved_sport='football', public_ok=True)
+        db.add(tax); db.commit()
+        assert repair_recent_gossip_news(db) >= 1
+        db.refresh(tax)
+        assert tax.public_ok is False
+        assert db.query(NewsIncident).filter_by(article_id=article.id, status='open',
+            reason_code='taxonomy_source_path_conflict').count() == 1
+        assert repair_recent_gossip_news(db) == 0
+    finally:
+        db.close()
+
+
+def test_source_section_guard_preserves_explicit_sport_corrections():
+    from bot.news_policy import source_path_conflict_reason
+    assert source_path_conflict_reason({'title': 'UFC star wins MMA bout',
+        'url': 'https://www.bbc.co.uk/sport/football/articles/misplaced'}, 'mma') is None
+    assert source_path_conflict_reason({'title': 'Cornish Pirates defeated at Coventry',
+        'url': 'https://www.bbc.co.uk/sport/rugby-union/articles/report'}, 'football') == 'taxonomy_source_path_conflict'
+    assert source_path_conflict_reason({'title': 'Coventry win',
+        'url': 'https://other.example/rugby-union/report'}, 'football') is None
 
 
 def test_nrl_gallery_cms_fails_before_facts_or_writer(monkeypatch):
