@@ -901,6 +901,7 @@ def _fetch_and_store_all_articles(
         from public_index import (
             recent_public_sport_inventory,
             repair_recent_duplicate_news,
+            repair_recent_gossip_news,
             repair_recent_news_images,
             repair_recent_sport_mislabels,
             repair_recent_unresolved,
@@ -915,20 +916,24 @@ def _fetch_and_store_all_articles(
         after_mislabels = time.monotonic()
         repaired = repair_recent_unresolved(db, limit=24)
         after_unresolved = time.monotonic()
+        gossip = repair_recent_gossip_news(db, limit=600, max_age_hours=168)
+        after_gossip = time.monotonic()
         duplicates = repair_recent_duplicate_news(db, limit=600, max_age_hours=168)
         after_dedupe = time.monotonic()
         sport_inventory = recent_public_sport_inventory(db, max_age_hours=24)
         logger.info(
             "[fetch_sources] repair phases images=%s %.3fs mislabels=%s %.3fs "
-            "unresolved=%s %.3fs duplicates=%s %.3fs inventory=%.3fs",
+            "unresolved=%s %.3fs gossip=%s %.3fs duplicates=%s %.3fs inventory=%.3fs",
             images,
             after_images - repair_started,
             mislabels,
             after_mislabels - after_images,
             repaired,
             after_unresolved - after_mislabels,
+            gossip,
+            after_gossip - after_unresolved,
             duplicates,
-            after_dedupe - after_unresolved,
+            after_dedupe - after_gossip,
             time.monotonic() - after_dedupe,
         )
         queued, admission = fair_news_queue(
