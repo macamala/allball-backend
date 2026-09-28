@@ -362,6 +362,16 @@ HTML_INDEXES = (
 
 SITEMAPS = (
     {
+        "id": "uefa-football-competitions", "sport": "football", "publisher": "UEFA",
+        "url": "https://www.uefa.com/sitemap/news/latest.xml", "host": "www.uefa.com",
+        "url_markers": ("/uefachampionsleague/news/", "/uefaeuropaleague/news/",
+                        "/uefaconferenceleague/news/", "/uefanationsleague/news/",
+                        "/european-qualifiers/news/", "/uefaeuro/news/", "/under21/news/",
+                        "/under19/news/", "/under17/news/", "/womenschampionsleague/news/",
+                        "/womenseuropeanqualifiers/news/", "/womensnationsleague/news/",
+                        "/womenseuro/news/", "/womensunder19/news/", "/womensunder17/news/"),
+    },
+    {
         "id": "uefa-futsal",
         "sport": "futsal",
         "publisher": "UEFA",
@@ -538,7 +548,7 @@ def _child_text(node, wanted: str) -> str:
     return ""
 
 
-def _sitemap_candidates(cfg: Dict) -> List[tuple[str, str]]:
+def _sitemap_candidates(cfg: Dict, *, publication_times=None) -> List[tuple[str, str]]:
     try:
         raw = read_news_feed(cfg["url"])
         if len(raw) > MAX_INDEX_BYTES:
@@ -566,8 +576,18 @@ def _sitemap_candidates(cfg: Dict) -> List[tuple[str, str]]:
         title_ok = any(marker in blob for marker in cfg.get("title_markers", ()))
         if not (url_ok or title_ok) or loc in seen:
             continue
+        if non_article_news_reason({"title": title, "url": loc}):
+            continue
         seen.add(loc)
-        output.append((loc.split("#", 1)[0], title))
+        canonical = loc.split("#", 1)[0]
+        if publication_times is not None:
+            from .extract import _parse_explicit_datetime
+            # news:publication_date belongs to this same allowlisted URL.
+            # Never substitute sitemap lastmod, fetch time or a naive date.
+            stamp = _parse_explicit_datetime(_child_text(node, "publication_date"))
+            if stamp is not None:
+                publication_times[canonical] = stamp
+        output.append((canonical, title))
         if len(output) >= MAX_LINKS_PER_SOURCE:
             break
     return output
@@ -619,7 +639,7 @@ def _visible_published_date(
     return None
 
 
-def _hydrate(cfg: Dict, url: str, fallback_title: str, *, diagnostics=None) -> Optional[Dict]:
+def _hydrate(cfg: Dict, url: str, fallback_title: str, *, diagnostics=None, sitemap_published_at=None) -> Optional[Dict]:
     def reject(reason):
         if diagnostics is not None:
             diagnostics[reason] += 1
@@ -668,6 +688,8 @@ def _hydrate(cfg: Dict, url: str, fallback_title: str, *, diagnostics=None) -> O
             html,
             cfg.get("visible_date_timezone"),
         )
+    if published_at is None and isinstance(sitemap_published_at, datetime) and sitemap_published_at.tzinfo is not None:
+        published_at = sitemap_published_at
     max_age = max(24, min(int(cfg.get("max_age_hours") or 72), 168))
     if published_at is None:
         return reject("publication_time_unverified")
@@ -738,11 +760,12 @@ def _hydrate(cfg: Dict, url: str, fallback_title: str, *, diagnostics=None) -> O
 
 def _hydrate_source(cfg: Dict, limit: int, *, sitemap: bool = False) -> List[Dict]:
     """Hydrate one allowlisted source serially; safe unit for bounded host parallelism."""
-    candidates = _sitemap_candidates(cfg) if sitemap else _anchor_candidates(cfg)
+    publication_times = {}
+    candidates = _sitemap_candidates(cfg, publication_times=publication_times) if sitemap else _anchor_candidates(cfg)
     rows: List[Dict] = []
     reasons = Counter()
     for url, title in candidates:
-        item = _hydrate(cfg, url, title, diagnostics=reasons)
+        item = _hydrate(cfg, url, title, diagnostics=reasons, sitemap_published_at=publication_times.get(url))
         if item is None:
             continue
         rows.append(item)

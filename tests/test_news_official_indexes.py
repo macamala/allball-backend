@@ -41,7 +41,7 @@ def test_uefa_sitemap_selects_only_futsal(monkeypatch):
         <news:news><news:title>Champions League football story</news:title></news:news></url>
     </urlset>'''
     monkeypatch.setattr(idx, 'read_news_feed', lambda url: xml)
-    cfg=idx.SITEMAPS[0]
+    cfg=next(row for row in idx.SITEMAPS if row['id']=='uefa-futsal')
     rows=idx._sitemap_candidates(cfg)
     assert len(rows)==1
     assert 'uefafutsalchampionsleague' in rows[0][0]
@@ -131,7 +131,7 @@ def test_unusable_primary_indexes_have_active_fallbacks():
 def test_disabled_html_indexes_are_not_fetched(monkeypatch):
     calls=[]
     monkeypatch.setattr(idx, '_anchor_candidates', lambda cfg: calls.append(cfg['id']) or [])
-    monkeypatch.setattr(idx, '_sitemap_candidates', lambda cfg: [])
+    monkeypatch.setattr(idx, '_sitemap_candidates', lambda cfg, **kwargs: [])
     idx.fetch_official_index_entries(1)
     assert 'rocket-league-competitive' not in calls
     assert 'ittf-table-tennis-news' not in calls

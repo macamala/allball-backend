@@ -17,6 +17,11 @@ class Feed(TypedDict, total=False):
 
 
 FEEDS: List[Feed] = [
+    {'url': 'https://www.theguardian.com/football/rss', 'kind': 'league', 'sport': 'football', 'enabled': True, 'note': 'Global club and national-team football; never stamp a domestic league.'},
+    {'url': 'https://www.theguardian.com/au/sport/rss', 'kind': 'mixed', 'enabled': True, 'note': 'Multi-sport reporting; independently classify; opinion/blog/live products held.'},
+    {'url': 'https://www.sportschau.de/index~rss2.xml', 'kind': 'mixed', 'enabled': True, 'note': 'German international and domestic sports reporting; verified article prose, timestamps and image candidates.'},
+    {'url': 'https://feeds.as.com/mrss-s/pages/as/site/as.com/section/futbol/portada', 'kind': 'league', 'sport': 'football', 'enabled': True, 'note': 'Global Spanish-language football; no country or league stamp.'},
+    {'url': 'https://www.motorsport.com/rss/all/news/', 'kind': 'league', 'sport': 'motorsport', 'enabled': True, 'note': 'F1 and other racing championships; prose and publication timestamps verified; no single-series stamp.'},
     {'url': 'https://feeds.bbci.co.uk/sport/football/premier-league/rss.xml', 'kind': 'league', 'sport': 'football', 'league': 'england-premier-league', 'country': 'england', 'enabled': True},
     {'url': 'https://feeds.bbci.co.uk/sport/football/championship/rss.xml', 'kind': 'league', 'sport': 'football', 'league': 'england-championship', 'country': 'england', 'enabled': True},
     {'url': 'https://as.com/rss/futbol/primera.xml', 'kind': 'league', 'sport': 'football', 'league': 'spain-la-liga', 'country': 'spain', 'enabled': True},

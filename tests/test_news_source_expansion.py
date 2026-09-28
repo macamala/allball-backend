@@ -148,3 +148,39 @@ def test_foreign_prose_with_roster_is_not_a_navigation_page():
     roster='Golmani: Noa Atubolu Fin Damen Jonas Urbig Bajern Minhen Valdemar Anton Borusija Dortmund Ridle Baku Lajpzig Fin Jelč Štutgart David Raum Lajpcig'
     assert not is_site_chrome_text(prose+'\n\n'+roster)
     assert is_site_chrome_text('Home Football Basketball Tennis Cricket Rugby Golf Racing Results Fixtures Tables Teams Players Video Photos Podcasts Scores Transfers Clubs News')
+
+
+def test_global_sources_do_not_stamp_one_country_league_or_mixed_sport():
+    from bot.feeds import FEEDS
+    from bot.news_policy import source_path_sport_hint
+    for url in ['https://www.theguardian.com/football/rss', 'https://feeds.as.com/mrss-s/pages/as/site/as.com/section/futbol/portada']:
+        f=next(f for f in FEEDS if f['url']==url)
+        assert f['sport']=='football' and not f.get('league') and not f.get('country')
+    assert next(f for f in FEEDS if f['url']=='https://www.sportschau.de/index~rss2.xml')['kind']=='mixed'
+    assert source_path_sport_hint('https://www.sportschau.de/handball/bundesliga/club-signs-player.html')=='handball'
+    assert source_path_sport_hint('https://www.sportschau.de/fussball/nationalmannschaft/report.html')=='football'
+    assert source_path_sport_hint('https://www.sportschau.de/fussball-other/') is None
+    assert non_article_news_reason({'title':'An opinion | A Reporter','url':'https://www.theguardian.com/football/2026/sep/28/opinion'})=='non_article_analysis'
+    assert non_article_news_reason({'title':'Club confirms appointment','url':'https://www.theguardian.com/football/2026/sep/28/appointment'}) is None
+
+
+def test_uefa_sitemap_exact_publication_time_hydrates_same_article(monkeypatch):
+    source=next(x for x in idx.SITEMAPS if x['id']=='uefa-football-competitions')
+    url='https://www.uefa.com/uefanationsleague/news/123-greece-win/'
+    stamp=datetime.now(timezone.utc).isoformat()
+    sitemap=f'<urlset xmlns:news="http://www.google.com/schemas/sitemap-news/0.9"><url><loc>{url}</loc><news:news><news:title>Greece win in Germany</news:title><news:publication_date>{stamp}</news:publication_date></news:news></url></urlset>'
+    article='<meta property="og:title" content="Greece win in Germany"><meta property="og:image" content="https://editorial.uefa.com/match.jpg"><article><p>'+'Greece secured a victory against Germany in the Nations League. '*20+'</p></article>'
+    monkeypatch.setattr(idx,'read_news_feed',lambda u:(sitemap if u==source['url'] else article).encode())
+    rows=idx._hydrate_source(source,1,sitemap=True)
+    assert len(rows)==1 and rows[0]['published_at'].isoformat()==stamp
+    assert rows[0]['url']==url and rows[0]['feed']['sport']=='football'
+    sitemap=sitemap.replace(f'<news:publication_date>{stamp}</news:publication_date>', f'<lastmod>{stamp}</lastmod>')
+    assert idx._hydrate_source(source,1,sitemap=True)==[]
+
+
+def test_uefa_discovery_keeps_futsal_separate_and_does_not_use_naive_dates(monkeypatch):
+    source=next(x for x in idx.SITEMAPS if x['id']=='uefa-football-competitions')
+    page='<urlset><url><loc>https://www.uefa.com/uefafutsalchampionsleague/news/123-report/</loc><title>Futsal report</title></url><url><loc>https://www.uefa.com/uefanationsleague/news/124-report/</loc><title>Team announcement</title><publication_date>2026-09-28</publication_date></url></urlset>'
+    monkeypatch.setattr(idx,'read_news_feed',lambda u:page.encode())
+    dates={}; rows=idx._sitemap_candidates(source,publication_times=dates)
+    assert len(rows)==1 and '124-report' in rows[0][0] and dates=={}

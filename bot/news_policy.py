@@ -56,6 +56,18 @@ def canonical_news_url(value):
 
 
 _SOURCE_PATH_SPORTS = (
+    ("www.theguardian.com", "/football/", "football"),
+    ("www.sportschau.de", "/fussball/", "football"),
+    ("www.sportschau.de", "/handball/", "handball"),
+    ("www.sportschau.de", "/basketball/", "basketball"),
+    ("www.sportschau.de", "/eishockey/", "ice-hockey"),
+    ("www.sportschau.de", "/tennis/", "tennis"),
+    ("www.sportschau.de", "/radsport/", "cycling"),
+    ("www.sportschau.de", "/wintersport/", "winter-sports"),
+    ("www.sportschau.de", "/leichtathletik/", "athletics"),
+    ("www.sportschau.de", "/schwimmen/", "swimming"),
+    ("www.sportschau.de", "/volleyball/", "volleyball"),
+    ("www.sportschau.de", "/motorsport/", "motorsport"),
     ("www.b92.net", "/sport/fudbal/", "football"),
     ("www.b92.net", "/sport/kosarka/", "basketball"),
     ("www.b92.net", "/sport/tenis/", "tennis"),
@@ -218,6 +230,8 @@ def non_article_news_reason(item):
         return "non_article_podcast"
     if re.search(r"\bscorecard\b", title) or "/scorecard/" in path:
         return "non_article_scorecard"
+    if re.search(r"\b(?:all-time top scorers?|top international scorers?|most-capped|record collection|how he has scored)\b", title):
+        return "non_article_rolling_tracker"
     if re.search(r"\binjury (?:reports?|updates?|trackers?)\b", title) and re.search(
         r"\b(?:updated daily|daily updates?|real[- ]time|fantasy (?:players|managers)|latest)\b", title
     ):
@@ -263,6 +277,11 @@ def non_article_news_reason(item):
         host = (urlsplit(url).hostname or "").lower()
     except ValueError:
         host = ""
+    if host == "www.theguardian.com":
+        if "/live/" in path:
+            return "non_article_live_program"
+        if "/blog/" in path or path.startswith("/commentisfree/") or re.search(r"\s\|\s[^|]+$", title):
+            return "non_article_analysis"
     if host == "www.record.pt" and path.startswith("/jogo-da-vida/"):
         return "non_sports_lifestyle_section"
     if host == "www.record.pt" and path.startswith("/fora-de-campo/"):
