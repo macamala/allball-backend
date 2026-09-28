@@ -421,6 +421,7 @@ def test_writer_prompt_includes_numeric_and_quote_safety_contract(monkeypatch):
     assert "ALLOWED NUMERIC TOKENS:" in captured[0]
     assert "3:1" in captured[0] and "2026" in captured[0]
     assert "Do not output straight or curly double quotation marks anywhere" in captured[0]
+    assert "TAXONOMY LOCK: the exact article sport is football" in captured[0]
 
 
 def test_ai_story_runs_deterministic_fact_lock_before_semantic_validator(monkeypatch):
@@ -455,3 +456,17 @@ def test_live_ingest_rejects_candidate_older_than_24_hours(monkeypatch):
         lambda *a: pytest.fail("stale article reached extraction"),
     )
     assert ingest._ingest_item(Mock(),item,True,6000,1)==(None,False)
+
+
+def test_sport_mismatch_retry_gets_taxonomy_correction_prompt(monkeypatch):
+    captured=[]
+    monkeypatch.setattr(writer, "_call_selected_ai", lambda prompt: captured.append(prompt) or "draft")
+    writer.write_ninkosports_story(
+        "NRLW signing update",
+        "The source reports a rugby league signing update.",
+        sport="rugby-league",
+        correction_reason="draft_sport_mismatch:rugby",
+    )
+    assert captured
+    assert "previous draft changed the article's sport taxonomy" in captured[0]
+    assert "TAXONOMY LOCK: the exact article sport is rugby-league" in captured[0]
