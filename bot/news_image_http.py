@@ -12,6 +12,8 @@ from urllib.parse import urljoin
 
 import httpx
 
+from .media_url import upgrade_hero_image_url
+
 from .news_feed_http import validate_public_url
 
 USER_AGENT = (
@@ -80,7 +82,7 @@ def _image_dimensions(data: bytes):
     return None
 
 
-def _image_geometry_reason(data: bytes):
+def _image_geometry_reason(data: bytes, url: str = ""):
     dims = _image_dimensions(data)
     if not dims:
         return None
@@ -88,7 +90,12 @@ def _image_geometry_reason(data: bytes):
     if width <= 0 or height <= 0:
         return None
     if width < 320 or height < 140:
-        return "image_too_small"
+        # Some publishers (notably BBC ichef) encode the requested display
+        # width in the URL. The public UI rewrites that same-photo URL to the
+        # hero role, so a 240px transport variant is not inherently a bad hero.
+        upgraded = upgrade_hero_image_url(url)
+        if not upgraded or upgraded == url:
+            return "image_too_small"
     ratio = width / max(height, 1)
     if ratio > 3.5 or ratio < 0.35:
         return "bad_aspect_ratio"
@@ -180,7 +187,7 @@ def probe_news_image(url: str, *, client=None) -> tuple[bool, str]:
                         result = (False, "not_image_content")
                         _cache_put(value, *result)
                         return result
-                    geometry_reason = _image_geometry_reason(bytes(data))
+                    geometry_reason = _image_geometry_reason(bytes(data), current)
                     if geometry_reason:
                         result = (False, geometry_reason)
                         _cache_put(value, *result)

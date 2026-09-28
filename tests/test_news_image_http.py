@@ -99,3 +99,12 @@ def test_image_probe_accepts_normal_photo_geometry():
     client=Client([Response(content_type="image/png",body=_png(1200,800))])
     ok,reason=images.probe_news_image("https://cdn.example/photo.png",client=client)
     assert ok is True and reason=="ok"
+
+
+def test_image_probe_keeps_upgradable_small_bbc_photo():
+    client=Client([Response(content_type="image/jpeg",body=b"\xff\xd8\xff\xc0\x00\x11\x08\x00\x87\x00\xf0\x03"+b"x"*32)])
+    ok,reason=images.probe_news_image(
+        "https://ichef.bbci.co.uk/ace/standard/240/cpsprodpb/example.jpg",
+        client=client,
+    )
+    assert ok is True and reason=="ok"
