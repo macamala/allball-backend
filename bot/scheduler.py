@@ -24,6 +24,7 @@ def _run_zero_ai_public_repairs():
     from public_index import (
         recent_public_sport_inventory,
         repair_recent_duplicate_news,
+        repair_recent_gossip_news,
         repair_recent_news_images,
         repair_recent_sport_mislabels,
         repair_recent_unresolved,
@@ -34,6 +35,7 @@ def _run_zero_ai_public_repairs():
         images = repair_recent_news_images(db, limit=80, max_age_hours=72, recover_limit=8)
         mislabels = repair_recent_sport_mislabels(db, limit=600, max_age_hours=168)
         repaired = repair_recent_unresolved(db, limit=24)
+        gossip = repair_recent_gossip_news(db, limit=600, max_age_hours=168)
         duplicates = repair_recent_duplicate_news(db, limit=600, max_age_hours=168)
         inventory = recent_public_sport_inventory(db, max_age_hours=72)
     except Exception as exc:
@@ -45,13 +47,14 @@ def _run_zero_ai_public_repairs():
         return {}
     finally:
         db.close()
-    if images or mislabels or repaired or duplicates:
+    if images or mislabels or repaired or gossip or duplicates:
         bump_public_cache()
     logger.info(
-        'News zero-AI repair: images=%s mislabels=%s unresolved=%s duplicates=%s inventory=%s',
+        'News zero-AI repair: images=%s mislabels=%s unresolved=%s gossip=%s duplicates=%s inventory=%s',
         images,
         mislabels,
         repaired,
+        gossip,
         duplicates,
         inventory,
     )
@@ -62,7 +65,7 @@ def _run_image_health():
     """Bounded zero-AI hero-image maintenance for the current public feed."""
     from database import SessionLocal
     from public_cache import bump_public_cache
-    from public_index import repair_recent_news_images, repair_recent_sport_mislabels
+    from public_index import repair_recent_gossip_news, repair_recent_news_images, repair_recent_sport_mislabels
 
     db = SessionLocal()
     try:
@@ -77,7 +80,12 @@ def _run_image_health():
             limit=600,
             max_age_hours=168,
         )
-        changed = image_changes + taxonomy_changes
+        gossip_changes = repair_recent_gossip_news(
+            db,
+            limit=600,
+            max_age_hours=168,
+        )
+        changed = image_changes + taxonomy_changes + gossip_changes
     except Exception as exc:
         try:
             db.rollback()
@@ -90,8 +98,8 @@ def _run_image_health():
     if changed:
         bump_public_cache()
     logger.info(
-        'News image-health finished: changed=%s images=%s taxonomy=%s',
-        changed, image_changes, taxonomy_changes,
+        'News image-health finished: changed=%s images=%s taxonomy=%s gossip=%s',
+        changed, image_changes, taxonomy_changes, gossip_changes,
     )
     return changed
 
