@@ -550,11 +550,14 @@ def _ingest_item(
                 and not ai_budget_exhausted()
                 and _correction_retry_allowed(
                     prefer_breadth=prefer_breadth,
-                    force=rewrite_reason in {
-                        "direct_quote_requires_review",
-                        "headline_too_similar_to_source",
-                        "copied_source_headline",
-                    },
+                    force=(
+                        rewrite_reason in {
+                            "direct_quote_requires_review",
+                            "headline_too_similar_to_source",
+                            "copied_source_headline",
+                        }
+                        or str(rewrite_reason or "").startswith("draft_sport_mismatch:")
+                    ),
                 )
             ):
                 retry_parsed, retry_reason = _ai_story(
