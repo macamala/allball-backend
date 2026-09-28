@@ -58,6 +58,20 @@ def test_minor_sports_rotate_in_reserved_lane():
     assert {result[3]['sport'], result[7]['sport']} == {'handball', 'lacrosse'}
 
 
+def test_equal_zero_coverage_rotates_across_cycles_even_when_one_source_is_fresher():
+    rows = [candidate(s) for s in ('football','basketball','tennis','swimming','water-polo')]
+    rows[-1]['published_at'] = NOW - timedelta(hours=8)
+    rows[-2]['_extracted'] = 'A complete article from the latest swimming source.'
+    seen = set()
+    for offset in range(2):
+        result, _ = fair_news_queue(rows, lambda r: SimpleNamespace(sport=r['sport']),
+            now=NOW+timedelta(minutes=offset*10), same_day_timezone='Australia/Sydney',
+            sport_inventory={}, prioritize_major_sports=True)
+        assert [r['sport'] for r in result[:2]] == ['football','basketball']
+        seen.add(result[3]['sport'])
+    assert seen == {'swimming','water-polo'}
+
+
 @pytest.fixture
 def pool(monkeypatch):
     monkeypatch.setenv('NEWS_EXTERNAL_FREE_WRITERS_ENABLED', '1')

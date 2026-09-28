@@ -753,6 +753,7 @@ def _hydrate(cfg: Dict, url: str, fallback_title: str, *, diagnostics=None, site
         "image": image,
         "image_candidates": image_candidates,
         "published_at": published_at,
+        "_publication_evidence": "article-published",
         "feed": feed,
         "_extracted": body,
         "_extracted_image": image,

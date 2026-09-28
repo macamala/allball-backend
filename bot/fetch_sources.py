@@ -391,7 +391,8 @@ def _fetch_feed_entries(feed_cfg: Dict, max_articles: int) -> List[Dict]:
                 "url": link,
                 "image": _extract_image_url(entry),
                 "image_candidates": _extract_image_candidates(entry),
-                "published_at": parse_feed_datetime(entry),
+                "published_at": parse_feed_datetime({key: entry.get(key) for key in ('published', 'published_parsed') if entry.get(key) is not None}),
+                "_publication_evidence": "rss-published",
                 "feed": feed_cfg,
             }
         )
@@ -740,6 +741,10 @@ def _ingest_item(
     story_body = _sanitize_body(story_body, title=story_title)
     story_summary = _sanitize_summary(story_summary, title=story_title)
 
+    if editorial_day_reason(published_at, datetime.now(timezone.utc),
+            os.getenv("NEWS_EDITORIAL_TIMEZONE") or "Australia/Sydney"):
+        logger.info('[fetch_sources] hold: source editorial day changed before publication')
+        return None, False
     slug = _make_unique_slug(db, _slugify(story_title))
     article = Article(
         external_id=source_url[:500],
@@ -756,7 +761,7 @@ def _ingest_item(
         ai_content=story_body if used_ai else None,
         ai_generated=used_ai,
         is_live=True,
-        published_at=published_at,
+        published_at=published_at.astimezone(timezone.utc).replace(tzinfo=None),
     )
     db.add(article)
     db.commit()
@@ -917,6 +922,8 @@ def _fetch_and_store_all_articles(
     created = 0
     reset_openai_rate_limit()
     try:
+        from .news_publication_clock import ensure_news_publication_clock, repair_verified_source_times
+        ensure_news_publication_clock(db)
         per_feed = max(1, max_per_league)
         queued = []
         for feed in enabled_feeds():
@@ -955,6 +962,7 @@ def _fetch_and_store_all_articles(
                 queued.extend(fetch_newsapi_ai_entries(100))
             except Exception as e:
                 logger.error("[fetch_sources] NewsAPI.ai discovery error: %s", type(e).__name__)
+        repair_verified_source_times(db, queued)
         before_known = len(queued)
         queued = unprocessed_source_items(db, queued)
         logger.info("[fetch_sources] prequeue known-source-filtered=%s remaining=%s",

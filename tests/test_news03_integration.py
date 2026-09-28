@@ -134,6 +134,14 @@ def test_stale_or_future_item_no_extraction(monkeypatch,days):
     assert ingest._ingest_item(None,item,True,6000,1)==(None,False)
 
 
+def test_story_crossing_sydney_midnight_is_rechecked_before_commit(monkeypatch):
+    item = prepare_ingest(monkeypatch)
+    monkeypatch.setattr(ingest, 'editorial_day_reason', Mock(side_effect=[None, 'not_editorial_today']))
+    db = Mock()
+    assert ingest._ingest_item(db,item,True,6000,1) == (None,False)
+    db.add.assert_not_called()
+
+
 def test_historical_jobs_default_to_no_session_no_mutation(monkeypatch):
     import database
     monkeypatch.setattr(database,'SessionLocal',lambda:pytest.fail('session opened'))

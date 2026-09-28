@@ -796,7 +796,17 @@ def fair_news_queue(
             "boxing": 1, "mma": 1, "cycling": 1, "athletics": 1,
         }
         scheduled = defaultdict(int)
-        breadth = deque(s for s in order if s not in major_weights)
+        minor_sports = sorted(s for s in order if s not in major_weights)
+        if minor_sports:
+            offset = int(now.timestamp() // 600) % len(minor_sports)
+            rotated_minor = minor_sports[offset:] + minor_sports[:offset]
+            # A fresh stream of college swimming stories must not permanently
+            # outrank today's single water-polo/volleyball report. Inventory
+            # still wins; equal coverage debt rotates independently each cycle.
+            breadth = deque(sorted(rotated_minor,
+                key=lambda sport: max(0, int((sport_inventory or {}).get(sport, 0) or 0))))
+        else:
+            breadth = deque()
         major_rank = {s: n for n, s in enumerate(major_weights)}
 
         def major(exclude=()):
