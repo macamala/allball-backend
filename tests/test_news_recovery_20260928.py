@@ -138,16 +138,20 @@ def test_world_athletics_time_must_belong_to_the_current_article(monkeypatch):
     assert idx._hydrate(cfg, 'https://worldathletics.org/news/report/another-story', '') is None
 
 
-def test_public_quiz_cleanup_is_durable_and_does_not_delete_article():
+@pytest.mark.parametrize('headline,reason,slug', [
+    ('NinkoSports Daily Football Quizzes Test Knowledge and Instinct', 'non_article_quiz', 'quiz'),
+    ('NHL fantasy hockey previews roll out for all 32 teams', 'non_article_fantasy_product', 'fantasy'),
+])
+def test_public_quiz_cleanup_is_durable_and_does_not_delete_article(headline, reason, slug):
     from database import SessionLocal
     from models import Article, ArticleTaxonomyResolution, NewsIncident
     from public_index import repair_recent_gossip_news
     from taxonomy_resolver import RESOLVER_VERSION
     db = SessionLocal()
     try:
-        a = Article(title="NinkoSports Daily Football Quizzes Test Knowledge and Instinct",
-            summary="BBC Sport has published daily challenges.", slug="recovery-quiz-test",
-            source_url="https://example.test/quiz", published_at=datetime.now(timezone.utc).replace(tzinfo=None))
+        a = Article(title=headline,
+            summary="A media product announcement.", slug=f"recovery-{slug}-test",
+            source_url=f"https://example.test/{slug}", published_at=datetime.now(timezone.utc).replace(tzinfo=None))
         db.add(a); db.flush()
         tax = ArticleTaxonomyResolution(article_id=a.id, resolver_version=RESOLVER_VERSION, public_ok=True)
         db.add(tax); db.commit()
@@ -155,7 +159,7 @@ def test_public_quiz_cleanup_is_durable_and_does_not_delete_article():
         db.refresh(tax)
         assert tax.public_ok is False
         assert db.get(Article, a.id) is not None
-        assert db.query(NewsIncident).filter_by(article_id=a.id, status="open", reason_code="non_article_quiz").count() == 1
+        assert db.query(NewsIncident).filter_by(article_id=a.id, status="open", reason_code=reason).count() == 1
         assert repair_recent_gossip_news(db) == 0
     finally:
         db.close()

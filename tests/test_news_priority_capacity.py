@@ -139,6 +139,12 @@ def test_newspaper_roundups_cannot_spend_writer_slots(title):
     assert non_article_news_reason({'title': title}) == 'non_article_newspaper_roundup'
 
 
+def test_fantasy_products_blocked_without_blocking_real_hockey_news():
+    assert non_article_news_reason({'title': 'NHL fantasy hockey previews for all teams'}) == 'non_article_fantasy_product'
+    assert non_article_news_reason({'title': 'Player preview', 'url': 'https://example.test/fantasy/preview'}) == 'non_article_fantasy_product'
+    assert non_article_news_reason({'title': 'Hockey club announces new captain'}) is None
+
+
 def test_basketball_article_excludes_player_widgets_related_cards_and_hidden_templates():
     from bot.extract import article_text_from_html
     html = '''<div class="text_container"><p>The basketball club confirmed a new player signing.</p>
