@@ -327,3 +327,18 @@ def test_current_factual_event_with_history_reference_is_not_blocked():
         "title":"Club confirms new contract 10 years after academy debut",
         "url":"https://example.test/sport/story",
     }) is None
+
+
+def test_readiness_prefers_sufficient_rss_facts_over_thin_metadata():
+    from bot.news_policy import candidate_readiness_score
+    rich={
+        "title":"Match report",
+        "summary":" ".join(["detail"]*30),
+        "url":"https://example.test/rich",
+    }
+    thin={
+        "title":"Short item",
+        "summary":"brief item only",
+        "url":"https://example.test/thin",
+    }
+    assert candidate_readiness_score(rich) > candidate_readiness_score(thin)
