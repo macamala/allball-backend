@@ -171,7 +171,8 @@ HEADLINE_RETRY_HINT = (
 LENGTH_RETRY_HINT = (
     "The previous draft was only a short summary of a substantial source article. "
     "Rewrite a full multi-paragraph NinkoSports story using the important facts, "
-    "context, quotes and developments. Do not invent anything. Do not pad with filler."
+    "context, paraphrased reported statements and developments. Use no direct quotes "
+    "or quotation marks. Do not invent anything. Do not pad with filler."
 )
 
 
@@ -376,7 +377,7 @@ def write_ninkosports_story(
             + prompt
         )
     if retry_for_length:
-        prompt = f"{LENGTH_RETRY_HINT}\n\n{prompt}"
+        prompt = f"{LENGTH_RETRY_HINT}\nVALIDATION_FAILURE: too-short\n\n{prompt}"
     if correction_reason:
         safe_reason = re.sub(r"[^a-zA-Z0-9:_-]", "", correction_reason)[:160]
         retry_hint = (

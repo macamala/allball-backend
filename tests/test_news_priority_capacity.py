@@ -196,3 +196,18 @@ def test_modal_may_is_not_a_month_and_cannot_authorize_a_new_date():
     assert _calendar_terms('May not be available for the club.') == set()
     assert _calendar_terms('The club announced it in May.') == {'may'}
     assert _calendar_terms('They return on May 12, then play in June.') == {'may', 'june'}
+
+
+def test_length_correction_paraphrases_quotes_and_uses_verified_free_corrective_route(monkeypatch):
+    prompts = []
+    monkeypatch.setattr(writer, 'openai_rate_limited', lambda: False)
+    monkeypatch.setattr(writer, '_call_selected_ai', lambda prompt: prompts.append(prompt))
+    writer.write_ninkosports_story('Football squad announcement', 'The club announced its new squad.', retry_for_length=True)
+    assert 'VALIDATION_FAILURE: too-short' in prompts[0]
+    assert 'paraphrased reported statements' in prompts[0]
+    calls = []
+    monkeypatch.setattr(router, '_free_model', lambda *args: 'fixture:free')
+    monkeypatch.setattr(router, '_completion', lambda **kwargs: calls.append(kwargs) or 'corrected draft')
+    monkeypatch.setattr(external, 'completion', lambda **kwargs: pytest.fail('corrective route should run first'))
+    assert router.write_free_story('system', prompts[0]) == 'corrected draft'
+    assert len(calls) == 1 and calls[0]['model'].endswith(':free')
