@@ -18,6 +18,18 @@ MONTHS_DAYS = {
     "september","october","november","december",
     "monday","tuesday","wednesday","thursday","friday","saturday","sunday",
 }
+
+
+def _calendar_terms(text: str) -> set[str]:
+    # Modal "may be/need/have ..." is not the month May. Keep actual date
+    # phrases (in May, May 12, late May) subject to the existing calendar lock.
+    normalized = _norm(text)
+    normalized = re.sub(
+        r"\bmay\s+(?=(?:not\s+)?(?:be|have|need|require|face|remain|return|leave|join|play|miss|keep|make|take|come|go)\b)",
+        "", normalized,
+    )
+    return {term for term in MONTHS_DAYS
+            if re.search(r"(?<!\w)" + term + r"(?!\w)", normalized)}
 COMMON_CAPITALIZED = {
     "The","A","An","This","That","These","Those","After","Before","During",
     "Meanwhile","However","While","With","Without","For","From","In","On","At",
@@ -141,14 +153,12 @@ def fact_lock_reason(
     if extra_acronyms:
         return "unsupported_acronym:" + extra_acronyms[0]
 
-    src_norm = _norm(source)
-    out_norm = _norm(output)
     # Calendar/claim vocabulary below is English-only. For non-English source
     # material, use the cross-language semantic validator instead of pretending
     # absence of an English keyword proves absence of the underlying fact.
     if _source_probably_english(source):
-        src_calendar = {term for term in MONTHS_DAYS if f" {term} " in src_norm}
-        for term in sorted({term for term in MONTHS_DAYS if f" {term} " in out_norm} - src_calendar):
+        src_calendar = _calendar_terms(source)
+        for term in sorted(_calendar_terms(output) - src_calendar):
             return "unsupported_time_reference:" + term
 
         # Event-specific claim families are intentionally left to the semantic

@@ -28,7 +28,7 @@ from .news_learning import (
 from .news_budget import active_ai_budget, ai_budget_scope, configured_budget, ai_budget_exhausted
 from sports_registry.sports import SPORTS
 from .classify import Classification, classify_article
-from .dedupe import existing_by_url, existing_near_duplicate
+from .dedupe import existing_by_url, existing_near_duplicate, unprocessed_source_items
 from .extract import extract_from_url, parse_feed_datetime, paragraphs_from_html
 from .feeds import enabled_feeds
 from .news_feed_http import read_news_feed
@@ -876,7 +876,10 @@ def _fetch_and_store_all_articles(
         queued = []
         for feed in enabled_feeds():
             try:
-                queued.extend(_fetch_feed_entries(feed, per_feed))
+                # Scan deeper in the already-downloaded RSS document. Otherwise
+                # the same first five known URLs permanently hide fresh entries
+                # further down the feed. AI/publication limits are unchanged.
+                queued.extend(_fetch_feed_entries(feed, max(per_feed, 20)))
             except Exception as e:
                 logger.error("[fetch_sources] feed error %s: %s", feed.get("url"), e)
         if os.getenv("NEWS_EXPANDED_FEEDS_ENABLED") == "1":
@@ -907,6 +910,11 @@ def _fetch_and_store_all_articles(
                 queued.extend(fetch_newsapi_ai_entries(100))
             except Exception as e:
                 logger.error("[fetch_sources] NewsAPI.ai discovery error: %s", type(e).__name__)
+        before_known = len(queued)
+        queued = unprocessed_source_items(db, queued)
+        logger.info("[fetch_sources] prequeue known-source-filtered=%s remaining=%s",
+                    before_known - len(queued), len(queued))
+
         # Mixed feeds often have a headline with no sport word even though the
         # actual article body is unambiguous. Enrich only a small bounded set
         # before fair-queue admission. This spends no AI requests, and the same

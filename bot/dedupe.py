@@ -12,6 +12,31 @@ from .textutil import normalize_title
 from .news_policy import canonical_news_url
 
 
+def unprocessed_source_items(db: Session, items: list) -> list:
+    """Remove known source identities before editorial slots are allocated.
+
+    One exact lookup plus the same bounded canonical history used at ingest.
+    Includes held Article rows: rediscovery must not resurrect or rewrite them.
+    The final ingest duplicate checks remain authoritative.
+    """
+    urls = {str(item.get('url') or '') for item in items if item.get('url')}
+    if not urls:
+        return items
+    exact = db.query(Article.source_url, Article.external_id).filter(
+        (Article.source_url.in_(urls)) | (Article.external_id.in_(urls))
+    ).all()
+    recent = db.query(Article.source_url, Article.external_id).filter(
+        Article.source_url.isnot(None)
+    ).order_by(Article.id.desc()).limit(500).all()
+    known = {
+        canonical_news_url(value)
+        for source, external in [*exact, *recent]
+        for value in (source, external)
+        if value and canonical_news_url(value)
+    }
+    return [item for item in items if canonical_news_url(item.get('url')) not in known]
+
+
 def existing_by_url(db: Session, source_url: str) -> Optional[Article]:
     if not source_url:
         return None

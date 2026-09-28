@@ -372,6 +372,35 @@ def test_mislabel_repair_corrects_distinctive_wrong_sport():
         db.close()
 
 
+def test_cricket_format_repairs_legacy_football_label_without_ai():
+    from models import ArticleTaxonomyResolution
+    from public_index import repair_recent_sport_mislabels
+    article = _make(
+        slug='cricket-format-legacy-football',
+        title="England's 50‑over preparation changes before the World Cup",
+        summary='England announced a revised cricket training programme.',
+        content=('England announced changes to their cricket training programme ahead of the World Cup. '
+                 'The squad will hold additional practice sessions before the next series begins. '
+                 'Coaches confirmed that the preparation schedule includes batting and bowling work. '
+                 'The team management will review the programme after the series and discuss the next phase '
+                 'with the players before naming the tournament squad.'),
+        sport='football', league='fifa-world-cup',
+    )
+    db = SessionLocal()
+    try:
+        tax = db.query(ArticleTaxonomyResolution).filter_by(article_id=article.id).one()
+        tax.resolved_sport = 'football'; tax.public_ok = True
+        db.add(tax); db.commit()
+        assert repair_recent_sport_mislabels(db) >= 1
+        db.refresh(tax)
+        article = db.get(Article, article.id)
+        assert tax.resolved_sport == article.sport == 'cricket'
+        assert tax.public_ok is True
+        assert article.league is None
+    finally:
+        db.close()
+
+
 def test_afl_club_headline_repairs_wrong_basketball_public_label():
     from models import ArticleTaxonomyResolution
     from public_index import repair_recent_sport_mislabels

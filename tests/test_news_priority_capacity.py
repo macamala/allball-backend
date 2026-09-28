@@ -157,3 +157,42 @@ def test_basketball_article_excludes_player_widgets_related_cards_and_hidden_tem
     body = article_text_from_html(html)
     assert 'new player signing' in body and 'one-year deal' in body
     assert not any(x in body for x in ('203', 'contract dilemma', 'injured', 'predictions', 'Unlock'))
+
+
+@pytest.mark.parametrize('marker', ['50-over', '50‑over', '20–over', 'ODI', 'T20', 'cricket'])
+def test_explicit_cricket_format_beats_shared_world_cup(marker):
+    from bot.classify import classify_article
+    from public_index import _explicit_title_sport_override
+    title = f"England's {marker} preparation for the World Cup"
+    tags = classify_article(title, 'England prepare for the World Cup.', feed_kind='mixed')
+    assert tags.sport == 'cricket' and tags.league != 'fifa-world-cup'
+    assert _explicit_title_sport_override(title) == 'cricket'
+    assert _explicit_title_sport_override('England name squad for football World Cup') is None
+
+
+def test_known_sources_do_not_occupy_priority_slots_or_resurrect_held_rows():
+    from database import SessionLocal
+    from models import Article
+    from bot.dedupe import unprocessed_source_items
+    db = SessionLocal()
+    prefix = 'https://example.test/priority-known/'
+    try:
+        rows = [Article(title=f'Already processed {i}', slug=f'priority-known-{i}',
+                        source_url=prefix+str(i), external_id=prefix+str(i),
+                        published_at=NOW.replace(tzinfo=None)) for i in range(5)]
+        db.add_all(rows); db.commit()
+        items = [dict(candidate('football', i), url=prefix+str(i)+'?utm_source=rss') for i in range(8)]
+        remaining = unprocessed_source_items(db, items)
+        assert [r['url'] for r in remaining] == [prefix+str(i)+'?utm_source=rss' for i in (5, 6, 7)]
+        assert db.query(Article).filter(Article.source_url.startswith(prefix)).count() == 5
+    finally:
+        db.query(Article).filter(Article.source_url.startswith(prefix)).delete()
+        db.commit(); db.close()
+
+
+def test_modal_may_is_not_a_month_and_cannot_authorize_a_new_date():
+    from bot.news_fact_guard import _calendar_terms
+    assert _calendar_terms('The club may need to release a player.') == set()
+    assert _calendar_terms('May not be available for the club.') == set()
+    assert _calendar_terms('The club announced it in May.') == {'may'}
+    assert _calendar_terms('They return on May 12, then play in June.') == {'may', 'june'}

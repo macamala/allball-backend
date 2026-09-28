@@ -19,7 +19,7 @@ from models import Article, ArticleTaxonomyResolution
 from sport_match import MAIN_SPORTS, isolation_ok
 from bot.taxonomy import COMPETITIONS
 from bot.news_learning import article_has_open_incident
-from bot.news_policy import gossip_news_reason, non_article_news_reason, publisher_branding_reason
+from bot.news_policy import CRICKET_TITLE_RE, gossip_news_reason, non_article_news_reason, publisher_branding_reason
 from taxonomy_resolver import (
     MIN_SPORT_CONFIDENCE,
     RESOLVER_VERSION,
@@ -671,6 +671,8 @@ def _explicit_title_sport_override(title: str) -> Optional[str]:
     # incidental city/club words such as Brighton that otherwise resemble football.
     if re.search(r"(?<!\w)(?:mma|ufc|mixed\s+martial\s+arts|oktagon)(?!\w)", value, re.I):
         return "mma"
+    if CRICKET_TITLE_RE.search(value):
+        return "cricket"
     # Strong road-cycling phrases outrank the generic words "Grand Prix".
     # This is intentionally narrow so motorsport Grand Prix stories are unchanged.
     if re.search(
@@ -804,6 +806,16 @@ def repair_recent_sport_mislabels(
             persist_public_article(db, article, forced, commit=False)
             if tax.public_ok and tax.resolved_sport == explicit_title_sport:
                 corrected += 1
+                from bot.news_learning import record_incident
+                record_incident(
+                    db, article_id=article.id, source_url=article.source_url,
+                    sport=explicit_title_sport, reason_code="taxonomy_sport_mismatch",
+                    phase="postpublish", status="auto_corrected",
+                    draft={"title": article.title, "summary": article.summary, "body": body},
+                    writer_provider="news-audit", writer_model="deterministic",
+                    details={"previous_sport": cached_sport, "corrected_sport": explicit_title_sport,
+                             "gate": "explicit_title_sport_marker"},
+                )
                 logger.warning(
                     "[public_index] corrected explicit-title sport article=%s cached=%s corrected=%s title=%s",
                     article_id,

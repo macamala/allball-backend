@@ -11,6 +11,7 @@ from .taxonomy import (
     TEAMS,
 )
 from .textutil import clean_text
+from .news_policy import CRICKET_TITLE_RE
 
 
 @dataclass
@@ -107,6 +108,11 @@ def classify_article(
 
     if basketball_context:
         sport_scores["football"] = max(0, sport_scores.get("football", 0) - 3)
+    if CRICKET_TITLE_RE.search(title_text):
+        # World Cup and national-team names are shared with football. Explicit
+        # cricket formats, including Unicode hyphens, resolve that ambiguity.
+        sport_scores["cricket"] = max(sport_scores.get("cricket", 0), 12)
+        sport_scores["football"] = 0
     if tennis_context:
         sport_scores["football"] = min(sport_scores.get("football", 0), sport_scores.get("football", 0))
         sport_scores["basketball"] = min(sport_scores.get("basketball", 0), 1)
