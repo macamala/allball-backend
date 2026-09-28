@@ -195,3 +195,19 @@ def test_major_north_american_league_indexes_are_first_party():
     assert by_id["nba-basketball-news"]["host"]=="www.nba.com"
     assert by_id["nfl-american-football-news"]["host"]=="www.nfl.com"
     assert by_id["nhl-ice-hockey-news"]["host"]=="www.nhl.com"
+
+
+def test_official_source_hydration_helper_is_bounded(monkeypatch):
+    cfg={"id":"fixture","sport":"football"}
+    monkeypatch.setattr(
+        idx,
+        "_anchor_candidates",
+        lambda row:[("https://example.test/a","A"),("https://example.test/b","B")],
+    )
+    monkeypatch.setattr(
+        idx,
+        "_hydrate",
+        lambda row,url,title:{"title":title,"url":url},
+    )
+    rows=idx._hydrate_source(cfg,1)
+    assert rows==[{"title":"A","url":"https://example.test/a"}]
