@@ -166,3 +166,14 @@ def test_ihf_visible_date_and_relative_image_are_hydrated(monkeypatch):
     assert item["published_at"].isoformat().startswith("2026-09-27T00:00:00")
     assert item["image"]=="https://www.ihf.info/sites/default/files/handball-photo.jpg"
     assert item["image_candidates"][0]["url"]==item["image"]
+
+
+def test_first_party_baseball_darts_mma_indexes_are_enabled():
+    by_id={row["id"]:row for row in idx.HTML_INDEXES}
+    assert by_id["mlb-baseball-news"]["sport"]=="baseball"
+    assert by_id["mlb-baseball-news"]["url"]=="https://www.mlb.com/news"
+    assert by_id["pdc-darts-news"]["sport"]=="darts"
+    assert by_id["ufc-mma-news"]["sport"]=="mma"
+    assert all(by_id[name].get("enabled",True) for name in (
+        "mlb-baseball-news","pdc-darts-news","ufc-mma-news"
+    ))
