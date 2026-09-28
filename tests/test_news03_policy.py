@@ -305,3 +305,25 @@ def test_blesk_sport_tabloid_lane_is_rejected():
         "title":"Fotbalista Baroš uspořádal rozlučku, nečekaný vzkaz exmanželky",
         "url":"https://isport.blesk.cz/clanek/blesk-sport/480337/example.html",
     })=="gossip_tabloid_section"
+
+
+def test_retrospective_commentary_is_rejected_from_current_news():
+    from bot.news_policy import gossip_news_reason
+    blocked=[
+        "Stoke's 2011 FA Cup Final Loss Cast in New Light by Man City Verdict",
+        "Former captain looks back on the 2012 final",
+        "Ten years on: remembering the title-winning season",
+    ]
+    for title in blocked:
+        assert gossip_news_reason({
+            "title":title,
+            "url":"https://example.test/sport/story",
+        })=="non_news_retrospective_commentary"
+
+
+def test_current_factual_event_with_history_reference_is_not_blocked():
+    from bot.news_policy import gossip_news_reason
+    assert gossip_news_reason({
+        "title":"Club confirms new contract 10 years after academy debut",
+        "url":"https://example.test/sport/story",
+    }) is None
