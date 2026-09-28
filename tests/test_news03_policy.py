@@ -342,3 +342,11 @@ def test_readiness_prefers_sufficient_rss_facts_over_thin_metadata():
         "url":"https://example.test/thin",
     }
     assert candidate_readiness_score(rich) > candidate_readiness_score(thin)
+
+
+def test_old_year_reflective_interview_is_not_current_news():
+    from bot.news_policy import gossip_news_reason
+    assert gossip_news_reason({
+        "title":"Totti credits his 2006 World Cup role for lifting him beyond Rome",
+        "url":"https://example.test/sport/story",
+    })=="non_news_retrospective_commentary"
