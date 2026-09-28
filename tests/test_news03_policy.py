@@ -174,6 +174,9 @@ def test_equally_empty_sports_prefer_admission_ready_candidate():
     [
         ("https://www.record.pt/modalidades/tenis/detalhe/francisco-cabral", "tennis"),
         ("https://www.novosti.rs/sport/fudbal/1653155/srbija-holandija", "football"),
+        ("https://www.record.pt/internacional/competicoes-de-selecoes/liga-das-nacoes/detalhe/alemanha", "football"),
+        ("https://isport.blesk.cz/clanek/fotbal-reprezentace-liga-narodu/480343/nemecko-recko.html", "football"),
+        ("https://isport.blesk.cz/clanek/ostatni-cyklistika/480345/pad-vacka.html", "cycling"),
         ("https://www.blick.ch/sport/motorsport/buemi-toyota-japan-id1.html", "motorsport"),
         ("https://www.bbc.co.uk/sport/rugby-union/articles/cx05r4gg209ro", "rugby"),
         ("https://www.bbc.co.uk/sport/cricket/videos/cmdx0wvdlkwjo", "cricket"),

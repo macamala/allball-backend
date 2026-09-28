@@ -50,7 +50,14 @@ EXTRA_SPORT_ALIASES: Dict[str, List[str]] = {
     ],
     "basketball": ["nba rank", "aba liga", "aba lige", "aba league"],
     "boxing": ["radivoje kalajdžić", "radivoje kalajdzic", "srbin u londonu prebio britanca"],
-    "handball": ["rukometašice", "rukometasice", "trifej makedonije", "ohridu"],
+    "handball": [
+        "rukometašice",
+        "rukometasice",
+        "trifej makedonije",
+        "ohridu",
+        "hsc suhr aarau",
+        "gc amicitia",
+    ],
     "rugby-league": [
         "rugby league",
         " nrl ",
