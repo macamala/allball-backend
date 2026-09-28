@@ -855,6 +855,13 @@ def _fetch_and_store_all_articles(
                 queued.extend(fetch_espn_news_entries(12))
             except Exception as e:
                 logger.error("[fetch_sources] ESPN News JSON discovery error: %s", type(e).__name__)
+        if os.getenv("NEWS_NEWSAPI_ORG_ENABLED") == "1":
+            try:
+                from .news_newsapi_org import fetch_newsapi_org_entries
+
+                queued.extend(fetch_newsapi_org_entries(100))
+            except Exception as e:
+                logger.error("[fetch_sources] NewsAPI.org discovery error: %s", type(e).__name__)
         if os.getenv("NEWS_NEWSAPI_AI_ENABLED") == "1":
             try:
                 from .news_aggregator import fetch_newsapi_ai_entries
