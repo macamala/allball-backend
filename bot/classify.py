@@ -82,6 +82,7 @@ def classify_article(
         )
     )
     tennis_context = _score_aliases(title_text, SPORT_ALIASES.get("tennis", [])) >= 2
+    cycling_context = _score_aliases(title_text, SPORT_ALIASES.get("cycling", [])) >= 2
     motorsport_context = _score_aliases(title_text, SPORT_ALIASES.get("motorsport", [])) >= 2
     # Explicit sport-name evidence must beat generic football tournament phrases
     # such as "World Cup" or "Champions League" in niche-sport headlines.
@@ -99,7 +100,12 @@ def classify_article(
     if tennis_context:
         sport_scores["football"] = min(sport_scores.get("football", 0), sport_scores.get("football", 0))
         sport_scores["basketball"] = min(sport_scores.get("basketball", 0), 1)
-    if motorsport_context and not basketball_context:
+    if cycling_context:
+        # Cycling headlines can legitimately contain "Grand Prix". Strong road/
+        # UCI/peloton evidence must beat that generic motorsport phrase.
+        sport_scores["cycling"] = max(sport_scores.get("cycling", 0), 8)
+        sport_scores["motorsport"] = 0
+    if motorsport_context and not basketball_context and not cycling_context:
         pass
     if niche_context:
         sport_scores["football"] = 0
