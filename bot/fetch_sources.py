@@ -842,6 +842,13 @@ def _fetch_and_store_all_articles(
                 queued.extend(fetch_official_index_entries(per_feed))
             except Exception as e:
                 logger.error("[fetch_sources] official index error: %s", type(e).__name__)
+        if os.getenv("NEWS_NEWSAPI_AI_ENABLED") == "1":
+            try:
+                from .news_aggregator import fetch_newsapi_ai_entries
+
+                queued.extend(fetch_newsapi_ai_entries(100))
+            except Exception as e:
+                logger.error("[fetch_sources] NewsAPI.ai discovery error: %s", type(e).__name__)
         # Mixed feeds often have a headline with no sport word even though the
         # actual article body is unambiguous. Enrich only a small bounded set
         # before fair-queue admission. This spends no AI requests, and the same
