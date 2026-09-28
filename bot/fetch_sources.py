@@ -3,6 +3,7 @@
 import logging
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor
 from contextvars import ContextVar
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
@@ -400,6 +401,38 @@ def _fetch_feed_entries(feed_cfg: Dict, max_articles: int) -> List[Dict]:
     fresh = [item for item in items if not freshness_reason(item["published_at"], now)]
     fresh.sort(key=lambda item: item["published_at"], reverse=True)
     return fresh[:max(1, max_articles)]
+
+
+def _collect_rss_entries(feeds, max_articles):
+    """Read up to six publishers concurrently, one request per host at a time.
+
+    Only public discovery runs in threads. AI budgets and database writes stay
+    on the owning cycle thread; output order does not depend on network timing.
+    """
+    groups = {}
+    for index, feed in enumerate(feeds):
+        host = (urlsplit(feed['url']).hostname or '').lower().removeprefix('www.')
+        groups.setdefault(host, []).append((index, feed))
+    if not groups:
+        return []
+
+    def collect_host(rows):
+        result = []
+        for index, feed in rows:
+            try:
+                result.append((index, _fetch_feed_entries(feed, max_articles)))
+            except Exception as exc:
+                logger.warning('[fetch_sources] RSS held url=%s error_type=%s',
+                               feed.get('url'), type(exc).__name__)
+        return result
+
+    started = time.monotonic()
+    with ThreadPoolExecutor(max_workers=min(6, len(groups))) as pool:
+        collected = [row for group in pool.map(collect_host, groups.values()) for row in group]
+    items = [item for _, entries in sorted(collected, key=lambda row: row[0]) for item in entries]
+    logger.info('[fetch_sources] RSS discovery feeds=%s hosts=%s candidates=%s elapsed=%.1fs',
+                len(feeds), len(groups), len(items), time.monotonic() - started)
+    return items
 
 
 def _reconcile_public_taxonomy(tags, resolved, feed: Dict):
@@ -925,15 +958,9 @@ def _fetch_and_store_all_articles(
         from .news_publication_clock import ensure_news_publication_clock, repair_verified_source_times
         ensure_news_publication_clock(db)
         per_feed = max(1, max_per_league)
-        queued = []
-        for feed in enabled_feeds():
-            try:
-                # Scan deeper in the already-downloaded RSS document. Otherwise
-                # the same first five known URLs permanently hide fresh entries
-                # further down the feed. AI/publication limits are unchanged.
-                queued.extend(_fetch_feed_entries(feed, max(per_feed, 20)))
-            except Exception as e:
-                logger.error("[fetch_sources] feed error %s: %s", feed.get("url"), e)
+        # Scan deeper in each downloaded feed, without serially waiting on
+        # unrelated publishers. AI and publication limits are unchanged.
+        queued = _collect_rss_entries(enabled_feeds(), max(per_feed, 20))
         if os.getenv("NEWS_EXPANDED_FEEDS_ENABLED") == "1":
             try:
                 from .news_official_indexes import fetch_official_index_entries

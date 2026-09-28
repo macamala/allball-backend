@@ -69,6 +69,14 @@ def _run_image_health():
 
     db = SessionLocal()
     try:
+        # Verify the News clock during the existing zero-AI owner pass, so a
+        # deploy need not wait until a writer cycle to reveal schema trouble.
+        # A clock failure still permits image/taxonomy holds, never new stories.
+        from .news_publication_clock import ensure_news_publication_clock
+        try:
+            ensure_news_publication_clock(db)
+        except RuntimeError:
+            logger.warning('News publication clock not ready; public repairs continue, writers remain held')
         image_changes = repair_recent_news_images(
             db,
             limit=80,
