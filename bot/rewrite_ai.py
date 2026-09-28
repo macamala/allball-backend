@@ -152,6 +152,12 @@ QUOTE_RETRY_HINT = (
     "marks anywhere and do not copy the source quote wording verbatim. Preserve "
     "only the meaning explicitly supported by the source."
 )
+SPORT_RETRY_HINT = (
+    "The previous draft changed the article's sport taxonomy. Keep the exact "
+    "SPORT classification supplied below. Do not rename it as a related sport "
+    "and do not add another sport unless the verified source facts explicitly discuss it."
+)
+
 HEADLINE_RETRY_HINT = (
     "The previous headline was too close to the source headline. Create a genuinely "
     "new NinkoSports headline using different wording and structure while preserving "
@@ -348,7 +354,8 @@ def write_ninkosports_story(
         "DRAFT SAFETY CONTRACT:\n"
         "- Do not output straight or curly double quotation marks anywhere. Paraphrase every quoted statement.\n"
         f"- ALLOWED NUMERIC TOKENS: {numeric_contract}\n"
-        "- Any numeric token not listed above is forbidden. Do not calculate or reformat numbers.\n\n"
+        "- Any numeric token not listed above is forbidden. Do not calculate or reformat numbers.\n"
+        f"- TAXONOMY LOCK: the exact article sport is {sport}. Keep it in that sport; do not relabel it as a related sport.\n\n"
         f"SPORT: {sport}\n"
         f"COMPETITION: {league or 'unspecified'}\n\n"
         f"{_ninkosports_style(sport)}\n\n"
@@ -370,6 +377,8 @@ def write_ninkosports_story(
         retry_hint = (
             QUOTE_RETRY_HINT
             if safe_reason == "direct_quote_requires_review"
+            else SPORT_RETRY_HINT
+            if safe_reason.startswith("draft_sport_mismatch:")
             else HEADLINE_RETRY_HINT
             if safe_reason in {"headline_too_similar_to_source", "copied_source_headline"}
             else FACT_RETRY_HINT
