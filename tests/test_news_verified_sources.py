@@ -58,3 +58,19 @@ def test_table_tennis_and_futsal_fallback_feeds_are_present():
     by_url={row['url']:row for row in VERIFIED_RSS}
     assert by_url['https://www.tabletennisengland.co.uk/feed']['sport']=='table-tennis'
     assert by_url['https://www.futsalfocus.net/feed']['sport']=='futsal'
+
+
+def test_espn_dedicated_sport_feeds_are_enabled_without_league_stamp():
+    from bot.feeds import FEEDS
+    by_url={row["url"]:row for row in FEEDS}
+    expected={
+        "https://www.espn.com/espn/rss/mlb/news":"baseball",
+        "https://www.espn.com/espn/rss/nfl/news":"american-football",
+        "https://www.espn.com/espn/rss/nhl/news":"ice-hockey",
+        "https://www.espn.com/espn/rss/golf/news":"golf",
+    }
+    for url,sport in expected.items():
+        row=by_url[url]
+        assert row["enabled"] is True
+        assert row["sport"]==sport
+        assert row.get("league") is None
