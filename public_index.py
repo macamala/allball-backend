@@ -648,6 +648,9 @@ def repair_recent_sport_mislabels(
         if not cached or not raw_title:
             continue
         possible: set[str] = set()
+        explicit_title_sport = _explicit_title_sport_override(raw_title)
+        if explicit_title_sport and explicit_title_sport != cached:
+            possible.add(explicit_title_sport)
         for alias, candidate_sport in distinctive_aliases:
             if candidate_sport == cached:
                 continue
