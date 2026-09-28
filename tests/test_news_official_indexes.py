@@ -218,3 +218,11 @@ def test_nrl_first_party_rugby_league_index_is_enabled():
     assert row["sport"]=="rugby-league"
     assert row["host"]=="www.nrl.com"
     assert row.get("enabled",True) is True
+
+
+def test_chinese_olympic_source_is_taxonomy_neutral():
+    row=next(x for x in idx.HTML_INDEXES if x["id"]=="chinese-olympic-sports-news")
+    assert row["kind"]=="mixed"
+    assert row["sport"] is None
+    assert row["host"]=="en.olympic.cn"
+    assert row["visible_date"] is True
