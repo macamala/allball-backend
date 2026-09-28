@@ -17,6 +17,8 @@ class Feed(TypedDict, total=False):
 
 
 FEEDS: List[Feed] = [
+    {'url': 'https://en.yna.co.kr/RSS/sports.xml', 'kind': 'mixed', 'publisher': 'Yonhap', 'enabled': True, 'note': 'Verified +0900 RSS and exact article metadata; mixed Asian Games/global sports. Restrict extraction to story-news, excluding unrelated recommendation photos.'},
+    {'url': 'https://pbsi.id/feed/', 'kind': 'league', 'sport': 'badminton', 'publisher': 'PBSI', 'verified_official': True, 'enabled': True, 'note': 'Indonesian badminton federation: verified exact UTC RSS, full player statements and same-article match photography; no league stamp.'},
     {'url': 'https://timesofindia.indiatimes.com/rssfeeds/4719148.cms', 'kind': 'mixed', 'enabled': True, 'note': 'Asian Games and global sport; verified timezone-aware RSS, free article prose and same-article JSON-LD photo. No sport/league stamp; liveblogs, medal tables and schedules held.'},
     {'url': 'https://www.ihf.info/news/rss.xml', 'kind': 'league', 'sport': 'handball', 'enabled': True, 'verified_official': True, 'article_https_host': 'www.ihf.info', 'note': 'Official RSS provides exact UTC publication times missing from article pages. Verified same-host HTTPS articles; no league stamp.'},
     {'url': 'https://www.theguardian.com/football/rss', 'kind': 'league', 'sport': 'football', 'enabled': True, 'note': 'Global club and national-team football; never stamp a domestic league.'},

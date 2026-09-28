@@ -504,6 +504,16 @@ def _ingest_item(
         and 0 < len(str(candidate.get("url") or "").strip()) <= 500
     ]
     image_url = _pick_reachable_article_image(image_candidates)
+    if not image_url:
+        # RSS extraction historically returned only one chosen image. When it
+        # is dead/a logo/a thumbnail, try the other real images on this SAME
+        # article before holding it. No AI requests are spent on this repair.
+        from .extract import extract_image_candidates_from_url
+        alternatives = extract_image_candidates_from_url(source_url)
+        image_url = _pick_reachable_article_image([
+            row for row in alternatives
+            if 0 < len(str(row.get("url") or "")) <= 500
+        ])
     if not news_image_is_publishable(image_url):
         _hold_ai_source(source_url, "missing-or-unreachable-publishable-image")
         logger.info(
@@ -1071,6 +1081,10 @@ def _fetch_and_store_all_articles(
             if ai_budget <= 0 or openai_rate_limited() or ai_budget_exhausted():
                 break
             active_budget = active_ai_budget()
+            if (active_budget is not None
+                    and (active_budget.max_requests - active_budget.attempts) < 2):
+                logger.info("[fetch_sources] holding final request: an original needs a writer and validator")
+                break
             if (
                 not prefer_breadth
                 and os.getenv("NEWS_TRANSLATIONS_ENABLED") == "1"

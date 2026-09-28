@@ -270,3 +270,44 @@ def test_confirmed_legacy_editorial_incidents_are_held_without_blocking_real_fin
     assert non_article_news_reason({'title':'Premier League possession football faces questions as tactics evolve'}) == 'non_article_analysis'
     assert non_article_news_reason({'title':'Grand Final Week Opens with a Harbour Bridge March'}) == 'non_article_event_promotion'
     assert non_article_news_reason({'title':'Knights fans fill Sydney Harbour Bridge ahead of Grand Final'}) is None
+
+
+def test_membership_panel_inside_main_cannot_supply_article_images_or_prose():
+    h='<main><div id="authProfile"><img src="https://cdn.example/membership.jpg"><p>Membership product promotion.</p></div><img src="https://cdn.example/player.jpg"><p>The basketball club announced its new signing.</p></main>'
+    assert [r['url'] for r in collect_page_image_candidates(h)] == ['https://cdn.example/player.jpg']
+    assert 'Membership' not in article_text_from_html(h)
+
+
+def test_yonhap_recommendation_articles_cannot_supply_hero_or_body():
+    import json
+    story='The volleyball team canceled practice after its bus arrived at the wrong venue. '
+    h='<meta property="og:url" content="https://en.yna.co.kr/view/AEN20260928010600320"><meta property="og:image" content="https://img.example/volleyball.jpg">'
+    h+='<main><article><img src="https://img.example/unrelated.jpg"><p>Unrelated recommendation.</p></article><article class="story-news"><img src="//img.example/volleyball.jpg"><p>'+story*8+'</p></article></main>'
+    assert all('unrelated' not in r['url'] for r in collect_page_image_candidates(h))
+    assert 'Unrelated' not in article_text_from_html(h)
+    assert 'volleyball' in article_text_from_html(h)
+
+
+def test_swimmer_headline_outweighs_incidental_basketball_comparison():
+    assert classify_article('Swimmers lament decision not to award medals to relay heat participants',
+        'The swimming team questioned the relay medal policy. NBA basketball player Michael Jordan had a similar complaint.').sport == 'swimming'
+    assert classify_article('NBA basketball players take swimming lessons','Basketball players practiced in a pool.').sport == 'basketball'
+
+
+def test_historical_tennis_feature_is_not_today_news_but_new_death_is():
+    assert non_article_news_reason({'title':'How a 1986 Fed Cup final helped shape Czechia’s tennis legacy'}) == 'non_news_retrospective_commentary'
+    assert non_article_news_reason({'title':'1966 World Cup winner dies aged 90'}) is None
+
+
+def test_dedicated_indonesian_federation_feed_resolves_sport_without_guessing_league():
+    from bot.fetch_sources import _classify_candidate
+    c=_classify_candidate({'title':'Asian Games 2026: Alwi Melesat ke Semifinal, Jonatan Kandas',
+        'summary':'MS-QF: Alwi Farhan vs Chou Tien Chen.',
+        'feed':{'kind':'league','sport':'badminton','verified_official':True},'url':'https://pbsi.id/news/example/'})
+    assert c.sport == 'badminton' and c.league == 'badminton-international'
+
+
+def test_ufc_drupal_column_layout_is_not_discarded_as_a_sidebar():
+    h='<meta property="og:url" content="https://www.ufc.com/news/week-8-preview"><main><div class="l-two-col--right-sidebar"><div class="field--name-body-structured"><p>The fighters will compete in the next round of the series.</p></div><aside><p>Unrelated fight promotion.</p></aside></div></main>'
+    body=article_text_from_html(h)
+    assert 'fighters will compete' in body and 'Unrelated' not in body

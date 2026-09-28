@@ -217,6 +217,9 @@ def non_article_news_reason(item):
     }
     if title.strip() in confirmed_editorial_holds:
         return confirmed_editorial_holds[title.strip()]
+    if (re.search(r"\b(?:19\d{2}|20[01]\d)\b", title)
+            and re.search(r"\b(?:helped shape|looking back|look back|rewind|legacy)\b", title)):
+        return "non_news_retrospective_commentary"
 
     # Confirmed incident: this is a future race schedule/weather guide. A prior
     # Azerbaijan result in its background must never become a Bahrain result.
@@ -324,7 +327,7 @@ def non_article_news_reason(item):
 def publisher_branding_reason(item):
     """Hold outlet-branded drafts; never replace source names with our own."""
     text = "\n".join(str((item or {}).get(k) or "") for k in ("title", "summary", "body"))
-    if re.search(r"\b(?:BBC(?:\s+Sport)?|ESPN|Sky\s+Sports|Reuters|Associated\s+Press|BasketNews|TalkBasket|Eurohoops|Yahoo\s+Sports|The\s+Athletic|B92(?:\.sport|\.net)?|Mozzart\s+Sport|Marca|The\s+Guardian|Sportschau|Motorsport\.com)\b", text, re.I):
+    if re.search(r"\b(?:BBC(?:\s+Sport)?|ESPN|Sky\s+Sports|Reuters|Yonhap(?:\s+News\s+Agency)?|Associated\s+Press|BasketNews|TalkBasket|Eurohoops|Yahoo\s+Sports|The\s+Athletic|B92(?:\.sport|\.net)?|Mozzart\s+Sport|Marca|The\s+Guardian|Sportschau|Motorsport\.com)\b", text, re.I):
         return "publisher_branding"
     return None
 

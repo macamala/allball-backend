@@ -120,6 +120,11 @@ def classify_article(
         sport_scores["volleyball"] = max(sport_scores.get("volleyball", 0), 12)
         sport_scores["boxing"] = 0
         sport_scores["tennis"] = 0
+    # A swimmer headline is stronger than an incidental basketball comparison
+    # in the story. Do not use this override for a cross-sport headline.
+    if (re.search(r"\b(?:swimming|swimmers?)\b", title_text)
+            and not re.search(r"\b(?:basketball|football|soccer|nba|nfl|tennis|water polo|triathlon)\b", title_text)):
+        sport_scores["swimming"] = max(max(sport_scores.values()) + 4, 12)
     # National teams and World Cup appear in both codes and soccer. Explicit
     # rugby evidence in the title/lead must outrank those shared names.
     explicit_other_title = re.search(

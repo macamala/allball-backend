@@ -79,6 +79,8 @@ def test_incomplete_or_failed_response_still_charged(monkeypatch,tmp_path,result
 
 
 def prepare_ingest(monkeypatch,draft=DRAFT):
+    from bot import extract as extract_module
+    monkeypatch.setattr(extract_module,'extract_image_candidates_from_url',lambda *a,**k:[])
     monkeypatch.setattr(ingest,'existing_by_url',lambda *a:None)
     monkeypatch.setattr(ingest,'existing_near_duplicate',lambda *a:None)
     monkeypatch.setattr(ingest,'_source_on_ai_cooldown',lambda *a:False)
@@ -551,3 +553,19 @@ def test_nonpublic_original_is_never_counted_as_published(monkeypatch, index_fai
         assert public_query(db).filter(Article.source_url == item['url']).first() is None
     finally:
         db.close()
+
+
+def test_rss_ingest_tries_same_article_alternative_photo_before_spending_ai(monkeypatch):
+    from bot import extract as extract_module
+    item=prepare_ingest(monkeypatch)
+    monkeypatch.setattr(ingest,'news_image_is_reachable',lambda url:url.endswith('good.jpg'))
+    fetched=[]
+    monkeypatch.setattr(extract_module,'extract_image_candidates_from_url',lambda url:fetched.append(url) or [
+        {'url':'https://example.test/dead.jpg','source':'body','in_article':True},
+        {'url':'https://example.test/good.jpg','source':'og'},
+    ])
+    writer_call=Mock(return_value=(None,'empty'))
+    monkeypatch.setattr(ingest,'_ai_story',writer_call)
+    assert ingest._ingest_item(Mock(),item,True,6000,1) == (None,False)
+    assert fetched == [item['url']]
+    writer_call.assert_called_once()

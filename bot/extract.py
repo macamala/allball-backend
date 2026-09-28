@@ -314,6 +314,13 @@ def collect_page_image_candidates(html: str) -> List[dict]:
     if twitter:
         candidates.append({"url": twitter, "source": "twitter", "in_article": False})
     candidates.extend(_json_ld_images(html))
+    # Yonhap uses <article> for unrelated recommendation cards too. Limit
+    # body images to its actual story container; metadata remains same-page.
+    canonical = _og(html or '', 'og:url') or ''
+    if urlsplit(canonical).hostname == 'en.yna.co.kr':
+        scoped = _ScopedNewsBody('story-news')
+        scoped.feed(html or '')
+        html = '<article>' + ''.join(scoped.parts) + '</article>' if scoped.finished else ''
     parser = _LeadImageExtractor()
     try:
         parser.feed(html or "")
@@ -332,6 +339,10 @@ def _is_chrome_open(tag: str, attrs) -> bool:
     if tag in CHROME_TAGS:
         return True
     attrs = _attr_map(attrs)
+    # Membership account panels can sit inside <main>. Their product cards
+    # are navigation, not photographs or prose belonging to the news article.
+    if attrs.get("id", "").casefold() == "authprofile" or "profile-panel" in attrs.get("class", "").split():
+        return True
     role = attrs.get("role", "").lower()
     if role in CHROME_ROLES:
         return True
@@ -565,6 +576,13 @@ def article_text_from_html(html: str) -> str:
         publisher_host = None
     if publisher_host == 'www.mozzartsport.com':
         body_class = 'news-content'
+    if publisher_host == 'en.yna.co.kr':
+        body_class = 'story-news'
+    if publisher_host in {'www.ufc.com', 'ufc.com'}:
+        # Drupal's outer two-column layout contains "right-sidebar" in its
+        # class name. That is not the sidebar itself; scope to the article's
+        # structured prose before the normal chrome filter runs.
+        body_class = 'field--name-body-structured'
     if body_class:
         scoped = _ScopedNewsBody(body_class)
         try:
