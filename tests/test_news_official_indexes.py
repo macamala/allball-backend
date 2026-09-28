@@ -184,6 +184,7 @@ def test_olympics_global_source_is_mixed_and_never_stamps_sport():
     assert row["kind"]=="mixed"
     assert row["sport"] is None
     assert row["host"]=="www.olympics.com"
+    assert row["enabled"] is False
 
 
 def test_major_north_american_league_indexes_are_first_party():
