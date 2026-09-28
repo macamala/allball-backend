@@ -7,6 +7,7 @@ from bot import fetch_sources as ingest, rewrite_ai as writer, feeds, pipeline
 from bot.news_budget import AiRequestBudget, ai_budget_scope
 from bot.news_verified_feeds import VERIFIED_RSS
 import repair_content
+import public_index
 
 BODY = ('A revised knockout structure has been confirmed for the football competition. '
         'Clubs will enter the tournament under the announced format, with the draw determining their opening opponents. '
@@ -303,6 +304,28 @@ def test_unknown_enrichment_skips_non_articles_and_prefers_sport_hinted_story(mo
     assert "_extracted" in candidates[2]
     assert "_extracted" not in candidates[0]
     assert "_extracted" not in candidates[1]
+
+
+def test_public_image_repair_falls_back_to_second_source_candidate(monkeypatch):
+    from bot import extract as extract_module
+    from bot import news_image_http
+
+    monkeypatch.setattr(
+        extract_module,
+        "extract_image_candidates_from_url",
+        lambda *a, **k: [
+            {"url":"https://example.test/dead.jpg","source":"og","width":1600,"in_article":False},
+            {"url":"https://example.test/good.jpg","source":"jsonld","width":1200,"in_article":True},
+        ],
+    )
+    seen=[]
+    monkeypatch.setattr(
+        news_image_http,
+        "news_image_is_reachable",
+        lambda url: seen.append(url) or url.endswith("good.jpg"),
+    )
+    assert public_index._reachable_source_image("https://example.test/story") == "https://example.test/good.jpg"
+    assert seen == ["https://example.test/dead.jpg","https://example.test/good.jpg"]
 
 
 def test_reachable_image_selector_falls_back_to_second_candidate(monkeypatch):

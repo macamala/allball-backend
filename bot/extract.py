@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from html.parser import HTMLParser
 from typing import List, Optional, Tuple
+from urllib.parse import urljoin
 
 import httpx
 
@@ -465,6 +466,45 @@ def article_text_from_html(html: str) -> str:
         if word_count(ld_body) > word_count(text):
             text = ld_body
     return text
+
+
+def extract_image_candidates_from_url(url: str, timeout: float = 12.0) -> List[dict]:
+    """Fetch one canonical article page and return its real image candidates.
+
+    Used by the bounded image-health repair path. It does no AI work and does
+    not choose a winner; callers can probe several ranked candidates when a
+    publisher's primary og:image has expired.
+    """
+    if not url:
+        return []
+    try:
+        with httpx.Client(timeout=timeout, follow_redirects=True, headers=EXTRACT_HEADERS) as client:
+            resp = client.get(url)
+            if resp.status_code >= 400:
+                logger.info("[extract-images] HTTP %s for %s", resp.status_code, url)
+                return []
+            html = resp.text or ""
+            base_url = str(getattr(resp, "url", None) or url)
+    except Exception as e:
+        logger.info("[extract-images] failed %s: %s", url, e)
+        return []
+
+    output = []
+    seen = set()
+    for candidate in collect_page_image_candidates(html):
+        if not isinstance(candidate, dict):
+            continue
+        raw = str(candidate.get("url") or "").strip()
+        if not raw:
+            continue
+        resolved = urljoin(base_url, raw)
+        if not resolved or resolved in seen:
+            continue
+        seen.add(resolved)
+        row = dict(candidate)
+        row["url"] = resolved
+        output.append(row)
+    return output
 
 
 def extract_from_url(url: str, timeout: float = 18.0) -> Tuple[str, Optional[str]]:

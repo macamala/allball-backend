@@ -13,7 +13,7 @@ from typing import Optional, Sequence
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from editorial import classify_media_url, evaluate_quality, news_image_is_publishable
+from editorial import classify_media_url, evaluate_quality, news_image_is_publishable, score_image_candidate
 from models import Article, ArticleTaxonomyResolution
 from sport_match import MAIN_SPORTS, isolation_ok
 from bot.taxonomy import COMPETITIONS
@@ -224,6 +224,45 @@ def recent_public_sport_inventory(db: Session, max_age_hours: int = 72) -> dict[
 
 
 
+def _reachable_source_image(
+    source_url: str,
+    *,
+    current_url: Optional[str] = None,
+    max_checks: int = 6,
+) -> Optional[str]:
+    """Pick a reachable editorial image from one canonical source page."""
+    from bot.extract import extract_image_candidates_from_url
+    from bot.news_image_http import news_image_is_reachable
+
+    try:
+        candidates = extract_image_candidates_from_url(source_url, timeout=12.0)
+    except Exception:
+        candidates = []
+
+    ranked = []
+    seen = set()
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        url = str(candidate.get("url") or "").strip()
+        if (
+            not url
+            or url in seen
+            or url == str(current_url or "").strip()
+            or len(url) > 500
+            or not news_image_is_publishable(url)
+        ):
+            continue
+        seen.add(url)
+        ranked.append((score_image_candidate(candidate), url))
+    ranked.sort(key=lambda row: row[0], reverse=True)
+
+    for _score, url in ranked[: max(1, int(max_checks))]:
+        if news_image_is_reachable(url):
+            return url
+    return None
+
+
 def repair_recent_news_images(
     db: Session,
     *,
@@ -240,8 +279,7 @@ def repair_recent_news_images(
     """
     from collections import Counter
 
-    from bot.extract import extract_from_url
-    from bot.news_image_http import news_image_is_reachable, probe_news_images
+    from bot.news_image_http import probe_news_images
 
     cutoff = datetime.utcnow() - timedelta(hours=max(1, int(max_age_hours)))
     rows = (
@@ -299,19 +337,11 @@ def repair_recent_news_images(
         replacement = None
         source_url = str(article.source_url or "").strip()
         if index < refresh_budget and source_url:
-            try:
-                _text, candidate = extract_from_url(source_url, timeout=12.0)
-            except Exception:
-                candidate = None
-            candidate = str(candidate or "").strip()
-            if (
-                candidate
-                and len(candidate) <= 500
-                and candidate != str(article.image_url or "").strip()
-                and news_image_is_publishable(candidate)
-                and news_image_is_reachable(candidate)
-            ):
-                replacement = candidate
+            replacement = _reachable_source_image(
+                source_url,
+                current_url=article.image_url,
+                max_checks=6,
+            )
 
         if replacement:
             article.image_url = replacement
@@ -359,17 +389,12 @@ def repair_recent_news_images(
     for article, tax in recovery_rows:
         if int(article.id) in touched_ids:
             continue
-        try:
-            _text, candidate = extract_from_url(str(article.source_url), timeout=12.0)
-        except Exception:
-            candidate = None
-        candidate = str(candidate or "").strip()
-        if (
-            not candidate
-            or len(candidate) > 500
-            or not news_image_is_publishable(candidate)
-            or not news_image_is_reachable(candidate)
-        ):
+        candidate = _reachable_source_image(
+            str(article.source_url),
+            current_url=article.image_url,
+            max_checks=6,
+        )
+        if not candidate:
             continue
         article.image_url = candidate
         db.add(article)
