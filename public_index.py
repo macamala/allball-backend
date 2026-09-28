@@ -24,6 +24,7 @@ from taxonomy_resolver import (
     RESOLVER_VERSION,
     persist_resolution,
     resolve_article_competition,
+    TaxonomyResolution,
 )
 
 logger = logging.getLogger("ninkosports.public_index")
@@ -337,6 +338,8 @@ def repair_recent_news_images(
         "http_404",
         "http_410",
         "http_451",
+        "bad_aspect_ratio",
+        "image_too_small",
     }
     failed = [
         (article, tax, probes.get(str(article.image_url or "").strip(), (False, "probe_missing"))[1])
@@ -574,6 +577,16 @@ def _distinctive_title_sport_support(title: str, sport: str) -> bool:
             return True
     return False
 
+def _explicit_title_sport_override(title: str) -> Optional[str]:
+    """Very narrow, high-signal title markers allowed to correct a cached sport."""
+    value = " " + (title or "").casefold() + " "
+    # MMA/UFC are unambiguous sport labels in a News headline. They must outrank
+    # incidental city/club words such as Brighton that otherwise resemble football.
+    if re.search(r"(?<!\w)(?:mma|ufc|mixed\s+martial\s+arts|oktagon)(?!\w)", value, re.I):
+        return "mma"
+    return None
+
+
 def repair_recent_sport_mislabels(
     db: Session,
     *,
@@ -666,6 +679,39 @@ def repair_recent_sport_mislabels(
         if article is None:
             continue
         body = article.ai_content or article.content or article.summary or ""
+        explicit_title_sport = _explicit_title_sport_override(title)
+        if explicit_title_sport and explicit_title_sport != str(tax.resolved_sport or ""):
+            forced = TaxonomyResolution(
+                sport=explicit_title_sport,
+                competition=None,
+                sport_confidence=0.99,
+                competition_confidence=0.0,
+                evidence=["explicit-title-sport-marker"],
+            )
+            cached_sport = str(tax.resolved_sport or "")
+            persist_public_article(db, article, forced, commit=False)
+            if tax.public_ok and tax.resolved_sport == explicit_title_sport:
+                corrected += 1
+                logger.warning(
+                    "[public_index] corrected explicit-title sport article=%s cached=%s corrected=%s title=%s",
+                    article_id,
+                    cached_sport,
+                    explicit_title_sport,
+                    title[:100],
+                )
+                continue
+            tax.public_ok = False
+            db.add(tax)
+            hidden += 1
+            logger.warning(
+                "[public_index] hide explicit-title sport conflict article=%s cached=%s expected=%s title=%s",
+                article_id,
+                cached_sport,
+                explicit_title_sport,
+                title[:100],
+            )
+            continue
+
         independent = classify_article(
             title,
             body,

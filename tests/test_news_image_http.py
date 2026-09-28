@@ -76,3 +76,26 @@ def test_image_probe_rejects_empty_image_mime_response():
     client=Client([Response(status=200,content_type="image/jpeg",body=b"")])
     ok,reason=images.probe_news_image("https://cdn.example/empty.jpg",client=client)
     assert ok is False and reason=="empty_image_response"
+
+
+def _png(width, height):
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + b"\x00\x00\x00\rIHDR"
+        + int(width).to_bytes(4, "big")
+        + int(height).to_bytes(4, "big")
+        + b"\x08\x02\x00\x00\x00"
+        + b"fixture"
+    )
+
+
+def test_image_probe_rejects_extreme_text_banner_geometry():
+    client=Client([Response(content_type="image/png",body=_png(1200,180))])
+    ok,reason=images.probe_news_image("https://cdn.example/banner.png",client=client)
+    assert ok is False and reason=="bad_aspect_ratio"
+
+
+def test_image_probe_accepts_normal_photo_geometry():
+    client=Client([Response(content_type="image/png",body=_png(1200,800))])
+    ok,reason=images.probe_news_image("https://cdn.example/photo.png",client=client)
+    assert ok is True and reason=="ok"

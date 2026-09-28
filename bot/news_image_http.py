@@ -40,6 +40,61 @@ def _looks_like_image_bytes(data: bytes) -> bool:
     return False
 
 
+def _image_dimensions(data: bytes):
+    """Return (width, height) from common image headers when available."""
+    raw = bytes(data or b"")
+    # PNG: signature + IHDR width/height.
+    if len(raw) >= 24 and raw.startswith(b"\x89PNG\r\n\x1a\n") and raw[12:16] == b"IHDR":
+        return int.from_bytes(raw[16:20], "big"), int.from_bytes(raw[20:24], "big")
+    # GIF logical screen dimensions.
+    if len(raw) >= 10 and raw.startswith((b"GIF87a", b"GIF89a")):
+        return int.from_bytes(raw[6:8], "little"), int.from_bytes(raw[8:10], "little")
+    # JPEG SOF markers normally occur well inside the bounded 64 KiB sniff.
+    if len(raw) >= 4 and raw[:2] == b"\xff\xd8":
+        pos = 2
+        sof = {0xC0,0xC1,0xC2,0xC3,0xC5,0xC6,0xC7,0xC9,0xCA,0xCB,0xCD,0xCE,0xCF}
+        while pos + 4 <= len(raw):
+            if raw[pos] != 0xFF:
+                pos += 1
+                continue
+            while pos < len(raw) and raw[pos] == 0xFF:
+                pos += 1
+            if pos >= len(raw):
+                break
+            marker = raw[pos]
+            pos += 1
+            if marker in {0xD8, 0xD9}:
+                continue
+            if marker == 0xDA:
+                break
+            if pos + 2 > len(raw):
+                break
+            seglen = int.from_bytes(raw[pos:pos+2], "big")
+            if seglen < 2 or pos + seglen > len(raw):
+                break
+            if marker in sof and seglen >= 7:
+                height = int.from_bytes(raw[pos+3:pos+5], "big")
+                width = int.from_bytes(raw[pos+5:pos+7], "big")
+                return width, height
+            pos += seglen
+    return None
+
+
+def _image_geometry_reason(data: bytes):
+    dims = _image_dimensions(data)
+    if not dims:
+        return None
+    width, height = dims
+    if width <= 0 or height <= 0:
+        return None
+    if width < 320 or height < 140:
+        return "image_too_small"
+    ratio = width / max(height, 1)
+    if ratio > 3.5 or ratio < 0.35:
+        return "bad_aspect_ratio"
+    return None
+
+
 def _cache_get(url: str):
     cached = _CACHE.get(url)
     if not cached:
@@ -123,6 +178,11 @@ def probe_news_image(url: str, *, client=None) -> tuple[bool, str]:
                         return result
                     if not type_ok and not magic_ok:
                         result = (False, "not_image_content")
+                        _cache_put(value, *result)
+                        return result
+                    geometry_reason = _image_geometry_reason(bytes(data))
+                    if geometry_reason:
+                        result = (False, geometry_reason)
                         _cache_put(value, *result)
                         return result
                     result = (True, "ok")

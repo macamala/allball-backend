@@ -387,3 +387,15 @@ def test_textual_sport_evidence_beats_conflicting_source_path():
     tags=ingest._classify_item(item,item["summary"])
     assert tags.sport=="basketball"
     assert tags.reason!="trusted-source-path"
+
+
+def test_explicit_mma_title_override_beats_incidental_football_words():
+    assert public_index._explicit_title_sport_override(
+        "Christian Eckerlin brings MMA edge to Brighton before Frankfurt farewell"
+    ) == "mma"
+
+
+def test_explicit_mma_title_override_does_not_guess_plain_football_title():
+    assert public_index._explicit_title_sport_override(
+        "McInnes reaches 100 days at Rangers with Old Firm double"
+    ) is None
