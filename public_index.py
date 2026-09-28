@@ -253,8 +253,11 @@ def _reachable_source_image(
             or not news_image_is_publishable(url)
         ):
             continue
+        score = score_image_candidate(candidate)
+        if score < 0:
+            continue
         seen.add(url)
-        ranked.append((score_image_candidate(candidate), url))
+        ranked.append((score, url))
     ranked.sort(key=lambda row: row[0], reverse=True)
 
     for _score, url in ranked[: max(1, int(max_checks))]:
