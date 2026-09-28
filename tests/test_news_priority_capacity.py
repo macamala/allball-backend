@@ -211,3 +211,25 @@ def test_length_correction_paraphrases_quotes_and_uses_verified_free_corrective_
     monkeypatch.setattr(external, 'completion', lambda **kwargs: pytest.fail('corrective route should run first'))
     assert router.write_free_story('system', prompts[0]) == 'corrected draft'
     assert len(calls) == 1 and calls[0]['model'].endswith(':free')
+
+
+def test_serbian_volleyball_title_beats_unrelated_boxing_and_tennis_context():
+    from bot.classify import classify_article
+    from public_index import _explicit_title_sport_override
+    title = 'Nikola Grbić vodio odbojkaše Poljske do evropskog zlata'
+    assert classify_article(title, 'Related boxing bout and ATP tennis news.').sport == 'volleyball'
+    assert _explicit_title_sport_override(title) == 'volleyball'
+    assert _explicit_title_sport_override('A report about normal grammar') is None
+
+
+def test_cms_article_scope_excludes_ads_and_all_external_recommendations():
+    from bot.extract import article_text_from_html
+    html = '''<section class="single-news-content pb-2"><p>The volleyball team confirmed its training programme.</p>
+      <div class="miya-galerija-video"><img src="ad.jpg"/><p>Breakfast Buffet from ten o'clock.</p></div>
+      <p>The coach announced additional sessions before the competition begins next week.</p>
+      <div class="mobile-app"><p>Download the newspaper app for daily headlines.</p></div></section>
+      <article><p>A completely unrelated tennis injury and boxing title report.</p></article>'''
+    text = article_text_from_html(html)
+    assert 'volleyball team' in text and 'additional sessions' in text
+    assert not any(s in text for s in ('Breakfast', 'Download', 'tennis', 'boxing'))
+    assert article_text_from_html('<section class="single-news-content"><p>Unclosed body') == ''

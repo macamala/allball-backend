@@ -11,6 +11,7 @@ from typing import Optional
 import httpx
 
 from .news_budget import reserve_ai_request
+from .news_policy import numeric_tokens
 from .free_ai_router import (
     free_ai_available,
     free_ai_rate_limited,
@@ -347,10 +348,7 @@ def write_ninkosports_story(
     if len(facts) > 8000:
         facts = facts[:8000]
     numeric_source = f"{title}\n{facts}"
-    allowed_numeric_tokens = sorted(set(re.findall(
-        r"(?<!\w)\d+(?:[.,:/–-]\d+)*(?:%|\b)",
-        numeric_source,
-    )))
+    allowed_numeric_tokens = sorted(numeric_tokens(numeric_source))
     numeric_contract = (
         ", ".join(allowed_numeric_tokens)
         if allowed_numeric_tokens

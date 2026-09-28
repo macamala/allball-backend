@@ -12,6 +12,14 @@ TRACKING = {'fbclid', 'gclid', 'mc_cid', 'mc_eid'}
 CRICKET_TITLE_RE = re.compile(
     r"(?<!\w)(?:cricket|t20i?s?|odis?|(?:20|50)[\s\-‐‑‒–—]+over)(?!\w)", re.I
 )
+VOLLEYBALL_TITLE_RE = re.compile(
+    r"(?<!\w)(?:volleyball|fivb|eurovolley|odbojka|odbojku|odbojkaš(?:i|e|a|ima|ice|ica|ki|ke)|"
+    r"odbojkas(?:i|e|a|ima|ice|ica|ki|ke))(?!\w)", re.I
+)
+
+
+def numeric_tokens(text):
+    return set(re.findall(r'(?<!\w)\d+(?:[.,:/–-]\d+)*(?:%|\b)', text or ''))
 _NAME_START_STOP = {'The','This','That','These','Those','After','Before','With','When','While','But','And','For','From','Into','During'}
 _PROPER_NAME_RE = re.compile(
     r"\b(?:[A-Z][A-Za-zÀ-ÖØ-öø-ÿ'’.-]{1,})(?:[ \t]+(?:[A-Z][A-Za-zÀ-ÖØ-öø-ÿ'’.-]{1,}|de|da|del|di|la|le|van|von)){1,4}\b"
@@ -645,8 +653,7 @@ def original_draft_reason(draft, source_title, source_body):
         and SequenceMatcher(None, source_title_norm, draft_title_norm).ratio() > 0.88
     ):
         return 'headline_too_similar_to_source'
-    numbers = lambda text: set(re.findall(r'(?<!\w)\d+(?:[.,:/–-]\d+)*(?:%|\b)', text))
-    if numbers(output) - numbers(source): return 'unsupported_number'
+    if numeric_tokens(output) - numeric_tokens(source): return 'unsupported_number'
     tokens = lambda text: re.findall(r"[\w]+", text.lower())
     src, dst = tokens(source_body), tokens(body)
     if len(dst) < 25: return 'insufficient_original_body'

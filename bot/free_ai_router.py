@@ -259,6 +259,7 @@ def write_free_story(system_prompt: str, prompt: str) -> Optional[str]:
         or "VALIDATION_FAILURE: validator-unsupported-claim" in prompt
         or "VALIDATION_FAILURE: validator-changed-name" in prompt
         or "VALIDATION_FAILURE: too-short" in prompt
+        or "VALIDATION_FAILURE: unsupported_number" in prompt
     )
     if corrective_retry:
         model = _free_model("NEWS_XKIRO_WRITER_MODEL", _DEFAULT_WRITER)

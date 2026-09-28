@@ -465,12 +465,13 @@ def test_rejected_story_preserves_draft_and_specific_validator_feedback(monkeypa
 
 
 @pytest.mark.parametrize('corrected', [False, True])
-def test_major_sport_correction_retains_incident_and_requires_pass(monkeypatch, tmp_path, corrected):
+@pytest.mark.parametrize('reason_code', ['validator-unsupported-claim', 'unsupported_number'])
+def test_major_sport_correction_retains_incident_and_requires_pass(monkeypatch, tmp_path, corrected, reason_code):
     import json
     from database import SessionLocal
     from models import Article, NewsIncident
     item = prepare_ingest(monkeypatch)
-    item['url'] = f'https://example.test/priority-correction-{corrected}'
+    item['url'] = f'https://example.test/priority-correction-{reason_code}-{corrected}'
     feedback = {'unsupported_claims': ['The draw has already taken place'], 'changed_names': []}
     calls = []
     def story(**kwargs):
@@ -478,7 +479,7 @@ def test_major_sport_correction_retains_incident_and_requires_pass(monkeypatch, 
         if len(calls) == 1:
             ingest._LAST_STORY_FAILURE.set({'draft': DRAFT, 'source_facts': FACTS,
                                             'validator_feedback': feedback})
-            return None, 'validator-unsupported-claim'
+            return None, reason_code
         assert kwargs['correction_feedback'] == feedback
         return (DRAFT, 'ok') if corrected else (None, 'validator-unsupported-claim')
     monkeypatch.setattr(ingest, '_ai_story', story)

@@ -14,7 +14,7 @@ from database import SessionLocal
 from models import Article
 from editorial import news_image_is_publishable, pick_article_image, score_image_candidate
 
-from .news_policy import editorial_day_reason, fair_news_queue, freshness_reason, non_article_news_reason, original_draft_reason, source_path_sport_hint
+from .news_policy import editorial_day_reason, fair_news_queue, freshness_reason, non_article_news_reason, numeric_tokens, original_draft_reason, source_path_sport_hint
 from .news_fact_guard import fact_lock_reason
 from .news_learning import (
     learned_rule_violation_reason,
@@ -209,12 +209,19 @@ def _ai_story(
         payload,
     )
     if deterministic_reason:
+        feedback = None
+        if deterministic_reason == "unsupported_number":
+            output = "\n".join(str(parsed.get(k) or "") for k in ("title", "summary", "body"))
+            missing = sorted(numeric_tokens(output) - numeric_tokens(title + "\n" + payload))
+            feedback = {"unsupported_claims": ["Numeric token absent from source: " + token for token in missing[:6]],
+                        "changed_names": []}
+            logger.info("[fetch_sources] unsupported_numeric_tokens=%s title=%s", missing[:6], title[:80])
         logger.info(
             "[fetch_sources] reject deterministic=%s before validator title=%s",
             deterministic_reason,
             title[:80],
         )
-        return reject(deterministic_reason, parsed)
+        return reject(deterministic_reason, parsed, feedback)
     lock_reason = fact_lock_reason(
         parsed,
         title,
@@ -579,7 +586,7 @@ def _ingest_item(
                         or str(rewrite_reason or "").startswith("draft_sport_mismatch:")
                         or (
                             tags.sport in {"football", "basketball"}
-                            and rewrite_reason in {"validator-unsupported-claim", "validator-changed-name"}
+                            and rewrite_reason in {"validator-unsupported-claim", "validator-changed-name", "unsupported_number"}
                             and any(feedback.values())
                             and active_ai_budget() is not None
                             and active_ai_budget().max_requests - active_ai_budget().attempts >= 4

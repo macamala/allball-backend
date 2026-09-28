@@ -117,7 +117,8 @@ def _metadata(html: str, key: str) -> Optional[str]:
 CHROME_ATTR_RE = re.compile(
     r"\b(?:site-nav|global-nav|main-nav|footer-nav|skiplink|skip-link|"
     r"cookie|consent|newsletter|subscribe|masthead|sidebar|"
-    r"article-widget--player|news-aside-list|news-container-item|latest-videos-block|bn-chat-premium)\b",
+    r"article-widget--player|news-aside-list|news-container-item|latest-videos-block|bn-chat-premium|"
+    r"recommended-news|related-news|category-news|miya-galerija-video|mobile-app|google-follow|footer-top)\b",
     re.IGNORECASE,
 )
 
@@ -507,7 +508,59 @@ def _json_ld_article_body(html: str) -> str:
     return ""
 
 
+class _ScopedNewsBody(HTMLParser):
+    """Capture a known CMS article body, excluding later recommendation grids."""
+    def __init__(self):
+        super().__init__(convert_charrefs=False)
+        self.depth = 0
+        self.finished = False
+        self.parts = []
+
+    def handle_starttag(self, tag, attrs):
+        if self.finished:
+            return
+        if not self.depth:
+            if 'single-news-content' in dict(attrs).get('class', '').split():
+                self.depth = 1
+            return
+        self.parts.append(self.get_starttag_text())
+        if tag not in VOID_TAGS:
+            self.depth += 1
+
+    def handle_startendtag(self, tag, attrs):
+        if self.depth:
+            self.parts.append(self.get_starttag_text())
+
+    def handle_endtag(self, tag):
+        if self.depth and tag not in VOID_TAGS:
+            self.depth -= 1
+            if self.depth:
+                self.parts.append(f'</{tag}>')
+            else:
+                self.finished = True
+
+    def handle_data(self, data):
+        if self.depth:
+            self.parts.append(data)
+
+    def handle_entityref(self, name):
+        self.handle_data(f'&{name};')
+
+    def handle_charref(self, name):
+        self.handle_data(f'&#{name};')
+
+
 def article_text_from_html(html: str) -> str:
+    if 'single-news-content' in (html or ''):
+        scoped = _ScopedNewsBody()
+        try:
+            scoped.feed(html)
+            scoped.close()
+        except Exception:
+            return ''
+        if not scoped.finished:
+            return ''
+        html = ''.join(scoped.parts)
     text = paragraphs_from_html(html or "")
     text = strip_site_chrome(text) or text
     if is_site_chrome_text(text):

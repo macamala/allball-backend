@@ -11,7 +11,7 @@ from .taxonomy import (
     TEAMS,
 )
 from .textutil import clean_text
-from .news_policy import CRICKET_TITLE_RE
+from .news_policy import CRICKET_TITLE_RE, VOLLEYBALL_TITLE_RE
 
 
 @dataclass
@@ -113,6 +113,10 @@ def classify_article(
         # cricket formats, including Unicode hyphens, resolve that ambiguity.
         sport_scores["cricket"] = max(sport_scores.get("cricket", 0), 12)
         sport_scores["football"] = 0
+    if VOLLEYBALL_TITLE_RE.search(title_text):
+        sport_scores["volleyball"] = max(sport_scores.get("volleyball", 0), 12)
+        sport_scores["boxing"] = 0
+        sport_scores["tennis"] = 0
     if tennis_context:
         sport_scores["football"] = min(sport_scores.get("football", 0), sport_scores.get("football", 0))
         sport_scores["basketball"] = min(sport_scores.get("basketball", 0), 1)
