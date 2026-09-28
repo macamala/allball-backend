@@ -399,3 +399,11 @@ def test_explicit_mma_title_override_does_not_guess_plain_football_title():
     assert public_index._explicit_title_sport_override(
         "McInnes reaches 100 days at Rangers with Old Firm double"
     ) is None
+
+
+def test_coverage_debt_does_not_reserve_writer_budget_for_translations(monkeypatch, tmp_path):
+    monkeypatch.setenv("NEWS_TRANSLATIONS_ENABLED","1")
+    monkeypatch.setenv("NEWS_TRANSLATIONS_PER_CYCLE","3")
+    budget=AiRequestBudget(6,str(tmp_path/"ledger.db"))
+    with ai_budget_scope(budget):
+        assert ingest._correction_retry_allowed(prefer_breadth=True) is True

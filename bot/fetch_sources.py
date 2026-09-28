@@ -119,7 +119,7 @@ def _correction_retry_allowed(*, prefer_breadth: bool = False) -> bool:
     if getattr(budget, "blocked_reason", None):
         return False
     translation_reserve = 0
-    if os.getenv("NEWS_TRANSLATIONS_ENABLED") == "1":
+    if not prefer_breadth and os.getenv("NEWS_TRANSLATIONS_ENABLED") == "1":
         try:
             translation_reserve = 1 if int(os.getenv("NEWS_TRANSLATIONS_PER_CYCLE", "0")) > 0 else 0
         except ValueError:
@@ -917,7 +917,8 @@ def _fetch_and_store_all_articles(
                 break
             active_budget = active_ai_budget()
             if (
-                os.getenv("NEWS_TRANSLATIONS_ENABLED") == "1"
+                not prefer_breadth
+                and os.getenv("NEWS_TRANSLATIONS_ENABLED") == "1"
                 and int(os.getenv("NEWS_TRANSLATIONS_PER_CYCLE", "0") or "0") > 0
                 and active_budget is not None
                 and (active_budget.max_requests - active_budget.attempts) < 3
