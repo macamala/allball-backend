@@ -2,6 +2,7 @@
 
 import logging
 import os
+import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import ContextVar
@@ -324,6 +325,19 @@ def _make_unique_slug(db: Session, base_slug: str, skip_article_id: Optional[int
         slug = f"{base_slug}-{counter}"
 
 
+def _rss_publication_time(entry, feed_cfg):
+    fields = {key: entry.get(key) for key in ('published', 'published_parsed')
+              if entry.get(key) is not None}
+    raw = fields.get('published')
+    if isinstance(raw, str):
+        for alias, offset in (feed_cfg.get('rss_timezone_aliases') or {}).items():
+            # Only publisher-verified explicit zone names are mapped. Never
+            # assign an offset to a timestamp that did not include one.
+            raw = re.sub(r'\s' + re.escape(alias) + r'\s*$', ' ' + offset, raw)
+        fields['published'] = raw
+    return parse_feed_datetime(fields)
+
+
 def _fetch_feed_entries(feed_cfg: Dict, max_articles: int) -> List[Dict]:
     url = feed_cfg["url"]
     if news_source_is_excluded(url):
@@ -400,7 +414,7 @@ def _fetch_feed_entries(feed_cfg: Dict, max_articles: int) -> List[Dict]:
                 "url": link,
                 "image": _extract_image_url(entry),
                 "image_candidates": _extract_image_candidates(entry),
-                "published_at": parse_feed_datetime({key: entry.get(key) for key in ('published', 'published_parsed') if entry.get(key) is not None}),
+                "published_at": _rss_publication_time(entry, feed_cfg),
                 "_publication_evidence": "rss-published",
                 "feed": feed_cfg,
             }

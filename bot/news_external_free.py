@@ -77,9 +77,11 @@ def _http_failure(provider: str, response) -> None:
             if isinstance(errors, list):
                 error_codes = [int(row['code']) for row in errors[:8]
                                if isinstance(row, dict) and str(row.get('code', '')).isdigit()]
-            if provider == 'cloudflare' and isinstance(errors, list) and any(
-                code == 3036 for code in error_codes
-            ):
+                message += ' ' + ' '.join(str(row.get('message') or '').lower()
+                                          for row in errors[:8] if isinstance(row, dict))
+            if provider == 'cloudflare' and (3036 in error_codes or (
+                'daily free allocation' in message and 'neurons' in message
+            )):
                 dimension = 'daily_free_neurons'
                 now = datetime.now(timezone.utc)
                 reset = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)

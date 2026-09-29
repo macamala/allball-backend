@@ -81,3 +81,52 @@ def test_non_news_candidates_are_held_before_ai(title, reason):
 
 def test_highlights_as_a_verb_does_not_block_real_reporting():
     assert non_article_news_reason({'title':'Rugby coach highlights injury concerns before squad selection'}) is None
+
+
+def test_cycling_article_scoped_past_outer_sidebar_without_reader_comments():
+    prose = 'De renner bevestigt dat hij dit seizoen geen wegwedstrijden meer zal rijden. '
+    html = '<meta property="og:url" content="https://www.wielerflits.nl/nieuws/renner/">'
+    html += '<div class="container with-sidebar"><article class="post-wrapper"><div id="single-content">'
+    html += '<p>' + prose * 5 + '</p></div><p>A reader guesses that the rider has signed for a different team.</p></article></div>'
+    body = article_text_from_html(html)
+    assert prose.strip() in body and 'reader guesses' not in body
+
+
+def test_sky_body_and_mixed_feed_keep_sport_evidence_without_adverts():
+    from bot.feeds import FEEDS
+    from bot.classify import classify_article
+    cfg = next(x for x in FEEDS if x['url'] == 'https://www.skysports.com/rss/12040')
+    assert cfg['kind'] == 'mixed' and cfg['enabled'] and not cfg.get('sport') and not cfg.get('league')
+    prose = 'Luke Woodhouse beat Luke Littler at the World Grand Prix darts tournament in Leicester. '
+    html = '<meta property="og:url" content="https://www.skysports.com/darts/news/fixture">'
+    html += '<div class="sdc-article-body"><p>' + prose * 4 + '</p>'
+    html += '<p>Watch the darts tournament live on Sky Sports with streaming access and no contract on NOW.</p></div>'
+    html += '<p>Premier League football news: Arsenal and Liverpool announce new transfers.</p>'
+    body = article_text_from_html(html)
+    assert 'streaming access' not in body and 'Arsenal' not in body
+    assert classify_article('Littler exits World Grand Prix', body).sport == 'darts'
+
+
+def test_verified_bst_offset_does_not_promote_yesterdays_sky_news_into_today():
+    from bot.fetch_sources import _rss_publication_time
+    from bot.feeds import FEEDS
+    from bot.news_policy import editorial_day_reason
+    cfg = next(x for x in FEEDS if x['url'] == 'https://www.skysports.com/rss/12040')
+    raw = {'published': 'Mon, 28 Sep 2026 14:30:00 BST'}
+    parsed = _rss_publication_time(raw, cfg)
+    assert parsed == datetime(2026, 9, 28, 13, 30, tzinfo=timezone.utc)
+    assert editorial_day_reason(parsed, datetime(2026, 9, 29, 1, tzinfo=timezone.utc), 'Australia/Sydney') == 'not_editorial_today'
+    assert _rss_publication_time({'published': 'Mon, 28 Sep 2026 14:30:00 GMT'}, cfg).hour == 14
+    # A publisher without a confirmed mapping is never assigned a guessed zone.
+    assert _rss_publication_time(raw, {}).tzinfo is None
+
+
+def test_rugby_latest_discovery_never_spends_hydration_budget_on_navigation(monkeypatch):
+    from bot import news_official_indexes as idx
+    cfg = next(x for x in idx.HTML_INDEXES if x['id'] == 'rugbypass-rugby-news')
+    html = '<nav><a class="link-box" href="/news/rugby-transfers/">Transfers</a></nav>'
+    html += '<a class="link-box" href="/news/old-pinned-story/">Old pinned story</a>'
+    html += '<div class="latest right-column"><article><a class="link-box" href="/news/player-extension/">Player extension</a></article></div>'
+    html += '<a class="link-box" href="/news/most-commented/">Most commented</a>'
+    monkeypatch.setattr(idx, 'read_news_feed', lambda url: html.encode())
+    assert idx._anchor_candidates(cfg) == [('https://www.rugbypass.com/news/player-extension/', 'Player extension')]

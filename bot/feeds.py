@@ -18,6 +18,7 @@ class Feed(TypedDict, total=False):
 
 
 FEEDS: List[Feed] = [
+    {'url': 'https://www.wielerflits.nl/feed/', 'kind': 'league', 'sport': 'cycling', 'publisher': 'WielerFlits', 'enabled': True, 'note': 'Exact UTC RSS and matching article publication metadata; scoped Dutch cycling reports with same-article photos. No league stamp; all originality and factual gates remain required.'},
     {'url': 'https://www.golfmonthly.com/feeds.xml', 'kind': 'league', 'sport': 'golf', 'publisher': 'Golf Monthly', 'enabled': True, 'allowed_article_paths': ('/news/',), 'excluded_article_paths': ('/news/live/',), 'note': 'Publisher-advertised RSS with exact UTC dates and scoped public article prose. Excludes equipment, coaching, betting and live products; same-article photo gates remain mandatory.'},
     {'url': 'https://www.eurohoops.net/en/feed/', 'kind': 'league', 'sport': 'basketball', 'publisher': 'Eurohoops', 'enabled': True, 'note': 'Publisher-advertised English RSS: exact UTC publication dates, full prose and same-article 950x500 photographs verified. Broad NBA/EuroLeague/national-team coverage without league stamp; betting products held.'},
     {'url': 'https://lnfoficial.com.br/noticias/feed/', 'kind': 'league', 'sport': 'futsal', 'publisher': 'Liga Nacional de Futsal', 'verified_official': True, 'enabled': True, 'note': 'Official replacement linked by ligafutsal.com.br: exact UTC RSS timestamps, scoped article prose and same-article match photos verified. Expo invitations remain held; no invented publication times or league stamp.'},
@@ -41,7 +42,7 @@ FEEDS: List[Feed] = [
     {'url': 'https://www.espn.com/espn/rss/nba/news', 'kind': 'league', 'sport': 'basketball', 'league': 'nba', 'country': 'usa', 'enabled': True, 'rss_fallback_only': True},
     {'url': 'https://www.espn.com/espn/rss/ncb/news', 'kind': 'league', 'sport': 'basketball', 'league': 'ncaa-basketball', 'country': 'usa', 'enabled': True, 'rss_fallback_only': True},
     {'url': 'https://feeds.bbci.co.uk/sport/football/scottish-premiership/rss.xml', 'kind': 'league', 'sport': 'football', 'league': 'scotland-premiership', 'country': 'scotland', 'enabled': True},
-    {'url': 'https://www.skysports.com/rss/29328', 'kind': 'league', 'sport': 'football', 'league': 'scotland-premiership', 'country': 'scotland', 'enabled': True},
+    {'url': 'https://www.skysports.com/rss/29328', 'kind': 'league', 'sport': 'football', 'league': 'scotland-premiership', 'country': 'scotland', 'enabled': True, 'rss_timezone_aliases': {'BST': '+0100'}},
     {'url': 'https://www.hln.be/sport/voetbal/rss.xml', 'kind': 'league', 'sport': 'football', 'enabled': True, 'note': 'Belgian football-only feed; sport hint only, never league stamp'},
     {'url': 'https://www.record.pt/rss', 'kind': 'mixed', 'enabled': True, 'note': 'Portuguese general sport; classify independently'},
     {'url': 'https://isport.blesk.cz/rss', 'kind': 'mixed', 'enabled': True, 'note': 'Czech general sport; classify independently'},
@@ -61,7 +62,7 @@ FEEDS: List[Feed] = [
     {'url': 'https://www.b92.net/rss/sport', 'kind': 'mixed', 'enabled': True, 'note': 'Serbian sports reporting; classify by article evidence and bounded section paths, never stamp football on mixed feed.'},
     {'url': 'https://www.handball-planet.com/feed/', 'kind': 'league', 'sport': 'handball', 'enabled': False, 'note': 'RSS dates and full prose verified; article HTTP 403 and no feed photographs. Hold until a usable article image path is verified.'},
     {'url': 'https://feeds.bbci.co.uk/sport/football/german/rss.xml', 'kind': 'disabled', 'enabled': False, 'note': '404 / mismatched tags; Bundesliga still needs a replacement RSS'},
-    {'url': 'https://www.skysports.com/rss/12040', 'kind': 'disabled', 'enabled': False, 'note': 'General Sky firehose mis-stamped as Premier League'},
+    {'url': 'https://www.skysports.com/rss/12040', 'kind': 'mixed', 'publisher': 'Sky Sports', 'enabled': True, 'rss_timezone_aliases': {'BST': '+0100'}, 'note': 'Mixed sports only: no automatic football or league stamp. Explicit UK BST offset, scoped article prose and real editorial photos verified; streaming adverts excluded.'},
     {'url': 'https://www.skysports.com/rss/12040/championship', 'kind': 'disabled', 'enabled': False, 'note': 'Not well-formed XML'},
     {'url': 'https://www.bundesliga.com/en/bundesliga/rss-feed', 'kind': 'disabled', 'enabled': False, 'note': 'Not well-formed XML'},
     {'url': 'https://www.kicker.de/bundesliga/rss', 'kind': 'disabled', 'enabled': False, 'note': 'Returns HTML'},

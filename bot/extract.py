@@ -551,9 +551,10 @@ def _json_ld_article_body(html: str) -> str:
 
 class _ScopedNewsBody(HTMLParser):
     """Capture a known CMS article body, excluding later recommendation grids."""
-    def __init__(self, body_class="single-news-content"):
+    def __init__(self, body_class="single-news-content", *, body_id=None):
         super().__init__(convert_charrefs=False)
         self.body_class = body_class
+        self.body_id = body_id
         self.root_tag = None
         self.depth = 0
         self.finished = False
@@ -563,7 +564,9 @@ class _ScopedNewsBody(HTMLParser):
         if self.finished:
             return
         if not self.depth:
-            if self.body_class in dict(attrs).get('class', '').split():
+            values = dict(attrs)
+            if ((self.body_id and values.get('id') == self.body_id)
+                    or (not self.body_id and self.body_class in values.get('class', '').split())):
                 self.root_tag = tag
                 self.depth = 1
             return
@@ -597,6 +600,7 @@ class _ScopedNewsBody(HTMLParser):
 
 def article_text_from_html(html: str) -> str:
     body_class = 'single-news-content' if 'single-news-content' in (html or '') else None
+    body_id = None
     # Mozzart's article container is distinct from headline grids and betting
     # widgets. Only apply its class under its own canonical publisher metadata.
     canonical = _og(html or '', 'og:url') or _metadata(html or '', 'canonical') or _meta_name(html or '', 'url') or ''
@@ -630,8 +634,12 @@ def article_text_from_html(html: str) -> str:
         body_class = 'copy-row'
     if publisher_host in {'ustrottingnews.com', 'www.ustrottingnews.com'}:
         body_class = 'entry-content'
-    if body_class:
-        scoped = _ScopedNewsBody(body_class)
+    if publisher_host in {'wielerflits.nl', 'www.wielerflits.nl'}:
+        body_id = 'single-content'
+    if publisher_host in {'skysports.com', 'www.skysports.com'}:
+        body_class = 'sdc-article-body'
+    if body_class or body_id:
+        scoped = _ScopedNewsBody(body_class, body_id=body_id)
         try:
             scoped.feed(html)
             scoped.close()
@@ -644,6 +652,10 @@ def article_text_from_html(html: str) -> str:
     if publisher_host in {'www.rugbypass.com', 'rugbypass.com'}:
         # The publisher app advertisement is appended inside its prose block.
         text = re.split(r'(?im)^Your home for rugby\.', text, maxsplit=1)[0].strip()
+    if publisher_host in {'skysports.com', 'www.skysports.com'}:
+        text = '\n\n'.join(p for p in text.split('\n\n')
+                          if not (re.match(r'(?i)^(?:watch|stream|upgrade|get|not got sky)\b', p)
+                                  and re.search(r'(?i)\b(?:sky sports|contract on now|not got sky)\b', p)))
     text = strip_site_chrome(text) or text
     if is_site_chrome_text(text):
         text = ""

@@ -26,6 +26,7 @@ from .extract import (
     collect_page_image_candidates,
     page_published_at_from_html,
     page_title_from_html,
+    _ScopedNewsBody,
 )
 from .news_feed_http import read_news_feed
 from .news_policy import editorial_day_reason, freshness_reason, non_article_news_reason
@@ -39,6 +40,7 @@ HTML_INDEXES = (
         'id': 'rugbypass-rugby-news', 'sport': 'rugby', 'publisher': 'RugbyPass',
         'url': 'https://www.rugbypass.com/', 'host': 'www.rugbypass.com',
         'paths': ('/news/',), 'verified_official': False,
+        'index_body_class': 'latest', 'anchor_class': 'link-box',
         # RSS dates are naive. Hydrate the article's explicit UTC publication
         # metadata instead; /plus/ subscription articles are not admitted.
     },
@@ -490,6 +492,12 @@ def _anchor_candidates(cfg: Dict) -> List[tuple[str, str]]:
             if len(output) >= MAX_LINKS_PER_SOURCE:
                 break
         return output
+    if cfg.get('index_body_class'):
+        scoped = _ScopedNewsBody(cfg['index_body_class'])
+        scoped.feed(html)
+        if not scoped.finished:
+            return []
+        html = ''.join(scoped.parts)
     parser = _AnchorParser(cfg.get("anchor_class"))
     try:
         parser.feed(html)

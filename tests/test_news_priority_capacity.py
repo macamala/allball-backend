@@ -134,6 +134,22 @@ def test_429_shared_across_purposes_and_cycles_charges_only_actual_requests(pool
     assert any(provider == 'groq' for provider, _ in external.configured_identities())
 
 
+def test_cloudflare_alternate_error_code_needs_explicit_daily_quota_message(pool, caplog):
+    response = httpx.Response(429, json={'errors': [{'code': 4006,
+        'message': 'You have used up your daily free allocation of 10,000 neurons. secret-do-not-log'}]})
+    external._http_failure('cloudflare', response)
+    assert 'limit_dimension=daily_free_neurons' in caplog.text
+    assert 'secret-do-not-log' not in caplog.text
+    assert external._COOLDOWN_UNTIL['cloudflare'] > pool[0] + 600
+
+
+def test_cloudflare_unknown_4006_is_not_assumed_to_be_daily_quota(pool, caplog):
+    response = httpx.Response(429, json={'errors': [{'code': 4006, 'message': 'Unspecified capacity issue'}]})
+    external._http_failure('cloudflare', response)
+    assert 'limit_dimension=unknown' in caplog.text
+    assert external._COOLDOWN_UNTIL['cloudflare'] == pool[0] + 600
+
+
 @pytest.mark.parametrize('value,seconds', [('7.66s', 7.66), ('2m59.56s', 179.56),
     ('1h2m3s', 3723), ('45', 45), ('nan', None), ('999999h', None), ('garbage', None)])
 def test_provider_retry_windows(value, seconds):
