@@ -673,6 +673,37 @@ def _correct_confirmed_mccabe_copy(article: Article, tax) -> dict:
     return changes
 
 
+def _correct_confirmed_fss_copy(article: Article) -> dict:
+    """Repair the exact audited original; preserve its date, slug and status."""
+    try:
+        source = urlsplit(article.source_url or '')
+    except ValueError:
+        return {}
+    if (article.id != 22191 or not article.ai_generated
+            or source.hostname != 'fss.rs'
+            or source.path.rstrip('/') != '/a-tim-promene-u-sastavu-pred-nastavak-lige-nacija'):
+        return {}
+    replacements = {
+        'Veľko Paukovic': 'Veljko Paunović',
+        'Ognen Mimovic': 'Ognjen Mimović',
+        'Dragun Rosic': 'Dragan Rosić',
+        'Voivodina': 'Vojvodina',
+        'a home game against Germany in Munich': 'an away game against Germany in Munich',
+    }
+    changes = {}
+    for field in ('summary', 'content', 'ai_content'):
+        value = getattr(article, field, None)
+        if not value:
+            continue
+        revised = value
+        for old, new in replacements.items():
+            revised = revised.replace(old, new)
+        if revised != value:
+            setattr(article, field, revised)
+            changes[field] = {'before': value, 'after': revised}
+    return changes
+
+
 def repair_recent_gossip_news(
     db: Session,
     *,
@@ -703,6 +734,18 @@ def repair_recent_gossip_news(
     corrected = 0
     reasons = {}
     for article, tax in rows:
+        fss_changes = _correct_confirmed_fss_copy(article)
+        if fss_changes:
+            db.add(article)
+            from bot.news_learning import record_incident
+            record_incident(db, reason_code='serbian_name_spelling_and_away_fixture',
+                article_id=article.id, source_url=article.source_url, sport='football',
+                phase='postpublish', status='auto_corrected',
+                writer_provider='news-audit', writer_model='deterministic',
+                details={'evidence': 'FSS: Вељко Пауновић; Огњен Мимовић; Драгану Росићу; Војводине; гостовање Немачкој у Минхену',
+                         'changes': fss_changes})
+            corrected += 1
+            logger.info('[public_index] corrected confirmed FSS names and away fixture article=%s', article.id)
         mccabe_changes = _correct_confirmed_mccabe_copy(article, tax)
         if mccabe_changes:
             db.add_all([article, tax])

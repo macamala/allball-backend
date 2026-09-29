@@ -8,6 +8,7 @@ unsupported facts before publication.
 from __future__ import annotations
 
 import re
+import unicodedata
 from difflib import SequenceMatcher
 from typing import Optional
 
@@ -134,6 +135,49 @@ def competition_in_source(competition: str, text: str) -> bool:
                for alias in meta.get('aliases', []) if alias.strip())
 
 
+# Confirmed FSS transcription incident. These are spelling equivalences only,
+# activated by the corresponding source name; they add no role or match facts.
+_SERBIAN_NAME_FORMS = (
+    (r'Вељк[оу]\s+Пауновић\w*', 'Veljko Paunović'),
+    (r'Огњен\w*\s+Мимовић\w*', 'Ognjen Mimović'),
+    (r'Драган\w*\s+Росић\w*', 'Dragan Rosić'),
+    (r'Војводин\w*', 'Vojvodina'),
+)
+
+
+def source_name_spellings(source: str) -> str:
+    names = [name for pattern, name in _SERBIAN_NAME_FORMS
+             if re.search(pattern, source or '', re.I)]
+    return ', '.join(names)
+
+
+def _ascii_name(value: str) -> str:
+    return ''.join(c for c in unicodedata.normalize('NFKD', value.casefold())
+                   if not unicodedata.combining(c))
+
+
+def _serbian_transcription_reason(source: str, output: str) -> Optional[str]:
+    words = re.findall(r'[A-Za-z\u00c0-\u024f]+', output or '')
+    words = [_ascii_name(word) for word in words]
+    for pattern, canonical in _SERBIAN_NAME_FORMS:
+        if not re.search(pattern, source or '', re.I):
+            continue
+        expected = _ascii_name(canonical).split()
+        for index in range(len(words) - len(expected) + 1):
+            candidate = words[index:index + len(expected)]
+            if candidate == expected:
+                continue
+            # Fuzzy matching only REJECTS a near-spelled name. It never grants
+            # identity, repairs text or supplies a fact for publication.
+            if all(SequenceMatcher(None, a, b).ratio() >= .72
+                   for a, b in zip(candidate, expected)):
+                return 'source_name_spelling:' + canonical
+    if (re.search(r'гостовање\s+Немачкој\s+у\s+Минхену', source or '', re.I)
+            and re.search(r'\b(?:home (?:game|match|fixture)|host(?:s|ing)? Germany)\b', output or '', re.I)):
+        return 'reversed_home_away'
+    return None
+
+
 def fact_lock_reason(
     draft: dict,
     source_title: str,
@@ -155,6 +199,9 @@ def fact_lock_reason(
         str(draft.get(key) or "") for key in ("title", "summary", "body")
     )
     source = f"{source_title or ''}\n{source_body or ''}"
+    transcription_reason = _serbian_transcription_reason(source, output)
+    if transcription_reason:
+        return transcription_reason
     if expected_sport == 'football':
         from .taxonomy import COMPETITIONS
         for competition, meta in COMPETITIONS.items():
