@@ -240,6 +240,50 @@ def _serbian_transcription_reason(source: str, output: str) -> Optional[str]:
     return None
 
 
+def _football_player_binding_reason(source: str, output: str) -> Optional[str]:
+    """Check explicit player/count/position bindings in audited source formats.
+
+    These are source comparisons, never a player database or inferred lineup.
+    Unmatched formats still require the independent semantic validator.
+    """
+    name = r"[A-ZÀ-ÖØ-Þ][\w’'-]+(?: [A-ZÀ-ÖØ-Þ][\w’'-]+){1,3}"
+    count = r'(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)'
+    caps = {}
+    for match in re.finditer(
+        rf'({name}),\s*(?i:(?:seulement\s+)?(\d+)\s+sélections(?:\s+au compteur)?\s+avant cette rencontre)', source
+    ):
+        caps[match[1].casefold()] = int(match[2])
+    if caps:
+        from .news_policy import numeric_tokens
+        for match in re.finditer(
+            rf'({name}),?\s+[^.!?\n]{{0,55}}?\b({count})\s+(?:international\s+|national-team\s+)?(?:caps|appearances)\b', output
+        ):
+            values = numeric_tokens(match[2], include_spelled=True)
+            value = int(next(iter(values))) if len(values) == 1 else None
+            if value in caps.values() and caps.get(match[1].casefold()) != value:
+                return 'misattributed_player_caps'
+        ordinals = dict(zip('first second third fourth fifth sixth seventh eighth ninth tenth'.split(), range(1, 11)))
+        for player, prior_count in caps.items():
+            for match in re.finditer(re.escape(player) + r'\b[^.!?\n]{0,65}\b(' + '|'.join(ordinals) + r'|\d+(?:st|nd|rd|th))\s+(?:international\s+)?appearance\b', output, re.I):
+                ordinal = match[1].lower()
+                value = ordinals.get(ordinal) or int(re.sub(r'\D', '', ordinal))
+                if value == prior_count:
+                    return 'changed_appearance_time_scope'
+    positions = {}
+    for match in re.finditer(
+        rf'(?i:couloir\s+(gauche|droit)\s+de la défense)[^.!?\n]{{0,90}}?\b({name})', source
+    ):
+        positions.setdefault(match[2].casefold(), set()).add('left' if match[1].casefold() == 'gauche' else 'right')
+    for player, sides in positions.items():
+        if len(sides) != 1:
+            continue
+        other = 'right' if 'left' in sides else 'left'
+        wrong = rf'(?:cent(?:er|re)[ -]back|central defen[cs](?:e|ive)|{other}[ -]back|{other}(?: side| flank)? of (?:the )?defen[cs]e)'
+        if re.search(re.escape(player) + rf'\b[^.!?\n]{{0,90}}?\b{wrong}\b', output, re.I):
+            return 'changed_defensive_side'
+    return None
+
+
 def fact_lock_reason(
     draft: dict,
     source_title: str,
@@ -261,6 +305,10 @@ def fact_lock_reason(
         str(draft.get(key) or "") for key in ("title", "summary", "body")
     )
     source = f"{source_title or ''}\n{source_body or ''}"
+    if expected_sport == 'football':
+        binding_reason = _football_player_binding_reason(source, output)
+        if binding_reason:
+            return binding_reason
     if (expected_sport == 'football' and re.search(r'\bcaptain\b', output, re.I)
             and not re.search(r'(?<!\w)(?:captain(?:s|cy|ed)?|kapiten\w*|капитен\w*|капитан\w*|capitain\w*|kapitän\w*|capit[áa]n\w*|capit[aã]o|capitano|capit[âa]n)(?!\w)', source, re.I)):
         return 'unsupported_player_role:captain'

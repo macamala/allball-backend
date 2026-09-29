@@ -155,3 +155,54 @@ def test_kayode_repair_removes_uncredited_assist_ratings_and_author_only():
     assert 'assisting' not in a.summary and '4-1 in Bursa' in a.summary
     assert a.content == 'The 22-year-old Brentford defender marked his senior international debut.'
     assert _correct_confirmed_football_prose(a) == {}
+
+
+PLAYER_SOURCE = ('La présence de Pierre Kalulu, seulement 3 sélections au compteur avant cette rencontre. '
+    'Sur le couloir gauche de la défense, c’était une double première presque pour Andy Diouf. '
+    'Lucas Da Cunha a débuté au milieu.')
+
+
+@pytest.mark.parametrize('body,reason', [
+    ('Lucas Da Cunha, a Côme player with only three caps, started in midfield.', 'misattributed_player_caps'),
+    ('Pierre Kalulu, making his third appearance for the national team, played on the right flank.', 'changed_appearance_time_scope'),
+    ('Andy Diouf debuted in a central defensive role.', 'changed_defensive_side'),
+    ('Andy Diouf played as a right-back.', 'changed_defensive_side'),
+    ('Pierre Kalulu, who had three caps before the match, played on the right flank.', None),
+    ('Andy Diouf played on the left side of defence. Lucas Da Cunha started in midfield.', None),
+])
+def test_player_statistics_keep_their_owner_time_and_defensive_side(body, reason):
+    assert guard._football_player_binding_reason(PLAYER_SOURCE, body) == reason
+
+
+def test_matching_cap_counts_for_two_named_players_are_not_a_misattribution():
+    source = PLAYER_SOURCE + ' Lucas Da Cunha, seulement 3 sélections au compteur avant cette rencontre.'
+    assert guard._football_player_binding_reason(source, 'Lucas Da Cunha, with three caps, played in midfield.') is None
+    assert guard._football_player_binding_reason('Andy Diouf played in central defence.', 'Andy Diouf played as a centre-back.') is None
+
+
+@pytest.mark.parametrize('public', [True, False])
+def test_source_compared_france_correction_preserves_public_archive_and_never_resurrects(public):
+    engine = create_engine('sqlite:///:memory:')
+    for model in (Article, ArticleTaxonomyResolution, NewsIncident): model.__table__.create(engine)
+    with Session(engine) as db:
+        stamp = datetime.utcnow()
+        bad = ('Pierre Kalulu, making his third appearance for the national team, played on the right flank, while '
+               'Andy Diouf debuted in a central defensive role despite limited prior experience in that position. '
+               'Lucas Da Cunha, a Côme player with only three caps, started in midfield.')
+        a = Article(id=22213,title='France prepares for Nations League match',slug='stable-france',
+            content=bad,ai_content=bad,ai_generated=True,sport='football',published_at=stamp,image_url='https://photo.test/france.jpg',
+            source_url='https://rmcsport.bfmtv.com/football/equipe-de-france/belgique-france-le-coach-m-a-donne-toute-sa-confiance-les-conseils-de-zinedine-zidane-avant-les-debuts-des-petits-nouveaux_AV-202609290379.html')
+        tax=ArticleTaxonomyResolution(article_id=a.id,resolved_sport='football',public_ok=public,resolver_version=RESOLVER_VERSION)
+        db.add_all([a,tax]);db.commit()
+        assert repair_recent_gossip_news(db) == int(public)
+        assert a.published_at==stamp and a.slug=='stable-france' and a.image_url=='https://photo.test/france.jpg'
+        assert tax.public_ok is public and db.get(Article,22213) is not None
+        if public:
+            assert 'three national-team appearances before the match' in a.content
+            assert 'left side of defence' in a.content and 'with only three caps' not in a.content
+            assert a.content==a.ai_content and guard._football_player_binding_reason(PLAYER_SOURCE,a.content) is None
+            assert db.query(NewsIncident).filter_by(reason_code='confirmed_football_prose_scope',status='auto_corrected').count()==1
+        else:
+            assert a.content==bad
+        assert repair_recent_gossip_news(db)==0
+    engine.dispose()

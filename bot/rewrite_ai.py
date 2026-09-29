@@ -76,6 +76,7 @@ NON-NEGOTIABLE:
 - Every numeric token in the draft must already appear in the supplied source facts. Never calculate, infer or add a year, age, score, count, ranking or date.
 - Preserve every person, team, competition and venue name EXACTLY as supplied. Do not create a new capitalized label for them.
 - If the source gives only a surname, do not add a given name from memory.
+- Keep every cap count attached to the named player and its time: three appearances BEFORE the match does not make this the third appearance. Never transfer that count to another player. Left-side defence is not central defence.
 - A debut at a particular stadium is not an international debut. A shot followed by a rebound goal is not an officially credited assist unless the source explicitly calls it an assist.
 - Omit author biographies, editor credits and newspaper player-rating roundups; these are not facts of the sporting development.
 - Never use direct quotations or quotation marks for reported statements. Paraphrase only what is explicitly stated.

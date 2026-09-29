@@ -799,6 +799,7 @@ def _correct_confirmed_football_prose(article: Article) -> dict:
         22206: 'https://www.footmercato.net/a2290739679306661964-un-ancien-prodige-du-real-madrid-evoque-un-eventuel-retour',
         22207: 'https://fss.rs/dusan-tadic-pokazali-smo-zajednistvo-i-borbenost-to-je-put-kojim-treba-da-idemo/',
         22210: 'https://football-italia.net/kayode-impresses-italy-debut-palestra-duel/',
+        22213: 'https://rmcsport.bfmtv.com/football/equipe-de-france/belgique-france-le-coach-m-a-donne-toute-sa-confiance-les-conseils-de-zinedine-zidane-avant-les-debuts-des-petits-nouveaux_AV-202609290379.html',
     }
     if not article.ai_generated or sources.get(article.id) != article.source_url:
         return {}
@@ -837,6 +838,13 @@ def _correct_confirmed_football_prose(article: Article) -> dict:
                     ' Lorenzo Bettoni serves as the Editor of Football Italia.',
                 ):
                     new = new.replace(fragment, '')
+        elif article.id == 22213:
+            new = new.replace('Pierre Kalulu, making his third appearance for the national team,',
+                'Pierre Kalulu, who had three national-team appearances before the match,')
+            new = new.replace('Andy Diouf debuted in a central defensive role despite limited prior experience in that position.',
+                'Andy Diouf played on the left side of defence for the first time and said the position was unfamiliar to him.')
+            new = new.replace('Lucas Da Cunha, a Côme player with only three caps,',
+                'Lucas Da Cunha, a Côme player,')
         if new != old:
             setattr(article, field, new)
             changes[field] = {'before': old, 'after': new}

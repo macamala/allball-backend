@@ -391,6 +391,10 @@ Check WHO did each action, not just whether the names and action appear somewher
 in the source. Never transfer one person's employment, biography, injury, result
 or quotation to another person named in the same article. Resolve pronouns from
 their source context. If the actor is uncertain, reject the claim.
+Bind each cap/appearance count to its player and time. Three caps BEFORE this
+match cannot support calling this the third appearance or assigning three caps
+to another player. Preserve left/right/central defensive positions exactly;
+French couloir gauche de la défense means the left side, not central defence.
 Check singular roles before a list: naming an assistant coach and another person
 does not establish that both are assistant coaches. Never pluralize a shared role
 without explicit source support. Preserve the exact cause of a travel disruption:

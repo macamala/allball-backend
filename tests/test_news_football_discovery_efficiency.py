@@ -4,6 +4,7 @@ from email.utils import format_datetime
 from bot import fetch_sources
 from bot.feeds import FEEDS
 from bot.news_policy import non_article_news_reason, source_path_sport_hint
+from bot.news_football_priority import football_editorial_priority
 
 
 def test_mozzart_football_rss_preserves_exact_dates_and_rejects_future_and_other_sports(monkeypatch):
@@ -43,3 +44,13 @@ def test_fundraising_hospitality_is_rejected_but_sporting_and_charity_news_survi
     assert non_article_news_reason({'title': 'LUDI TIKET, utorak, 370.849 dinara: Majstorija sa Zlatibora'}) == 'non_article_betting_product'
     assert non_article_news_reason({'title': 'Rezzime jučeršanjeg dan (ponedeljak): Zamalo pa perfekcija',
         'url': 'https://www.mozzartsport.com/fudbal/vesti/rezzime-jucersanjeg-dan-ponedeljak-zamalo-pa-perfekcija/555066'}) == 'non_article_betting_product'
+
+
+def test_primary_zvezda_priority_uses_current_subject_not_old_club_in_full_rss_body():
+    base={'url':'https://www.mozzartsport.com/fudbal/vesti/story/555001','feed':{'sport':'football'}}
+    assert football_editorial_priority({**base,'title':'Crvena zvezda potpisala novog igrača'})==2
+    assert football_editorial_priority({**base,'title':'Novi ugovor za napadača','summary':'Crvena zvezda je potvrdila produžetak ugovora.'})==2
+    for lead in ('Nekadašnji đak Crvene zvezde sada igra u Jermeniji.',
+                 'Grafičar je pobedio u obračunu filijala Crvene zvezde i Partizana.',
+                 'A current international football story. '*10 + 'Previously he played for Crvena zvezda.'):
+        assert football_editorial_priority({**base,'title':'Player scores for new team','summary':lead})!=2

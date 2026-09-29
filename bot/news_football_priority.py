@@ -26,9 +26,18 @@ def football_editorial_priority(item, tags=None):
     except ValueError:
         host, path = '', ''
     title = str(item.get('title') or '').casefold()
-    text = title + ' ' + str(item.get('summary') or '').casefold()
+    summary = str(item.get('summary') or '').casefold()
+    text = title + ' ' + summary
+    zvezda_pattern = r'\b(?:crven(?:a|e|oj|u|om)\s+zvezd(?:a|e|i|u|om)|црвен(?:а|е|ој|у|ом)\s+звезд(?:а|е|и|у|ом)|red star belgrade)\b'
+    # Some RSS descriptions contain the entire article. An incidental former
+    # club or reserve affiliate must not displace major-league reporting.
+    lead = summary[:280]
+    lead_match = re.search(zvezda_pattern, lead)
+    current_club_lead = bool(lead_match and not re.search(
+        r'\b(?:bivš\w*|bivs\w*|nekadašnj\w*|nekadasnj\w*|former|ex|filijal\w*)\b',
+        lead[max(0, lead_match.start()-90):lead_match.start()]))
     if (host == 'crvenazvezdafk.com'
-            or re.search(r'\b(?:crven(?:a|e|oj|u|om)\s+zvezd(?:a|e|i|u|om)|црвен(?:а|е|ој|у|ом)\s+звезд(?:а|е|и|у|ом)|red star belgrade)\b', text)
+            or re.search(zvezda_pattern, title) or current_club_lead
             or re.search(r'(?:^|/)crvena-zvezda(?:/|$)', path)):
         return 2
     league = getattr(tags, 'league', None) if tags is not None else feed.get('league')
