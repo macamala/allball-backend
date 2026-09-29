@@ -207,6 +207,10 @@ def test_mixed_grand_prix_uses_explicit_sport_in_factual_lead():
     ('Betting on EuroLeague Teams That Might Lose Their Stars to the NBA Mid-Contract', True),
     ('Besiktas Are Back in the EuroLeague – What the Odds Say About Promoted Clubs', True),
     ('NBA player suspended after betting investigation', False),
+    ('REZZIME DANA (ponedeljak): Severnoirci i Tunišani upropastili savršen tiket | Mozzart Sport', True),
+    ('REZIME DANA: Dva gola odlučila sudbinu tiketa', True),
+    ('Rezime dana: Zvezda potpisala novog napadača', False),
+    ('Zvezda prodala sve ulaznice za evropsku utakmicu', False),
 ])
 def test_betting_advice_is_not_current_sports_reporting(title, held):
     assert (non_article_news_reason({'title': title}) == 'non_article_betting_product') is held
