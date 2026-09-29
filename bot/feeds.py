@@ -1,6 +1,7 @@
 """RSS sources. Mixed feeds are allowed only with independent classification."""
 
 import os
+from urllib.parse import urlsplit
 
 from typing import Dict, List, Optional, TypedDict
 
@@ -74,10 +75,18 @@ FEEDS: List[Feed] = [
 ]
 
 
+def news_source_is_excluded(url: str) -> bool:
+    """Publisher exclusions apply to News intake and article-page repairs."""
+    host = (urlsplit(str(url or "")).hostname or "").lower()
+    return any(host == root or host.endswith('.' + root)
+               for root in ('bbc.com', 'bbc.co.uk', 'bbci.co.uk'))
+
+
 def enabled_feeds() -> List[Feed]:
     rows = [feed for feed in FEEDS if feed.get("enabled")]
     if os.getenv("NEWS_EXPANDED_FEEDS_ENABLED") == "1":
         from .news_verified_feeds import VERIFIED_RSS
         rows += [dict(feed) for feed in VERIFIED_RSS]
     # Do not fetch identical URLs twice or mutate the static catalog.
-    return list({feed["url"]: feed for feed in rows}.values())
+    return list({feed["url"]: feed for feed in rows
+                 if not news_source_is_excluded(feed["url"])}.values())

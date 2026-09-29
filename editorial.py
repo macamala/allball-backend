@@ -596,7 +596,7 @@ MEDIA_CREST_RE = re.compile(
 )
 MEDIA_GRAPHIC_RE = re.compile(
     r"(?:infographic|og[-_]?default|placeholder|sprite|watermark|site[-_]?icon|"
-    r"promo(?:tional)?|(?<![a-z])brand(?:ing)?(?![a-z])|podcast|sounds|newsletter|subscribe|"
+    r"promo(?:tional)?|(?<![a-z])brand(?:ed|ing)?(?![a-z])|podcast|sounds|newsletter|subscribe|"
     r"social[-_]?(?:share|image)|sharing[-_]?image|default[-_]?social|"
     r"app[-_]?download|app[-_]?icon|tile|tracking|pixel|related[-_]?thumb|"
     r"programme[-_]?brand|72[-_]?plus|72plus|football[-_]?daily|"

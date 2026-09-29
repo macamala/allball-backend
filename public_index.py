@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from editorial import classify_media_url, evaluate_quality, news_image_is_publishable
 from bot.news_image_http import score_news_image_candidate
+from bot.feeds import news_source_is_excluded
 from models import Article, ArticleTaxonomyResolution
 from sport_match import MAIN_SPORTS, isolation_ok
 from bot.taxonomy import COMPETITIONS
@@ -289,7 +290,7 @@ def _reachable_source_image(
     from bot.extract import extract_image_candidates_from_url
     from bot.news_image_http import news_image_is_reachable, news_hero_url
 
-    if _legacy_non_news_source_url(source_url):
+    if _legacy_non_news_source_url(source_url) or news_source_is_excluded(source_url):
         return None
 
     # Repair a verified same-photo hero size before fetching a whole source page.
@@ -397,10 +398,17 @@ def repair_recent_news_images(
     )
 
     probes = probe_news_images(
-        [article.image_url for article, _tax in rows if article.image_url],
+        [article.image_url for article, _tax in rows
+         if article.image_url and news_image_is_publishable(article.image_url)],
         max_workers=6,
     )
+    # Reachable bytes do not make a logo/title card an editorial photograph.
+    # Apply the same type gate as ingestion before restoring public visibility.
+    probes.update({article.image_url: (False, 'non_editorial_hero')
+                   for article, _tax in rows
+                   if not news_image_is_publishable(article.image_url)})
     definitive_reasons = {
+        "non_editorial_hero",
         "invalid_or_nonpublic_url",
         "redirect_without_location",
         "redirect_limit",

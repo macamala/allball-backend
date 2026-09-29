@@ -238,3 +238,22 @@ def test_public_repair_aligns_reachable_but_unrelated_photo_and_remembers_check(
     assert pages == [article.source_url]
     db.commit.assert_called_once()
     public_index._SOURCE_IMAGE_CHECKED.clear()
+
+
+def test_reachable_branded_card_is_held_if_no_real_article_photo(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    import public_index
+    branded = 'https://ichef.bbci.co.uk/ace/branded_sport/1200/cpsprodpb/fixture.jpg'
+    article = SimpleNamespace(id=9901, image_url=branded, source_url='https://www.bbc.co.uk/sport/football/articles/fixture')
+    tax = SimpleNamespace(public_ok=True, hero_media_kind='EDITORIAL_PHOTO')
+    db = Mock()
+    query = db.query.return_value.join.return_value.filter.return_value.order_by.return_value.limit.return_value
+    query.all.side_effect = [[(article, tax)], []]
+    requests = []
+    monkeypatch.setattr(images, 'probe_news_images', lambda urls, **kw: requests.extend(urls) or {u: (True, 'ok') for u in urls})
+    monkeypatch.setattr(public_index, '_reachable_source_image', lambda *args, **kw: None)
+    assert public_index.repair_recent_news_images(db, recover_limit=1) == 1
+    assert not tax.public_ok and tax.hero_media_kind == 'MISSING' and article.image_url is None
+    assert branded not in requests
+    db.commit.assert_called_once()

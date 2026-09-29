@@ -14,6 +14,7 @@ import httpx
 from .quality import is_substantial_source
 from .site_chrome import is_site_chrome_text, strip_site_chrome
 from .textutil import clean_text, word_count
+from .feeds import news_source_is_excluded
 
 logger = logging.getLogger(__name__)
 
@@ -640,7 +641,7 @@ def extract_image_candidates_from_url(url: str, timeout: float = 12.0) -> List[d
     not choose a winner; callers can probe several ranked candidates when a
     publisher's primary og:image has expired.
     """
-    if not url:
+    if not url or news_source_is_excluded(url):
         return []
     try:
         with httpx.Client(timeout=timeout, follow_redirects=True, headers=EXTRACT_HEADERS) as client:
@@ -678,7 +679,7 @@ def extract_from_url(url: str, timeout: float = 18.0) -> Tuple[str, Optional[str
     Empty text means extraction failed; caller must not invent facts.
     Never substitutes og:description / RSS metadata for the article body.
     """
-    if not url:
+    if not url or news_source_is_excluded(url):
         return "", None
     try:
         with httpx.Client(timeout=timeout, follow_redirects=True, headers=EXTRACT_HEADERS) as client:

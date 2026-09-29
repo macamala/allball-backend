@@ -32,7 +32,7 @@ from sports_registry.sports import SPORTS
 from .classify import Classification, classify_article
 from .dedupe import existing_by_url, existing_near_duplicate, unprocessed_source_items
 from .extract import extract_from_url, parse_feed_datetime, paragraphs_from_html
-from .feeds import enabled_feeds
+from .feeds import enabled_feeds, news_source_is_excluded
 from .news_feed_http import read_news_feed
 from .news_image_http import news_image_is_reachable, news_hero_url, score_news_image_candidate
 from .media_url import collect_feed_image_candidates, pick_source_image, width_from_url
@@ -326,6 +326,8 @@ def _make_unique_slug(db: Session, base_slug: str, skip_article_id: Optional[int
 
 def _fetch_feed_entries(feed_cfg: Dict, max_articles: int) -> List[Dict]:
     url = feed_cfg["url"]
+    if news_source_is_excluded(url):
+        return []
     logger.info("[fetch_sources] Fetching RSS kind=%s url=%s", feed_cfg.get("kind"), url)
     feed = feedparser.parse(read_news_feed(url))
     entries = list(feed.entries or []) if feed.version else []
@@ -484,6 +486,8 @@ def _ingest_item(
     first_coverage: bool = False,
 ) -> tuple:
     """Returns (created_article_or_None, ai_used_bool)."""
+    if news_source_is_excluded(item.get("url")):
+        return None, False
     # Budget absence is never permission to publish copied source prose.
     if not use_ai or ai_budget <= 0 or openai_rate_limited():
         return None, False

@@ -5,6 +5,30 @@ from bot import news_fact_guard as guard
 from bot.news_policy import non_article_news_reason
 
 
+def test_excluded_publisher_is_never_fetched_or_ingested(monkeypatch):
+    from bot import extract, fetch_sources, feeds
+    import public_index
+    monkeypatch.setenv('NEWS_EXPANDED_FEEDS_ENABLED', '1')
+    assert feeds.enabled_feeds()
+    assert all(not feeds.news_source_is_excluded(f['url']) for f in feeds.enabled_feeds())
+    assert any('eurohoops.net' in f['url'] for f in feeds.enabled_feeds())
+    assert not feeds.news_source_is_excluded('https://notbbc.com/report')
+    assert not feeds.news_source_is_excluded('https://example.test/report?source=bbc.com')
+    def forbidden(*args, **kwargs):
+        pytest.fail('Excluded source must never reach extraction, transport or AI')
+    monkeypatch.setattr(extract.httpx, 'Client', forbidden)
+    monkeypatch.setattr(fetch_sources, 'read_news_feed', forbidden)
+    monkeypatch.setattr(fetch_sources, 'openai_rate_limited', forbidden)
+    monkeypatch.setattr(public_index, 'news_image_is_publishable', forbidden)
+    for url in ('https://www.bbc.com/sport/article', 'https://www.bbc.co.uk/sport/article',
+                'https://feeds.bbci.co.uk/sport/rss.xml'):
+        assert extract.extract_from_url(url) == ('', None)
+        assert extract.extract_image_candidates_from_url(url) == []
+        assert fetch_sources._fetch_feed_entries({'url': url}, 1) == []
+        assert fetch_sources._ingest_item(None, {'url': url}, True, 1000, 1) == (None, False)
+        assert public_index._reachable_source_image(url, current_url='https://cdn.example/photo.jpg') is None
+
+
 @pytest.mark.parametrize("sport,title,body", [
     ("darts", "Littler stunned by Waterhouse at World Grand Prix", "Waterhouse advanced after defeating Littler."),
     ("water-polo", "Novi Beograd keeps perfect record beating Budva", "The Champions League qualifiers returned to domestic competition."),
@@ -134,7 +158,7 @@ def test_nba_image_fallback_excludes_recommendations_and_brandon_is_not_branding
     images = collect_page_image_candidates(html)
     assert {i['url'] for i in images} == {'https://cdn.nba.com/manage/hero.jpg', 'https://cdn.nba.com/manage/ingram.jpg'}
     assert score_news_image_candidate(next(i for i in images if i['source'] == 'body')) >= 0
-    for url in ['https://example.test/brand/photo.jpg', 'https://example.test/branding.jpg', 'https://example.test/team_brand_tile.jpg']:
+    for url in ['https://example.test/brand/photo.jpg', 'https://example.test/branding.jpg', 'https://example.test/team_brand_tile.jpg', 'https://ichef.bbci.co.uk/ace/branded_sport/1200/cpsprodpb/fixture.jpg']:
         assert classify_media_url(url) == 'GRAPHIC'
 
 
