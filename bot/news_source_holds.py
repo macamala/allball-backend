@@ -17,15 +17,17 @@ logger = logging.getLogger(__name__)
 _MEMORY = {}
 _MEMORY_MAX = 1000
 _SCHEMA_READY = False
+_EDITORIAL_RETRY_REASONS = {
+    'direct_quote_requires_review',
+    'headline_too_similar_to_source',
+    'copied_source_headline',
+}
 
 
 def _retryable_reason(reason: str | None) -> bool:
     value = str(reason or "")
     return (
         value in {
-            "direct_quote_requires_review",
-            "headline_too_similar_to_source",
-            "copied_source_headline",
             "validator-unavailable",
             "validator-independent-unavailable",
             "empty",
@@ -147,6 +149,11 @@ def hold_source(url: str, reason: str = "rejected", hours: int = 6) -> None:
     if not key:
         return
     hours = max(1, min(int(hours), 72))
+    # hold_source runs after the bounded corrective rewrite already failed.
+    # Retrying that same quote/headline every ten minutes starves other news.
+    # Keep it eligible for a later writer attempt, with a one-hour pause.
+    if str(reason or '') in _EDITORIAL_RETRY_REASONS:
+        hours = min(hours, 1)
     _memory_hold(key, hours)
     dsn = _postgres_dsn()
     if not dsn:

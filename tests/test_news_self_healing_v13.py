@@ -361,7 +361,8 @@ def test_event_claim_words_defer_to_semantic_validator():
 
 def test_retryable_old_hold_reasons():
     from bot.news_source_holds import _retryable_reason
-    assert _retryable_reason("direct_quote_requires_review")
+    # A failed bounded correction now waits before spending another cycle.
+    assert not _retryable_reason("direct_quote_requires_review")
     assert _retryable_reason("unsupported_proper_name:fixture")
     assert _retryable_reason("unsupported_claim_family:appointment")
     assert _retryable_reason("validator-unavailable")
