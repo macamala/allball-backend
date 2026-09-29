@@ -398,6 +398,12 @@ def non_article_news_reason(item):
     if re.search(r"\b(?:full schedule|medal (?:tally|winners)|full list of (?:athletes|medals))\b", title):
         return "non_article_service_guide"
     copy = " ".join(str((item or {}).get(k) or "") for k in ("summary", "body"))
+    # Club behind-the-scenes video releases must not become a second match
+    # report after a writer removes the programme name from its headline.
+    if (re.search(r'\binside anfield\b', title + ' ' + copy + ' ' + path.replace('-', ' '), re.I)
+            and (title.startswith('inside anfield') or '/news/inside-anfield-' in path
+                 or re.search(r'\b(?:episode|install?ment|released video footage)\b', copy, re.I))):
+        return 'non_article_video_feature'
     if re.search(r"\bno (?:further|additional|specific) .{0,100}\b(?:provided|mentioned|supplied|detailed) (?:in|by) (?:the )?(?:(?:verified|reported|supplied) )?(?:source|release|material|facts|context)\b", copy, re.I):
         return "non_news_source_meta_filler"
     if re.search(r"\b(?:source|reported context|verified facts|provided information|supplied material|statement)\b.{0,80}\b(?:does not|did not|doesn't|didn't) (?:specify|identify|detail|provide)\b|\bno specific (?:teams|players|athletes|scenarios|details)\b.{0,60}\b(?:detailed|provided|identified|specified)\b", copy, re.I):

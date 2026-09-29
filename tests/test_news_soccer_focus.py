@@ -118,6 +118,15 @@ def test_new_football_sources_keep_only_news_products(url, reason):
     assert non_article_news_reason({'url': url, 'title': 'Federation confirms decision'}) == reason
 
 
+def test_club_video_episode_remains_a_video_after_a_news_like_rewrite():
+    assert non_article_news_reason({'title': 'Inside Anfield: Behind the scenes of the derby'}) == 'non_article_video_feature'
+    assert non_article_news_reason({'title': 'Liverpool women secure first home derby win over Everton in WSL',
+        'summary': "A new Inside Anfield episode documents the club's victory against Everton.",
+        'body': 'The released video footage provides unseen moments and alternative angles.'}) == 'non_article_video_feature'
+    assert non_article_news_reason({'title': 'Liverpool women end Anfield hoodoo with derby victory over Everton',
+        'body': 'Gareth Taylor praised his players following the match.'}) is None
+
+
 @pytest.mark.parametrize('audited', [False, True])
 def test_photo_fix_expires_only_audited_prefixed_cooldowns(monkeypatch, audited):
     from bot import news_source_holds as holds
