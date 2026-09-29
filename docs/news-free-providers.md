@@ -26,6 +26,26 @@ limits remain provider-controlled: another route adds capacity but does not
 guarantee 500 articles per day. A quota or auth rejection cools down that
 provider across writing, validation and translation, without logging secrets.
 
+## Optional Groq writer pool
+
+`NEWS_GROQ_WRITER_FALLBACK_MODELS=openai/gpt-oss-20b` adds the documented
+Groq Free Plan production model to the writer lane on the existing account.
+It does not call the paid OpenAI API or change the account's billing plan.
+No other fallback IDs are accepted. The fallback cannot serve as a validator
+or translator; another provider must validate every completed draft.
+
+Groq quota holds are model-specific only when the actual 429 response explicitly
+names the requested model and a recognized token/request limit. Each route
+obeys its Retry-After. Unknown/account-wide limits, billing errors and 401/403
+hold all models. Cloudflare daily free allocation remains account-wide. Every
+attempt, including a rejected primary request, still consumes the common ledger.
+Two Groq models never count as two independent providers.
+
+Groq references, checked 2026-09-29:
+- https://console.groq.com/docs/models
+- https://console.groq.com/docs/rate-limits
+- https://console.groq.com/docs/model/openai/gpt-oss-20b
+
 Official references, checked 2026-09-29:
 - https://docs.mistral.ai/getting-started/quickstarts/studio/activate-and-generate-api-key
 - https://docs.mistral.ai/admin/billing-usage/usage-limits

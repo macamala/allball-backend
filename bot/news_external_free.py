@@ -32,10 +32,19 @@ _PURPOSES = ("writer", "validator", "translation")
 _UNAVAILABLE = {name: set() for name in _PURPOSES}
 _CURSOR = {name: 0 for name in _PURPOSES}
 _COOLDOWN_UNTIL = {}
+# Explicitly supported production model in Groq's Free Plan on 2026-09-29.
+# Writer-only: the existing independent validator remains the publication gate.
+_GROQ_FREE_WRITER_FALLBACKS = frozenset({'openai/gpt-oss-20b'})
 
 
-def _provider_ready(provider: str) -> bool:
-    return time.monotonic() >= _COOLDOWN_UNTIL.get(provider, 0.0)
+def _route_key(provider: str, model: str) -> str:
+    return provider + ':' + model
+
+
+def _provider_ready(provider: str, model: str = '') -> bool:
+    now = time.monotonic()
+    return (now >= _COOLDOWN_UNTIL.get(provider, 0.0)
+            and (not model or now >= _COOLDOWN_UNTIL.get(_route_key(provider, model), 0.0)))
 
 
 def _retry_seconds(value) -> Optional[float]:
@@ -59,7 +68,7 @@ def _retry_seconds(value) -> Optional[float]:
     return None
 
 
-def _http_failure(provider: str, response) -> None:
+def _http_failure(provider: str, response, *, model: str = '') -> None:
     """Share provider quota/auth failures across purposes; never log response bodies."""
     status = response.status_code
     if status not in {401, 403, 429}:
@@ -68,6 +77,7 @@ def _http_failure(provider: str, response) -> None:
     seconds = _retry_seconds(headers.get("retry-after"))
     dimension = "unknown"
     error_codes = []
+    model_scope = False
     if status == 429:
         try:
             payload = response.json()
@@ -94,17 +104,26 @@ def _http_failure(provider: str, response) -> None:
                 if marker in message or re.search(r"\b" + code + r"\b", message):
                     dimension = code
                     break
+            # Only an explicit model-specific Groq quota scopes the hold to one
+            # route. Auth, billing, unknown limits and Cloudflare's account-wide
+            # daily allowance always hold the entire provider. No key rotation.
+            model_scope = bool(provider == 'groq' and model
+                and dimension in {'tpd', 'rpd', 'tpm', 'rpm'}
+                and not re.search(r'\b(billing|payment|credit|balance|spend)\b', message)
+                and re.search(r'\brate limit (?:reached|exceeded) for model\s+[`\"\x27]?' + re.escape(model.lower())
+                              + r'[`\"\x27]?(?=\s|[,.;])', message))
         except (ValueError, TypeError, AttributeError):
             pass
         if seconds is None:
             reset_key = "x-ratelimit-reset-requests" if dimension == "rpd" else "x-ratelimit-reset-tokens"
             seconds = _retry_seconds(headers.get(reset_key)) if dimension in {"rpd", "tpm"} else None
     seconds = seconds or (3600 if status in {401, 403} else 600)
-    _COOLDOWN_UNTIL[provider] = max(_COOLDOWN_UNTIL.get(provider, 0), time.monotonic() + seconds)
+    scope = _route_key(provider, model) if model_scope else provider
+    _COOLDOWN_UNTIL[scope] = max(_COOLDOWN_UNTIL.get(scope, 0), time.monotonic() + seconds)
     for unavailable in _UNAVAILABLE.values():
-        unavailable.add(provider)
-    logger.warning("[external_free] provider=%s status=%s cooldown_seconds=%s limit_dimension=%s error_codes=%s",
-                   provider, status, int(seconds), dimension, error_codes)
+        unavailable.add(scope)
+    logger.warning("[external_free] provider=%s status=%s cooldown_seconds=%s limit_dimension=%s error_codes=%s model_scope=%s",
+                   provider, status, int(seconds), dimension, error_codes, model if model_scope else 'all')
 
 
 def enabled() -> bool:
@@ -152,13 +171,34 @@ def _config(provider: str) -> Optional[dict]:
     return None
 
 
-def configured_identities(purpose: str = "writer") -> tuple[tuple[str, str], ...]:
-    purpose = purpose if purpose in _UNAVAILABLE else "writer"
+def _configs(purpose: str) -> list[dict]:
     rows = []
     for provider in _PROVIDERS:
         cfg = _config(provider)
-        if cfg and provider not in _UNAVAILABLE[purpose] and _provider_ready(provider):
-            rows.append((provider, cfg["model"]))
+        if not cfg:
+            continue
+        rows.append(cfg)
+        if provider == 'groq' and purpose == 'writer':
+            requested = os.getenv('NEWS_GROQ_WRITER_FALLBACK_MODELS', '').split(',')
+            for model in dict.fromkeys(value.strip() for value in requested):
+                if model in _GROQ_FREE_WRITER_FALLBACKS and model != cfg['model']:
+                    rows.append({**cfg, 'model': model})
+    return rows
+
+
+def _route_ready(cfg: dict, purpose: str) -> bool:
+    provider, model = cfg['provider'], cfg['model']
+    return (provider not in _UNAVAILABLE[purpose]
+            and _route_key(provider, model) not in _UNAVAILABLE[purpose]
+            and _provider_ready(provider, model))
+
+
+def configured_identities(purpose: str = "writer") -> tuple[tuple[str, str], ...]:
+    purpose = purpose if purpose in _UNAVAILABLE else "writer"
+    rows = []
+    for cfg in _configs(purpose):
+        if _route_ready(cfg, purpose):
+            rows.append((cfg['provider'], cfg["model"]))
     return tuple(rows)
 
 
@@ -176,9 +216,7 @@ def reset() -> None:
 
 def _ordered_configs(purpose: str, avoid_provider: Optional[str] = None) -> list[dict]:
     purpose = purpose if purpose in _UNAVAILABLE else "writer"
-    rows = [cfg for name in _PROVIDERS if (cfg := _config(name))]
-    rows = [row for row in rows if row["provider"] not in _UNAVAILABLE[purpose]
-            and _provider_ready(row["provider"])]
+    rows = [cfg for cfg in _configs(purpose) if _route_ready(cfg, purpose)]
     if not rows:
         return []
     offset = _CURSOR[purpose] % len(rows)
@@ -247,7 +285,7 @@ def _groq(cfg: dict, system: str, user: str, max_tokens: int, json_mode: bool):
                 json=payload,
             )
         if response.status_code != 200:
-            _http_failure("groq", response)
+            _http_failure("groq", response, model=cfg['model'])
             logger.warning("[external_free] groq http_status=%s", response.status_code)
             return None
         return _choice_text(response.json())
@@ -353,6 +391,10 @@ def completion(
 ) -> tuple[Optional[str], tuple[str, str]]:
     purpose = purpose if purpose in _UNAVAILABLE else "writer"
     for cfg in _ordered_configs(purpose, avoid_provider=avoid_provider):
+        # An earlier route may have just discovered a provider-wide auth/quota
+        # hold. Respect it before trying another config from the same snapshot.
+        if not _route_ready(cfg, purpose):
+            continue
         if cfg["provider"] == "groq":
             value = _groq(cfg, system, user, max_tokens, json_mode)
         elif cfg["provider"] == "mistral":
@@ -362,5 +404,5 @@ def completion(
         if value:
             return value, (cfg["provider"], cfg["model"])
         # Do not hammer a failed transport/shape route again in this cycle.
-        _UNAVAILABLE[purpose].add(cfg["provider"])
+        _UNAVAILABLE[purpose].add(_route_key(cfg['provider'], cfg['model']))
     return None, ("unknown", "unknown")
