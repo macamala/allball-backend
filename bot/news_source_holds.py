@@ -244,6 +244,18 @@ def held_source_urls(urls) -> set[str]:
             )
             if cursor.rowcount:
                 logger.info('[source_holds] expired audited pre-fix Zvezda CIES cooldown=%s', cursor.rowcount)
+            # The later review rejected the source's Serbian transcription
+            # even after correction. Canonical spellings are now supplied to
+            # both writer and independent validator; all gates run again.
+            cursor.execute(
+                "UPDATE news_ai_source_holds SET expires_at=NOW(), "
+                "reason='audited-player-spellings-repaired', updated_at=NOW() "
+                "WHERE source_hash=%s AND expires_at > NOW() "
+                "AND reason='validator-changed-name' AND updated_at < %s::timestamptz",
+                (hashes[_ZVEZDA_CIES_REPAIR_URL], '2026-09-29T07:53:00Z'),
+            )
+            if cursor.rowcount:
+                logger.info('[source_holds] expired audited pre-fix Zvezda name cooldown=%s', cursor.rowcount)
         repaired_photo_keys = [hashes[url] for url in values if url in _FSS_PHOTO_REPAIR_URLS]
         if repaired_photo_keys:
             # Two audited FSS pages expose valid full-size article photos in

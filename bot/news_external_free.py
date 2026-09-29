@@ -409,7 +409,9 @@ def _cloudflare(cfg: dict, system: str, user: str, max_tokens: int, json_mode: b
         # without returning a usable verdict. Keep the strict downstream schema
         # and independent-provider checks; never salvage an incomplete verdict.
         payload['response_format'] = {'type': 'json_object'}
-        payload['max_tokens'] = max(1400, payload['max_tokens'])
+        # Production returned finish=length at 1400 on a short Cyrillic
+        # source. Leave bounded room for the model's reasoning and verdict.
+        payload['max_tokens'] = max(4096, payload['max_tokens'])
     try:
         with httpx.Client(
             timeout=httpx.Timeout(120, connect=8), follow_redirects=False

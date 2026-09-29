@@ -31,7 +31,7 @@ def test_cloudflare_verdict_requests_json_and_preserves_rejection(monkeypatch, t
     assert json.loads(raw) == verdict
     assert budget.attempts == len(requests) == 1
     assert requests[0]['response_format'] == {'type': 'json_object'}
-    assert requests[0]['max_tokens'] == 1400
+    assert requests[0]['max_tokens'] == 4096
 
 
 def test_cloudflare_incomplete_verdict_is_not_salvaged(monkeypatch, caplog):

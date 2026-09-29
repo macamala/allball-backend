@@ -166,6 +166,13 @@ _SERBIAN_NAME_FORMS = (
     (r'Огњен\w*\s+Мимовић\w*', 'Ognjen Mimović'),
     (r'Драган\w*\s+Росић\w*', 'Dragan Rosić'),
     (r'Војводин\w*', 'Vojvodina'),
+    (r'(?<!\w)Стефан(?:а|у|ом)?\s+Гудељ(?:а|у|ем)?(?!\w)', 'Stefan Gudelj'),
+    # Audited against the players' official Barcelona, Liverpool and Real
+    # Madrid profiles on 2026-09-29. Surname-only source evidence does not add
+    # a given name, team, role or any biographical fact.
+    (r'(?<!\w)Кубарси(?:ја|ју|јем)?(?!\w)', 'Cubarsí'),
+    (r'(?<!\w)Жереми(?:ја|ју|јем)?\s+Жаке(?:а|у|ом)?(?!\w)', 'Jeremy Jacquet'),
+    (r'(?<!\w)Дин(?:а|у|ом)?\s+Хујсен(?:а|у|ом)?(?!\w)', 'Dean Huijsen'),
 )
 
 
@@ -173,6 +180,16 @@ def source_name_spellings(source: str) -> str:
     names = [name for pattern, name in _SERBIAN_NAME_FORMS
              if re.search(pattern, source or '', re.I)]
     return ', '.join(names)
+
+
+def source_name_equivalences(source: str) -> str:
+    """Only audited identities actually present in this source, no new facts."""
+    pairs = []
+    for pattern, canonical in _SERBIAN_NAME_FORMS:
+        match = re.search(pattern, source or '', re.I)
+        if match:
+            pairs.append(f'{match.group(0)} = {canonical}')
+    return '; '.join(pairs)
 
 
 def _ascii_name(value: str) -> str:

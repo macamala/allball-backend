@@ -450,6 +450,13 @@ def validate_free_story(
         + "\n\nDRAFT SUMMARY:\n" + (draft_summary or "")[:1200]
         + "\n\nDRAFT BODY:\n" + (draft_body or "")[:9000]
     )
+    from .news_fact_guard import source_name_equivalences
+    names = source_name_equivalences((source_title or '') + '\n' + (source_facts or ''))
+    if names:
+        user += ('\n\nAUDITED SOURCE NAME SPELLINGS:\n' + names
+                 + '\nThese are spelling equivalences for names present in the source, not new facts. '
+                   'Accept these equivalent spellings only; still reject different people, misspellings, '
+                   'changed roles or unsupported claims. Do not infer a club or biography from a name.')
     raw = None
     writer_provider, _writer_model = _LAST_WRITER.get()
     try:

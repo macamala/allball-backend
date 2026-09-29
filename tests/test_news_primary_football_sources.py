@@ -54,6 +54,8 @@ def test_primary_queue_filters_clearly_nonnews_formats():
         ('The Nations League is a welcome example of soccer done well','non_article_analysis'),
         ('La conspiración de que Vinicius no es Vinicius y fue reemplazado tras el Mundial','non_news_conspiracy')]:
         assert non_article_news_reason({'title':title}) == reason
+    assert non_article_news_reason({'title':'Training gallery: Back to work!'}) == 'non_article_photo_gallery'
+    assert non_article_news_reason({'title':'Equipe de France: comment prononce-t-on vraiment le nom de Lucas Da Cunha?'}) == 'non_article_service_guide'
 
 
 @pytest.mark.parametrize('audited',[True,False])
@@ -75,8 +77,11 @@ def test_only_exact_prefixed_cies_false_hold_can_be_retried(monkeypatch,audited)
     monkeypatch.setattr(holds,'_ensure_schema',lambda _:None)
     assert holds.held_source_urls([url]) == {url}  # Other semantic reasons stay held.
     writes = [(q,p) for q,p in statements if q.startswith('UPDATE')]
-    assert len(writes)==int(audited)
+    assert len(writes)==2*int(audited)
     if audited:
         q,p=writes[0]
         assert "reason='unsupported_acronym:CIES'" in q and 'updated_at < %s::timestamptz' in q
         assert p==(holds._fingerprint(url),'2026-09-29T07:35:00Z')
+        q,p=writes[1]
+        assert "reason='validator-changed-name'" in q and 'updated_at < %s::timestamptz' in q
+        assert p==(holds._fingerprint(url),'2026-09-29T07:53:00Z')

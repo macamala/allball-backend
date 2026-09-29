@@ -455,6 +455,8 @@ def non_article_news_reason(item):
 
     if re.search(r"\bpodcast\b|^nbl (?:overtime|now)\b", title) or "/iplayer/episode/" in path or "/podcasts/" in path:
         return "non_article_podcast"
+    if re.search(r"\b(?:comment prononce-t-on|how to pronounce)\b", title):
+        return "non_article_service_guide"
     if re.search(r"\bscorecard\b", title) or "/scorecard/" in path:
         return "non_article_scorecard"
     if re.search(r"\b(?:all-time top scorers?|top international scorers?|most-capped|record collection|how he has scored)\b", title):
@@ -466,7 +468,7 @@ def non_article_news_reason(item):
     if re.search(r"\b(?:roster tracker|off-season tracker|player movement tracker)\b", title):
         return "non_article_rolling_tracker"
     if re.search(r"/(?:photos|photo-gallery|gallery|galleries)/|/news/(?:gallery|photos|in-pictures)-", path) or re.search(
-        r"\b(?:photo gallery|in pictures|in photos)\b", title
+        r"\b(?:photo gallery|training gallery|in pictures|in photos)\b", title
     ):
         return "non_article_photo_gallery"
     # Confirmed photo-gallery incident: the CMS uses an ordinary /news/ URL.
