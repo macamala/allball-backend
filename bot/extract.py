@@ -596,10 +596,11 @@ def _json_ld_article_body(html: str) -> str:
 
 class _ScopedNewsBody(HTMLParser):
     """Capture a known CMS article body, excluding later recommendation grids."""
-    def __init__(self, body_class="single-news-content", *, body_id=None, collect_all=False):
+    def __init__(self, body_class="single-news-content", *, body_id=None, body_tag=None, collect_all=False):
         super().__init__(convert_charrefs=False)
         self.body_class = body_class
         self.body_id = body_id
+        self.body_tag = body_tag
         self.collect_all = collect_all
         self.root_tag = None
         self.root_attrs = {}
@@ -611,6 +612,8 @@ class _ScopedNewsBody(HTMLParser):
         if self.finished and not self.collect_all:
             return
         if not self.depth:
+            if self.body_tag and tag != self.body_tag:
+                return
             values = dict(attrs)
             if ((self.body_id and values.get('id') == self.body_id)
                     or (not self.body_id and self.body_class in values.get('class', '').split())):
@@ -652,8 +655,11 @@ class _ScopedNewsBody(HTMLParser):
 
 
 def article_text_from_html(html: str) -> str:
+    if (_og(html or '', 'og:type') or '').lower().startswith(('video', 'music')):
+        return ''
     body_class = 'single-news-content' if 'single-news-content' in (html or '') else None
     body_id = None
+    body_tag = None
     source_category = None
     # Mozzart's article container is distinct from headline grids and betting
     # widgets. Only apply its class under its own canonical publisher metadata.
@@ -675,6 +681,7 @@ def article_text_from_html(html: str) -> str:
     if publisher_host == 'football-italia.net':
         # The author biography is a sibling of article.small.single.
         body_class = 'single'
+        body_tag = 'article'  # WordPress body also carries class="single".
     if publisher_host == 'aleagues.com.au':
         article = _ScopedNewsBody('main-article')
         article.feed(html)
@@ -720,7 +727,7 @@ def article_text_from_html(html: str) -> str:
         # Fail closed if it is absent instead of treating recommendations as facts.
         body_class = 'elementor-widget-my-custom-post-content'
     if body_class or body_id:
-        scoped = _ScopedNewsBody(body_class, body_id=body_id)
+        scoped = _ScopedNewsBody(body_class, body_id=body_id, body_tag=body_tag)
         try:
             scoped.feed(html)
             scoped.close()
@@ -805,6 +812,13 @@ def extract_image_candidates_from_url(url: str, timeout: float = 12.0) -> List[d
     return output
 
 
+_NON_ARTICLE_DOCUMENTS: dict[str, str] = {}
+
+
+def non_article_document_reason(url: str) -> Optional[str]:
+    return _NON_ARTICLE_DOCUMENTS.get(url)
+
+
 def extract_from_url(url: str, timeout: float = 18.0) -> Tuple[str, Optional[str]]:
     """
     Returns (article_text, image_url_or_none).
@@ -825,6 +839,15 @@ def extract_from_url(url: str, timeout: float = 18.0) -> Tuple[str, Optional[str
         return "", None
 
     image = None
+    _NON_ARTICLE_DOCUMENTS.pop(url, None)
+    media_type = (_og(html, 'og:type') or '').lower()
+    if media_type.startswith(('video', 'music')):
+        reason = 'non_article_video_source' if media_type.startswith('video') else 'non_article_audio_source'
+        if len(_NON_ARTICLE_DOCUMENTS) >= 512:
+            _NON_ARTICLE_DOCUMENTS.pop(next(iter(_NON_ARTICLE_DOCUMENTS)), None)
+        _NON_ARTICLE_DOCUMENTS[url] = reason
+        logger.info('[extract] hold document type=%s url=%s', reason, url[:180])
+        return '', None
     try:
         from .news_image_http import pick_news_article_image
 

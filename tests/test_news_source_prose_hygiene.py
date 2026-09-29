@@ -29,13 +29,57 @@ def test_remaining_placeholder_and_author_bio_fail_admission():
 
 def test_football_italia_scope_excludes_author_bio_and_video_promotion():
     html = ('<meta property="og:url" content="https://football-italia.net/report/">'
+            '<body class="post-template-default single single-post">'
             '<article class="small single"><p>The defender scored on his first appearance for the national team. '
             'The coach praised his work with the squad after the final whistle.</p>'
             '<p>Find out more about his career in the video below.</p></article>'
-            '<div class="mg-info-author-block"><p>Lorenzo Bettoni is the Editor of Football Italia.</p></div>')
+            '<div class="mg-info-author-block"><p>Lorenzo Bettoni is the Editor of Football Italia.</p></div></body>')
     text = article_text_from_html(html)
     assert 'defender scored' in text and 'Lorenzo' not in text and 'video below' not in text
     assert article_text_from_html(html.replace('class="small single"', 'class="missing"')) == ''
+
+
+def test_video_document_cannot_fall_back_to_rss_description(monkeypatch):
+    from bot import extract
+    from bot.fetch_sources import source_article_facts
+    url = 'https://www.sportschau.de/fussball/dfb-sammelueberspielung-112.html'
+    class Client:
+        def __init__(self, **kwargs): pass
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def get(self, url): return SimpleNamespace(status_code=200,
+            text='<meta property="og:type" content="video.other"><p>A video description with football names.</p>')
+    monkeypatch.setattr(extract.httpx, 'Client', Client)
+    monkeypatch.setattr(extract, '_NON_ARTICLE_DOCUMENTS', {})
+    assert extract.extract_from_url(url) == ('', None)
+    assert source_article_facts('', 'A long video caption. '*15, url) == ('', 'non-article-source')
+    assert article_text_from_html('<meta property="og:type" content="video.other"><p>Football news caption</p>') == ''
+    assert non_article_news_reason({'title':'German squad news','url':'https://www.sportschau.de/fussball/news,dfb-sammelueberspielung-112.html'}) == 'non_article_video_feature'
+
+
+def test_taranto_archived_summary_marker_is_corrected_and_restored(monkeypatch):
+    monkeypatch.setattr('bot.news_image_http.news_image_is_reachable', lambda url: True)
+    engine = create_engine('sqlite:///:memory:')
+    for model in (Article, ArticleTaxonomyResolution, NewsIncident): model.__table__.create(engine)
+    with Session(engine) as db:
+        stamp = datetime.utcnow()
+        body = ("Adelaide United have appointed Adriana Taranto as their captain for the coming women's football season. "
+                "The midfielder will lead the team in the 2026/27 Ninja A-League Women's campaign. "
+                "The club announced the appointment as the squad continued its preparations for the season.")
+        a = Article(id=22195,title="Adelaide United name Adriana Taranto captain for 2026/27 Ninja A-League women's season",
+            slug='stable-taranto',summary='[Blank Line]',content=body,ai_content=body,ai_generated=True,sport='football',
+            image_url='https://photo.test/taranto.jpg',published_at=stamp,
+            source_url='https://aleagues.com.au/news/news-adriana-taranto-named-new-adelaide-united-captain/')
+        tax=ArticleTaxonomyResolution(article_id=22195,resolved_sport='football',sport_confidence=.98,
+            public_ok=False,resolver_version=RESOLVER_VERSION,hero_media_kind='EDITORIAL_PHOTO')
+        incident=NewsIncident(article_id=22195,reason_code='draft_placeholder',phase='postpublish',
+            status='open',severity='block',writer_provider='news-audit',writer_model='deterministic',confirmed=False)
+        db.add_all([a,tax,incident]);db.commit()
+        assert repair_recent_gossip_news(db) == 1 and tax.public_ok
+        assert incident.status == 'auto_corrected' and 'Taranto' in a.summary and '[' not in a.summary
+        assert a.content==body and a.published_at==stamp and a.slug=='stable-taranto'
+        assert repair_recent_gossip_news(db) == 0
+    engine.dispose()
 
 
 def test_stadium_debut_and_rebound_cannot_be_expanded(monkeypatch):

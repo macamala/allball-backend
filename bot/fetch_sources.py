@@ -98,6 +98,9 @@ def source_article_facts(
     RSS is discovery metadata when a real article page exists.
     Returns (facts, origin) where origin is source|rss|missing-source|none.
     """
+    from .extract import non_article_document_reason
+    if non_article_document_reason(source_url):
+        return '', 'non-article-source'
     extracted_clean = strip_site_chrome(extracted or "") or (extracted or "")
     rss_clean = strip_site_chrome(rss_text or "") or (rss_text or "")
     extracted_ok = bool(extracted_clean) and not is_site_chrome_text(extracted_clean)
@@ -554,6 +557,11 @@ def _ingest_item(
     if not extracted:
         extracted, extracted_image = extract_from_url(source_url)
     facts, origin = source_article_facts(extracted, rss_text, source_url)
+    if origin == 'non-article-source':
+        from .extract import non_article_document_reason
+        _hold_ai_source(source_url, non_article_document_reason(source_url))
+        logger.info('[fetch_sources] hold confirmed media source url=%s', source_url[:180])
+        return None, False
     facts = strip_truncation_markers(facts)
     if origin == "missing-source" or not facts or is_site_chrome_text(facts) or not enough_for_brief(item["title"], facts):
         logger.info(

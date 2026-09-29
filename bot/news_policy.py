@@ -548,6 +548,8 @@ def non_article_news_reason(item):
             return 'non_article_analysis'
         if '/en-directo/' in path:
             return 'non_article_live_program'
+    if host == 'www.sportschau.de' and re.search(r',[^,]*sammelueberspielung-', path):
+        return 'non_article_video_feature'
     if host == 'www.sportschau.de' and re.search(r',(?:video|audio|live)-', path):
         return 'non_article_video_highlights' if ',video-' in path else 'non_article_live_program'
     if host in {'ardsounds.de', 'www.ardsounds.de'} and path.startswith('/episode/'):

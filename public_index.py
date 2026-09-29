@@ -779,6 +779,10 @@ def _correct_confirmed_taranto_format(article: Article) -> dict:
             or source.path.rstrip('/') != '/news/news-adriana-taranto-named-new-adelaide-united-captain'):
         return {}
     changes = {}
+    if re.fullmatch(r'\[?blank\s+line\]?', (getattr(article, 'summary', None) or '').strip(), re.I):
+        previous = article.summary
+        article.summary = "Adriana Taranto will captain Adelaide United in the 2026/27 Ninja A-League Women's season."
+        changes['summary'] = {'before': previous, 'after': article.summary}
     for field in ('content', 'ai_content'):
         value = getattr(article, field, None)
         if value and '[Blank Line]' in value:
@@ -916,7 +920,7 @@ def repair_recent_gossip_news(
         )
         .filter(
             ArticleTaxonomyResolution.resolver_version == RESOLVER_VERSION,
-            or_(ArticleTaxonomyResolution.public_ok.is_(True), Article.id.in_((22166, 22202, 22204, 22205, 22207))),
+            or_(ArticleTaxonomyResolution.public_ok.is_(True), Article.id.in_((22166, 22195, 22202, 22204, 22205, 22207))),
             func.coalesce(Article.published_at, Article.created_at) >= cutoff,
         )
         .order_by(
@@ -972,6 +976,17 @@ def repair_recent_gossip_news(
         format_changes = _correct_confirmed_taranto_format(article)
         if format_changes:
             db.add(article)
+            from bot.news_learning import mark_auto_corrected
+            from models import NewsIncident
+            for incident in db.query(NewsIncident).filter(
+                    NewsIncident.article_id == article.id, NewsIncident.reason_code == 'draft_placeholder',
+                    NewsIncident.writer_provider == 'news-audit', NewsIncident.writer_model == 'deterministic',
+                    NewsIncident.phase == 'postpublish', NewsIncident.status == 'open',
+                    NewsIncident.confirmed.is_(False)).all():
+                mark_auto_corrected(db, incident, note='Exact source-confirmed Taranto formatting correction; full public gates rechecked')
+            from bot.news_image_http import news_image_is_reachable
+            if news_image_is_reachable(article.image_url):
+                persist_public_article(db, article, cache_row_to_resolution(tax), commit=False)
             from bot.news_learning import record_incident
             record_incident(db, reason_code='draft_placeholder',
                 article_id=article.id, source_url=article.source_url, sport='football',
