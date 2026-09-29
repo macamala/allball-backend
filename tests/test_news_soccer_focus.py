@@ -82,6 +82,7 @@ def test_marca_body_and_images_stay_inside_the_report():
 
 
 @pytest.mark.parametrize('url,reason', [
+    ('https://www.marca.com/futbol/2026/09/28/leganes-0-2-castellon-resumen-video.html', 'non_article_video_highlights'),
     ('https://www.marca.com/futbol/seleccion/opinion/2026/09/29/example.html', 'non_article_analysis'),
     ('https://www.marca.com/futbol/en-directo/2026/09/29/example.html', 'non_article_live_program'),
     ('https://www.sportschau.de/fussball/nationsleague/match,video-nations-league-100.html', 'non_article_video_highlights'),

@@ -475,6 +475,8 @@ def non_article_news_reason(item):
     if host == "www.record.pt" and path.startswith("/fora-de-campo/"):
         return "non_sports_off_field_section"
     if host == 'www.marca.com':
+        if path.endswith('-video.html'):
+            return 'non_article_video_highlights'
         if '/opinion/' in path:
             return 'non_article_analysis'
         if '/en-directo/' in path:
