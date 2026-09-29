@@ -374,6 +374,7 @@ in the source. Never transfer one person's employment, biography, injury, result
 or quotation to another person named in the same article. Resolve pronouns from
 their source context. If the actor is uncertain, reject the claim.
 Do not use outside knowledge or assumptions.
+Reject clock times mistranslated as durations: Serbian "večeras do 24 časa" means by midnight that evening, not 24 hours from now.
 The source and draft must describe a concrete current sporting development.
 Reject product/service descriptions, evergreen injury or roster trackers,
 photo captions expanded with filler, podcasts, highlight lists, quizzes and

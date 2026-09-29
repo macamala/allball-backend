@@ -567,6 +567,32 @@ def repair_recent_news_images(
         )
     return changed
 
+def _correct_confirmed_deadline_copy(article: Article) -> dict:
+    """Remove only the exact disproven clause from the audited News original.
+
+    Source 555050 says both "večeras do ponoći" and "večeras do 24 časa".
+    The preceding midnight statement is accurate; the added duration is not.
+    This cannot affect another source, translated rows or a held row's state.
+    """
+    try:
+        source = urlsplit(article.source_url or '')
+    except ValueError:
+        return {}
+    if (article.id != 22162 or not article.ai_generated
+            or source.hostname not in {'www.mozzartsport.com', 'mozzartsport.com'}
+            or source.path.rstrip('/') != '/kosarka/vesti/ostoja-mijailovic-aba-liga-ce-poceti-poslali-smo-novi-predlog-sudijama/555050'):
+        return {}
+    clause = ', which is set for 24 hours from now'
+    changes = {}
+    for field in ('content', 'ai_content'):
+        value = getattr(article, field, None)
+        if value and clause + '.' in value and 'tonight at midnight' in value:
+            revised = value.replace(clause + '.', '.')
+            setattr(article, field, revised)
+            changes[field] = {'before': value, 'after': revised}
+    return changes
+
+
 def repair_recent_gossip_news(
     db: Session,
     *,
@@ -597,6 +623,18 @@ def repair_recent_gossip_news(
     corrected = 0
     reasons = {}
     for article, tax in rows:
+        copy_changes = _correct_confirmed_deadline_copy(article)
+        if copy_changes:
+            db.add(article)
+            from bot.news_learning import record_incident
+            record_incident(db, reason_code='clock_time_as_duration',
+                article_id=article.id, source_url=article.source_url, sport=tax.resolved_sport,
+                phase='postpublish', status='auto_corrected',
+                writer_provider='news-audit', writer_model='deterministic',
+                details={'evidence': 'Source states tonight by midnight; 24 is a clock time, not elapsed hours',
+                         'changes': copy_changes})
+            corrected += 1
+            logger.info('[public_index] corrected confirmed deadline article=%s', article.id)
         # A publisher's domestic feed label cannot turn an explicit national
         # tournament headline into that country's club league. Clear the
         # unsupported competition only; never infer a fixture or enable a hold.

@@ -146,6 +146,12 @@ def fact_lock_reason(
     )
     source = f"{source_title or ''}\n{source_body or ''}"
 
+    # Confirmed Serbian translation incident: "večeras do 24 časa" is a
+    # midnight deadline, not a new interval beginning at publication time.
+    if (re.search(r"\b(?:večeras|veceras|danas)\s+do\s+24\s*(?:časa|casa|sata)\b", source, re.I)
+            and re.search(r"\b(?:(?:24|twenty[ -]four)\s+hours?\s+(?:from\s+now|later)|in\s+(?:24|twenty[ -]four)\s+hours?)\b", output, re.I)):
+        return "clock_time_as_duration"
+
     # A first home appearance is not an overall debut. Preserve the qualifier
     # even when it is only present in the supplied source body.
     headline = str(draft.get("title") or "")
