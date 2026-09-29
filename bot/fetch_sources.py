@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from database import SessionLocal
 from models import Article
-from editorial import news_image_is_publishable, pick_article_image
+from editorial import looks_non_english, news_image_is_publishable, pick_article_image
 
 from .news_policy import NEWS_FRESHNESS_HOURS, news_freshness_reason, fair_news_queue, non_article_news_reason, numeric_tokens, original_draft_reason, source_path_sport_hint
 from .news_football_priority import football_editorial_priority
@@ -206,6 +206,10 @@ def _ai_story(
             )
             return reject("too-short", parsed)
         parsed["body"] = body
+    if any(looks_non_english(str(parsed.get(key) or '')) for key in ('title', 'summary', 'body')):
+        return reject('non_english', parsed, {'unsupported_claims': ['Write all prose in English; preserve verified personal names.']})
+    if re.search(r"\b(?:millions?|milliards?)\s+d['’]euros\b", body, re.I):
+        return reject('untranslated_currency_unit', parsed, {'unsupported_claims': ['Use English currency-unit words without changing the stated amount or currency.']})
     deterministic_reason = original_draft_reason(
         {
             "title": parsed.get("title") or title,
@@ -679,6 +683,8 @@ def _ingest_item(
                             "direct_quote_requires_review",
                             "headline_too_similar_to_source",
                             "copied_source_headline",
+                            "non_english",
+                            "untranslated_currency_unit",
                         }
                         or str(rewrite_reason or "").startswith("draft_sport_mismatch:")
                         or (

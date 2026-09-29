@@ -142,21 +142,42 @@ def _source_probably_english(text: str) -> bool:
     if len(words) < 12:
         return False
     common = {
-        "the","and","to","of","in","for","on","with","after","before","as","at",
+        "the","and","of","for","with","after","before",
         "from","that","this","was","were","is","are","has","have","had","will",
-        "his","her","their","they","he","she","a","an",
+        "his","her","their","they","he","she",
     }
     hits = sum(1 for word in words if word in common)
-    return hits >= max(4, len(words) // 18)
+    # French a/on, Portuguese as and German an cannot establish English.
+    return hits >= max(4, len(words) // 12) and len(set(words) & common) >= 3
 
 
 def competition_in_source(competition: str, text: str) -> bool:
     """A club-name inference is not evidence of its men's league in this story."""
     from .taxonomy import COMPETITIONS
     meta = COMPETITIONS.get(competition) or {}
-    return any(re.search(r'(?<!\w)' + r'\s+'.join(re.escape(part) for part in alias.strip().split()) + r'(?!\w)',
+    if any(re.search(r'(?<!\w)' + r'\s+'.join(re.escape(part) for part in alias.strip().split()) + r'(?!\w)',
                          text or '', re.I)
-               for alias in meta.get('aliases', []) if alias.strip())
+               for alias in meta.get('aliases', []) if alias.strip()):
+        return True
+    # Exact language equivalents seen in football sources. These establish
+    # only a competition name; the independent validator still checks claims.
+    local = {
+        'uefa-champions-league': r'(?:Лиг[аеуи] шампиона|Lig[aeui] šampiona|Liga dos Campeões|Ligue des champions)',
+        'fifa-world-cup': r'Coupe du monde',
+    }.get(competition)
+    if not local:
+        return False
+    for match in re.finditer(r'(?<!\w)' + local + r'(?!\w)', text or '', re.I):
+        # A qualified women's/youth/club tournament is not its men's senior
+        # counterpart. Never discard a qualifier while translating the label.
+        before = (text or '')[max(0, match.start()-25):match.start()]
+        after = (text or '')[match.end():match.end()+45]
+        if re.search(r'(?:žensk\w*|женск\w*|omladinsk\w*|омладинск\w*)\s*$', before, re.I):
+            continue
+        if re.match(r'\s*(?:f[ée]minine|des clubs|de clubs|junior|U[ -]?\d+|des moins de|para menores|за жене|za žene)\b', after, re.I):
+            continue
+        return True
+    return False
 
 
 # Confirmed FSS transcription incident. These are spelling equivalences only,

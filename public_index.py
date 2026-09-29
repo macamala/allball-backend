@@ -788,6 +788,73 @@ def _correct_confirmed_taranto_format(article: Article) -> dict:
     return changes
 
 
+def _recover_confirmed_language_hold(db: Session, article: Article, tax) -> bool:
+    """Recheck only AI drafts seen failing the old name/diacritic gate.
+
+    These rows passed both factual validators before insertion. Never admit
+    legacy imports, Live Scores, arbitrary held rows, or any open incident.
+    """
+    from editorial import SLAVIC_LETTER_RE
+    from bot.news_policy import news_freshness_reason
+    from bot.news_image_http import news_image_is_reachable
+    from bot.dedupe import titles_are_near_duplicate
+    if (article.id not in {22202, 22204, 22205, 22207} or tax.public_ok
+            or not article.ai_generated or tax.resolved_sport != 'football'
+            or urlsplit(article.source_url or '').hostname not in {'fss.rs', 'www.novosti.rs'}
+            or '/live-scores' in (article.source_url or '').lower()):
+        return False
+    body = article.ai_content or article.content or ''
+    old_signal = (len(SLAVIC_LETTER_RE.findall(body)) >= 3
+                  or len(SLAVIC_LETTER_RE.findall(article.title or '')) >= 2)
+    quality = evaluate_quality(title=article.title, summary=article.summary,
+        body=body, image_url=article.image_url)
+    logger.info('[public_index] language hold review article=%s old_name_signal=%s flags=%s title=%s body=%s',
+        article.id, old_signal, quality.get('flags'), article.title, body[:420])
+    stamp = article.published_at
+    if stamp is not None and stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=timezone.utc)  # schema stores UTC
+    if (not old_signal or not quality.get('ok')
+            or news_freshness_reason(stamp, datetime.now(timezone.utc))
+            or article_has_open_incident(db, article.id)):
+        return False
+    peers = db.query(Article.title).join(ArticleTaxonomyResolution,
+        ArticleTaxonomyResolution.article_id == Article.id).filter(
+            ArticleTaxonomyResolution.public_ok.is_(True),
+            ArticleTaxonomyResolution.resolved_sport == 'football',
+            Article.id != article.id).all()
+    if any(titles_are_near_duplicate(article.title or '', title or '') for title, in peers):
+        return False
+    if not news_image_is_reachable(article.image_url):
+        return False
+    persist_public_article(db, article, cache_row_to_resolution(tax), commit=False)
+    if not tax.public_ok:
+        return False
+    from bot.news_learning import record_incident
+    record_incident(db, reason_code='english_proper_name_false_language_hold',
+        article_id=article.id, source_url=article.source_url, sport='football',
+        phase='public-admission', status='auto_corrected',
+        writer_provider='news-audit', writer_model='deterministic',
+        details={'evidence': 'Observed AI factual-validation pass followed by non_english admission hold; Latin proper names excluded from letter heuristic; full public gates and image rechecked; original copy/date preserved'})
+    logger.info('[public_index] recovered English proper-name false hold article=%s', article.id)
+    return True
+
+
+def _correct_confirmed_chema_currency(article: Article) -> dict:
+    if (article.id != 22206 or not article.ai_generated or article.source_url !=
+            'https://www.footmercato.net/a2290739679306661964-un-ancien-prodige-du-real-madrid-evoque-un-eventuel-retour'):
+        return {}
+    changes = {}
+    for field in ('content', 'ai_content'):
+        old = getattr(article, field, None)
+        if not isinstance(old, str):
+            continue
+        new = old.replace("23 millions d'euros", '€23 million').replace("14,5 millions d'euros", '€14.5 million')
+        if new != old:
+            setattr(article, field, new)
+            changes[field] = {'before': old, 'after': new}
+    return changes
+
+
 def repair_recent_gossip_news(
     db: Session,
     *,
@@ -804,7 +871,7 @@ def repair_recent_gossip_news(
         )
         .filter(
             ArticleTaxonomyResolution.resolver_version == RESOLVER_VERSION,
-            or_(ArticleTaxonomyResolution.public_ok.is_(True), Article.id == 22166),
+            or_(ArticleTaxonomyResolution.public_ok.is_(True), Article.id.in_((22166, 22202, 22204, 22205, 22207))),
             func.coalesce(Article.published_at, Article.created_at) >= cutoff,
         )
         .order_by(
@@ -818,6 +885,22 @@ def repair_recent_gossip_news(
     corrected = 0
     reasons = {}
     for article, tax in rows:
+        if not tax.public_ok and article.id in {22202, 22204, 22205, 22207}:
+            if _recover_confirmed_language_hold(db, article, tax):
+                corrected += 1
+            else:
+                continue
+        currency_changes = _correct_confirmed_chema_currency(article)
+        if currency_changes:
+            db.add(article)
+            from bot.news_learning import record_incident
+            record_incident(db, reason_code='untranslated_currency_unit',
+                article_id=article.id, source_url=article.source_url, sport='football',
+                phase='postpublish', status='auto_corrected', writer_provider='news-audit',
+                writer_model='deterministic', details={'changes': currency_changes,
+                    'evidence': 'French euro amounts rendered in English without changing currency or value'})
+            corrected += 1
+            logger.info('[public_index] corrected English currency units article=%s', article.id)
         gudelj_changes = _correct_confirmed_gudelj_copy(article)
         if gudelj_changes:
             db.add(article)

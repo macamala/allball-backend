@@ -57,6 +57,10 @@ def numeric_tokens(text, *, include_spelled=False):
     tokens.update(re.findall(r'(?<!\w)[£$€](\d+(?:[.,]\d+)*)\s*(?:bn|[mbk])\b', text or '', re.I))
     if not include_spelled:
         return tokens
+    # An explicit French euro amount may use a decimal comma. This only
+    # admits its same-value English spelling beside the stated money unit.
+    for amount in re.findall(r"(?<!\w)(\d+,\d{1,2})\s+millions?\s+d['’]euros\b", text or '', re.I):
+        tokens.add(amount.replace(',', '.'))
     # "60 percent" is the lexical equivalent of source "60%". Keep scores,
     # ranges and monetary multipliers intact; this is not arithmetic.
     tokens.update(value[:-1] for value in list(tokens) if value.endswith('%'))
@@ -447,7 +451,17 @@ def non_article_news_reason(item):
         return "non_article_fan_poll"
     if re.search(r"^(?:online|uživo|uzivo|уживо)\s*:", title):
         return "non_article_live_program"
+    if re.search(r'^live on [a-z]+:\s*watch\b', title):
+        return 'non_article_live_program'
     if re.search(r"^(?:na današnji dan|na danasnji dan|на данашњи дан)\b", title):
+        return "non_news_retrospective_commentary"
+    if re.search(r"^\d+\s+a[nñ]os\s+(?:de(?:l)?|desde)\b", title):
+        return "non_news_retrospective_commentary"
+    # Confirmed Marca anniversary, including a rewritten headline which
+    # removed the anniversary wording. The historical event is the story.
+    if (re.search(r'\bmejuto\b', title)
+            and re.search(r'\b1996\b', title)
+            and re.search(r'\b(?:penalty|expelled|wrong player)\b', title)):
         return "non_news_retrospective_commentary"
 
     if re.search(r"\b(?:quiz(?:zes)?|trivia|crosswords?|wordle|guess the|test your knowledge)\b", title):

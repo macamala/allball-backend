@@ -7,6 +7,7 @@ and when choosing premium homepage/sport slots.
 from __future__ import annotations
 
 import re
+import unicodedata
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 from bot.media_url import (
@@ -547,12 +548,19 @@ def _word_count(text: str) -> int:
 
 def looks_non_english(text: str) -> bool:
     raw = text or ""
-    if len(SLAVIC_LETTER_RE.findall(raw)) >= 3:
+    words = re.findall(r"[^\W\d_]+(?:['’-][^\W\d_]+)*", raw, re.UNICODE)
+    # Diacritics in Latin-script proper names are not a prose language.
+    # Keep the name unchanged; only exclude capitalised name tokens from the
+    # legacy Slavic-letter signal. Foreign prose still needs English evidence.
+    prose = " ".join(word for word in words if not word[0].isupper())
+    if len(SLAVIC_LETTER_RE.findall(prose)) >= 2:
         return True
-    words = re.findall(r"[A-Za-zÀ-ÿ']+", raw.lower())
-    if len(words) < 50:
+    non_latin = sum(ch.isalpha() and not unicodedata.name(ch, '').startswith('LATIN') for ch in raw)
+    if non_latin >= 3:
+        return True
+    if len(words) < 20:
         return False
-    hits = sum(1 for word in words if word in ENGLISH_STOPWORDS)
+    hits = sum(1 for word in words if word.casefold() in ENGLISH_STOPWORDS)
     return (hits / len(words)) < 0.10
 
 
@@ -789,11 +797,8 @@ def evaluate_quality(
         flags.append("truncation")
     if _word_count(cleaned_body) < 40:
         flags.append("weak_body")
-    if looks_non_english(cleaned_body) or looks_non_english(cleaned_title):
+    if any(looks_non_english(value) for value in (cleaned_body, cleaned_title, cleaned_summary)):
         flags.append("non_english")
-    if len(SLAVIC_LETTER_RE.findall(raw_title)) >= 2:
-        if "non_english" not in flags:
-            flags.append("non_english")
     if not image_is_usable(image_url):
         flags.append("unusable_image")
     premium_flags = {
