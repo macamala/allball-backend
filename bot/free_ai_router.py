@@ -396,6 +396,10 @@ without explicit source support. Preserve the exact cause of a travel disruption
 a weight calculation problem is not a fuel calculation error, and an unplanned
 refuelling stop does not entail an emergency.
 Do not use outside knowledge or assumptions.
+If a source gives only a surname, do not allow a given name added from memory.
+A shot saved before a teammate scores the rebound does not establish a credited
+assist. A first appearance at one stadium does not establish an international
+debut. Reject author biographies and editor credits inserted into the story.
 Reject clock times mistranslated as durations: Serbian "večeras do 24 časa" means by midnight that evening, not 24 hours from now.
 The source and draft must describe a concrete current sporting development.
 Reject product/service descriptions, evergreen injury or roster trackers,

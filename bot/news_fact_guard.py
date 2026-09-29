@@ -261,6 +261,15 @@ def fact_lock_reason(
         str(draft.get(key) or "") for key in ("title", "summary", "body")
     )
     source = f"{source_title or ''}\n{source_body or ''}"
+    if re.search(r'први пут[^.!?]{0,70}на стадиону', source, re.I):
+        for sentence in re.split(r'[.!?\n]', output):
+            if (re.search(r'\b(?:international debut|senior debut|made his debut)\b', sentence, re.I)
+                    and not re.search(r'\b(?:stadium|marakana|rajko miti[ćc])\b', sentence, re.I)):
+                return 'expanded_debut_scope'
+    if (re.search(r'\b(?:rebound|initial effort|initial shot)\b', source, re.I)
+            and not re.search(r'\bassist(?:ed|ing|s)?\b', source, re.I)
+            and re.search(r'\b(?:assisted|assisting|provided an assist|registered an assist)\b', output, re.I)):
+        return 'unsupported_credited_assist'
     transcription_reason = _serbian_transcription_reason(source, output)
     if transcription_reason:
         return transcription_reason

@@ -75,6 +75,9 @@ NON-NEGOTIABLE:
 - Never invent or embellish scores, dates, times, injuries, fees, statistics, locations, standings, records, roles, relationships or background.
 - Every numeric token in the draft must already appear in the supplied source facts. Never calculate, infer or add a year, age, score, count, ranking or date.
 - Preserve every person, team, competition and venue name EXACTLY as supplied. Do not create a new capitalized label for them.
+- If the source gives only a surname, do not add a given name from memory.
+- A debut at a particular stadium is not an international debut. A shot followed by a rebound goal is not an officially credited assist unless the source explicitly calls it an assist.
+- Omit author biographies, editor credits and newspaper player-rating roundups; these are not facts of the sporting development.
 - Never use direct quotations or quotation marks for reported statements. Paraphrase only what is explicitly stated.
 - Do not turn a source description into a stronger claim. Prefer neutral verbs such as "said", "reported", "won", "lost", "finished", "announced" only when supported.
 - Do not add generic sports filler such as "boost", "statement win", "crucial", "dominant", "dramatic", "historic", "momentum", "pressure", or "hopes" unless that exact idea is supported.
@@ -386,6 +389,9 @@ def write_ninkosports_story(
 
 def parse_ai_output(ai_text: str) -> dict:
     text = (ai_text or "").strip()
+    # Some models print the formatting instruction literally. Treat only
+    # standalone blank-line markers as separators before selecting summary.
+    text = re.sub(r'(?im)^\s*\[?blank\s+line\]?\s*$', '', text).strip()
     if not text:
         return {}
     lines = [ln.rstrip() for ln in text.splitlines()]

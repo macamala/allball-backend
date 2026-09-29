@@ -672,6 +672,9 @@ def article_text_from_html(html: str) -> str:
         body_class = 'content_body_wrapper'
     if publisher_host == 'www.footmercato.net':
         body_class = 'wysiwygContent'
+    if publisher_host == 'football-italia.net':
+        # The author biography is a sibling of article.small.single.
+        body_class = 'single'
     if publisher_host == 'aleagues.com.au':
         article = _ScopedNewsBody('main-article')
         article.feed(html)
@@ -735,6 +738,9 @@ def article_text_from_html(html: str) -> str:
             return ''
         html = ''.join(prose.parts)
     text = paragraphs_from_html(html or "")
+    if publisher_host == 'football-italia.net':
+        text = '\n\n'.join(p for p in text.split('\n\n')
+                          if not re.match(r'(?i)^Find out more .+\bvideo below\b', p))
     if publisher_host == 'aleagues.com.au':
         text = '\n\n'.join(p for p in text.split('\n\n') if not re.match(
             r'(?i)^(?:click here|transfer centre|sign up|subscribe)\b', p))

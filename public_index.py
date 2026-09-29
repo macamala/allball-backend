@@ -788,6 +788,51 @@ def _correct_confirmed_taranto_format(article: Article) -> dict:
     return changes
 
 
+def _correct_confirmed_football_prose(article: Article) -> dict:
+    """Exact, source-compared corrections; preserve row identity and archive."""
+    sources = {
+        22204: 'https://fss.rs/aleksandar-stankovic-prva-utakmica-na-marakani-u-dresu-a-tima-ostvarenje-jednog-od-mojih-snova/',
+        22206: 'https://www.footmercato.net/a2290739679306661964-un-ancien-prodige-du-real-madrid-evoque-un-eventuel-retour',
+        22210: 'https://football-italia.net/kayode-impresses-italy-debut-palestra-duel/',
+    }
+    if not article.ai_generated or sources.get(article.id) != article.source_url:
+        return {}
+    changes = {}
+    for field in ('summary', 'content', 'ai_content'):
+        old = getattr(article, field, None)
+        if not isinstance(old, str):
+            continue
+        new = old
+        if article.id == 22204:
+            if field == 'summary' and old.strip().casefold() == 'blank line':
+                new = 'Aleksandar Stanković described his first senior Serbia appearance at Rajko Mitić Stadium as the fulfilment of a childhood dream.'
+            else:
+                new = new.replace("Young Serbian international made his debut against Netherlands and praised his team's character despite a 1:2 defeat.", '')
+                new = re.sub(r'(?im)^\s*\[?blank\s+line\]?\s*$', '', new).strip()
+        elif article.id == 22206:
+            new = new.replace('Aurélien Tchouaméni, Eduardo Camavinga and Bernardo Silva',
+                              'Tchouaméni, Camavinga and Bernardo Silva')
+        elif article.id == 22210:
+            if field == 'summary' and old == 'Brentford defender Michael Kayode earned Man of the Match honors from multiple Italian newspapers after scoring and assisting in a victory.':
+                new = 'Michael Kayode scored on his senior Italy debut as the team beat Türkiye 4-1 in Bursa.'
+            else:
+                new = new.replace('The 22-year-old right-back', 'The 22-year-old Brentford defender')
+                new = new.replace('in March before sustaining an injury.', 'in March.')
+                for fragment in (
+                    ' Most Italian publications selected him as the standout performer following the 4-1 result against Türkiye.',
+                    ' Gazzetta and Corriere della Sera both assigned him a rating of 7/10 for the display.',
+                    ' Gazzetta described the performance as commanding and noted the player scored his first goal for the national team.',
+                    ' Corriere della Sera questioned whether Kayode might displace Palestra from the starting lineup once that player recovers from injury.',
+                    ' Corriere dello Sport and Tuttosport rated Kayode 7.5/10 for the match, though the former outlet gave the Man of the Match award to Sandro Tonali with an 8/10 rating.',
+                    ' Lorenzo Bettoni serves as the Editor of Football Italia.',
+                ):
+                    new = new.replace(fragment, '')
+        if new != old:
+            setattr(article, field, new)
+            changes[field] = {'before': old, 'after': new}
+    return changes
+
+
 def _recover_confirmed_language_hold(db: Session, article: Article, tax) -> bool:
     """Recheck only AI drafts seen failing the old name/diacritic gate.
 
@@ -885,6 +930,17 @@ def repair_recent_gossip_news(
     corrected = 0
     reasons = {}
     for article, tax in rows:
+        prose_changes = _correct_confirmed_football_prose(article)
+        if prose_changes:
+            db.add(article)
+            from bot.news_learning import record_incident
+            record_incident(db, reason_code='confirmed_football_prose_scope',
+                article_id=article.id, source_url=article.source_url, sport='football',
+                phase='postpublish', status='auto_corrected', writer_provider='news-audit',
+                writer_model='deterministic', details={'changes': prose_changes,
+                    'evidence': 'Compared with exact source: stadium appearance is not an international debut; rebound contribution is not a credited assist; remove literal formatting, author bio, newspaper ratings and unsourced given names'})
+            corrected += 1
+            logger.info('[public_index] corrected confirmed football prose article=%s', article.id)
         if not tax.public_ok and article.id in {22202, 22204, 22205, 22207}:
             if _recover_confirmed_language_hold(db, article, tax):
                 corrected += 1

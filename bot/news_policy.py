@@ -340,6 +340,11 @@ def non_article_news_reason(item):
         path = ""
 
     body = str((item or {}).get("body") or (item or {}).get("summary") or "")
+    copy = '\n'.join(str((item or {}).get(key) or '') for key in ('title', 'summary', 'body'))
+    if re.search(r'(?im)^\s*\[?blank\s+line\]?\s*$', copy):
+        return 'draft_placeholder'
+    if re.search(r'\b(?:is|serves as) (?:the )?(?:editor|journalist|reporter|correspondent) (?:of|at|for)\b', copy, re.I):
+        return 'source_author_biography'
     # Confirmed actor-role swap in this source: Cuesta was Arsenal's assistant,
     # not Gilardino. Preserve the source row and record a durable public hold.
     if path.rstrip('/') == '/parma-agreement-gilardino-italy-return-coach' and re.search(
