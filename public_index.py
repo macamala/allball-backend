@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo
 from typing import Optional, Sequence
 from urllib.parse import urlsplit
 
-from sqlalchemy import func, text
+from sqlalchemy import func, or_, text
 from sqlalchemy.orm import Session
 
 from editorial import classify_media_url, evaluate_quality, news_image_is_publishable
@@ -645,15 +645,16 @@ def _correct_confirmed_mccabe_copy(article: Article, tax) -> dict:
     except ValueError:
         return {}
     old = 'Katie McCabe helps Chelsea defeat former club Arsenal in Premier League match'
-    new = "McCabe reflects on Chelsea Women's victory over former club Arsenal"
+    previous_repair = "McCabe reflects on Chelsea Women's victory over former club Arsenal"
+    new = "McCabe praises Walsh after Chelsea Women's victory over Arsenal"
     if (article.id != 22166 or not article.ai_generated
             or source.hostname not in {'www.chelseafc.com', 'chelseafc.com'}
             or source.path.rstrip('/') != '/en/news/article/katie-mccabe-on-playing-smart-and-riding-the-storms-against-former-club'
-            or article.title not in {old, new}):
+            or article.title not in {old, previous_repair, new}):
         return {}
     changes = {}
-    if article.title == old:
-        changes['title'] = {'before': old, 'after': new}
+    if article.title != new:
+        changes['title'] = {'before': article.title, 'after': new}
         article.title = new
     for field in ('content', 'ai_content'):
         value = getattr(article, field, None)
@@ -688,7 +689,7 @@ def repair_recent_gossip_news(
         )
         .filter(
             ArticleTaxonomyResolution.resolver_version == RESOLVER_VERSION,
-            ArticleTaxonomyResolution.public_ok.is_(True),
+            or_(ArticleTaxonomyResolution.public_ok.is_(True), Article.id == 22166),
             func.coalesce(Article.published_at, Article.created_at) >= cutoff,
         )
         .order_by(
@@ -705,7 +706,28 @@ def repair_recent_gossip_news(
         mccabe_changes = _correct_confirmed_mccabe_copy(article, tax)
         if mccabe_changes:
             db.add_all([article, tax])
-            from bot.news_learning import record_incident
+            from bot.news_learning import record_incident, mark_auto_corrected
+            from models import NewsIncident
+            previous_repair = "McCabe reflects on Chelsea Women's victory over former club Arsenal"
+            for incident in db.query(NewsIncident).filter(
+                    NewsIncident.article_id == article.id,
+                    NewsIncident.reason_code == 'non_news_retrospective_commentary',
+                    NewsIncident.phase == 'postpublish',
+                    NewsIncident.writer_provider == 'news-audit',
+                    NewsIncident.writer_model == 'deterministic',
+                    NewsIncident.status == 'open',
+                    NewsIncident.confirmed.is_(False)).all():
+                if (incident.draft_excerpt or '').startswith(previous_repair):
+                    mark_auto_corrected(db, incident, note='Current report retitled without retrospective wording; source-confirmed womens team; public gates rechecked')
+            # The previous repair title triggered the retrospective filter.
+            # Re-run public admission for this exact audited row, preserving
+            # all other incidents and requiring a working photo first.
+            from bot.news_image_http import news_image_is_reachable
+            if news_image_is_reachable(article.image_url):
+                persist_public_article(db, article, cache_row_to_resolution(tax), commit=False)
+            else:
+                tax.public_ok = False
+                db.add(tax)
             record_incident(db, reason_code='inferred_mens_competition_for_womens_team',
                 article_id=article.id, source_url=article.source_url, sport=tax.resolved_sport,
                 phase='postpublish', status='auto_corrected',

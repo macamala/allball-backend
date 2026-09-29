@@ -48,3 +48,42 @@ def test_audited_womens_copy_repair_preserves_identity_and_is_idempotent():
     assert _correct_confirmed_mccabe_copy(row, tax) == {}
     row.id = 999
     assert _correct_confirmed_mccabe_copy(row, tax) == {}
+
+
+@pytest.mark.parametrize('photo_ok,confirmed_hold,expected_public', [(True, False, True), (False, False, False), (True, True, False)])
+def test_full_repair_restores_only_after_all_public_gates(monkeypatch, photo_ok, confirmed_hold, expected_public):
+    from datetime import datetime
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+    from models import Article, ArticleTaxonomyResolution, NewsIncident
+    from public_index import repair_recent_gossip_news
+    from taxonomy_resolver import RESOLVER_VERSION
+    monkeypatch.setattr('bot.news_image_http.news_image_is_reachable', lambda url: photo_ok)
+    old = "McCabe reflects on Chelsea Women's victory over former club Arsenal"
+    body = ("McCabe said Chelsea had prepared for Arsenal's ability in possession before the football match. "
+        "The team had to withstand pressure before taking control of the ball. Alyssa Thompson scored the goal.\n\n"
+        "Arsenal added attackers in the second half, and McCabe said Chelsea needed to remain organised. "
+        "Keeping possession near the corner helped them protect their advantage and take the points. "
+        "She said she respected Arsenal's supporters after spending a decade with the club.\n\n"
+        "McCabe praised Keira Walsh for her work in midfield. She described Walsh as a passing option under pressure "
+        "and said her composure helped Chelsea retain possession in tight areas. McCabe was pleased with the victory.")
+    engine = create_engine('sqlite:///:memory:')
+    for model in (Article, ArticleTaxonomyResolution, NewsIncident): model.__table__.create(engine)
+    with Session(engine) as db:
+        article = Article(id=22166, title=old, slug='stable-url', sport='football',
+            source_url='https://www.chelseafc.com/en/news/article/katie-mccabe-on-playing-smart-and-riding-the-storms-against-former-club',
+            summary='McCabe praised Walsh after the win against Arsenal.', content=body, ai_content=body,
+            ai_generated=True, published_at=datetime.utcnow(), image_url='https://example.test/player.jpg')
+        tax = ArticleTaxonomyResolution(article_id=22166, resolved_sport='football', sport_confidence='0.98',
+            competition_confidence='0', resolver_version=RESOLVER_VERSION, public_ok=False)
+        incident = NewsIncident(article_id=22166, reason_code='non_news_retrospective_commentary',
+            phase='postpublish', writer_provider='news-audit', writer_model='deterministic',
+            status='open', confirmed=confirmed_hold, draft_excerpt=old)
+        db.add_all([article, tax, incident]); db.commit()
+        assert repair_recent_gossip_news(db) == 1
+        assert article.title == "McCabe praises Walsh after Chelsea Women's victory over Arsenal"
+        assert tax.public_ok is expected_public and tax.resolved_competition is None
+        assert article.slug == 'stable-url'
+        assert incident.status == ('open' if confirmed_hold else 'auto_corrected')
+        assert repair_recent_gossip_news(db) == 0
+    engine.dispose()
