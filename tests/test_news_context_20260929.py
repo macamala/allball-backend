@@ -159,3 +159,12 @@ def test_mixed_grand_prix_uses_explicit_sport_in_factual_lead():
     assert classify_article('Formula 1 driver wins Grand Prix', 'He also follows the World Series of Darts.').sport == 'motorsport'
     assert non_article_news_reason({'title': 'All Red competition: Win a VIP visit to Anfield for Liverpool v Arsenal - Liverpool FC'}) == 'non_article_commercial_promotion'
     assert non_article_news_reason({'title': 'Liverpool win league title after victory at Anfield'}) is None
+
+
+@pytest.mark.parametrize('title,held', [
+    ('Betting on EuroLeague Teams That Might Lose Their Stars to the NBA Mid-Contract', True),
+    ('Besiktas Are Back in the EuroLeague – What the Odds Say About Promoted Clubs', True),
+    ('NBA player suspended after betting investigation', False),
+])
+def test_betting_advice_is_not_current_sports_reporting(title, held):
+    assert (non_article_news_reason({'title': title}) == 'non_article_betting_product') is held

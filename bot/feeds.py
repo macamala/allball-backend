@@ -17,6 +17,7 @@ class Feed(TypedDict, total=False):
 
 
 FEEDS: List[Feed] = [
+    {'url': 'https://www.eurohoops.net/en/feed/', 'kind': 'league', 'sport': 'basketball', 'publisher': 'Eurohoops', 'enabled': True, 'note': 'Publisher-advertised English RSS: exact UTC publication dates, full prose and same-article 950x500 photographs verified. Broad NBA/EuroLeague/national-team coverage without league stamp; betting products held.'},
     {'url': 'https://lnfoficial.com.br/noticias/feed/', 'kind': 'league', 'sport': 'futsal', 'publisher': 'Liga Nacional de Futsal', 'verified_official': True, 'enabled': True, 'note': 'Official replacement linked by ligafutsal.com.br: exact UTC RSS timestamps, scoped article prose and same-article match photos verified. Expo invitations remain held; no invented publication times or league stamp.'},
     {'url': 'https://swimswam.com/feed/', 'kind': 'league', 'sport': 'swimming', 'publisher': 'SwimSwam', 'enabled': True, 'note': 'Exact UTC RSS and public article dates, scoped WordPress prose and same-article photographs verified. NCAA alone is not basketball evidence; diving and sponsored products remain held.'},
     {'url': 'https://total-waterpolo.com/feed/', 'kind': 'league', 'sport': 'water-polo', 'publisher': 'Total Waterpolo', 'enabled': True, 'note': 'Exact UTC RSS, full original reporting and article photos verified; international and club water polo without a league stamp. Shared Champions League names never imply soccer.'},
