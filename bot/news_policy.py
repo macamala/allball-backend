@@ -712,7 +712,11 @@ def fair_news_queue(
     buckets = defaultdict(list)
     rejected = defaultdict(int)
     seen = set()
-    for item in items:
+    # RSS is collected before official HTML/JSON. For the same article, keep
+    # the richest admissible representation rather than losing verified body
+    # and image metadata simply because a sparse feed row arrived first.
+    # All admission checks below still run before a URL is marked as seen.
+    for item in sorted(items, key=candidate_readiness_score, reverse=True):
         reason = freshness_reason(item.get('published_at'), now, max_age_hours)
         if not reason and same_day_timezone:
             reason = editorial_day_reason(item.get('published_at'), now, same_day_timezone)
