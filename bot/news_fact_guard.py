@@ -8,6 +8,7 @@ unsupported facts before publication.
 from __future__ import annotations
 
 import re
+from difflib import SequenceMatcher
 from typing import Optional
 
 from entities import extract_entities
@@ -145,6 +146,24 @@ def fact_lock_reason(
         str(draft.get(key) or "") for key in ("title", "summary", "body")
     )
     source = f"{source_title or ''}\n{source_body or ''}"
+
+    # Event labels often name athletes by surname alone (and in all caps).
+    # Semantic checking missed VOLKANOVSKI -> Volkovski in an audited draft.
+    # Reject near-spelled participants in explicit X vs Y labels, never infer
+    # or autocorrect a person's identity from fuzzy matching.
+    pair_re = r"\b([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'’-]{3,})\s+vs\.?\s+([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'’-]{3,})\b"
+    source_names = {name.casefold() for pair in re.findall(pair_re, source, re.I)
+                    for name in pair if len(name) >= 6}
+    source_words = set(re.findall(r"[\w'’-]+", source.casefold()))
+    for pair in re.findall(pair_re, output, re.I):
+        for name in pair:
+            word = name.casefold()
+            if word in source_words or len(word) < 6:
+                continue
+            if any(abs(len(word) - len(known)) <= 2
+                   and SequenceMatcher(None, known, word).ratio() >= 0.84
+                   for known in source_names):
+                return 'unsupported_event_participant:' + name
 
     # Confirmed Serbian translation incident: "večeras do 24 časa" is a
     # midnight deadline, not a new interval beginning at publication time.

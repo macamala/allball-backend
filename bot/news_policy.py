@@ -894,7 +894,9 @@ def original_draft_reason(draft, source_title, source_body):
         return admission
     source = f'{source_title}\n{source_body}'
     output = f'{title}\n{summary}\n{body}'
-    if re.search(r'https?://|www\.', output, re.I): return 'external_link_in_copy'
+    if (re.search(r'https?://|www\.', output, re.I)
+            or re.search(r'\b(?:[a-z0-9][a-z0-9-]*\.)+(?:com|org|net|io|co|tv)(?=[:/\s.,;!?)]|$)', output, re.I)):
+        return 'external_link_in_copy'
     if re.search(r'read (?:the )?(?:full|original) (?:story|article)|appeared first on', output, re.I):
         return 'publisher_redirect_copy'
     if re.search(r'(?im)^\s*(?:source|sources|powered by|originally published)\s*:', output):

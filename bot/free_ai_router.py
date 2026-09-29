@@ -381,6 +381,8 @@ importance, chronology, atmosphere, crowd reaction, tactics, injury, statistic,
 location, table position, relationship, quote, prediction, consequence or
 stronger characterization not supported by the source.
 Reject any changed or invented proper name.
+Compare surname spelling character by character, including single surnames in
+event labels such as X vs Y. A similar-looking name is still a changed name.
 Check WHO did each action, not just whether the names and action appear somewhere
 in the source. Never transfer one person's employment, biography, injury, result
 or quotation to another person named in the same article. Resolve pronouns from

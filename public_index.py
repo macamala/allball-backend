@@ -610,6 +610,34 @@ def _correct_confirmed_lead_headline(article: Article) -> dict:
     return {'title': {'before': old_title, 'after': article.title}}
 
 
+def _correct_confirmed_ufc_copy(article: Article) -> dict:
+    """Apply only source-verified spelling and commercial-copy corrections."""
+    try:
+        source = urlsplit(article.source_url or '')
+    except ValueError:
+        return {}
+    if (article.id != 22165 or not article.ai_generated
+            or source.hostname not in {'www.ufc.com', 'ufc.com'}
+            or source.path.rstrip('/') != '/news/octagon-returns-down-under-ufc-fight-night-sydney-sunday-february-7'):
+        return {}
+    commercial_copy = (
+        ' Travel packages for fans are available through Sportsnet Holidays, and exclusive corporate suites can be booked directly via Afterpay Arena.',
+        ' General public and UFC VIP ticket details will be announced later, with pre‑sale access available through UFC.com/Sydney.',
+    )
+    changes = {}
+    for field in ('content', 'ai_content'):
+        value = getattr(article, field, None)
+        if not value:
+            continue
+        revised = value.replace('Volkovski vs. Lopes', 'Volkanovski vs. Lopes')
+        for sentence in commercial_copy:
+            revised = revised.replace(sentence, '')
+        if revised != value:
+            setattr(article, field, revised)
+            changes[field] = {'before': value, 'after': revised}
+    return changes
+
+
 def repair_recent_gossip_news(
     db: Session,
     *,
@@ -640,6 +668,18 @@ def repair_recent_gossip_news(
     corrected = 0
     reasons = {}
     for article, tax in rows:
+        ufc_changes = _correct_confirmed_ufc_copy(article)
+        if ufc_changes:
+            db.add(article)
+            from bot.news_learning import record_incident
+            record_incident(db, reason_code='confirmed_participant_spelling_and_commercial_copy',
+                article_id=article.id, source_url=article.source_url, sport=tax.resolved_sport,
+                phase='postpublish', status='auto_corrected',
+                writer_provider='news-audit', writer_model='deterministic',
+                details={'evidence': 'Official source spells VOLKANOVSKI vs. LOPES 2; omit booking and presale directions',
+                         'changes': ufc_changes})
+            corrected += 1
+            logger.info('[public_index] corrected confirmed UFC copy article=%s', article.id)
         headline_changes = _correct_confirmed_lead_headline(article)
         if headline_changes:
             db.add(article)
