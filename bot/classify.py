@@ -127,6 +127,15 @@ def classify_article(
     cycling_context = _score_aliases(title_text, SPORT_ALIASES.get("cycling", [])) >= 2
     darts_context = _score_aliases(title_text, SPORT_ALIASES.get("darts", [])) >= 1
     snooker_context = _score_aliases(title_text, SPORT_ALIASES.get("snooker", [])) >= 1
+    if (re.search(r'\bgrand prix\b', title_text)
+            and not re.search(r'\b(?:formula (?:1|one)|f1|motogp|motorsport)\b', title_text)):
+        # Mixed RSS headlines often omit the sport, but their factual lead
+        # explicitly identifies darts/snooker/cycling. Grand Prix is not enough
+        # to override that evidence (confirmed Littler/Woodhouse incident).
+        lead = _norm((body or '')[:900])
+        darts_context = darts_context or _score_aliases(lead, SPORT_ALIASES.get('darts', [])) >= 1
+        snooker_context = snooker_context or _score_aliases(lead, SPORT_ALIASES.get('snooker', [])) >= 1
+        cycling_context = cycling_context or _score_aliases(lead, SPORT_ALIASES.get('cycling', [])) >= 2
     motorsport_context = _score_aliases(title_text, SPORT_ALIASES.get("motorsport", [])) >= 2
     # Explicit sport-name evidence must beat generic football tournament phrases
     # such as "World Cup" or "Champions League" in niche-sport headlines.

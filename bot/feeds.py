@@ -17,6 +17,7 @@ class Feed(TypedDict, total=False):
 
 
 FEEDS: List[Feed] = [
+    {'url': 'https://lnfoficial.com.br/noticias/feed/', 'kind': 'league', 'sport': 'futsal', 'publisher': 'Liga Nacional de Futsal', 'verified_official': True, 'enabled': True, 'note': 'Official replacement linked by ligafutsal.com.br: exact UTC RSS timestamps, scoped article prose and same-article match photos verified. Expo invitations remain held; no invented publication times or league stamp.'},
     {'url': 'https://swimswam.com/feed/', 'kind': 'league', 'sport': 'swimming', 'publisher': 'SwimSwam', 'enabled': True, 'note': 'Exact UTC RSS and public article dates, scoped WordPress prose and same-article photographs verified. NCAA alone is not basketball evidence; diving and sponsored products remain held.'},
     {'url': 'https://total-waterpolo.com/feed/', 'kind': 'league', 'sport': 'water-polo', 'publisher': 'Total Waterpolo', 'enabled': True, 'note': 'Exact UTC RSS, full original reporting and article photos verified; international and club water polo without a league stamp. Shared Champions League names never imply soccer.'},
     {'url': 'https://www.wpbsa.com/feed/', 'kind': 'league', 'sport': 'snooker', 'publisher': 'WPBSA', 'verified_official': True, 'enabled': True, 'note': 'Governing body RSS: exact UTC timestamps, full match reports and same-article photography verified. Billiards, promotional ceremonies and viewing guides are held separately.'},
@@ -33,7 +34,7 @@ FEEDS: List[Feed] = [
     {'url': 'https://feeds.bbci.co.uk/sport/football/championship/rss.xml', 'kind': 'league', 'sport': 'football', 'league': 'england-championship', 'country': 'england', 'enabled': True},
     {'url': 'https://as.com/rss/futbol/primera.xml', 'kind': 'league', 'sport': 'football', 'league': 'spain-la-liga', 'country': 'spain', 'enabled': True},
     {'url': 'https://as.com/rss/futbol/segunda.xml', 'kind': 'league', 'sport': 'football', 'league': 'spain-la-liga-2', 'country': 'spain', 'enabled': True},
-    {'url': 'https://football-italia.net/feed/', 'kind': 'league', 'sport': 'football', 'league': 'italy-serie-a', 'country': 'italy', 'enabled': True},
+    {'url': 'https://football-italia.net/feed/', 'kind': 'league', 'sport': 'football', 'enabled': True, 'note': 'Includes national teams and UEFA competitions; publisher country does not establish Serie A.'},
     {'url': 'https://www.espn.com/espn/rss/nba/news', 'kind': 'league', 'sport': 'basketball', 'league': 'nba', 'country': 'usa', 'enabled': True, 'rss_fallback_only': True},
     {'url': 'https://www.espn.com/espn/rss/ncb/news', 'kind': 'league', 'sport': 'basketball', 'league': 'ncaa-basketball', 'country': 'usa', 'enabled': True, 'rss_fallback_only': True},
     {'url': 'https://feeds.bbci.co.uk/sport/football/scottish-premiership/rss.xml', 'kind': 'league', 'sport': 'football', 'league': 'scotland-premiership', 'country': 'scotland', 'enabled': True},
@@ -50,7 +51,7 @@ FEEDS: List[Feed] = [
     {'url': 'https://www.espn.com/espn/rss/nfl/news', 'kind': 'league', 'sport': 'american-football', 'enabled': True, 'rss_fallback_only': True, 'note': 'ESPN NFL-only feed; sport hint only'},
     {'url': 'https://www.espn.com/espn/rss/nhl/news', 'kind': 'league', 'sport': 'ice-hockey', 'enabled': True, 'rss_fallback_only': True, 'note': 'ESPN NHL-only feed; sport hint only'},
     {'url': 'https://www.espn.com/espn/rss/golf/news', 'kind': 'league', 'sport': 'golf', 'enabled': True, 'rss_fallback_only': True, 'note': 'ESPN golf-only feed; sport hint only'},
-    {'url': 'https://basketnews.com/news/rss', 'kind': 'league', 'sport': 'basketball', 'enabled': True, 'note': 'RSS, article publication metadata, prose and images verified 2026-09-28; no league stamp; rumours/paywalls remain subject to admission gates'},
+    {'url': 'https://basketnews.com/news/rss', 'kind': 'league', 'sport': 'basketball', 'enabled': True, 'readiness_penalty': 15, 'note': 'Repeated production hero HTTP 403 after initial success on Sep 28-29: prioritize other eligible basketball publishers. Keep all image and originality gates; no league stamp.'},
     {'url': 'https://www.nbl.com.au/news/rss.xml', 'kind': 'league', 'sport': 'basketball', 'enabled': True, 'verified_official': True, 'note': 'Official NBL RSS carries exact GMT publication time; page date alone is insufficient. Podcasts, trackers and highlights are held.'},
     {'url': 'https://www.crvenazvezdafk.com/vesti/rss.xml', 'kind': 'league', 'sport': 'football', 'enabled': True, 'verified_official': True, 'note': 'Official club RSS with exact GMT timestamps; no league stamp; retrospectives and fan polls held.'},
     {'url': 'https://fss.rs/feed/', 'kind': 'league', 'sport': 'football', 'enabled': True, 'verified_official': True, 'note': 'Official federation reporting, youth and senior teams; no league stamp.'},

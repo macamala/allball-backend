@@ -586,8 +586,32 @@ def repair_recent_gossip_news(
         .all()
     )
     hidden = 0
+    corrected = 0
     reasons = {}
     for article, tax in rows:
+        # A publisher's domestic feed label cannot turn an explicit national
+        # tournament headline into that country's club league. Clear the
+        # unsupported competition only; never infer a fixture or enable a hold.
+        from bot.taxonomy import COMPETITIONS
+        competition = tax.resolved_competition
+        country = (COMPETITIONS.get(competition) or {}).get('country')
+        if (tax.resolved_sport == 'football'
+                and re.search(r'\bnations league\b', article.title or '', re.I)
+                and country and country not in {'international', 'global', 'europe'}):
+            tax.resolved_competition = None
+            tax.competition_confidence = 0.0
+            article.league = None
+            article.country = None
+            db.add_all([article, tax])
+            from bot.news_learning import record_incident
+            record_incident(db, reason_code='taxonomy_competition_mismatch',
+                article_id=article.id, source_url=article.source_url, sport='football',
+                phase='postpublish', status='auto_corrected',
+                writer_provider='news-audit', writer_model='deterministic',
+                details={'previous_competition': competition,
+                         'evidence': 'explicit Nations League headline; domestic league unsupported'})
+            corrected += 1
+            logger.info('[public_index] cleared unsupported domestic competition article=%s previous=%s', article.id, competition)
         item = {
             "title": article.title,
             "summary": article.summary,
@@ -615,7 +639,7 @@ def repair_recent_gossip_news(
             reason,
             (article.title or "")[:120],
         )
-    if hidden:
+    if hidden or corrected:
         try:
             db.commit()
         except Exception:
@@ -623,11 +647,12 @@ def repair_recent_gossip_news(
             logger.exception("recent News gossip repair failed")
             return 0
         logger.info(
-            "[public_index] gossip repair hidden=%s reasons=%s",
+            "[public_index] gossip repair hidden=%s reasons=%s competition_corrections=%s",
             hidden,
             reasons,
+            corrected,
         )
-    return hidden
+    return hidden + corrected
 
 
 def repair_recent_duplicate_news(

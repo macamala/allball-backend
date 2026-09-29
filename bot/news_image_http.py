@@ -8,6 +8,8 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
 import re
+import logging
+import socket
 from typing import Iterable
 from urllib.parse import urljoin, urlsplit, parse_qs, parse_qsl, urlencode, urlunsplit
 
@@ -26,6 +28,7 @@ MAX_SNIFF_BYTES = 64 * 1024
 _CACHE_TTL_OK = 6 * 60 * 60
 _CACHE_TTL_BAD = 30 * 60
 _CACHE: dict[str, tuple[float, bool, str]] = {}
+logger = logging.getLogger(__name__)
 
 
 def score_news_image_candidate(candidate: dict) -> float:
@@ -168,6 +171,8 @@ def _cache_get(url: str):
 def _cache_put(url: str, ok: bool, reason: str):
     ttl = _CACHE_TTL_OK if ok else _CACHE_TTL_BAD
     _CACHE[url] = (time.monotonic() + ttl, bool(ok), str(reason))
+    if not ok:
+        logger.info('[news-image] held host=%s reason=%s', urlsplit(url).hostname, reason)
 
 
 def clear_image_probe_cache():
@@ -203,6 +208,10 @@ def probe_news_image(url: str, *, client=None) -> tuple[bool, str]:
     own_client = client is None
     try:
         validate_public_url(value)
+    except socket.gaierror:
+        result = (False, "dns_resolution_failed")
+        _cache_put(value, *result)
+        return result
     except Exception:
         result = (False, "invalid_or_nonpublic_url")
         _cache_put(value, *result)

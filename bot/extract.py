@@ -107,11 +107,15 @@ class _MetaParser(HTMLParser):
             key = row.get("property") or row.get("name")
             if key and row.get("content"):
                 self.values[str(key).lower()] = row["content"].strip()
+        elif tag.lower() == 'link':
+            row = dict(attrs)
+            if 'canonical' in str(row.get('rel') or '').lower().split() and row.get('href'):
+                self.values['canonical'] = row['href'].strip()
 
 
 def _metadata(html: str, key: str) -> Optional[str]:
     parser = _MetaParser()
-    for tag in re.findall(r"<meta\b[^>]*>", html or "", re.I):
+    for tag in re.findall(r"<(?:meta|link)\b[^>]*>", html or "", re.I):
         parser.feed(tag)
     return parser.values.get(key.lower())
 CHROME_ATTR_RE = re.compile(
@@ -325,11 +329,19 @@ def collect_page_image_candidates(html: str) -> List[dict]:
     candidates.extend(_json_ld_images(html))
     # Yonhap uses <article> for unrelated recommendation cards too. Limit
     # body images to its actual story container; metadata remains same-page.
-    canonical = _og(html or '', 'og:url') or ''
+    canonical = _og(html or '', 'og:url') or _metadata(html or '', 'canonical') or ''
     if urlsplit(canonical).hostname == 'en.yna.co.kr':
         scoped = _ScopedNewsBody('story-news')
         scoped.feed(html or '')
         html = '<article>' + ''.join(scoped.parts) + '</article>' if scoped.finished else ''
+    if urlsplit(canonical).hostname in {'nba.com', 'www.nba.com'}:
+        # NBA wraps unrelated ArticleTile recommendations in <main> too.
+        # Only the actual ArticleContent container can supply fallback photos.
+        body_class = re.search(r'\bArticleContent_article__[A-Za-z0-9_-]+', html or '')
+        scoped = _ScopedNewsBody(body_class[0]) if body_class else None
+        if scoped:
+            scoped.feed(html or '')
+        html = '<article>' + ''.join(scoped.parts) + '</article>' if scoped and scoped.finished else ''
     parser = _LeadImageExtractor()
     try:
         parser.feed(html or "")
@@ -596,6 +608,10 @@ def article_text_from_html(html: str) -> str:
         # WordPress tags the real article "category-news", which resembles a
         # related-news widget to the generic chrome filter. Scope to its post.
         body_class = 'type-post'
+    if publisher_host in {'lnfoficial.com.br', 'www.lnfoficial.com.br'}:
+        # The outer report-news-container is mistaken for navigation by the
+        # generic chrome filter. Its post-content is the verified story body.
+        body_class = 'post-content'
     if body_class:
         scoped = _ScopedNewsBody(body_class)
         try:

@@ -101,6 +101,7 @@ def canonical_news_url(value):
 
 
 _SOURCE_PATH_SPORTS = (
+    ("lnfoficial.com.br", "/noticias/", "futsal"),
     ("www.theguardian.com", "/football/", "football"),
     ("www.sportschau.de", "/fussball/", "football"),
     ("www.sportschau.de", "/handball/", "handball"),
@@ -319,6 +320,10 @@ def non_article_news_reason(item):
         return "non_article_analysis"
     if title.strip() == "stars arrive in shenzhen":
         return "non_article_event_promotion"
+    if re.search(r"\bconvite\b.{0,60}\b(?:expo|feira)\b", title):
+        return "non_article_event_promotion"
+    if re.search(r'\bwin (?:an? |your )?(?:vip )?(?:visit|trip|tickets|signed shirt)\b', title):
+        return "non_article_commercial_promotion"
     if (re.search(r"^what (?:is|was|are|were) .{0,90}\bbest\b", title)
             or re.search(r"\b(?:invite[sd]?|ask[sed]*|inviting)\b.{0,40}\b(?:fans|supporters)\b.{0,35}\b(?:rank|choose|pick|select|vote|rate)\b", title)):
         return "non_article_fan_poll"
@@ -338,6 +343,10 @@ def non_article_news_reason(item):
     if (re.search(r"\b(?:19\d{2}|20[01]\d)\b", title)
             and re.search(r"\b(?:helped shape|looking back|look back|rewind|legacy)\b", title)):
         return "non_news_retrospective_commentary"
+    if re.search(r"^clive churchill medal winner\s*:.+\b(?:19\d{2}|20[01]\d)\b", title):
+        return "non_news_retrospective_commentary"
+    if title.strip() == 'counter-strike 2 update':
+        return "non_article_product_patch"
 
     # Confirmed incident: this is a future race schedule/weather guide. A prior
     # Azerbaijan result in its background must never become a Bahrain result.
@@ -632,6 +641,9 @@ def candidate_readiness_score(item):
         score += 1
     if feed.get("verified_official") is True:
         score += 2
+    # A reviewed source-level reliability issue can lower queue priority without
+    # waiving any image/fact checks or removing the source's valid candidates.
+    score -= max(0, min(20, int(feed.get("readiness_penalty") or 0)))
     return score
 
 
