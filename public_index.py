@@ -593,6 +593,23 @@ def _correct_confirmed_deadline_copy(article: Article) -> dict:
     return changes
 
 
+def _correct_confirmed_lead_headline(article: Article) -> dict:
+    """Repair the audited source-lead headline without changing its URL or date."""
+    try:
+        source = urlsplit(article.source_url or '')
+    except ValueError:
+        return {}
+    old_title = ('All Blacks head coach Dave Rennie has named a 34-man squad for the '
+                 'Bledisloe Cup series starting next weekend at Eden Park in Auckland.')
+    if (article.id != 22163 or not article.ai_generated
+            or source.hostname not in {'www.rugbypass.com', 'rugbypass.com'}
+            or source.path.rstrip('/') != '/news/scott-barrett-among-notable-inclusions-in-34-man-all-blacks-bledisloe-cup-squad'
+            or article.title != old_title):
+        return {}
+    article.title = 'Barrett and Frizell return as Taylor takes All Blacks captaincy'
+    return {'title': {'before': old_title, 'after': article.title}}
+
+
 def repair_recent_gossip_news(
     db: Session,
     *,
@@ -623,6 +640,18 @@ def repair_recent_gossip_news(
     corrected = 0
     reasons = {}
     for article, tax in rows:
+        headline_changes = _correct_confirmed_lead_headline(article)
+        if headline_changes:
+            db.add(article)
+            from bot.news_learning import record_incident
+            record_incident(db, reason_code='headline_too_similar_to_source',
+                article_id=article.id, source_url=article.source_url, sport=tax.resolved_sport,
+                phase='postpublish', status='auto_corrected',
+                writer_provider='news-audit', writer_model='deterministic',
+                details={'evidence': 'Audited source confirms Barrett/Frizell return and Taylor captaincy; former headline closely rewrote its opening sentence',
+                         'changes': headline_changes})
+            corrected += 1
+            logger.info('[public_index] corrected confirmed source-lead headline article=%s', article.id)
         copy_changes = _correct_confirmed_deadline_copy(article)
         if copy_changes:
             db.add(article)

@@ -909,6 +909,19 @@ def original_draft_reason(draft, source_title, source_body):
         and SequenceMatcher(None, source_title_norm, draft_title_norm).ratio() > 0.88
     ):
         return 'headline_too_similar_to_source'
+    # A different publisher headline does not make its copied opening sentence
+    # an original headline. Check body wording too, without penalising short
+    # factual labels or shared person/team names.
+    headline_words = draft_title_norm.split()
+    source_body_norm = ' '.join(re.findall(r'[\w]+', source_body.casefold()))
+    if len(headline_words) >= 10 and f' {draft_title_norm} ' in f' {source_body_norm} ':
+        return 'copied_source_headline'
+    if len(headline_words) >= 12:
+        for sentence in re.split(r'[.!?\n]+', source_body):
+            sentence_norm = ' '.join(re.findall(r'[\w]+', sentence.casefold()))
+            if (len(sentence_norm.split()) >= 12
+                    and SequenceMatcher(None, sentence_norm, draft_title_norm).ratio() > 0.85):
+                return 'headline_too_similar_to_source'
     if numeric_tokens(output) - numeric_tokens(source, include_spelled=True): return 'unsupported_number'
     tokens = lambda text: re.findall(r"[\w]+", text.lower())
     src, dst = tokens(source_body), tokens(body)

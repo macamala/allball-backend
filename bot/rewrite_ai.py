@@ -42,6 +42,7 @@ rhythm, opening, paragraph order and voice.
 
 NINKOSPORTS NEWS VOICE:
 - Write clear, direct sports reporting with an independently written headline and lead.
+- Keep the headline concise, normally 8-16 words. Never use a source sentence as the headline, even with small word substitutions.
 - Lead with the verified current development, then explain the supporting facts.
 - Reorganise facts into a new article; do not translate or paraphrase sentence by sentence.
 - Every sentence must convey a sourced fact or a faithful paraphrase of an attributed statement.
@@ -132,7 +133,7 @@ SPORT_RETRY_HINT = (
 )
 
 HEADLINE_RETRY_HINT = (
-    "The previous headline was too close to the source headline. Create a genuinely "
+    "The previous headline was too close to the source headline or body sentence. Create a concise "
     "new NinkoSports headline using different wording and structure while preserving "
     "the exact supported meaning. Do not add a fact or sensationalise."
 )
