@@ -116,6 +116,13 @@ def image_url_for_display(url: Optional[str], role: str = "card") -> Optional[st
     raw = (url or "").strip()
     if not raw:
         return raw
+    pairs = dict((key.lower(), value) for key, value in parse_qsl(urlsplit(raw).query, keep_blank_values=True))
+    # Resizing a signed publisher URL invalidates its authorization. Keep the
+    # exact article URL; never remove or regenerate its signature. Guardian's
+    # explicit s=none body-photo URLs are unsigned size variants.
+    if (set(pairs) & {'signature', 'sig', 'token', 'policy', 'expires', 'st', 'hmac', 'x-amz-signature', 'x-goog-signature'}
+            or pairs.get('s', '').lower() not in {'', 'none'}):
+        return raw
     target = DISPLAY_WIDTHS.get(role, DISPLAY_WIDTHS["card"])
     current = width_from_url(raw)
     if current <= 0:

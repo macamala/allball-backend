@@ -57,8 +57,11 @@ def news_hero_url(url: str) -> str:
         # Never alter signed URLs or publisher overlays.
         if {k.lower() for k, _ in pairs} & {
             "signature", "sig", "token", "policy", "expires", "st", "hmac",
+            "x-amz-signature", "x-goog-signature",
             "overlay-base64", "overlay", "mark", "mark64", "txt",
         }:
+            return value
+        if any(k.lower() == 's' and v.lower() not in {'', 'none'} for k, v in pairs):
             return value
         # Verified UEFA image endpoint: 158x89 thumbnail -> 988x556 original.
         # Preserve the image identity, crop and every unrelated query value.

@@ -145,6 +145,18 @@ def test_uefa_size_upgrade_keeps_same_photo_and_signed_urls_are_untouched():
     assert images.news_hero_url(small+'&sig=abc') == small+'&sig=abc'
 
 
+def test_publisher_signed_photo_is_never_resized_or_stripped():
+    from bot.media_url import image_url_for_display
+    for signature in ['s=4dfe6bc826fa17a60415cf158a09d482', 'X-Amz-Signature=verified', 'X-Goog-Signature=verified']:
+        original = 'https://i.guim.co.uk/img/media/fixture/master/5370.jpg?width=1200&height=900&' + signature
+        assert images.news_hero_url(original) == original
+        for role in ('thumb', 'card', 'featured', 'hero'):
+            assert image_url_for_display(original, role) == original
+    unsigned = 'https://i.guim.co.uk/img/media/fixture/master/5370.jpg?width=465&dpr=1&s=none&crop=none'
+    assert 'width=1600' in images.news_hero_url(unsigned)
+    assert '&s=none&crop=none' in images.news_hero_url(unsigned)
+
+
 def test_uefa_ingest_and_repair_both_probe_and_return_the_actual_hero(monkeypatch):
     from bot import fetch_sources
     import public_index

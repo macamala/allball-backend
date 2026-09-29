@@ -456,6 +456,10 @@ SPORT_ALIASES: Dict[str, List[str]] = {
     "mma": ["mma", "ufc", "octagon", "mixed martial"],
     "cycling": ["cycling", "tour de france", "peloton", "uci world"],
     "snooker": ["snooker", "147 break", "crucible"],
+    # Mixed Asian Games headlines often name the discipline, not "athletics".
+    # Steeplechase and generic distance/relay words are deliberately excluded:
+    # they also occur in horse racing and swimming.
+    "athletics": ["athletics", "track and field", "long jump", "triple jump", "high jump", "pole vault", "shot put", "javelin", "hammer throw", "discus throw"],
 }
 
 for _slug, _aliases in extra_sport_aliases().items():

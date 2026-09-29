@@ -168,3 +168,13 @@ def test_mixed_grand_prix_uses_explicit_sport_in_factual_lead():
 ])
 def test_betting_advice_is_not_current_sports_reporting(title, held):
     assert (non_article_news_reason({'title': title}) == 'non_article_betting_product') is held
+
+
+@pytest.mark.parametrize('title,body,sport', [
+    ("Shaili Singh's long jump mark wrongly measured by officials, will move CAS: AFI", '', 'athletics'),
+    ('Asian Games: Yashvir wins silver, Rohit bronze as Pathirage takes javelin gold', '', 'athletics'),
+    ('Swimmer wins 1500m freestyle final', 'Swimming final in the pool.', 'swimming'),
+    ('Horse racing champion wins steeplechase', 'The jockey rode the horse to victory.', 'horse-racing'),
+])
+def test_precise_field_events_are_classified_without_stealing_swimming_or_racing(title, body, sport):
+    assert classify_article(title, body).sport == sport
