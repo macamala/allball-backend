@@ -25,9 +25,11 @@ class Client:
     def __init__(self, responses):
         self.responses=list(responses)
         self.calls=[]
+        self.headers=[]
 
-    def stream(self, method, url):
+    def stream(self, method, url, **kwargs):
         self.calls.append((method,url))
+        self.headers.append(kwargs.get('headers'))
         return self.responses.pop(0)
 
 
@@ -54,6 +56,19 @@ def test_image_probe_rejects_hotlink_http_failure():
     client=Client([Response(status=403,content_type="text/html",body=b"forbidden")])
     ok,reason=images.probe_news_image("https://cdn.example/photo",client=client)
     assert ok is False and reason=="http_403"
+
+
+@pytest.mark.parametrize('second,expected', [
+    (Response(), (True, 'ok')),
+    (Response(content_type='text/html', body=b'<html>not a photograph</html>'), (False, 'not_image_content')),
+    (Response(status=416), (False, 'http_416')),
+])
+def test_range_refusal_retries_same_photo_once_with_all_gates(second, expected):
+    client = Client([Response(status=416), second])
+    url = 'https://cdn.example/smaller-than-range.jpg'
+    assert images.probe_news_image(url, client=client) == expected
+    assert client.calls == [('GET', url), ('GET', url)]
+    assert client.headers == [{'Range': 'bytes=0-131071'}, {}]
 
 
 @pytest.mark.parametrize('width,height,reason', [(1200,800,'ok'), (120,80,'image_too_small'), (1200,180,'bad_aspect_ratio')])

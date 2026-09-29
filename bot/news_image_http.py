@@ -230,17 +230,30 @@ def probe_news_image(url: str, *, client=None) -> tuple[bool, str]:
                 "User-Agent": USER_AGENT,
                 "Referer": "https://ninkosports.com/",
                 "Accept": "image/jpeg,image/png,image/webp,image/gif;q=0.8",
-                "Range": f"bytes=0-{MAX_SNIFF_BYTES - 1}",
             },
         )
 
     current = value
+    range_header = f"bytes=0-{MAX_SNIFF_BYTES - 1}"
+    redirects = 0
     try:
-        for _ in range(4):
+        for _ in range(5):
             try:
                 validate_public_url(current)
-                with client.stream("GET", current) as response:
+                with client.stream("GET", current, headers={"Range": range_header} if range_header else {}) as response:
+                    # Some image CDNs reject a range extending beyond EOF.
+                    # Retry the SAME URL once without Range, still reading at
+                    # most MAX_SNIFF_BYTES and enforcing all image/geometry gates.
+                    if response.status_code == 416 and range_header:
+                        range_header = None
+                        logger.info('[news-image] range unsupported; bounded full GET host=%s', urlsplit(current).hostname)
+                        continue
                     if response.status_code in (301, 302, 303, 307, 308):
+                        redirects += 1
+                        if redirects >= 4:
+                            result = (False, 'redirect_limit')
+                            _cache_put(value, *result)
+                            return result
                         location = response.headers.get("location", "")
                         if not location:
                             result = (False, "redirect_without_location")
