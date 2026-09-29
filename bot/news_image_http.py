@@ -198,6 +198,9 @@ def probe_news_image(url: str, *, client=None) -> tuple[bool, str]:
     if (urlsplit(value).hostname == "cdn.prod.website-files.com"
             and re.search(r"[_/](?:nblplus(?:%20|[ ._(%-])|NBL%2B_|670f29f16cffa3066d5d5ca1_Exclusive\.)", urlsplit(value).path, re.I)):
         return False, "publisher_default_image"
+    if (urlsplit(value).hostname == 'images.ctfassets.net'
+            and re.search(r'/DPG_Media_Building_[^/]+\.(?:png|jpe?g)$', urlsplit(value).path, re.I)):
+        return False, 'publisher_default_image'
     if re.search(r"(?:^|[/_-])(?:banner|title[-_]card)(?:[._-]|$)", urlsplit(value).path, re.I):
         return False, "promotional_banner"
     # Choose another real photograph from the same article. Do not strip an

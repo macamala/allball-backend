@@ -350,7 +350,7 @@ def non_article_news_reason(item):
         return "non_article_commercial_promotion"
     if re.search(r'^betting on\b|\b(?:what the odds say|betting tips|odds and predictions)\b', title):
         return "non_article_betting_product"
-    if re.search(r'\bveja (?:as )?contas\b', title):
+    if re.search(r'\bveja (?:as )?contas\b', title) or re.search(r'-veja-(?:as-)?contas\.ghtml$', path):
         return 'non_article_analysis'
     if re.search(r'\btransfer cent(?:re|er)\b', title):
         return 'non_article_rolling_tracker'
@@ -467,6 +467,11 @@ def non_article_news_reason(item):
         return "non_article_video_highlights"
     if re.search(r"\b(?:race times|qualifying times|weather forecast|how to watch|where to watch|all you need to know|everything you need to know)\b", title):
         return "non_article_service_guide"
+    if (re.search(r'\b(?:dónde|donde) ver\b', title)
+            and re.search(r'\b(?:horario|tv|online|a qué hora|a que hora)\b', title)) or (
+            re.search(r'\bonde assistir\b', title)
+            and re.search(r'\b(?:horário|horario|tv|ao vivo)\b', title)):
+        return 'non_article_service_guide'
     if re.search(r"\b(?:today[’']?s papers|paper talk|newspaper round[- ]?up)\b", title):
         return "non_article_newspaper_roundup"
     # Keep scarce writer requests for factual news rather than opinion/listicle
@@ -950,6 +955,8 @@ def original_draft_reason(draft, source_title, source_body):
         return admission
     source = f'{source_title}\n{source_body}'
     output = f'{title}\n{summary}\n{body}'
+    if re.search(r'\[\s*(?:blank line|insert [^\]\n]+|placeholder|todo)\s*\]', output, re.I):
+        return 'draft_placeholder'
     if (re.search(r'https?://|www\.', output, re.I)
             or re.search(r'\b(?:[a-z0-9][a-z0-9-]*\.)+(?:com|org|net|io|co|tv)(?=[:/\s.,;!?)]|$)', output, re.I)):
         return 'external_link_in_copy'

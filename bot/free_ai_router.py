@@ -387,6 +387,11 @@ Check WHO did each action, not just whether the names and action appear somewher
 in the source. Never transfer one person's employment, biography, injury, result
 or quotation to another person named in the same article. Resolve pronouns from
 their source context. If the actor is uncertain, reject the claim.
+Check singular roles before a list: naming an assistant coach and another person
+does not establish that both are assistant coaches. Never pluralize a shared role
+without explicit source support. Preserve the exact cause of a travel disruption:
+a weight calculation problem is not a fuel calculation error, and an unplanned
+refuelling stop does not entail an emergency.
 Do not use outside knowledge or assumptions.
 Reject clock times mistranslated as durations: Serbian "večeras do 24 časa" means by midnight that evening, not 24 hours from now.
 The source and draft must describe a concrete current sporting development.
@@ -414,8 +419,11 @@ invited supporters to rank past wins does NOT make it news. A factual report
 about new competition events, appointments, injuries, contracts or sporting
 decisions is news; instructions for audience participation are not.
 Subjective pressure rankings, predictions, listicles and generic claims that a
-future tournament matters are analysis, not news. A teaser without identified
-people, teams or a concrete new event is insufficient. Never approve prose
+future tournament matters are analysis, not news. Qualification probability
+calculators (including "veja
+contas") and TV/streaming guides (including "dónde ver" and "onde assistir")
+remain analysis or service products even when their fixtures and numbers are true.
+A teaser without identified people, teams or a concrete new event is insufficient. Never approve prose
 describing facts that were not supplied, unspecified teams or missing details.
 
 Return JSON only with exactly:

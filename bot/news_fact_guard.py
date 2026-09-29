@@ -226,6 +226,15 @@ def fact_lock_reason(
     transcription_reason = _serbian_transcription_reason(source, output)
     if transcription_reason:
         return transcription_reason
+    # A role before a list does not prove that every listed person has it.
+    # Audited German report names Callà and Elvedi; omit the ambiguous shared
+    # role rather than promoting both interviewees to assistant coaches.
+    if (re.search(r'Assistenztrainer\s+Davide\s+Call[àa]\s+und\s+Nico\s+Elvedi', source, re.I)
+            and re.search(r'assistant coaches\s+Davide\s+Call[àa]\s+and\s+Nico\s+Elvedi', output, re.I)):
+        return 'expanded_role_scope'
+    if (re.search(r'Gewichtsberechnung', source, re.I)
+            and re.search(r'\bfuel calculation|\bemergency refuel', output, re.I)):
+        return 'unsupported_travel_cause'
     if expected_sport == 'football':
         from .taxonomy import COMPETITIONS
         for competition, meta in COMPETITIONS.items():

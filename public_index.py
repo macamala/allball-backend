@@ -704,6 +704,56 @@ def _correct_confirmed_fss_copy(article: Article) -> dict:
     return changes
 
 
+def _correct_confirmed_yakin_copy(article: Article) -> dict:
+    """Remove two audited translation errors, leaving this News row in place."""
+    try:
+        source = urlsplit(article.source_url or '')
+    except ValueError:
+        return {}
+    if (article.id != 22193 or not article.ai_generated
+            or source.hostname != 'www.blick.ch'
+            or source.path.rstrip('/') != '/sport/fussball/nations-league/nati-pk-vor-schottland-yakin-und-elvedi-live/mqh1lxn'):
+        return {}
+    replacements = {
+        'Assistant coaches Davide Callà and Nico Elvedi addressed media questions.':
+            'Davide Callà and Nico Elvedi answered media questions.',
+        'The team’s arrival also faced delays after a fuel calculation error forced an emergency refueling stop in Zurich, causing a three-hour delay.':
+            'The team’s flight stopped in Zurich to refuel following discrepancies in weight calculations, and the team arrived roughly three hours late.',
+    }
+    changes = {}
+    for field in ('content', 'ai_content'):
+        value = getattr(article, field, None)
+        if not value:
+            continue
+        revised = value
+        for old, new in replacements.items():
+            revised = revised.replace(old, new)
+        if revised != value:
+            setattr(article, field, revised)
+            changes[field] = {'before': value, 'after': revised}
+    return changes
+
+
+def _correct_confirmed_taranto_format(article: Article) -> dict:
+    """Remove an audited formatting marker without changing the report."""
+    try:
+        source = urlsplit(article.source_url or '')
+    except ValueError:
+        return {}
+    if (article.id != 22195 or not article.ai_generated
+            or source.hostname != 'aleagues.com.au'
+            or source.path.rstrip('/') != '/news/news-adriana-taranto-named-new-adelaide-united-captain'):
+        return {}
+    changes = {}
+    for field in ('content', 'ai_content'):
+        value = getattr(article, field, None)
+        if value and '[Blank Line]' in value:
+            revised = value.replace('\n[Blank Line]\n', '\n\n').replace('[Blank Line]', '')
+            setattr(article, field, revised)
+            changes[field] = {'before': value, 'after': revised}
+    return changes
+
+
 def repair_recent_gossip_news(
     db: Session,
     *,
@@ -734,6 +784,30 @@ def repair_recent_gossip_news(
     corrected = 0
     reasons = {}
     for article, tax in rows:
+        format_changes = _correct_confirmed_taranto_format(article)
+        if format_changes:
+            db.add(article)
+            from bot.news_learning import record_incident
+            record_incident(db, reason_code='draft_placeholder',
+                article_id=article.id, source_url=article.source_url, sport='football',
+                phase='postpublish', status='auto_corrected',
+                writer_provider='news-audit', writer_model='deterministic',
+                details={'evidence': 'Literal [Blank Line] editorial marker is not source reporting',
+                         'changes': format_changes})
+            corrected += 1
+            logger.info('[public_index] corrected confirmed format marker article=%s', article.id)
+        yakin_changes = _correct_confirmed_yakin_copy(article)
+        if yakin_changes:
+            db.add(article)
+            from bot.news_learning import record_incident
+            record_incident(db, reason_code='expanded_role_scope_and_travel_cause',
+                article_id=article.id, source_url=article.source_url, sport='football',
+                phase='postpublish', status='auto_corrected',
+                writer_provider='news-audit', writer_model='deterministic',
+                details={'evidence': 'Source names Callà and Elvedi without establishing both as assistant coaches; Gewichtsberechnung is weight calculation, not fuel calculation; no emergency refuelling assertion',
+                         'changes': yakin_changes})
+            corrected += 1
+            logger.info('[public_index] corrected confirmed interview role and travel cause article=%s', article.id)
         fss_changes = _correct_confirmed_fss_copy(article)
         if fss_changes:
             db.add(article)
