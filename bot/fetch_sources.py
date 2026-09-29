@@ -381,6 +381,12 @@ def _fetch_feed_entries(feed_cfg: Dict, max_articles: int) -> List[Dict]:
                 continue
         if not link or not title or looks_like_garbage(title):
             continue
+        allowed_paths = feed_cfg.get('allowed_article_paths') or ()
+        excluded_paths = feed_cfg.get('excluded_article_paths') or ()
+        path = urlsplit(link).path
+        if ((allowed_paths and not any(path.startswith(prefix) for prefix in allowed_paths))
+                or any(path.startswith(prefix) for prefix in excluded_paths)):
+            continue
         if feed_cfg.get("rss_fallback_only") and word_count(summary) < 25:
             logger.info(
                 "[fetch_sources] skip thin rss-only metadata: %s",

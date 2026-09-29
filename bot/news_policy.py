@@ -318,6 +318,10 @@ def non_article_news_reason(item):
         return "non_article_service_guide"
     if re.search(r"\b(?:talking points|silver linings|most intriguing|season buzz|news and intel)\b", title):
         return "non_article_analysis"
+    if re.match(r'\s*analysis\s*:', title):
+        return 'non_article_analysis'
+    if re.search(r'\b(?:participate|participates|participating|join|joins|host|hosts)\b.{0,45}\breddit ama\b', title):
+        return 'non_article_event_promotion'
     if title.strip() == "stars arrive in shenzhen":
         return "non_article_event_promotion"
     if re.search(r"\bconvite\b.{0,60}\b(?:expo|feira)\b", title):
@@ -422,6 +426,8 @@ def non_article_news_reason(item):
         r"(?:^|/|-)(?:best-moments|game-highlights|match-highlights|tries-of-the-week)(?:/|-|$)", path
     ) or re.search(
         r"\b(?:game highlights|match highlights|top (?:plays|tries)|tries of the week|best moments|moments that mattered)\b|^top \d+\s*:|^compilation\s*:", title
+    ) or re.search(
+        r'^\s*watch\b.{0,70}\bhighlights\b', title
     ):
         return "non_article_video_highlights"
     if re.search(r"\b(?:race times|qualifying times|weather forecast|how to watch|where to watch|all you need to know|everything you need to know)\b", title):

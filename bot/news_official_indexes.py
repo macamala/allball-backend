@@ -36,6 +36,13 @@ logger = logging.getLogger(__name__)
 
 HTML_INDEXES = (
     {
+        'id': 'rugbypass-rugby-news', 'sport': 'rugby', 'publisher': 'RugbyPass',
+        'url': 'https://www.rugbypass.com/', 'host': 'www.rugbypass.com',
+        'paths': ('/news/',), 'verified_official': False,
+        # RSS dates are naive. Hydrate the article's explicit UTC publication
+        # metadata instead; /plus/ subscription articles are not admitted.
+    },
+    {
         "id": "mozzart-serbian-football-news", "sport": "football", "publisher": "Mozzart Sport",
         "url": "https://www.mozzartsport.com/fudbal/1", "host": "www.mozzartsport.com",
         "paths": ("/fudbal/vesti/",), "article_path_re": r"^/fudbal/vesti/[^/]+/\d+$",

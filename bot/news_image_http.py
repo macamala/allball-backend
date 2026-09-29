@@ -275,7 +275,9 @@ def probe_news_image(url: str, *, client=None) -> tuple[bool, str]:
                     result = (True, "ok")
                     _cache_put(value, *result)
                     return result
-            except Exception:
+            except Exception as exc:
+                logger.info('[news-image] transport exception host=%s type=%s',
+                            urlsplit(value).hostname, type(exc).__name__)
                 result = (False, "request_failed")
                 _cache_put(value, *result)
                 return result

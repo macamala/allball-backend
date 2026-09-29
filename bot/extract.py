@@ -335,6 +335,10 @@ def collect_page_image_candidates(html: str) -> List[dict]:
         scoped = _ScopedNewsBody('story-news')
         scoped.feed(html or '')
         html = '<article>' + ''.join(scoped.parts) + '</article>' if scoped.finished else ''
+    if urlsplit(canonical).hostname in {'ustrottingnews.com', 'www.ustrottingnews.com'}:
+        scoped = _ScopedNewsBody('entry-content')
+        scoped.feed(html or '')
+        html = '<article>' + ''.join(scoped.parts) + '</article>' if scoped.finished else ''
     if urlsplit(canonical).hostname in {'nba.com', 'www.nba.com'}:
         # NBA wraps unrelated ArticleTile recommendations in <main> too.
         # Only the actual ArticleContent container can supply fallback photos.
@@ -361,6 +365,10 @@ def _is_chrome_open(tag: str, attrs) -> bool:
     if tag in CHROME_TAGS:
         return True
     attrs = _attr_map(attrs)
+    if set(attrs.get('class', '').split()) & {
+        'embedded-related-article', 'embedded-recommended-articles', 'promotion',
+    }:
+        return True
     # Membership account panels can sit inside <main>. Their product cards
     # are navigation, not photographs or prose belonging to the news article.
     if attrs.get("id", "").casefold() == "authprofile" or "profile-panel" in attrs.get("class", "").split():
@@ -591,7 +599,7 @@ def article_text_from_html(html: str) -> str:
     body_class = 'single-news-content' if 'single-news-content' in (html or '') else None
     # Mozzart's article container is distinct from headline grids and betting
     # widgets. Only apply its class under its own canonical publisher metadata.
-    canonical = _og(html or '', 'og:url') or _meta_name(html or '', 'url') or ''
+    canonical = _og(html or '', 'og:url') or _metadata(html or '', 'canonical') or _meta_name(html or '', 'url') or ''
     try:
         publisher_host = urlsplit(canonical).hostname
     except ValueError:
@@ -613,6 +621,15 @@ def article_text_from_html(html: str) -> str:
         # The outer report-news-container is mistaken for navigation by the
         # generic chrome filter. Its post-content is the verified story body.
         body_class = 'post-content'
+    if publisher_host in {'www.golfmonthly.com', 'golfmonthly.com'}:
+        # Future's enclosing widget is chrome; its article__body contains the
+        # actual reporting, while author biographies are outside that body.
+        body_class = 'article__body'
+    if publisher_host in {'www.rugbypass.com', 'rugbypass.com'}:
+        # Recommendations and reader comments follow the story container.
+        body_class = 'copy-row'
+    if publisher_host in {'ustrottingnews.com', 'www.ustrottingnews.com'}:
+        body_class = 'entry-content'
     if body_class:
         scoped = _ScopedNewsBody(body_class)
         try:
@@ -624,6 +641,9 @@ def article_text_from_html(html: str) -> str:
             return ''
         html = ''.join(scoped.parts)
     text = paragraphs_from_html(html or "")
+    if publisher_host in {'www.rugbypass.com', 'rugbypass.com'}:
+        # The publisher app advertisement is appended inside its prose block.
+        text = re.split(r'(?im)^Your home for rugby\.', text, maxsplit=1)[0].strip()
     text = strip_site_chrome(text) or text
     if is_site_chrome_text(text):
         text = ""
