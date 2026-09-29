@@ -17,6 +17,10 @@ logger = logging.getLogger(__name__)
 _MEMORY = {}
 _MEMORY_MAX = 1000
 _SCHEMA_READY = False
+_FSS_PHOTO_REPAIR_URLS = {
+    'https://fss.rs/a-tim-promene-u-sastavu-pred-nastavak-lige-nacija/',
+    'https://fss.rs/u21-i-u-drugom-testu-lako-sa-irakom-slede-dva-jaca-testa-protiv-rusije/',
+}
 _EDITORIAL_RETRY_REASONS = {
     'direct_quote_requires_review',
     'headline_too_similar_to_source',
@@ -227,6 +231,22 @@ def held_source_urls(urls) -> set[str]:
         cursor.execute("SET LOCAL statement_timeout = '5s'")
         _ensure_schema(cursor)
         keys = [hashes[url] for url in values]
+        repaired_photo_keys = [hashes[url] for url in values if url in _FSS_PHOTO_REPAIR_URLS]
+        if repaired_photo_keys:
+            # Two audited FSS pages expose valid full-size article photos in
+            # CSS that the old parser missed. Expire only their pre-fix image
+            # cooldowns; new failures and all editorial holds remain in force.
+            # The next ingest still probes photos and runs every public gate.
+            cursor.execute(
+                "UPDATE news_ai_source_holds SET expires_at=NOW(), "
+                "reason='audited-fss-photo-parser-repaired', updated_at=NOW() "
+                "WHERE source_hash = ANY(%s) AND expires_at > NOW() "
+                "AND reason='missing-or-unreachable-publishable-image' "
+                "AND updated_at < %s::timestamptz",
+                (repaired_photo_keys, '2026-09-29T05:55:00Z'),
+            )
+            if cursor.rowcount:
+                logger.info('[source_holds] expired audited pre-fix FSS photo cooldowns=%s', cursor.rowcount)
         cursor.execute(
             "SELECT source_hash, reason FROM news_ai_source_holds "
             "WHERE source_hash = ANY(%s) AND expires_at > NOW()",

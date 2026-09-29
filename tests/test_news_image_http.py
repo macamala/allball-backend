@@ -56,6 +56,22 @@ def test_image_probe_rejects_hotlink_http_failure():
     assert ok is False and reason=="http_403"
 
 
+@pytest.mark.parametrize('width,height,reason', [(1200,800,'ok'), (120,80,'image_too_small'), (1200,180,'bad_aspect_ratio')])
+def test_camera_metadata_before_dimensions_preserves_geometry_gates(width, height, reason):
+    app1 = b'\xff\xe1' + (60002).to_bytes(2, 'big') + b'x' * 60000
+    app2 = b'\xff\xe2' + (20002).to_bytes(2, 'big') + b'x' * 20000
+    sof = b'\xff\xc0\x00\x11\x08' + height.to_bytes(2, 'big') + width.to_bytes(2, 'big') + b'\x03' + b'x' * 32
+    body = b'\xff\xd8' + app1 + app2 + sof
+    assert images._image_dimensions(body[:65536]) is None
+    assert images.probe_news_image('https://cdn.example/camera.jpg', client=Client([Response(body=body)])) == (reason == 'ok', reason)
+
+
+def test_camera_probe_still_holds_dimensions_beyond_the_bounded_limit():
+    app = b'\xff\xe1' + (60002).to_bytes(2, 'big') + b'x' * 60000
+    body = b'\xff\xd8' + app * 3 + b'\xff\xc0\x00\x11\x08\x03\x20\x04\xb0\x03' + b'x' * 32
+    assert images.probe_news_image('https://cdn.example/oversized-metadata.jpg', client=Client([Response(body=body)])) == (False, 'image_dimensions_unverified')
+
+
 def test_image_probe_follows_bounded_public_redirect():
     client=Client([
         Response(status=302,content_type="",body=b"",location="https://media.example/final.jpg"),

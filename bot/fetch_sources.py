@@ -596,6 +596,9 @@ def _ingest_item(
 
     feed = item.get("feed") or {}
     tags = _classify_item(item, facts)
+    if os.getenv('NEWS_FOOTBALL_ONLY') == '1' and tags.sport != 'football':
+        logger.info('[fetch_sources] outside soccer focus after body classification sport=%s', tags.sport)
+        return None, False
     ok, reason = quality_check(item["title"], facts, tags.sport, require_english=False)
     if not ok:
         logger.info("[fetch_sources] skip quality=%s title=%s", reason, item["title"][:80])
@@ -1005,7 +1008,9 @@ def _fetch_and_store_all_articles(
                 queued.extend(fetch_official_index_entries(per_feed))
             except Exception as e:
                 logger.error("[fetch_sources] official index error: %s", type(e).__name__)
-        if os.getenv("NEWS_ESPN_NEWS_JSON_ENABLED") == "1":
+        # Current ESPN JSON catalog contains only other sports. Its independent
+        # soccer RSS remains in enabled_feeds; never use NFL as a soccer source.
+        if os.getenv("NEWS_ESPN_NEWS_JSON_ENABLED") == "1" and os.getenv('NEWS_FOOTBALL_ONLY') != '1':
             try:
                 from .news_espn_api import fetch_espn_news_entries
 
@@ -1133,6 +1138,7 @@ def _fetch_and_store_all_articles(
             sport_inventory=sport_inventory,
             coverage_floor=6,
             prioritize_major_sports=True,
+            allowed_sports={'football'} if os.getenv('NEWS_FOOTBALL_ONLY') == '1' else None,
         )
         candidate_sports = {}
         for candidate in queued:

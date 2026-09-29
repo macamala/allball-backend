@@ -24,7 +24,9 @@ USER_AGENT = (
     "(KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36 "
     "(compatible; NinkoSportsImageCheck/1.0; +https://ninkosports.com)"
 )
-MAX_SNIFF_BYTES = 64 * 1024
+# Verified FSS camera JPEGs have more than 64 KiB of EXIF/ICC metadata before
+# their dimensions. Keep a bounded probe, stopping early once dimensions exist.
+MAX_SNIFF_BYTES = 128 * 1024
 _CACHE_TTL_OK = 6 * 60 * 60
 _CACHE_TTL_BAD = 30 * 60
 _CACHE: dict[str, tuple[float, bool, str]] = {}
@@ -112,7 +114,7 @@ def _image_dimensions(data: bytes):
     # GIF logical screen dimensions.
     if len(raw) >= 10 and raw.startswith((b"GIF87a", b"GIF89a")):
         return int.from_bytes(raw[6:8], "little"), int.from_bytes(raw[8:10], "little")
-    # JPEG SOF markers normally occur well inside the bounded 64 KiB sniff.
+    # JPEG SOF markers can follow several EXIF/ICC application segments.
     if len(raw) >= 4 and raw[:2] == b"\xff\xd8":
         pos = 2
         sof = {0xC0,0xC1,0xC2,0xC3,0xC5,0xC6,0xC7,0xC9,0xCA,0xCB,0xCD,0xCE,0xCF}
@@ -256,7 +258,7 @@ def probe_news_image(url: str, *, client=None) -> tuple[bool, str]:
                     for chunk in response.iter_bytes():
                         if chunk:
                             data.extend(chunk[: max(0, MAX_SNIFF_BYTES - len(data))])
-                        if len(data) >= MAX_SNIFF_BYTES:
+                        if len(data) >= MAX_SNIFF_BYTES or _image_dimensions(bytes(data)) is not None:
                             break
                     magic_ok = _looks_like_image_bytes(bytes(data))
                     if not data:

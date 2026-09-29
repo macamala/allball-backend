@@ -319,6 +319,28 @@ class _LeadImageExtractor(HTMLParser):
             self.in_main -= 1
 
 
+class _FssArticlePhotos(HTMLParser):
+    """Literal photo URLs in FSS's article hero and inline photo galleries."""
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.images = []
+
+    def handle_starttag(self, tag, attrs):
+        values = dict(attrs)
+        classes = set((values.get('class') or '').split())
+        if not classes & {'fss-single__featimg-cont', 'fss-gallery__link'}:
+            return
+        match = re.search(r'''background-image\s*:\s*url\(\s*["']?([^"'()\s]+)''', values.get('style') or '', re.I)
+        url = match[1] if match else ''
+        try:
+            parsed = urlsplit(url)
+        except ValueError:
+            return
+        if (parsed.scheme == 'https' and parsed.hostname == 'fss.rs'
+                and parsed.path.startswith('/wp-content/uploads/')):
+            self.images.append({'url': url, 'source': 'body', 'in_article': True})
+
+
 def collect_page_image_candidates(html: str) -> List[dict]:
     candidates: List[dict] = []
     og = _og(html, "og:image")
@@ -331,6 +353,22 @@ def collect_page_image_candidates(html: str) -> List[dict]:
     # Yonhap uses <article> for unrelated recommendation cards too. Limit
     # body images to its actual story container; metadata remains same-page.
     canonical = _og(html or '', 'og:url') or _metadata(html or '', 'canonical') or ''
+    if urlsplit(canonical).hostname == 'fss.rs':
+        hero = _ScopedNewsBody('fss-single__featimg')
+        hero.feed(html or '')
+        scoped = _ScopedNewsBody('fss-single__content')
+        scoped.feed(html or '')
+        photos = _FssArticlePhotos()
+        photos.feed((''.join(hero.parts) if hero.finished else '')
+                    + (''.join(scoped.parts) if scoped.finished else ''))
+        candidates.extend(photos.images[:12])
+        # Never let federation logos or neighbouring story thumbnails become
+        # alternative heroes. Other images must be inside this article's body.
+        html = '<article>' + ''.join(scoped.parts) + '</article>' if scoped.finished else ''
+    if urlsplit(canonical).hostname == 'www.marca.com':
+        scoped = _ScopedNewsBody('ue-c-article__body')
+        scoped.feed(html or '')
+        html = '<article>' + ''.join(scoped.parts) + '</article>' if scoped.finished else ''
     if urlsplit(canonical).hostname == 'en.yna.co.kr':
         scoped = _ScopedNewsBody('story-news')
         scoped.feed(html or '')
@@ -610,6 +648,10 @@ def article_text_from_html(html: str) -> str:
         publisher_host = None
     if publisher_host == 'www.mozzartsport.com':
         body_class = 'news-content'
+    if publisher_host == 'fss.rs':
+        body_class = 'fss-single__content'
+    if publisher_host == 'www.marca.com':
+        body_class = 'ue-c-article__body'
     if publisher_host == 'en.yna.co.kr':
         body_class = 'story-news'
     if publisher_host in {'www.ufc.com', 'ufc.com'}:

@@ -129,6 +129,7 @@ _SOURCE_PATH_SPORTS = (
     ("www.b92.net", "/sport/tenis/", "tennis"),
     ("www.mozzartsport.com", "/fudbal/vesti/", "football"),
     ("www.mozzartsport.com", "/kosarka/vesti/", "basketball"),
+    ("www.marca.com", "/futbol/", "football"),
     ("www.bbc.co.uk", "/sport/football/", "football"),
     ("www.bbc.co.uk", "/sport/tennis/", "tennis"),
     ("www.bbc.co.uk", "/sport/formula1/", "motorsport"),
@@ -473,6 +474,15 @@ def non_article_news_reason(item):
         return "non_sports_lifestyle_section"
     if host == "www.record.pt" and path.startswith("/fora-de-campo/"):
         return "non_sports_off_field_section"
+    if host == 'www.marca.com':
+        if '/opinion/' in path:
+            return 'non_article_analysis'
+        if '/en-directo/' in path:
+            return 'non_article_live_program'
+    if host == 'www.sportschau.de' and re.search(r',(?:video|audio|live)-', path):
+        return 'non_article_video_highlights' if ',video-' in path else 'non_article_live_program'
+    if host in {'ardsounds.de', 'www.ardsounds.de'} and path.startswith('/episode/'):
+        return 'non_article_podcast'
     return None
 
 
@@ -707,6 +717,7 @@ def fair_news_queue(
     coverage_floor=6,
     same_day_timezone=None,
     prioritize_major_sports=False,
+    allowed_sports=None,
 ):
     """Newest per sport, then round robin; classify evidence before spending AI.
 
@@ -741,6 +752,8 @@ def fair_news_queue(
         sport = getattr(tags, 'sport', None)
         if not sport:
             rejected['unknown_sport'] += 1; continue
+        if allowed_sports is not None and sport not in allowed_sports:
+            rejected['outside_editorial_focus'] += 1; continue
         seen.add(url)
         # Retain exact source URL for provenance and existing database identity.
         buckets[sport].append(item)

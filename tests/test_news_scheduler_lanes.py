@@ -33,9 +33,10 @@ def test_removed_result_news_lane_never_imports_or_runs(monkeypatch, tmp_path):
     assert scheduler._run_cycle() == 0
 
 
-@pytest.mark.parametrize('debt,expected', [(0, ['english','translations']), (3,['english']), (None,['english'])])
-def test_translation_lane_runs_after_english_ingest_only_without_coverage_debt(monkeypatch, tmp_path, debt, expected):
+@pytest.mark.parametrize('debt,football_only,expected', [(0, False, ['english','translations']), (3,False,['english']), (None,False,['english']), (0,True,['english'])])
+def test_translation_lane_runs_after_english_ingest_only_without_coverage_debt(monkeypatch, tmp_path, debt, football_only, expected):
     _base_env(monkeypatch, tmp_path, max_articles="1", translations="1")
+    monkeypatch.setenv('NEWS_FOOTBALL_ONLY', '1' if football_only else '0')
     order = []
     def ingest(**kwargs):
         from bot.news_budget import active_ai_budget

@@ -806,8 +806,11 @@ def fetch_official_index_entries(max_per_source: int = 3) -> List[Dict]:
     """Return fresh hydrated official stories; never writes DB or calls AI."""
     limit = max(1, min(int(max_per_source), 5))
     items: List[Dict] = []
+    football_only = os.getenv('NEWS_FOOTBALL_ONLY') == '1'
 
     active_html = [cfg for cfg in HTML_INDEXES if cfg.get("enabled", True) is not False]
+    if football_only:
+        active_html = [cfg for cfg in active_html if not cfg.get('sport') or cfg.get('sport') == 'football']
     if active_html:
         workers = min(4, len(active_html))
         with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="news-official") as pool:
@@ -815,6 +818,8 @@ def fetch_official_index_entries(max_per_source: int = 3) -> List[Dict]:
                 items.extend(rows)
 
     active_sitemaps = [cfg for cfg in SITEMAPS if cfg.get("enabled", True) is not False]
+    if football_only:
+        active_sitemaps = [cfg for cfg in active_sitemaps if not cfg.get('sport') or cfg.get('sport') == 'football']
     if active_sitemaps:
         workers = min(2, len(active_sitemaps))
         with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="news-sitemap") as pool:

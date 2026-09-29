@@ -179,6 +179,7 @@ def _run_cycle():
             if (
                 rewritten > 0
                 and os.environ.get('NEWS_TRANSLATIONS_ENABLED') == '1'
+                and os.environ.get('NEWS_FOOTBALL_ONLY') != '1'
                 and int(os.environ.get('NEWS_TRANSLATIONS_PER_CYCLE', '0')) > 0
                 and not ai_budget_exhausted()
                 and getattr(budget, 'english_coverage_debt', None) == 0

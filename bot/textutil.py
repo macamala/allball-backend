@@ -17,7 +17,9 @@ PUBLISHER_FOOTER_RE = re.compile(
 
 
 def word_count(text: Optional[str]) -> int:
-    return len(re.findall(r"[A-Za-zÀ-ÿ']+", text or ""))
+    # Source articles may be Cyrillic. Counting only Latin letters made a full
+    # Serbian federation report look empty; the English output gate is separate.
+    return len(re.findall(r"[^\W\d_]+(?:['’][^\W\d_]+)*", text or ""))
 
 
 def strip_truncation_markers(text: str) -> str:

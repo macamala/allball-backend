@@ -18,6 +18,8 @@ class Feed(TypedDict, total=False):
 
 
 FEEDS: List[Feed] = [
+    {'url': 'https://www.marca.com/rss/googlenews/futbol.xml', 'kind': 'league', 'sport': 'football', 'publisher': 'Marca', 'enabled': True, 'allowed_article_paths': ('/futbol/',), 'note': 'Publisher-advertised football RSS; exact offset timestamps, scoped public article prose and same-article photos verified. Opinion and live products held; no blanket league stamp.'},
+    {'url': 'https://www.sportschau.de/fussball/index~rss2.xml', 'kind': 'league', 'sport': 'football', 'publisher': 'Sportschau', 'enabled': True, 'allowed_article_paths': ('/fussball/',), 'note': 'Publisher-advertised dedicated football RSS broadens German and international discovery beyond the mixed-feed limit. Only reporting, never audio episodes or highlight videos.'},
     {'url': 'https://www.volleynews.it/feed/', 'kind': 'league', 'sport': 'volleyball', 'publisher': 'VolleyNews', 'enabled': True, 'verified_official': False, 'note': 'Volleyball reporting with exact RSS/page publication offsets, scoped Elementor article prose and same-article photographs; no league or country stamp.'},
     {'url': 'https://www.wielerflits.nl/feed/', 'kind': 'league', 'sport': 'cycling', 'publisher': 'WielerFlits', 'enabled': True, 'note': 'Exact UTC RSS and matching article publication metadata; scoped Dutch cycling reports with same-article photos. No league stamp; all originality and factual gates remain required.'},
     {'url': 'https://www.golfmonthly.com/feeds.xml', 'kind': 'league', 'sport': 'golf', 'publisher': 'Golf Monthly', 'enabled': True, 'allowed_article_paths': ('/news/',), 'excluded_article_paths': ('/news/live/',), 'note': 'Publisher-advertised RSS with exact UTC dates and scoped public article prose. Excludes equipment, coaching, betting and live products; same-article photo gates remain mandatory.'},
@@ -90,6 +92,10 @@ def enabled_feeds() -> List[Feed]:
     if os.getenv("NEWS_EXPANDED_FEEDS_ENABLED") == "1":
         from .news_verified_feeds import VERIFIED_RSS
         rows += [dict(feed) for feed in VERIFIED_RSS]
+    if os.getenv("NEWS_FOOTBALL_ONLY") == "1":
+        # Retain mixed publishers: final article classification, not the feed
+        # name, decides whether a candidate is soccer. Existing rows stay intact.
+        rows = [feed for feed in rows if not feed.get('sport') or feed.get('sport') == 'football']
     # Do not fetch identical URLs twice or mutate the static catalog.
     return list({feed["url"]: feed for feed in rows
                  if not news_source_is_excluded(feed["url"])}.values())
