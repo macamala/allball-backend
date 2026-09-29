@@ -64,15 +64,21 @@ def _http_failure(provider: str, response) -> None:
     headers = getattr(response, "headers", {}) or {}
     seconds = _retry_seconds(headers.get("retry-after"))
     dimension = "unknown"
+    error_codes = []
     if status == 429:
         try:
             payload = response.json()
-            message = str((payload.get("error") or {}).get("message") or "").lower()
+            payload = payload if isinstance(payload, dict) else {}
+            error = payload.get("error")
+            message = str(error.get("message") if isinstance(error, dict) else error or "").lower()
             # Workers AI uses an errors array. Code 3036 explicitly means the
             # daily free neuron allowance is exhausted, not a minute limit.
             errors = payload.get('errors') if isinstance(payload, dict) else None
+            if isinstance(errors, list):
+                error_codes = [int(row['code']) for row in errors[:8]
+                               if isinstance(row, dict) and str(row.get('code', '')).isdigit()]
             if provider == 'cloudflare' and isinstance(errors, list) and any(
-                isinstance(row, dict) and row.get('code') == 3036 for row in errors
+                code == 3036 for code in error_codes
             ):
                 dimension = 'daily_free_neurons'
                 now = datetime.now(timezone.utc)
@@ -92,8 +98,8 @@ def _http_failure(provider: str, response) -> None:
     _COOLDOWN_UNTIL[provider] = max(_COOLDOWN_UNTIL.get(provider, 0), time.monotonic() + seconds)
     for unavailable in _UNAVAILABLE.values():
         unavailable.add(provider)
-    logger.warning("[external_free] provider=%s status=%s cooldown_seconds=%s limit_dimension=%s",
-                   provider, status, int(seconds), dimension)
+    logger.warning("[external_free] provider=%s status=%s cooldown_seconds=%s limit_dimension=%s error_codes=%s",
+                   provider, status, int(seconds), dimension, error_codes)
 
 
 def enabled() -> bool:

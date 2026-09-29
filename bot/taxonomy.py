@@ -483,7 +483,7 @@ TEAMS: List[Dict[str, object]] = [
             "arsenal",
             "tottenham",
             "west ham",
-            "newcastle",
+            "newcastle united",
             "brighton",
             "crystal palace",
             "nottingham forest",

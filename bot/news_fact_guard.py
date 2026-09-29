@@ -146,6 +146,14 @@ def fact_lock_reason(
     )
     source = f"{source_title or ''}\n{source_body or ''}"
 
+    # A first home appearance is not an overall debut. Preserve the qualifier
+    # even when it is only present in the supplied source body.
+    headline = str(draft.get("title") or "")
+    if (re.search(r"\b(?:home debut|debut in the home dugout|first home (?:match|game|appearance))\b", source, re.I)
+            and re.search(r"\bdebut\b", headline, re.I)
+            and not re.search(r"\bhome\b", headline, re.I)):
+        return "lost_debut_qualifier"
+
     unsupported = _unsupported_known_entities(source, output)
     if unsupported:
         return "unsupported_known_entity:" + unsupported[0]
@@ -175,7 +183,10 @@ def fact_lock_reason(
     if expected_sport:
         from .taxonomy import BROAD_LEAGUE
         from .classify import classify_article
-        classified = classify_article(output.split("\n", 1)[0], output, feed_kind="mixed")
+        classified = classify_article(
+            output.split("\n", 1)[0], output,
+            feed_kind="league", feed_sport=expected_sport,
+        )
         # A draft does not need to repeat the sport name when source evidence
         # already established it. Reject only a positive contradictory sport.
         if classified.sport and classified.sport != expected_sport:

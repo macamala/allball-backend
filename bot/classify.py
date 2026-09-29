@@ -66,6 +66,10 @@ def classify_article(
         if sport == 'basketball':
             # NCAA administers many sports; its name alone cannot prove basketball.
             aliases = [a for a in aliases if a.strip() != 'ncaa']
+        if sport == 'motorsport' and feed_kind == 'league' and feed_sport in {'darts', 'snooker', 'cycling'}:
+            # Grand Prix is shared by these sports. Keep positive racing
+            # evidence (Formula One, MotoGP, etc.) as contradictory evidence.
+            aliases = [a for a in aliases if a.strip() != 'grand prix']
         if sport == 'football' and feed_kind == 'league' and feed_sport and feed_sport != 'football':
             # These competitions exist in several sports. A dedicated source
             # disambiguates them, while real soccer words/club evidence still win.

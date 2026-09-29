@@ -326,6 +326,8 @@ def non_article_news_reason(item):
     # Confirmed legacy editorial incidents, shared with admission and the
     # bounded public repair. These texts contain no new sporting development.
     confirmed_editorial_holds = {
+        "greece defeat germany in klopp debut as gakpo suffers ankle injury": "lost_debut_qualifier",
+        "germany's unexpected defeat to greece in nations league matches sparks surprise": "confirmed_duplicate_with_unsupported_reaction",
         "linda nosková’s ambitious path toward tennis supremacy": "non_news_retrospective_commentary",
         "linda nosková's ambitious path toward tennis supremacy": "non_news_retrospective_commentary",
         "premier league possession football faces questions as tactics evolve": "non_article_analysis",
