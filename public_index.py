@@ -797,12 +797,13 @@ def _correct_confirmed_football_prose(article: Article) -> dict:
     sources = {
         22204: 'https://fss.rs/aleksandar-stankovic-prva-utakmica-na-marakani-u-dresu-a-tima-ostvarenje-jednog-od-mojih-snova/',
         22206: 'https://www.footmercato.net/a2290739679306661964-un-ancien-prodige-du-real-madrid-evoque-un-eventuel-retour',
+        22207: 'https://fss.rs/dusan-tadic-pokazali-smo-zajednistvo-i-borbenost-to-je-put-kojim-treba-da-idemo/',
         22210: 'https://football-italia.net/kayode-impresses-italy-debut-palestra-duel/',
     }
     if not article.ai_generated or sources.get(article.id) != article.source_url:
         return {}
     changes = {}
-    for field in ('summary', 'content', 'ai_content'):
+    for field in ('title', 'summary', 'content', 'ai_content'):
         old = getattr(article, field, None)
         if not isinstance(old, str):
             continue
@@ -816,6 +817,11 @@ def _correct_confirmed_football_prose(article: Article) -> dict:
         elif article.id == 22206:
             new = new.replace('Aurélien Tchouaméni, Eduardo Camavinga and Bernardo Silva',
                               'Tchouaméni, Camavinga and Bernardo Silva')
+        elif article.id == 22207:
+            new = new.replace('Serbia football captain Dušan Tadić', 'Serbia’s Dušan Tadić')
+            new = new.replace('The captain explained', 'Tadić explained')
+            new = new.replace('He stated that many of these players grew up alongside him and share mutual respect and affection.',
+                'He said he had played alongside many of them and that the affection and respect were mutual.')
         elif article.id == 22210:
             if field == 'summary' and old == 'Brentford defender Michael Kayode earned Man of the Match honors from multiple Italian newspapers after scoring and assisting in a victory.':
                 new = 'Michael Kayode scored on his senior Italy debut as the team beat Türkiye 4-1 in Bursa.'
@@ -942,7 +948,7 @@ def repair_recent_gossip_news(
                 article_id=article.id, source_url=article.source_url, sport='football',
                 phase='postpublish', status='auto_corrected', writer_provider='news-audit',
                 writer_model='deterministic', details={'changes': prose_changes,
-                    'evidence': 'Compared with exact source: stadium appearance is not an international debut; rebound contribution is not a credited assist; remove literal formatting, author bio, newspaper ratings and unsourced given names'})
+                    'evidence': 'Compared with exact source: stadium appearance is not an international debut; rebound contribution is not a credited assist; captaincy requires explicit source evidence; playing together does not establish shared childhood; remove literal formatting, author bio, newspaper ratings and unsourced given names'})
             corrected += 1
             logger.info('[public_index] corrected confirmed football prose article=%s', article.id)
         if not tax.public_ok and article.id in {22202, 22204, 22205, 22207}:

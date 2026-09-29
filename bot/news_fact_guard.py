@@ -261,6 +261,9 @@ def fact_lock_reason(
         str(draft.get(key) or "") for key in ("title", "summary", "body")
     )
     source = f"{source_title or ''}\n{source_body or ''}"
+    if (expected_sport == 'football' and re.search(r'\bcaptain\b', output, re.I)
+            and not re.search(r'(?<!\w)(?:captain(?:s|cy|ed)?|kapiten\w*|капитен\w*|капитан\w*|capitain\w*|kapitän\w*|capit[áa]n\w*|capit[aã]o|capitano|capit[âa]n)(?!\w)', source, re.I)):
+        return 'unsupported_player_role:captain'
     if re.search(r'први пут[^.!?]{0,70}на стадиону', source, re.I):
         for sentence in re.split(r'[.!?\n]', output):
             if (re.search(r'\b(?:international debut|senior debut|made his debut)\b', sentence, re.I)

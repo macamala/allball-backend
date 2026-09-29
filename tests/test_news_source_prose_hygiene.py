@@ -92,6 +92,31 @@ def test_stadium_debut_and_rebound_cannot_be_expanded(monkeypatch):
     assert guard.fact_lock_reason({'summary':'His shot was saved before the rebound goal.'}, '', source) is None
 
 
+@pytest.mark.parametrize('source,allowed', [
+    ('Искусни репрезентативац Душан Тадић говорио је после утакмице.', False),
+    ('Капитен Душан Тадић говорио је после утакмице.', True),
+    ('Le capitaine a parlé après le match.', True),
+    ('Der Kapitän sprach nach dem Spiel.', True),
+    ('O capitão falou depois do jogo.', True),
+    ('The player spoke after the match.', False),
+])
+def test_player_role_needs_source_evidence(monkeypatch, source, allowed):
+    monkeypatch.setattr(guard, 'original_draft_reason', lambda *args: None)
+    result=guard.fact_lock_reason({'summary':'The captain discussed the match.'}, '', source, expected_sport='football')
+    assert (result != 'unsupported_player_role:captain') is allowed
+
+
+def test_tadic_correction_preserves_player_identity_and_statement_scope():
+    a=SimpleNamespace(id=22207,ai_generated=True,
+        source_url='https://fss.rs/dusan-tadic-pokazali-smo-zajednistvo-i-borbenost-to-je-put-kojim-treba-da-idemo/',
+        title='Serbia football captain Dušan Tadić highlights unity', summary='His view of the game.',
+        content='The captain explained the defensive effort. He stated that many of these players grew up alongside him and share mutual respect and affection.',ai_content=None)
+    assert _correct_confirmed_football_prose(a)
+    assert a.title == 'Serbia’s Dušan Tadić highlights unity'
+    assert 'captain' not in a.content and 'played alongside' in a.content
+    assert _correct_confirmed_football_prose(a) == {}
+
+
 def test_exact_stankovic_repair_preserves_dates_images_and_public_archive():
     engine = create_engine('sqlite:///:memory:')
     for model in (Article, ArticleTaxonomyResolution, NewsIncident): model.__table__.create(engine)
