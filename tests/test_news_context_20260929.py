@@ -29,6 +29,24 @@ def test_excluded_publisher_is_never_fetched_or_ingested(monkeypatch):
         assert public_index._reachable_source_image(url, current_url='https://cdn.example/photo.jpg') is None
 
 
+@pytest.mark.parametrize('sport', ['darts', 'snooker', 'cycling'])
+def test_shared_grand_prix_name_does_not_contradict_verified_sport_at_final_gate(sport):
+    from types import SimpleNamespace
+    from taxonomy_resolver import resolve_article_competition
+    from bot.fetch_sources import _reconcile_public_taxonomy
+    draft = SimpleNamespace(title='Champion defeated in World Grand Prix opener',
+        summary='', content='The champion was eliminated in the opening round.', sport=sport, league=None)
+    tags = SimpleNamespace(sport=sport, league=None, confidence='high', reason='source-evidence')
+    resolved = resolve_article_competition(draft)
+    assert resolved.sport is None  # Stored labels alone never prove the sport.
+    final, reason = _reconcile_public_taxonomy(tags, resolved, {'kind':'league', 'sport':sport})
+    assert reason is None and final.sport == sport and final.public_competition is None
+    draft.title = 'Formula 1 driver wins Grand Prix from pole position'
+    resolved = resolve_article_competition(draft)
+    assert resolved.sport == 'motorsport'
+    assert _reconcile_public_taxonomy(tags, resolved, {'kind':'league', 'sport':sport})[1] == 'taxonomy-conflict'
+
+
 @pytest.mark.parametrize("sport,title,body", [
     ("darts", "Littler stunned by Waterhouse at World Grand Prix", "Waterhouse advanced after defeating Littler."),
     ("water-polo", "Novi Beograd keeps perfect record beating Budva", "The Champions League qualifiers returned to domestic competition."),

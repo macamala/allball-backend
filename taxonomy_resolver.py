@@ -354,6 +354,7 @@ def _exclusive_aliases(sport: str) -> Tuple[str, ...]:
         alias
         for alias in EXCLUSIVE_KEYWORDS.get(sport, ())
         if alias.strip() not in blocked
+        and not (sport == 'motorsport' and alias.strip() == 'grand prix')
     )
 
 
@@ -364,6 +365,10 @@ def _score_sports(title: str, summary: str, body: str) -> Dict[str, float]:
     scores = {sport: 0.0 for sport in SCORED_SPORTS}
 
     for sport in SCORED_SPORTS:
+        # Grand Prix is shared by darts, snooker and cycling. It cannot be
+        # independent racing evidence against a source-verified sport.
+        aliases = [alias for alias in SPORT_ALIASES.get(sport, [])
+                   if not (sport == 'motorsport' and alias.strip() == 'grand prix')]
         for alias in _exclusive_aliases(sport):
             padded = alias if alias.startswith(" ") else f" {alias.strip()} "
             if padded in title_blob:
@@ -375,9 +380,9 @@ def _score_sports(title: str, summary: str, body: str) -> Dict[str, float]:
         scores[sport] += _term_hits(title_blob, SPORT_TERMS.get(sport, ())) * 4.0
         scores[sport] += _term_hits(summary_blob, SPORT_TERMS.get(sport, ())) * 0.4
         scores[sport] += _term_hits(body_blob, SPORT_TERMS.get(sport, ())) * 0.2
-        scores[sport] += _alias_hits(title_blob, SPORT_ALIASES.get(sport, [])) * 3.0
-        chrome_aliases = [alias for alias in SPORT_ALIASES.get(sport, []) if _is_chrome_alias(sport, alias)]
-        content_aliases = [alias for alias in SPORT_ALIASES.get(sport, []) if not _is_chrome_alias(sport, alias)]
+        scores[sport] += _alias_hits(title_blob, aliases) * 3.0
+        chrome_aliases = [alias for alias in aliases if _is_chrome_alias(sport, alias)]
+        content_aliases = [alias for alias in aliases if not _is_chrome_alias(sport, alias)]
         scores[sport] += _alias_hits(summary_blob, content_aliases) * 0.5
         scores[sport] += _alias_hits(body_blob, content_aliases) * 0.2
         # Chrome aliases in summary/body are ignored unless the title already supports the sport.
