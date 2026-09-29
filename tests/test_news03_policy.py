@@ -370,3 +370,17 @@ def test_uefa_competition_aliases_share_article_identity_but_preserve_fetch_url(
     assert news_source_identity(a) == news_source_identity(b)
     assert news_source_identity(a) != news_source_identity(a.replace('1cd661bbe9cd','1cd661bbe9ce'))
     assert canonical_news_url(a) == a
+
+
+def test_verified_italian_integer_counts_allow_english_grouping_only():
+    from bot.news_policy import numeric_tokens
+    source = 'Nel weekend sono stati oltre 1.500 gli spettatori alle gare.'
+    supported = numeric_tokens(source, include_spelled=True)
+    assert numeric_tokens('More than 1,500 spectators attended.') <= supported
+    assert numeric_tokens('More than 1500 spectators attended.') <= supported
+    assert numeric_tokens('More than 1501 spectators attended.') - supported == {'1501'}
+    assert numeric_tokens('1.500 spettatori') == {'1.500'}  # source-only expansion
+    for ambiguous in ['1.500 seconds', '1.500 million euros', '1.500%', '1.500',
+                      '1.50 spettatori', '1,500 persone']:
+        assert '1500' not in numeric_tokens(ambiguous, include_spelled=True)
+    assert numeric_tokens('21-10, 21-11', include_spelled=True) == {'21-10', '21-11'}

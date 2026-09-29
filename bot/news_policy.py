@@ -48,6 +48,16 @@ def numeric_tokens(text, *, include_spelled=False):
     tokens = set(re.findall(r'(?<!\w)\d+(?:[.,:/–-]\d+)*(?:%|\b)', text or ''))
     if not include_spelled:
         return tokens
+    # Confirmed Italian source: "oltre 1.500 gli spettatori" was accurately
+    # rendered as "more than 1,500 spectators". Admit formatting equivalents
+    # only beside explicit countable-person nouns, never arbitrary decimals,
+    # money, percentages, scores, time measurements or calculations.
+    for match in re.finditer(
+        r'(?<![\w.,])\d{1,3}(?:\.\d{3})+(?=\s+(?:(?:gli|i|le)\s+)?'
+        r'(?:spettatori|tifosi|persone|atleti|partecipanti)\b)', text or '', re.I
+    ):
+        value = match.group()
+        tokens.update((value.replace('.', ','), value.replace('.', '')))
     # Source-only lexical equivalents, not calculations. Confirmed false hold:
     # the source said "Twelve-year-old" and the draft correctly wrote "12".
     units = dict(zip('zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen'.split(), range(20)))
