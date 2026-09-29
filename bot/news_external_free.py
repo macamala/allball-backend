@@ -3,7 +3,8 @@
 This module never reads or calls OpenAI. It is enabled only by
 NEWS_EXTERNAL_FREE_WRITERS_ENABLED=1 and uses configured Groq and
 Cloudflare credentials. Mistral additionally requires an explicit Free-account
-opt-in; an API key alone never enables it. Every HTTP attempt is reserved in the same
+opt-in; Z.ai is limited to the explicitly free GLM-4.7-Flash writer. An API key
+alone never enables either route. Every HTTP attempt is reserved in the same
 durable News request ledger. Provider output is never publication authority:
 downstream deterministic, semantic, taxonomy, dedupe and image gates decide.
 """
@@ -25,7 +26,9 @@ logger = logging.getLogger(__name__)
 
 _GROQ_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions"
 _MISTRAL_ENDPOINT = "https://api.mistral.ai/v1/chat/completions"
-_PROVIDERS = ("groq", "cloudflare", "mistral")
+_ZAI_ENDPOINT = "https://api.z.ai/api/paas/v4/chat/completions"
+_ZAI_FREE_MODEL = "glm-4.7-flash"
+_PROVIDERS = ("groq", "cloudflare", "mistral", "zai")
 _CF_MODEL_RE = re.compile(r"^@[A-Za-z0-9._/-]{3,160}$")
 _MODEL_RE = re.compile(r"^[A-Za-z0-9._/+:-]{3,160}$")
 _PURPOSES = ("writer", "validator", "translation")
@@ -133,6 +136,15 @@ def enabled() -> bool:
 def _config(provider: str) -> Optional[dict]:
     if not enabled():
         return None
+    if provider == "zai":
+        # Official pricing lists this exact model as free input and output.
+        # No configurable alias, paid FlashX fallback, tools or coding endpoint.
+        if os.getenv("NEWS_ZAI_FREE_WRITER_ENABLED") != "1":
+            return None
+        key = (os.getenv("ZAI_API_KEY") or "").strip()
+        if not key:
+            return None
+        return {"provider": "zai", "model": _ZAI_FREE_MODEL, "key": key}
     if provider == "mistral":
         # Mistral keys do not encode billing mode. The operator must confirm a
         # Free account before opting in; never infer free usage from a model name.
@@ -174,6 +186,8 @@ def _config(provider: str) -> Optional[dict]:
 def _configs(purpose: str) -> list[dict]:
     rows = []
     for provider in _PROVIDERS:
+        if provider == 'zai' and purpose != 'writer':
+            continue
         cfg = _config(provider)
         if not cfg:
             continue
@@ -327,6 +341,44 @@ def _mistral(cfg: dict, system: str, user: str, max_tokens: int, json_mode: bool
         return None
 
 
+def _zai(cfg: dict, system: str, user: str, max_tokens: int, json_mode: bool):
+    if cfg.get('model') != _ZAI_FREE_MODEL or not reserve_ai_request():
+        return None
+    payload = {
+        "model": _ZAI_FREE_MODEL,
+        "messages": [{"role": "system", "content": system},
+                     {"role": "user", "content": user}],
+        "thinking": {"type": "disabled"},
+        "temperature": 0.35,
+        "max_tokens": max(256, min(int(max_tokens), 9000)),
+        "stream": False,
+    }
+    try:
+        with httpx.Client(timeout=httpx.Timeout(95, connect=8), follow_redirects=False) as client:
+            response = client.post(_ZAI_ENDPOINT,
+                headers={"Authorization": "Bearer " + cfg["key"],
+                         "Content-Type": "application/json", "Accept": "application/json"},
+                json=payload)
+        if response.status_code != 200:
+            _http_failure("zai", response)
+            # The numeric documented error distinguishes quota/concurrency
+            # without leaking the upstream error message or credentials.
+            code = "unknown"
+            try:
+                error = response.json().get("error", {})
+                candidate = str(error.get("code", "")) if isinstance(error, dict) else ""
+                if re.fullmatch(r"\d{3,6}", candidate):
+                    code = candidate
+            except (ValueError, TypeError, AttributeError):
+                pass
+            logger.warning("[external_free] zai http_status=%s error_code=%s", response.status_code, code)
+            return None
+        return _choice_text(response.json())
+    except Exception as exc:
+        logger.warning("[external_free] zai request_failed=%s", type(exc).__name__)
+        return None
+
+
 def _cloudflare(cfg: dict, system: str, user: str, max_tokens: int, json_mode: bool):
     if not reserve_ai_request():
         return None
@@ -399,6 +451,8 @@ def completion(
             value = _groq(cfg, system, user, max_tokens, json_mode)
         elif cfg["provider"] == "mistral":
             value = _mistral(cfg, system, user, max_tokens, json_mode)
+        elif cfg["provider"] == "zai":
+            value = _zai(cfg, system, user, max_tokens, json_mode)
         else:
             value = _cloudflare(cfg, system, user, max_tokens, json_mode)
         if value:

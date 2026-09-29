@@ -3,7 +3,8 @@
 Only the Railway News service `hopeful-blessing` uses these settings.
 Keep API and results-worker settings unchanged.
 
-The pool supports Groq, Cloudflare Workers AI, and optional Mistral Free.
+The pool supports Groq, Cloudflare Workers AI, optional Mistral Free, and an
+optional fixed-model Z.ai free writer.
 xKiro remains the free fallback/corrective route. Every HTTP generation attempt
 uses the existing News request ledger. A writer cannot approve its own draft:
 semantic validation must come from another provider. Deterministic fact,
@@ -50,3 +51,25 @@ Official references, checked 2026-09-29:
 - https://docs.mistral.ai/getting-started/quickstarts/studio/activate-and-generate-api-key
 - https://docs.mistral.ai/admin/billing-usage/usage-limits
 - https://docs.mistral.ai/api/endpoint/chat
+
+## Optional Z.ai free writer
+
+`NEWS_ZAI_FREE_WRITER_ENABLED=1` plus the existing `ZAI_API_KEY` enables only
+`glm-4.7-flash` at the official Z.ai API. Official pricing on 2026-09-29 lists
+both input and output as free. The model and endpoint are fixed: no FlashX,
+paid alias, web-search tool, Coding Plan endpoint or OpenAI API is used.
+This is writer-only; independent semantic validation and every existing gate
+remain required. Quota/auth failures hold the provider across cycles and log
+only HTTP status and a numeric error code. The shared request ledger counts
+every attempt, including rejected requests. A successful HTTP response does
+not establish editorial quality or authorize publication by itself.
+
+References, checked 2026-09-29:
+- https://docs.z.ai/guides/overview/pricing
+- https://docs.z.ai/guides/llm/glm-4.7
+
+Other existing credentials are not automatically active. Airforce's public
+catalog currently exposes only `gemma3-270m:free`, unsuitable for this writer.
+LLM7's `turbo` tier must also have `usage_based_only=false`; pricing metadata
+alone cannot establish the account's billing mode. Neither is enabled by this
+change. No new key values belong in this document or in logs.
