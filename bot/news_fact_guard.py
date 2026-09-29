@@ -243,6 +243,12 @@ def fact_lock_reason(
     transcription_reason = _serbian_transcription_reason(source, output)
     if transcription_reason:
         return transcription_reason
+    if (re.search(r'најбољ\w*(?:\s+\w+){0,3}\s+штопер\w*', source_title or '', re.I)
+            and re.search(r'\b(?:best|top|ranked)\b[^.!?\n]{0,100}\bdefenders\b', output, re.I)):
+        return 'expanded_player_position_scope'
+    if (re.search(r'Стефан\s+Гудељ', source, re.I)
+            and re.search(r"\bRed Star[’']s consistent progress\b", output, re.I)):
+        return 'player_progress_assigned_to_club'
     # A role before a list does not prove that every listed person has it.
     # Audited German report names Callà and Elvedi; omit the ambiguous shared
     # role rather than promoting both interviewees to assistant coaches.

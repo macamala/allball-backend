@@ -367,6 +367,9 @@ Compare the draft ONLY with the supplied source facts.
 Check the headline and summary as carefully as the body. Preserve restrictive
 qualifiers: a home debut is not an overall debut; a first league win is not a
 first win in all competitions; a first medal does not mean the only medal.
+Keep a ranking's exact positional category: a centre-back ranking is not a
+ranking of all defenders. Do not assign a player's progress or maturity to
+their club; preserve the actor and any club attribution of praise.
 
 Approve every factual claim only when it is explicitly stated by the source or
 directly entailed by it. Do NOT require the same wording, paragraph order or

@@ -734,6 +734,40 @@ def _correct_confirmed_yakin_copy(article: Article) -> dict:
     return changes
 
 
+def _correct_confirmed_gudelj_copy(article: Article) -> dict:
+    """Keep the audited study's position category and the correct actor."""
+    try:
+        source = urlsplit(article.source_url or '')
+    except ValueError:
+        return {}
+    if (article.id != 22201 or not article.ai_generated
+            or source.hostname != 'www.crvenazvezdafk.com'
+            or source.path.rstrip('/') != '/vesti/gudelj-medju-najboljim-mladim-stoperima-sveta'):
+        return {}
+    replacements = {
+        'Stefan Gudelj ranked eighth among world’s best football defenders under 22':
+            'Gudelj takes eighth place in CIES under-22 centre-back study',
+        'Stefan Gudelj of Red Star Belgrade has been ranked eighth among the world’s best defenders under 22, according to the latest CIES football observer study.':
+            'CIES ranked Red Star Belgrade’s Stefan Gudelj eighth among centre-backs under 22.',
+        'The study covers more than 70 leagues worldwide and gives Gudelj an index of 79.4, placing him among the top young defenders globally.':
+            'The study covers more than 70 leagues worldwide and gives Gudelj an index of 79.4.',
+        'Red Star’s consistent progress and the player’s maturity have earned him international recognition and another strong endorsement of the club’s youth academy.':
+            'The club credited Gudelj’s performances, progress and maturity with earning the recognition, and described it as further evidence of the work of its youth academy.',
+    }
+    changes = {}
+    for field in ('title', 'summary', 'content', 'ai_content'):
+        value = getattr(article, field, None)
+        if not value:
+            continue
+        revised = value
+        for old, new in replacements.items():
+            revised = revised.replace(old, new)
+        if revised != value:
+            setattr(article, field, revised)
+            changes[field] = {'before': value, 'after': revised}
+    return changes
+
+
 def _correct_confirmed_taranto_format(article: Article) -> dict:
     """Remove an audited formatting marker without changing the report."""
     try:
@@ -784,6 +818,18 @@ def repair_recent_gossip_news(
     corrected = 0
     reasons = {}
     for article, tax in rows:
+        gudelj_changes = _correct_confirmed_gudelj_copy(article)
+        if gudelj_changes:
+            db.add(article)
+            from bot.news_learning import record_incident
+            record_incident(db, reason_code='expanded_player_position_scope',
+                article_id=article.id, source_url=article.source_url, sport='football',
+                phase='postpublish', status='auto_corrected',
+                writer_provider='news-audit', writer_model='deterministic',
+                details={'evidence': 'Source ranks under-22 centre-backs (штопера); performances, progress and maturity belong to Gudelj, not to the club',
+                         'changes': gudelj_changes})
+            corrected += 1
+            logger.info('[public_index] corrected confirmed player ranking scope article=%s', article.id)
         format_changes = _correct_confirmed_taranto_format(article)
         if format_changes:
             db.add(article)
