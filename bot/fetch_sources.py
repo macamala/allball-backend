@@ -1139,6 +1139,7 @@ def _fetch_and_store_all_articles(
             coverage_floor=6,
             prioritize_major_sports=True,
             allowed_sports={'football'} if os.getenv('NEWS_FOOTBALL_ONLY') == '1' else None,
+            spread_publishers=os.getenv('NEWS_FOOTBALL_ONLY') == '1',
         )
         candidate_sports = {}
         for candidate in queued:

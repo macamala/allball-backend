@@ -39,6 +39,8 @@ def unsupported_news_sport(title, body=""):
         return True
     if re.search(r"\b(?:air pistol|air rifle|pistol shooter|rifle shooter|sport pistol|issf|\d+\s*m(?:etre|eter)?\s+(?:air\s+)?(?:pistol|rifle))\b", lead):
         return True
+    if re.search(r"\b(?:trap|skeet)\s+(?:individual|team|event|competition|final|shooting)\b", headline + ' ' + lead):
+        return True
     if re.search(r"\b(?:english billiards|world billiards)\b", lead):
         return True
     return False
@@ -708,6 +710,20 @@ def queue_priority_score(item, now):
     return score
 
 
+def _spread_publisher_queue(items):
+    """Keep each publisher's ranked order, taking one per publisher per pass."""
+    publishers = {}
+    for item in items:
+        host = (urlsplit(item.get('url') or '').hostname or '').removeprefix('www.')
+        publishers.setdefault(host, deque()).append(item)
+    output = []
+    while any(publishers.values()):
+        for pending in publishers.values():
+            if pending:
+                output.append(pending.popleft())
+    return output
+
+
 def fair_news_queue(
     items,
     classify,
@@ -720,6 +736,7 @@ def fair_news_queue(
     same_day_timezone=None,
     prioritize_major_sports=False,
     allowed_sports=None,
+    spread_publishers=False,
 ):
     """Newest per sport, then round robin; classify evidence before spending AI.
 
@@ -840,6 +857,8 @@ def fair_news_queue(
         )
         for sport in order
     }
+    if spread_publishers:
+        queues = {sport: deque(_spread_publisher_queue(list(pending))) for sport, pending in queues.items()}
     if prioritize_major_sports:
         # Editorial priority: Football, Basketball, another major sport, then
         # a protected coverage lane. All candidates already passed the same

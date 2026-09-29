@@ -27,6 +27,31 @@ def test_focus_selects_soccer_without_relabelling_other_football_or_old_news():
     assert len(all_sports) == 3
 
 
+def test_trap_shooting_from_mixed_feeds_cannot_enter_soccer_focus():
+    candidate = {'title': 'Neeru Dhanda scripts history with India’s first individual gold in Asian Games 2026',
+        'url': 'https://timesofindia.indiatimes.com/sports/asian-games-2026/news/articleshow/1.cms',
+        'feed': {'kind': 'mixed'},
+        '_classification_text': "Neeru Dhanda won the women's trap individual event. Related: England football World Cup."}
+    assert _classify_candidate(candidate).sport is None
+    assert non_article_news_reason({'title': candidate['title'], 'body': candidate['_classification_text']}) == 'unsupported_news_sport'
+    assert _classify_candidate({'title': 'Football club drills offside trap before final',
+        'feed': {'kind': 'league', 'sport': 'football'}, 'summary': 'The coach confirmed the squad.'}).sport == 'football'
+
+
+def test_soccer_publishers_share_queue_without_losing_source_order_or_candidates():
+    now = datetime(2026, 9, 29, 6, tzinfo=timezone.utc)
+    rows = [dict(title='Football club confirms new coach', url=f'https://large.test/{i}',
+                 published_at=now-timedelta(minutes=i), feed={'kind':'league','sport':'football'}) for i in range(8)]
+    rows += [dict(title='Football national team announces squad', url=f'https://{host}/report',
+                  published_at=now-timedelta(hours=3), feed={'kind':'league','sport':'football'}) for host in ('federation.test','another-country.test')]
+    result, reasons = fair_news_queue(rows, _classify_candidate, now=now, same_day_timezone='Australia/Sydney',
+        allowed_sports={'football'}, spread_publishers=True, prioritize_major_sports=True)
+    assert not reasons and len(result) == len(rows)
+    assert result[0]['url'] == 'https://large.test/0'
+    assert {x['url'].split('/')[2] for x in result[:3]} == {'large.test','federation.test','another-country.test'}
+    assert [x['url'] for x in result if 'large.test' in x['url']] == [x['url'] for x in rows[:8]]
+
+
 def test_focus_discovery_preserves_mixed_sources_and_does_not_mutate_catalog(monkeypatch):
     monkeypatch.setenv('NEWS_EXPANDED_FEEDS_ENABLED', '1')
     before = repr(feeds.FEEDS)
