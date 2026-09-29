@@ -14,6 +14,7 @@ def isolated(monkeypatch):
     monkeypatch.setenv('GROQ_API_KEY', 'fixture-secret')
     monkeypatch.setenv('NEWS_GROQ_MODEL', PRIMARY)
     monkeypatch.setenv('NEWS_GROQ_WRITER_FALLBACK_MODELS', BACKUP)
+    monkeypatch.delenv('NEWS_GROQ_WRITER_MODEL', raising=False)
     monkeypatch.delenv('CLOUDFLARE_API_TOKEN', raising=False)
     monkeypatch.delenv('MISTRAL_API_KEY', raising=False)
     monkeypatch.setattr(pool, '_COOLDOWN_UNTIL', {})
@@ -31,6 +32,18 @@ def test_only_approved_explicit_writer_fallback_is_added(monkeypatch):
     assert pool.configured_identities('translation') == (('groq', PRIMARY),)
     monkeypatch.setenv('NEWS_GROQ_WRITER_FALLBACK_MODELS', 'llama-3.3-70b-versatile,paid-model')
     assert pool.configured_identities('writer') == (('groq', PRIMARY),)
+
+
+def test_primary_quota_can_be_reserved_for_validation_without_self_approval(monkeypatch):
+    monkeypatch.setenv('NEWS_GROQ_WRITER_MODEL', BACKUP)
+    assert pool.configured_identities('writer') == (('groq', BACKUP),)
+    assert pool.configured_identities('validator') == (('groq', PRIMARY),)
+    assert pool._ordered_configs('validator', avoid_provider='groq') == []
+    monkeypatch.setattr(router, '_rate_limited', False)
+    monkeypatch.setattr(router, '_xkiro_available', lambda: False)
+    assert not router.free_ai_available()
+    monkeypatch.setenv('NEWS_GROQ_WRITER_MODEL', 'unapproved-paid-model')
+    assert pool.configured_identities('writer') == (('groq', PRIMARY), ('groq', BACKUP))
 
 
 def test_explicit_model_quota_is_respected_across_purposes_and_cycles(monkeypatch, caplog):

@@ -194,6 +194,12 @@ def _configs(purpose: str) -> list[dict]:
         cfg = _config(provider)
         if not cfg:
             continue
+        if provider == 'groq' and purpose == 'writer':
+            preferred = os.getenv('NEWS_GROQ_WRITER_MODEL', '').strip()
+            if preferred in _GROQ_FREE_WRITER_FALLBACKS:
+                # Reserve the primary 120B allowance for validation when the
+                # operator selects the separately approved free writer model.
+                cfg = {**cfg, 'model': preferred}
         rows.append(cfg)
         if provider == 'groq' and purpose == 'writer':
             requested = os.getenv('NEWS_GROQ_WRITER_FALLBACK_MODELS', '').split(',')

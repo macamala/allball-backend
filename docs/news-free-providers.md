@@ -42,6 +42,13 @@ hold all models. Cloudflare daily free allocation remains account-wide. Every
 attempt, including a rejected primary request, still consumes the common ledger.
 Two Groq models never count as two independent providers.
 
+`NEWS_GROQ_WRITER_MODEL=openai/gpt-oss-20b` optionally assigns the approved
+20B model to first-pass writing and reserves the primary `NEWS_GROQ_MODEL`
+allowance for validation/translation. This prevents large writer requests
+from consuming the 120B allowance needed to validate xKiro corrections.
+The default is unchanged when the writer setting is absent. No unapproved
+writer model is accepted and the two roles still share provider identity.
+
 Groq references, checked 2026-09-29:
 - https://console.groq.com/docs/models
 - https://console.groq.com/docs/rate-limits
