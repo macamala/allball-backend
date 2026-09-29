@@ -45,6 +45,14 @@ def test_explicit_model_quota_is_respected_across_purposes_and_cycles(monkeypatc
     assert len(pool.configured_identities('writer')) == 2
 
 
+def test_billing_help_url_does_not_turn_explicit_model_quota_into_account_limit():
+    pool._http_failure('groq', quota(f'Rate limit reached for model `{PRIMARY}` on tokens per day (TPD). '
+        'Please try again later. Upgrade at https://console.groq.com/settings/billing'), model=PRIMARY)
+    pool.reset()
+    assert pool.configured_identities('writer') == (('groq', BACKUP),)
+    assert pool.configured_identities('validator') == ()
+
+
 @pytest.mark.parametrize('status,message', [
     (401, 'Invalid credential'), (403, f'model {PRIMARY} access denied'),
     (429, 'Organization tokens per day (TPD) exhausted'),

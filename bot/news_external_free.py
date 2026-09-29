@@ -110,9 +110,12 @@ def _http_failure(provider: str, response, *, model: str = '') -> None:
             # Only an explicit model-specific Groq quota scopes the hold to one
             # route. Auth, billing, unknown limits and Cloudflare's account-wide
             # daily allowance always hold the entire provider. No key rotation.
+            # A help URL such as /settings/billing is not itself a billing
+            # failure. Keep every actual billing word in the surrounding text.
+            quota_message = re.sub(r'https?://\S+', '', message)
             model_scope = bool(provider == 'groq' and model
                 and dimension in {'tpd', 'rpd', 'tpm', 'rpm'}
-                and not re.search(r'\b(billing|payment|credit|balance|spend)\b', message)
+                and not re.search(r'\b(billing|payment|credit|balance|spend)\b', quota_message)
                 and re.search(r'\brate limit (?:reached|exceeded) for model\s+[`\"\x27]?' + re.escape(model.lower())
                               + r'[`\"\x27]?(?=\s|[,.;])', message))
         except (ValueError, TypeError, AttributeError):
