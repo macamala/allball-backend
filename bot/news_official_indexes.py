@@ -37,6 +37,12 @@ logger = logging.getLogger(__name__)
 
 HTML_INDEXES = (
     {
+        'id': 'ge-brazil-football-news', 'sport': 'football', 'publisher': 'ge',
+        'url': 'https://ge.globo.com/futebol/', 'host': 'ge.globo.com',
+        'paths': ('/futebol/',), 'article_path_re': r'/noticia/\d{4}/\d{2}/\d{2}/[^/]+\.ghtml$',
+        'verified_official': False,
+    },
+    {
         'id': 'rugbypass-rugby-news', 'sport': 'rugby', 'publisher': 'RugbyPass',
         'url': 'https://www.rugbypass.com/', 'host': 'www.rugbypass.com',
         'paths': ('/news/',), 'verified_official': False,

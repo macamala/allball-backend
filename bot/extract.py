@@ -353,6 +353,11 @@ def collect_page_image_candidates(html: str) -> List[dict]:
     # Yonhap uses <article> for unrelated recommendation cards too. Limit
     # body images to its actual story container; metadata remains same-page.
     canonical = _og(html or '', 'og:url') or _metadata(html or '', 'canonical') or ''
+    scoped_photo_classes = {'aleagues.com.au': 'entry-content', 'ge.globo.com': 'mc-article-body'}
+    if urlsplit(canonical).hostname in scoped_photo_classes:
+        scoped = _ScopedNewsBody(scoped_photo_classes[urlsplit(canonical).hostname])
+        scoped.feed(html or '')
+        html = '<article>' + ''.join(scoped.parts) + '</article>' if scoped.finished else ''
     if urlsplit(canonical).hostname == 'fss.rs':
         hero = _ScopedNewsBody('fss-single__featimg')
         hero.feed(html or '')
@@ -589,24 +594,30 @@ def _json_ld_article_body(html: str) -> str:
 
 class _ScopedNewsBody(HTMLParser):
     """Capture a known CMS article body, excluding later recommendation grids."""
-    def __init__(self, body_class="single-news-content", *, body_id=None):
+    def __init__(self, body_class="single-news-content", *, body_id=None, collect_all=False):
         super().__init__(convert_charrefs=False)
         self.body_class = body_class
         self.body_id = body_id
+        self.collect_all = collect_all
         self.root_tag = None
+        self.root_attrs = {}
         self.depth = 0
         self.finished = False
         self.parts = []
 
     def handle_starttag(self, tag, attrs):
-        if self.finished:
+        if self.finished and not self.collect_all:
             return
         if not self.depth:
             values = dict(attrs)
             if ((self.body_id and values.get('id') == self.body_id)
                     or (not self.body_id and self.body_class in values.get('class', '').split())):
                 self.root_tag = tag
+                self.root_attrs = values
                 self.depth = 1
+                self.finished = False
+                if self.collect_all:
+                    self.parts.append(f'<{tag}>')
             return
         self.parts.append(self.get_starttag_text())
         if tag == self.root_tag:
@@ -623,6 +634,8 @@ class _ScopedNewsBody(HTMLParser):
             if self.depth:
                 self.parts.append(f'</{tag}>')
             else:
+                if self.collect_all:
+                    self.parts.append(f'</{tag}>')
                 self.finished = True
 
     def handle_data(self, data):
@@ -639,6 +652,7 @@ class _ScopedNewsBody(HTMLParser):
 def article_text_from_html(html: str) -> str:
     body_class = 'single-news-content' if 'single-news-content' in (html or '') else None
     body_id = None
+    source_category = None
     # Mozzart's article container is distinct from headline grids and betting
     # widgets. Only apply its class under its own canonical publisher metadata.
     canonical = _og(html or '', 'og:url') or _metadata(html or '', 'canonical') or _meta_name(html or '', 'url') or ''
@@ -652,6 +666,18 @@ def article_text_from_html(html: str) -> str:
         body_class = 'fss-single__content'
     if publisher_host == 'www.marca.com':
         body_class = 'ue-c-article__body'
+    if publisher_host == 'aleagues.com.au':
+        article = _ScopedNewsBody('main-article')
+        article.feed(html)
+        if not article.finished:
+            return ''
+        # Category on this post, never a related card's men's/women's label.
+        if 'competition-a-league-women' in article.root_attrs.get('class', '').split():
+            source_category = "Source article category: Women's Team."
+        html = ''.join(article.parts)
+        body_class = 'entry-content'
+    if publisher_host == 'ge.globo.com':
+        body_class = 'mc-article-body'
     if publisher_host == 'en.yna.co.kr':
         body_class = 'story-news'
     if publisher_host in {'www.ufc.com', 'ufc.com'}:
@@ -694,7 +720,21 @@ def article_text_from_html(html: str) -> str:
         if not scoped.finished:
             return ''
         html = ''.join(scoped.parts)
+    if publisher_host == 'ge.globo.com':
+        # Story prose uses this exact paragraph class. Embedded video captions,
+        # score widgets and recommendation cards are not facts of the report.
+        prose = _ScopedNewsBody('content-text__container', collect_all=True)
+        prose.feed(html)
+        if not prose.finished:
+            return ''
+        html = ''.join(prose.parts)
     text = paragraphs_from_html(html or "")
+    if publisher_host == 'aleagues.com.au':
+        text = '\n\n'.join(p for p in text.split('\n\n') if not re.match(
+            r'(?i)^(?:click here|transfer centre|sign up|subscribe)\b', p))
+    if publisher_host == 'ge.globo.com':
+        text = '\n\n'.join(p for p in text.split('\n\n') if not re.match(
+            r'(?i)^\W*(?:clique aqui|leia mais notícias|ouça o podcast|assista tudo)\b', p))
     if publisher_host in {'www.rugbypass.com', 'rugbypass.com'}:
         # The publisher app advertisement is appended inside its prose block.
         text = re.split(r'(?im)^Your home for rugby\.', text, maxsplit=1)[0].strip()
@@ -709,6 +749,8 @@ def article_text_from_html(html: str) -> str:
         ld_body = _json_ld_article_body(html or "")
         if word_count(ld_body) > word_count(text):
             text = ld_body
+    if text and source_category:
+        text = source_category + '\n\n' + text
     return text
 
 

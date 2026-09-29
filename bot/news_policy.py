@@ -48,8 +48,15 @@ def unsupported_news_sport(title, body=""):
 
 def numeric_tokens(text, *, include_spelled=False):
     tokens = set(re.findall(r'(?<!\w)\d+(?:[.,:/–-]\d+)*(?:%|\b)', text or ''))
+    # Compact published money amounts are numbers too: £185m / $250bn.
+    # Read the stated coefficient, never multiply it or infer a currency.
+    # Apply to drafts as well so an invented £999m cannot evade this gate.
+    tokens.update(re.findall(r'(?<!\w)[£$€](\d+(?:[.,]\d+)*)\s*(?:bn|[mbk])\b', text or '', re.I))
     if not include_spelled:
         return tokens
+    # "60 percent" is the lexical equivalent of source "60%". Keep scores,
+    # ranges and monetary multipliers intact; this is not arithmetic.
+    tokens.update(value[:-1] for value in list(tokens) if value.endswith('%'))
     # Confirmed Italian source: "oltre 1.500 gli spettatori" was accurately
     # rendered as "more than 1,500 spectators". Admit formatting equivalents
     # only beside explicit countable-person nouns, never arbitrary decimals,
@@ -343,6 +350,10 @@ def non_article_news_reason(item):
         return "non_article_commercial_promotion"
     if re.search(r'^betting on\b|\b(?:what the odds say|betting tips|odds and predictions)\b', title):
         return "non_article_betting_product"
+    if re.search(r'\bveja (?:as )?contas\b', title):
+        return 'non_article_analysis'
+    if re.search(r'\btransfer cent(?:re|er)\b', title):
+        return 'non_article_rolling_tracker'
     # Branded daily betting-slip roundups contain sports names and results,
     # but are not reporting. Reject before spending writer/validator requests.
     if (re.search(r"\brez{1,2}ime dana\b", title)

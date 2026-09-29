@@ -18,6 +18,7 @@ class Feed(TypedDict, total=False):
 
 
 FEEDS: List[Feed] = [
+    {'url': 'https://aleagues.com.au/feed/', 'kind': 'league', 'sport': 'football', 'publisher': 'A-Leagues', 'verified_official': True, 'enabled': True, 'allowed_article_paths': ('/news/',), 'note': 'Publisher-advertised RSS with exact UTC dates; public article entry-content and same-article photos. Men, women and national teams; no automatic domestic league stamp. Transfer trackers and ticket promotions held.'},
     {'url': 'https://www.marca.com/rss/googlenews/futbol.xml', 'kind': 'league', 'sport': 'football', 'publisher': 'Marca', 'enabled': True, 'allowed_article_paths': ('/futbol/',), 'note': 'Publisher-advertised football RSS; exact offset timestamps, scoped public article prose and same-article photos verified. Opinion and live products held; no blanket league stamp.'},
     {'url': 'https://www.sportschau.de/fussball/index~rss2.xml', 'kind': 'league', 'sport': 'football', 'publisher': 'Sportschau', 'enabled': True, 'allowed_article_paths': ('/fussball/',), 'note': 'Publisher-advertised dedicated football RSS broadens German and international discovery beyond the mixed-feed limit. Only reporting, never audio episodes or highlight videos.'},
     {'url': 'https://www.volleynews.it/feed/', 'kind': 'league', 'sport': 'volleyball', 'publisher': 'VolleyNews', 'enabled': True, 'verified_official': False, 'note': 'Volleyball reporting with exact RSS/page publication offsets, scoped Elementor article prose and same-article photographs; no league or country stamp.'},

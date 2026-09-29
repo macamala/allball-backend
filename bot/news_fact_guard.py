@@ -90,9 +90,33 @@ def _contains_any(blob: str, terms) -> bool:
     return any(term in blob for term in terms)
 
 
+def _news_entity_ids(text: str) -> set[str]:
+    # Inter Milan is one club, not evidence that AC Milan was also mentioned.
+    # Keep this News-only: the shared entity registry belongs to other services.
+    text = re.sub(r'(?<!\w)inter\s+milan(?!\w)', 'Internazionale', text or '', flags=re.I)
+    return extract_entities(extra=text).all_ids
+
+
 def _unsupported_known_entities(source: str, output: str) -> list[str]:
-    src = extract_entities(extra=source).all_ids
-    dst = extract_entities(extra=output).all_ids
+    src = _news_entity_ids(source)
+    # Source-only, word-bounded Serbian club spellings. These equivalences do
+    # not create a league, transfer or role fact, and do not modify Live entities.
+    aliases = {
+        'barcelona': r'barselon(?:a|e|i|u|om)|барселон(?:а|е|и|у|ом)',
+        'tottenham': r'totenhem(?:a|u|om)?|тотенхем(?:а|у|ом)?',
+        'manchester-city': r'man[čc]ester siti(?:ja|ju|jem)?|манчестер сити(?:ја|ју|јем)?',
+        'manchester-united': r'man[čc]ester junajted(?:a|u|om)?|манчестер јунајтед(?:а|у|ом)?',
+        'chelsea': r'[čc]elsi(?:ja|ju|jem)?|челси(?:ја|ју|јем)?',
+        'bayern': r'bajern(?:a|u|om)?|бајерн(?:а|у|ом)?',
+        'arsenal': r'арсенал(?:а|у|ом)?',
+        'liverpool': r'ливерпул(?:а|у|ом)?',
+        'juventus': r'јувентус(?:а|у|ом)?',
+        'real-madrid': r'реал мадрид(?:а|у|ом)?',
+    }
+    for entity, pattern in aliases.items():
+        if re.search(r'(?<!\w)(?:' + pattern + r')(?!\w)', source or '', re.I):
+            src.add(entity)
+    dst = _news_entity_ids(output)
     return sorted(dst - src)
 
 
