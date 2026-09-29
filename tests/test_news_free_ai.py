@@ -180,3 +180,33 @@ def test_provider_outage_cannot_start_writer_without_independent_validator(monke
     monkeypatch.setattr(free_ai, '_rate_limited', False)
     assert free_ai.free_ai_available() is expected
     assert free_ai.free_ai_rate_limited() is (not expected)
+
+
+@pytest.mark.parametrize('reason', ['unsupported_number', 'validator-unsupported-claim', 'too-short', 'direct_quote_requires_review'])
+def test_correction_keeps_only_available_validator_independent(monkeypatch, reason):
+    from bot import news_external_free as external
+    monkeypatch.setattr(external, 'configured_identities', lambda purpose='writer':
+        (('zai', 'glm-4.7-flash'),) if purpose == 'writer' else ())
+    calls = []
+    def complete(**kwargs):
+        calls.append(kwargs['purpose'])
+        if kwargs['purpose'] == 'writer':
+            return 'corrected external draft', ('zai', 'glm-4.7-flash')
+        return None, ('unknown', 'unknown')
+    monkeypatch.setattr(external, 'completion', complete)
+    monkeypatch.setattr(free_ai, '_completion', lambda **kw: pytest.fail('xKiro must remain validator'))
+    assert free_ai.write_free_story('system', 'VALIDATION_FAILURE: ' + reason) == 'corrected external draft'
+    assert free_ai.last_writer_identity() == ('zai', 'glm-4.7-flash')
+    approved = json.dumps({'source_type': 'news', 'approved': True, 'unsupported_claims': [], 'changed_names': []})
+    monkeypatch.setattr(free_ai, '_completion', lambda **kw: approved)
+    assert free_ai.validate_free_story('Source', 'facts', 'Draft', 'summary', 'body') == (True, 'ok')
+    assert free_ai.last_json_identity()[0] == 'xkiro'
+    assert calls == ['writer', 'validator']
+
+
+def test_no_pointless_xkiro_fallback_when_other_validators_are_unavailable(monkeypatch):
+    from bot import news_external_free as external
+    monkeypatch.setattr(external, 'configured_identities', lambda purpose='writer': ())
+    monkeypatch.setattr(external, 'completion', lambda **kw: (None, ('unknown', 'unknown')))
+    monkeypatch.setattr(free_ai, '_completion', lambda **kw: pytest.fail('unverifiable fallback spent a request'))
+    assert free_ai.write_free_story('system', 'source facts') is None

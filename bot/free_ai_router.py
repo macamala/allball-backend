@@ -249,10 +249,19 @@ def _completion(
         return None
 
 
+def _external_validator_ready() -> bool:
+    try:
+        from .news_external_free import configured_identities
+        return any(provider != 'xkiro' for provider, _model in configured_identities('validator'))
+    except Exception:
+        return False
+
+
 def write_free_story(system_prompt: str, prompt: str) -> Optional[str]:
     # Bounded factual/originality corrections benefit from a different model family
     # than the external first-pass writers. Use the verified xKiro free route
-    # first, then fall back to the external free pool if unavailable.
+    # first only when another provider can validate it. Otherwise keep xKiro
+    # available as validator and send the correction to the external writers.
     corrective_retry = (
         "VALIDATION_FAILURE: direct_quote_requires_review" in prompt
         or "VALIDATION_FAILURE: headline_too_similar_to_source" in prompt
@@ -262,7 +271,7 @@ def write_free_story(system_prompt: str, prompt: str) -> Optional[str]:
         or "VALIDATION_FAILURE: too-short" in prompt
         or "VALIDATION_FAILURE: unsupported_number" in prompt
     )
-    if corrective_retry:
+    if corrective_retry and _external_validator_ready():
         model = _free_model("NEWS_XKIRO_WRITER_MODEL", _DEFAULT_WRITER)
         if model:
             value = _completion(
@@ -293,6 +302,9 @@ def write_free_story(system_prompt: str, prompt: str) -> Optional[str]:
     except Exception as exc:
         logger.warning("[free_ai] external writer unavailable: %s", type(exc).__name__)
 
+    if not _external_validator_ready():
+        logger.info('[free_ai] xKiro writer skipped: no independent external validator')
+        return None
     model = _free_model("NEWS_XKIRO_WRITER_MODEL", _DEFAULT_WRITER)
     if not model:
         return None

@@ -294,6 +294,7 @@ def test_length_correction_paraphrases_quotes_and_uses_verified_free_corrective_
     assert 'paraphrased reported statements' in prompts[0]
     calls = []
     monkeypatch.setattr(router, '_free_model', lambda *args: 'fixture:free')
+    monkeypatch.setattr(external, 'configured_identities', lambda purpose='writer': (('groq', 'validator-fixture'),))
     monkeypatch.setattr(router, '_completion', lambda **kwargs: calls.append(kwargs) or 'corrected draft')
     monkeypatch.setattr(external, 'completion', lambda **kwargs: pytest.fail('corrective route should run first'))
     assert router.write_free_story('system', prompts[0]) == 'corrected draft'
