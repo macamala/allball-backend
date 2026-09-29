@@ -689,6 +689,7 @@ def _ingest_item(
                     force=(
                         rewrite_reason in {
                             "direct_quote_requires_review",
+                            "publisher_branding",
                             "headline_too_similar_to_source",
                             "copied_source_headline",
                             "non_english",

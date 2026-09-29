@@ -339,6 +339,7 @@ def write_ninkosports_story(
     prompt = (
         "DRAFT SAFETY CONTRACT:\n"
         "- Do not output straight or curly double quotation marks anywhere. Paraphrase every quoted statement.\n"
+        "- Do not include outlet names or source credits. Preserve the actual speaker and uncertainty; omit any claim whose meaning depends on naming its publisher. Never claim a NinkoSports interview.\n"
         f"- Source-attested Latin name spellings (omit unused names, do not invent variants): {source_spellings or 'use source spelling'}.\n"
         "- When a source transliterates foreign names, never guess an English surname. Omit an optional named comparison if its spelling is uncertain; preserve the central news fact. Do not substitute a similar-looking player.\n"
         "- Serbian gostovanje / гостовање means an away visit, never a home fixture. Preserve the source's host and visitor.\n"

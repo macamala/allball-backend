@@ -240,6 +240,7 @@ def test_world_athletics_time_must_belong_to_the_current_article(monkeypatch):
     ('NinkoSports Daily Football Quizzes Test Knowledge and Instinct', 'non_article_quiz', 'quiz'),
     ('NHL fantasy hockey previews roll out for all 32 teams', 'non_article_fantasy_product', 'fantasy'),
     ('Grand Final week in pictures', 'non_article_photo_gallery', 'gallery'),
+    ('Forever Reds Christmas Lunch Returns to Anfield with Legends and Fundraising Goals', 'non_article_event_promotion', 'christmas-lunch'),
     ('EuroLeague Injury Report Offers Daily Updates for Fans and Fantasy Players', 'non_article_rolling_tracker', 'injury-tracker'),
     ('Chelsea Ultimate Goal of the Season Group C results', 'non_article_fan_poll', 'goal-voting'),
     ('NBL27 Champion Fans MVP Voting Opens Weekly with $4000 Prize', 'non_article_fan_poll', 'mvp-voting'),

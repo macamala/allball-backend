@@ -88,6 +88,15 @@ def _http_failure(provider: str, response, *, model: str = '') -> None:
             payload = payload if isinstance(payload, dict) else {}
             error = payload.get("error")
             message = str(error.get("message") if isinstance(error, dict) else error or "").lower()
+            # Mistral errors use top-level message/code, unlike Groq's nested
+            # error. Inspect only for classification; never log response text.
+            if provider == 'mistral':
+                message += ' ' + str(payload.get('message') or '').lower()
+                code = payload.get('code')
+                if str(code).isdigit() and len(str(code)) <= 6:
+                    error_codes.append(int(code))
+                if 'service tier capacity exceeded' in message:
+                    dimension = 'service_tier_capacity'
             # Workers AI uses an errors array. Code 3036 explicitly means the
             # daily free neuron allowance is exhausted, not a minute limit.
             errors = payload.get('errors') if isinstance(payload, dict) else None
@@ -104,6 +113,7 @@ def _http_failure(provider: str, response, *, model: str = '') -> None:
                 reset = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
                 seconds = max(seconds or 0, (reset - now).total_seconds() + 60)
             for marker, code in (("tokens per day", "tpd"), ("requests per day", "rpd"),
+                                 ("tokens per month", "tokens_per_month"),
                                  ("tokens per minute", "tpm"), ("requests per minute", "rpm")):
                 if marker in message or re.search(r"\b" + code + r"\b", message):
                     dimension = code

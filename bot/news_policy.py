@@ -175,6 +175,7 @@ _SOURCE_PATH_SPORTS = (
     ("www.record.pt", "/futebol/", "football"),
     ("www.record.pt", "/internacional/competicoes-de-selecoes/", "football"),
     ("isport.blesk.cz", "/clanek/fotbal-", "football"),
+    ("isport.blesk.cz", "/clanek/hokej-", "ice-hockey"),
     ("isport.blesk.cz", "/clanek/ostatni-cyklistika/", "cycling"),
     ("www.novosti.rs", "/sport/fudbal/", "football"),
     ("www.blick.ch", "/sport/fussball/", "football"),
@@ -377,6 +378,11 @@ def non_article_news_reason(item):
         return "non_article_event_promotion"
     if re.search(r"\bconvite\b.{0,60}\b(?:expo|feira)\b", title):
         return "non_article_event_promotion"
+    # Club hospitality/fundraising invitations are not sporting developments.
+    # Match the event format, not charity reporting or Christmas fixtures.
+    promotion_title = title + ' ' + path.replace('-', ' ')
+    if re.search(r'\b(?:christmas|festive|fundraising|gala)\s+(?:fundraising\s+)?(?:lunch|dinner|banquet)\b', promotion_title):
+        return 'non_article_event_promotion'
     if re.search(r'\bwin (?:an? |your )?(?:vip )?(?:visit|trip|tickets|signed shirt)\b', title):
         return "non_article_commercial_promotion"
     if re.search(r'^betting on\b|\b(?:what the odds say|betting tips|odds and predictions)\b', title):
@@ -450,7 +456,7 @@ def non_article_news_reason(item):
         return "non_news_source_meta_filler"
     if re.search(r"\b(?:source|reported context|verified facts|provided information|supplied material|statement)\b.{0,80}\b(?:does not|did not|doesn't|didn't) (?:specify|identify|detail|provide)\b|\bno specific (?:teams|players|athletes|scenarios|details)\b.{0,60}\b(?:detailed|provided|identified|specified)\b", copy, re.I):
         return "non_news_source_meta_filler"
-    if re.search(r"\b(?:predlozzi|tipovanja|ludi tiket|kladioničarski tipovi|kladionicarski tipovi)\b", title) or re.search(r"/(?:predlozzi-i-tipovanja|ludi-tiket|najava-dana)-", path):
+    if re.search(r"\b(?:predlozzi|tipovanja|ludi tiket|kladioničarski tipovi|kladionicarski tipovi)\b", title) or re.search(r"/(?:predlozzi-i-tipovanja|ludi-tiket|najava-dana|rezzime)-", path):
         return "non_article_betting_product"
     if re.search(r"\b(?:biramo najlepši gol|biramo najlepsi gol|бирамо најлепши гол|vote for (?:the |your )?goal)\b", title):
         return "non_article_fan_poll"

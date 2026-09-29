@@ -182,7 +182,7 @@ def test_provider_outage_cannot_start_writer_without_independent_validator(monke
     assert free_ai.free_ai_rate_limited() is (not expected)
 
 
-@pytest.mark.parametrize('reason', ['unsupported_number', 'validator-unsupported-claim', 'too-short', 'direct_quote_requires_review'])
+@pytest.mark.parametrize('reason', ['unsupported_number', 'validator-unsupported-claim', 'too-short', 'direct_quote_requires_review', 'publisher_branding'])
 def test_correction_keeps_only_available_validator_independent(monkeypatch, reason):
     from bot import news_external_free as external
     monkeypatch.setattr(external, 'configured_identities', lambda purpose='writer':

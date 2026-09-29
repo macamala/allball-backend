@@ -264,6 +264,7 @@ def write_free_story(system_prompt: str, prompt: str) -> Optional[str]:
     # available as validator and send the correction to the external writers.
     corrective_retry = (
         "VALIDATION_FAILURE: direct_quote_requires_review" in prompt
+        or "VALIDATION_FAILURE: publisher_branding" in prompt
         or "VALIDATION_FAILURE: headline_too_similar_to_source" in prompt
         or "VALIDATION_FAILURE: copied_source_headline" in prompt
         or "VALIDATION_FAILURE: validator-unsupported-claim" in prompt

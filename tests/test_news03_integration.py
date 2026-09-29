@@ -496,7 +496,7 @@ def test_rejected_story_preserves_draft_and_specific_validator_feedback(monkeypa
 
 
 @pytest.mark.parametrize('corrected', [False, True])
-@pytest.mark.parametrize('reason_code', ['validator-unsupported-claim', 'unsupported_number'])
+@pytest.mark.parametrize('reason_code', ['validator-unsupported-claim', 'unsupported_number', 'publisher_branding'])
 def test_major_sport_correction_retains_incident_and_requires_pass(monkeypatch, tmp_path, corrected, reason_code):
     import json
     from database import SessionLocal

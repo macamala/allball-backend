@@ -88,3 +88,21 @@ def test_quota_cooldown_survives_cycle_reset_without_logging_key(pool, monkeypat
 ])
 def test_incomplete_or_unexpected_responses_fail_closed(choice):
     assert external._choice_text({'choices': [choice]}) is None
+
+
+@pytest.mark.parametrize('message,dimension', [
+    ('Service tier capacity exceeded for this model.', 'service_tier_capacity'),
+    ('Tokens per month exceeded.', 'tokens_per_month'),
+    ('Rate limit exceeded.', 'unknown'),
+])
+def test_top_level_mistral_quota_reason_is_visible_without_response_text(pool, monkeypatch, caplog, message, dimension):
+    monkeypatch.setattr(external.time, 'monotonic', lambda: 100.)
+    external._http_failure('mistral', httpx.Response(429, json={
+        'message': message + ' fixture-secret', 'code': '1300', 'type': 'rate_limited'}))
+    assert 'limit_dimension=' + dimension in caplog.text
+    assert 'error_codes=[1300]' in caplog.text
+    assert 'fixture-secret' not in caplog.text
+    assert external._COOLDOWN_UNTIL['mistral'] == 700.
+    external.reset()
+    assert not external.configured_identities('writer')
+    assert not external.configured_identities('validator')
