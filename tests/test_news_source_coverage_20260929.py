@@ -6,6 +6,29 @@ from bot.extract import article_text_from_html, collect_page_image_candidates
 from bot.news_policy import non_article_news_reason
 
 
+def test_volleynews_scopes_article_and_excludes_social_embed_and_related_stories():
+    prose = 'Il nuovo giocatore di pallavolo torna ad allenarsi con la squadra di Trento. '
+    html = '<link rel="canonical" href="https://www.volleynews.it/trento-allenamento/">'
+    html += '<div class="elementor-widget elementor-widget-my-custom-post-content"><p>' + prose * 5 + '</p>'
+    html += '<blockquote class="instagram-media"><p>Un post condiviso da someone says an unrelated player moves clubs.</p></blockquote></div>'
+    html += '<div><p>Recommended: Another team signs an unrelated player and coach.</p></div>'
+    body = article_text_from_html(html)
+    assert prose.strip() in body
+    assert 'Un post' not in body and 'unrelated' not in body and 'Recommended' not in body
+    assert not article_text_from_html(html.replace('elementor-widget-my-custom-post-content', 'changed-unknown-widget'))
+
+
+def test_volleynews_rss_and_page_keep_the_real_offset_and_sport_scope():
+    from bot.extract import page_published_at_from_html
+    from bot.fetch_sources import _rss_publication_time
+    from bot.feeds import FEEDS
+    cfg = next(row for row in FEEDS if row['url'] == 'https://www.volleynews.it/feed/')
+    assert cfg['enabled'] and cfg['sport'] == 'volleyball' and not cfg.get('league') and not cfg.get('country')
+    rss = _rss_publication_time({'published': 'Mon, 28 Sep 2026 14:43:37 +0000'}, cfg)
+    page = '<script type="application/ld+json">{"@type":"NewsArticle","datePublished":"2026-09-28T16:43:37+02:00"}</script>'
+    assert rss == page_published_at_from_html(page) == datetime(2026, 9, 28, 14, 43, 37, tzinfo=timezone.utc)
+
+
 def test_golf_body_excludes_author_bio_despite_outer_widget():
     prose = 'The golfer confirmed his entry for the championship in Scotland with his team. '
     html = '<meta property="og:url" content="https://www.golfmonthly.com/news/new-entry">'

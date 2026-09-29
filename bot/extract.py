@@ -366,7 +366,7 @@ def _is_chrome_open(tag: str, attrs) -> bool:
         return True
     attrs = _attr_map(attrs)
     if set(attrs.get('class', '').split()) & {
-        'embedded-related-article', 'embedded-recommended-articles', 'promotion',
+        'embedded-related-article', 'embedded-recommended-articles', 'promotion', 'instagram-media',
     }:
         return True
     # Membership account panels can sit inside <main>. Their product cards
@@ -638,6 +638,10 @@ def article_text_from_html(html: str) -> str:
         body_id = 'single-content'
     if publisher_host in {'skysports.com', 'www.skysports.com'}:
         body_class = 'sdc-article-body'
+    if publisher_host in {'volleynews.it', 'www.volleynews.it'}:
+        # Elementor places unrelated headlines after this exact article widget.
+        # Fail closed if it is absent instead of treating recommendations as facts.
+        body_class = 'elementor-widget-my-custom-post-content'
     if body_class or body_id:
         scoped = _ScopedNewsBody(body_class, body_id=body_id)
         try:

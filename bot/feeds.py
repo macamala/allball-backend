@@ -18,6 +18,7 @@ class Feed(TypedDict, total=False):
 
 
 FEEDS: List[Feed] = [
+    {'url': 'https://www.volleynews.it/feed/', 'kind': 'league', 'sport': 'volleyball', 'publisher': 'VolleyNews', 'enabled': True, 'verified_official': False, 'note': 'Volleyball reporting with exact RSS/page publication offsets, scoped Elementor article prose and same-article photographs; no league or country stamp.'},
     {'url': 'https://www.wielerflits.nl/feed/', 'kind': 'league', 'sport': 'cycling', 'publisher': 'WielerFlits', 'enabled': True, 'note': 'Exact UTC RSS and matching article publication metadata; scoped Dutch cycling reports with same-article photos. No league stamp; all originality and factual gates remain required.'},
     {'url': 'https://www.golfmonthly.com/feeds.xml', 'kind': 'league', 'sport': 'golf', 'publisher': 'Golf Monthly', 'enabled': True, 'allowed_article_paths': ('/news/',), 'excluded_article_paths': ('/news/live/',), 'note': 'Publisher-advertised RSS with exact UTC dates and scoped public article prose. Excludes equipment, coaching, betting and live products; same-article photo gates remain mandatory.'},
     {'url': 'https://www.eurohoops.net/en/feed/', 'kind': 'league', 'sport': 'basketball', 'publisher': 'Eurohoops', 'enabled': True, 'note': 'Publisher-advertised English RSS: exact UTC publication dates, full prose and same-article 950x500 photographs verified. Broad NBA/EuroLeague/national-team coverage without league stamp; betting products held.'},
