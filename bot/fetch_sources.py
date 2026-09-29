@@ -18,7 +18,7 @@ from models import Article
 from editorial import news_image_is_publishable, pick_article_image
 
 from .news_policy import editorial_day_reason, fair_news_queue, freshness_reason, non_article_news_reason, numeric_tokens, original_draft_reason, source_path_sport_hint
-from .news_fact_guard import fact_lock_reason
+from .news_fact_guard import competition_in_source, fact_lock_reason
 from .news_learning import (
     learned_rule_violation_reason,
     mark_auto_corrected,
@@ -160,6 +160,9 @@ def _ai_story(
 ) -> tuple:
     """Returns (parsed_dict_or_None, reason). reason is ok|empty|too-short."""
     payload = facts[: max(1, max_ai_chars)]
+    # Classification can infer a men's league from a shared club name. Never
+    # promote that guess into writer or validator source evidence.
+    league = league if competition_in_source(league, title + '\n' + payload) else ''
     _LAST_STORY_FAILURE.set({})
 
     def reject(reason, draft, feedback=None):
@@ -495,6 +498,16 @@ def _reconcile_public_taxonomy(tags, resolved, feed: Dict):
     return resolved, None
 
 
+def _source_grounded_resolution(resolved, title: str, facts: str):
+    from taxonomy_resolver import TaxonomyResolution
+    competition = resolved.public_competition
+    if competition in COMPETITIONS and not competition_in_source(competition, title + '\n' + facts):
+        return TaxonomyResolution(sport=resolved.sport, competition=None,
+            sport_confidence=resolved.sport_confidence, competition_confidence=0.0,
+            evidence=list(getattr(resolved, 'evidence', [])) + ['unsupported-inferred-competition-cleared'])
+    return resolved
+
+
 def _ingest_item(
     db: Session,
     item: Dict,
@@ -600,8 +613,7 @@ def _ingest_item(
             and feed.get("sport") == tags.sport
         )
         trusted_context = (
-            f"VERIFIED DEDICATED FEED SPORT: {tags.sport}. "
-            f"VERIFIED COMPETITION HINT: {tags.league or 'unspecified'}."
+            f"VERIFIED DEDICATED FEED SPORT: {tags.sport}."
             if trusted_feed else ""
         )
         learned_instructions, learned_rule_ids = (
@@ -789,6 +801,7 @@ def _ingest_item(
             item["title"][:80],
         )
         return None, False
+    resolved = _source_grounded_resolution(resolved, item['title'], facts)
     stamp_sport = resolved.sport
     stamp_league = resolved.public_competition
 

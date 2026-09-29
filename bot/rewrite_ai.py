@@ -49,6 +49,7 @@ NINKOSPORTS NEWS VOICE:
 - Use concrete, natural language and short paragraphs. Do not add literary lines,
   metaphors, imagined atmosphere, predictions, analysis or columnist commentary.
 - Preserve uncertainty and attribution: someone's expectation is not a confirmed outcome.
+- Preserve an explicitly supplied women's, men's or youth team category in the headline or opening. A shared club name does not establish its men's league.
 - Convert all quoted remarks to indirect speech. Never repeat quotation marks from a source headline.
 - Leave out redundant colour and stock sports phrases. Accuracy and clarity are the voice.
 

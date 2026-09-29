@@ -125,6 +125,15 @@ def _source_probably_english(text: str) -> bool:
     return hits >= max(4, len(words) // 18)
 
 
+def competition_in_source(competition: str, text: str) -> bool:
+    """A club-name inference is not evidence of its men's league in this story."""
+    from .taxonomy import COMPETITIONS
+    meta = COMPETITIONS.get(competition) or {}
+    return any(re.search(r'(?<!\w)' + r'\s+'.join(re.escape(part) for part in alias.strip().split()) + r'(?!\w)',
+                         text or '', re.I)
+               for alias in meta.get('aliases', []) if alias.strip())
+
+
 def fact_lock_reason(
     draft: dict,
     source_title: str,
@@ -146,6 +155,12 @@ def fact_lock_reason(
         str(draft.get(key) or "") for key in ("title", "summary", "body")
     )
     source = f"{source_title or ''}\n{source_body or ''}"
+    if expected_sport == 'football':
+        from .taxonomy import COMPETITIONS
+        for competition, meta in COMPETITIONS.items():
+            if (meta.get('sport') == 'football' and competition_in_source(competition, output)
+                    and not competition_in_source(competition, source)):
+                return 'unsupported_competition:' + competition
 
     # Event labels often name athletes by surname alone (and in all caps).
     # Semantic checking missed VOLKANOVSKI -> Volkovski in an audited draft.

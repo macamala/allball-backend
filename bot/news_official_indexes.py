@@ -718,6 +718,13 @@ def _hydrate(cfg: Dict, url: str, fallback_title: str, *, diagnostics=None, site
     body = article_text_from_html(html)
     if not title or not body:
         return reject("missing_title" if not title else "missing_article_body")
+    if cfg['id'] == 'chelsea-football-news':
+        category = header.get('category') if isinstance(header, dict) else None
+        section = category.get('title') if isinstance(category, dict) else None
+        if section == "Women's Team":
+            # Verified metadata from THIS article, not a related card. Keep
+            # the team category in the bounded facts seen by both AI roles.
+            body = "Source article category: Women's Team.\n\n" + body
     reason = non_article_news_reason({"title": title, "url": url})
     if reason:
         return reject(reason)

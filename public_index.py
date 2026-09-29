@@ -638,6 +638,40 @@ def _correct_confirmed_ufc_copy(article: Article) -> dict:
     return changes
 
 
+def _correct_confirmed_mccabe_copy(article: Article, tax) -> dict:
+    """The official header says Women's Team; it does not establish EPL."""
+    try:
+        source = urlsplit(article.source_url or '')
+    except ValueError:
+        return {}
+    old = 'Katie McCabe helps Chelsea defeat former club Arsenal in Premier League match'
+    new = "McCabe reflects on Chelsea Women's victory over former club Arsenal"
+    if (article.id != 22166 or not article.ai_generated
+            or source.hostname not in {'www.chelseafc.com', 'chelseafc.com'}
+            or source.path.rstrip('/') != '/en/news/article/katie-mccabe-on-playing-smart-and-riding-the-storms-against-former-club'
+            or article.title not in {old, new}):
+        return {}
+    changes = {}
+    if article.title == old:
+        changes['title'] = {'before': old, 'after': new}
+        article.title = new
+    for field in ('content', 'ai_content'):
+        value = getattr(article, field, None)
+        if value and 'surrounding her return to Stamford Bridge' in value:
+            revised = value.replace('surrounding her return to Stamford Bridge', 'around facing her former club')
+            setattr(article, field, revised)
+            changes[field] = {'before': value, 'after': revised}
+    if tax.resolved_competition == 'england-premier-league':
+        changes['competition'] = {'before': tax.resolved_competition, 'after': None}
+        tax.resolved_competition = None
+        tax.competition_confidence = 0.0
+    if article.league == 'england-premier-league':
+        article.league = None
+        article.country = None
+        changes['article_league'] = {'before': 'england-premier-league', 'after': None}
+    return changes
+
+
 def repair_recent_gossip_news(
     db: Session,
     *,
@@ -668,6 +702,18 @@ def repair_recent_gossip_news(
     corrected = 0
     reasons = {}
     for article, tax in rows:
+        mccabe_changes = _correct_confirmed_mccabe_copy(article, tax)
+        if mccabe_changes:
+            db.add_all([article, tax])
+            from bot.news_learning import record_incident
+            record_incident(db, reason_code='inferred_mens_competition_for_womens_team',
+                article_id=article.id, source_url=article.source_url, sport=tax.resolved_sport,
+                phase='postpublish', status='auto_corrected',
+                writer_provider='news-audit', writer_model='deterministic',
+                details={'evidence': 'Official current ArticleHeader category is Womens Team; source never names Premier League',
+                         'changes': mccabe_changes})
+            corrected += 1
+            logger.info('[public_index] corrected confirmed womens-team competition article=%s', article.id)
         ufc_changes = _correct_confirmed_ufc_copy(article)
         if ufc_changes:
             db.add(article)
