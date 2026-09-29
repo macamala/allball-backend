@@ -26,9 +26,10 @@ DRAFT = {
     "title": "Arsenal schedule update follows competition review",
     "summary": "The club will play under the revised competition format.",
     "body": (
-        "Arsenal will play its next match under the revised competition schedule after "
-        "the organising committee completed its review.\n\n"
-        "The update concerns the published competition format and the club's next match."
+        "Following the organising committee's review, Arsenal have confirmed changes "
+        "to the competition schedule.\n\n"
+        "The announcement sets out the format for the club's forthcoming fixture. "
+        "It contains no medical, transfer or disciplinary update."
     ),
 }
 
@@ -112,6 +113,10 @@ def test_persistent_writer_circuit_uses_only_confirmed_incidents():
 
 
 def _prepare_ingest(monkeypatch):
+    # These tests isolate incident/correction lifecycle. Public admission and
+    # image failure behavior have dedicated News integration coverage.
+    monkeypatch.setattr(ingest, 'news_image_is_reachable', lambda url: True)
+    monkeypatch.setattr('public_read.public_query', lambda db: db.query(Article))
     monkeypatch.setattr(ingest, "existing_by_url", lambda *a: None)
     monkeypatch.setattr(ingest, "existing_near_duplicate", lambda *a: None)
     monkeypatch.setattr(ingest, "_source_on_ai_cooldown", lambda *a: False)
@@ -327,7 +332,8 @@ def test_fact_lock_does_not_false_positive_normal_proper_names():
     assert fact_lock_reason(draft,source_title,source_body) is None
 
 
-def test_cross_language_claim_words_defer_to_semantic_validator():
+def test_cross_language_claim_words_defer_to_semantic_validator(monkeypatch):
+    monkeypatch.setattr('bot.news_fact_guard.original_draft_reason', lambda *args: None)
     from bot.news_fact_guard import fact_lock_reason
     source_title="Lierse laat zich verrassen in de beker"
     source_body=(
@@ -342,7 +348,8 @@ def test_cross_language_claim_words_defer_to_semantic_validator():
     assert fact_lock_reason(draft,source_title,source_body) is None
 
 
-def test_event_claim_words_defer_to_semantic_validator():
+def test_event_claim_words_defer_to_semantic_validator(monkeypatch):
+    monkeypatch.setattr('bot.news_fact_guard.original_draft_reason', lambda *args: None)
     from bot.news_fact_guard import fact_lock_reason
     source_title="Arsenal publish squad schedule"
     source_body=(
