@@ -134,9 +134,9 @@ def test_stale_or_future_item_no_extraction(monkeypatch,days):
     assert ingest._ingest_item(None,item,True,6000,1)==(None,False)
 
 
-def test_story_crossing_sydney_midnight_is_rechecked_before_commit(monkeypatch):
+def test_story_expiring_during_writing_is_rechecked_before_commit(monkeypatch):
     item = prepare_ingest(monkeypatch)
-    monkeypatch.setattr(ingest, 'editorial_day_reason', Mock(side_effect=[None, 'not_editorial_today']))
+    monkeypatch.setattr(ingest, 'news_freshness_reason', Mock(side_effect=[None, 'stale_publication']))
     db = Mock()
     assert ingest._ingest_item(db,item,True,6000,1) == (None,False)
     db.add.assert_not_called()
@@ -191,7 +191,7 @@ def test_feed_sort_filters_stale_before_item_limit(monkeypatch):
     now=datetime.now(timezone.utc)
     def item(title,delta):
         return f'<item><title>{title}</title><link>https://example.test/{title.replace(" ","-")}</link><pubDate>{format_datetime(now-timedelta(days=delta))}</pubDate></item>'
-    xml=('<rss version="2.0"><channel><title>Fixture</title>'+item('Old football cup',7)+item('Fresh football cup',1)+'</channel></rss>').encode()
+    xml=('<rss version="2.0"><channel><title>Fixture</title>'+item('Old football cup',7)+item('Fresh football cup',0.5)+'</channel></rss>').encode()
     monkeypatch.setattr(ingest,'read_news_feed',lambda url:xml)
     rows=ingest._fetch_feed_entries({'url':'https://example.test/feed'},1)
     assert len(rows)==1 and rows[0]['title']=='Fresh football cup'

@@ -19,8 +19,8 @@ def test_newsapi_org_candidate_is_discovery_only():
     assert item["image_candidates"][0]["url"]=="https://publisher.example/photo.jpg"
 
 
-def test_newsapi_org_window_starts_at_sydney_midnight(monkeypatch):
+def test_newsapi_org_window_spans_24_hours_without_sydney_cutoff(monkeypatch):
     monkeypatch.setenv("NEWS_EDITORIAL_TIMEZONE","Australia/Sydney")
     start,end=newsapi._window(datetime(2026,9,28,6,0,tzinfo=timezone.utc))
-    assert start=="2026-09-27T14:00:00Z"
+    assert start=="2026-09-27T06:00:00Z"
     assert end=="2026-09-28T06:00:00Z"

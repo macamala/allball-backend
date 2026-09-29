@@ -60,8 +60,7 @@ def test_hydrate_requires_explicit_timestamp_and_article_prose(monkeypatch):
       <meta property="article:published_time" content="2026-09-26T12:00:00+00:00">
     </head><body><main><p>{body}</p></main></body></html>'''.encode()
     monkeypatch.setattr(idx, 'read_news_feed', lambda url: html)
-    monkeypatch.setattr(idx, 'freshness_reason', lambda stamp, now, **kwargs: None)
-    monkeypatch.setattr(idx, 'editorial_day_reason', lambda *args: None)
+    monkeypatch.setattr(idx, 'news_freshness_reason', lambda stamp, now: None)
     item=idx._hydrate(cfg, 'https://www.ihf.info/media-center/news/test-story', 'fallback')
     assert item
     assert item['feed']['sport']=='handball'
@@ -159,8 +158,7 @@ def test_ihf_explicit_timestamp_and_relative_image_are_hydrated(monkeypatch):
       <meta property="og:image" content="/sites/default/files/handball-photo.jpg">
     </head><body><div>27 Sep. 2026</div><main><p>{body}</p></main></body></html>'''.encode()
     monkeypatch.setattr(idx, "read_news_feed", lambda url: html)
-    monkeypatch.setattr(idx, "freshness_reason", lambda stamp, now, **kwargs: None)
-    monkeypatch.setattr(idx, "editorial_day_reason", lambda *args: None)
+    monkeypatch.setattr(idx, "news_freshness_reason", lambda stamp, now: None)
     item=idx._hydrate(
         cfg,
         "https://www.ihf.info/media-center/news/seventh-barcelona",

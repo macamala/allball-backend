@@ -29,7 +29,7 @@ from .extract import (
     _ScopedNewsBody,
 )
 from .news_feed_http import read_news_feed
-from .news_policy import editorial_day_reason, freshness_reason, non_article_news_reason
+from .news_policy import news_freshness_reason, non_article_news_reason
 from .news_components import public_components
 from .textutil import clean_text
 
@@ -656,7 +656,7 @@ def _visible_published_date(
             ).astimezone(timezone.utc)
         except ValueError:
             return None
-    # A date without a time/offset does not establish a Sydney calendar day.
+    # A date without a time/offset does not establish a publication instant.
     # Keep it unverified instead of inventing midnight UTC.
     return None
 
@@ -712,12 +712,10 @@ def _hydrate(cfg: Dict, url: str, fallback_title: str, *, diagnostics=None, site
         )
     if published_at is None and isinstance(sitemap_published_at, datetime) and sitemap_published_at.tzinfo is not None:
         published_at = sitemap_published_at
-    max_age = max(24, min(int(cfg.get("max_age_hours") or 72), 168))
     if published_at is None:
         return reject("publication_time_unverified")
     now = datetime.now(timezone.utc)
-    reason = freshness_reason(published_at, now, max_age_hours=max_age)
-    reason = reason or editorial_day_reason(published_at, now, os.getenv("NEWS_EDITORIAL_TIMEZONE") or "Australia/Sydney")
+    reason = news_freshness_reason(published_at, now)
     if reason:
         return reject(reason)
     title = page_title_from_html(html) or fallback_title

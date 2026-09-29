@@ -17,7 +17,8 @@ from database import SessionLocal
 from models import Article
 from editorial import news_image_is_publishable, pick_article_image
 
-from .news_policy import editorial_day_reason, fair_news_queue, freshness_reason, non_article_news_reason, numeric_tokens, original_draft_reason, source_path_sport_hint
+from .news_policy import NEWS_FRESHNESS_HOURS, news_freshness_reason, fair_news_queue, non_article_news_reason, numeric_tokens, original_draft_reason, source_path_sport_hint
+from .news_football_priority import football_editorial_priority
 from .news_fact_guard import competition_in_source, fact_lock_reason
 from .news_learning import (
     learned_rule_violation_reason,
@@ -423,7 +424,7 @@ def _fetch_feed_entries(feed_cfg: Dict, max_articles: int) -> List[Dict]:
             }
         )
     now = datetime.now(timezone.utc)
-    fresh = [item for item in items if not freshness_reason(item["published_at"], now)]
+    fresh = [item for item in items if not news_freshness_reason(item["published_at"], now)]
     fresh.sort(key=lambda item: item["published_at"], reverse=True)
     return fresh[:max(1, max_articles)]
 
@@ -524,14 +525,9 @@ def _ingest_item(
     # Budget absence is never permission to publish copied source prose.
     if not use_ai or ai_budget <= 0 or openai_rate_limited():
         return None, False
-    if freshness_reason(
+    if news_freshness_reason(
         item.get("published_at"),
         datetime.now(timezone.utc),
-        max_age_hours=24,
-    ) or editorial_day_reason(
-        item.get("published_at"),
-        datetime.now(timezone.utc),
-        os.getenv("NEWS_EDITORIAL_TIMEZONE") or "Australia/Sydney",
     ):
         return None, False
     source_url = item["url"]
@@ -814,9 +810,8 @@ def _ingest_item(
     story_body = _sanitize_body(story_body, title=story_title)
     story_summary = _sanitize_summary(story_summary, title=story_title)
 
-    if editorial_day_reason(published_at, datetime.now(timezone.utc),
-            os.getenv("NEWS_EDITORIAL_TIMEZONE") or "Australia/Sydney"):
-        logger.info('[fetch_sources] hold: source editorial day changed before publication')
+    if news_freshness_reason(published_at, datetime.now(timezone.utc)):
+        logger.info('[fetch_sources] hold: source left freshness window before publication')
         return None, False
     slug = _make_unique_slug(db, _slugify(story_title))
     article = Article(
@@ -1108,8 +1103,8 @@ def _fetch_and_store_all_articles(
         after_gossip = time.monotonic()
         duplicates = repair_recent_duplicate_news(db, limit=600, max_age_hours=168)
         after_dedupe = time.monotonic()
-        sport_inventory = recent_public_sport_inventory(db, max_age_hours=24,
-            editorial_timezone=os.getenv("NEWS_EDITORIAL_TIMEZONE") or "Australia/Sydney")
+        sport_inventory = recent_public_sport_inventory(db, max_age_hours=NEWS_FRESHNESS_HOURS)
+        logger.info('[fetch_sources] freshness_policy=rolling_utc max_age_hours=%s archive_retained=true', NEWS_FRESHNESS_HOURS)
         logger.info(
             "[fetch_sources] repair phases images=%s %.3fs mislabels=%s %.3fs "
             "unresolved=%s %.3fs gossip=%s %.3fs duplicates=%s %.3fs inventory=%.3fs",
@@ -1128,8 +1123,7 @@ def _fetch_and_store_all_articles(
         queued, admission = fair_news_queue(
             queued,
             _classify_candidate,
-            max_age_hours=24,
-            same_day_timezone=os.getenv("NEWS_EDITORIAL_TIMEZONE") or "Australia/Sydney",
+            max_age_hours=NEWS_FRESHNESS_HOURS,
             sport_order=[
                 row["id"]
                 for row in SPORTS
@@ -1167,7 +1161,9 @@ def _fetch_and_store_all_articles(
             candidate_sports,
         )
         logger.info("[fetch_sources] editorial_queue_front=%s", [
-            {"sport": _classify_candidate(item).sport, "title": item["title"][:90]}
+            {"sport": _classify_candidate(item).sport,
+             "priority": football_editorial_priority(item, _classify_candidate(item)),
+             "title": item["title"][:90]}
             for item in queued[:8]
         ])
         active_news_sports = [

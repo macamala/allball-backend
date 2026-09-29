@@ -2,18 +2,18 @@
 
 Discovery only. Three broad sports queries are cached for almost one hour so the
 adapter stays within conservative request budgets. Returned rows never publish
-directly; the shared NinkoSports Sydney-day, source-fact, image, taxonomy,
+directly; the shared NinkoSports elapsed-age, source-fact, image, taxonomy,
 originality, dedupe and semantic gates remain authoritative.
 """
 from __future__ import annotations
 
-from datetime import datetime, time as dt_time, timezone
+from datetime import datetime, timedelta, timezone
 import logging
 import os
 import time
 from typing import Dict, List, Optional
 from urllib.parse import urlsplit
-from zoneinfo import ZoneInfo
+from .news_policy import NEWS_FRESHNESS_HOURS
 
 import httpx
 
@@ -57,14 +57,9 @@ def _stamp(value) -> Optional[datetime]:
 
 def _window(now: Optional[datetime] = None) -> tuple[str, str]:
     current = now or datetime.now(timezone.utc)
-    tz_name = os.getenv("NEWS_EDITORIAL_TIMEZONE") or "Australia/Sydney"
-    try:
-        zone = ZoneInfo(tz_name)
-    except Exception:
-        zone = timezone.utc
-    local = current.astimezone(zone)
-    local_start = datetime.combine(local.date(), dt_time.min, tzinfo=zone)
-    start_utc = local_start.astimezone(timezone.utc)
+    if current.tzinfo is None:
+        raise ValueError('discovery clock must be timezone-aware')
+    start_utc = current.astimezone(timezone.utc) - timedelta(hours=NEWS_FRESHNESS_HOURS)
     return (
         start_utc.isoformat().replace("+00:00", "Z"),
         current.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),

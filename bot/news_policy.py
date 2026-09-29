@@ -8,6 +8,7 @@ from difflib import SequenceMatcher
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 UTC = timezone.utc
+NEWS_FRESHNESS_HOURS = 24
 TRACKING = {'fbclid', 'gclid', 'mc_cid', 'mc_eid'}
 CRICKET_TITLE_RE = re.compile(
     r"(?<!\w)(?:cricket|t20i?s?|odis?|(?:20|50)[\s\-‐‑‒–—]+over)(?!\w)", re.I
@@ -139,6 +140,8 @@ _SOURCE_PATH_SPORTS = (
     ("www.mozzartsport.com", "/fudbal/vesti/", "football"),
     ("www.mozzartsport.com", "/kosarka/vesti/", "basketball"),
     ("www.marca.com", "/futbol/", "football"),
+    ("www.hln.be", "/formule-1/", "motorsport"),
+    ("www.hln.be", "/voetbal/", "football"),
     ("www.bbc.co.uk", "/sport/football/", "football"),
     ("www.bbc.co.uk", "/sport/tennis/", "tennis"),
     ("www.bbc.co.uk", "/sport/formula1/", "motorsport"),
@@ -255,7 +258,17 @@ def freshness_reason(stamp, now, max_age_hours=72):
     return None
 
 
+def news_freshness_reason(stamp, now):
+    """Global ingestion window; a reader's midnight never expires a source.
+
+    Exact, timezone-aware publication evidence is still required. This decides
+    whether to write NEW News, never whether an archived article stays public.
+    """
+    return freshness_reason(stamp, now, max_age_hours=NEWS_FRESHNESS_HOURS)
+
+
 def editorial_day_reason(stamp, now, timezone_name="Australia/Sydney"):
+    """Calendar classification only; production ingestion uses elapsed age."""
     value = publication_time(stamp)
     if value is None:
         return "publication_time_unverified"
@@ -707,17 +720,11 @@ def candidate_readiness_score(item):
 
 
 def queue_priority_score(item, now):
-    """Blend editorial value with freshness; today's verified news comes first."""
+    """Blend editorial value with elapsed age, independent of calendar zones."""
     score = newsworthiness_score(item)
     stamp = publication_time(item.get("published_at"))
     if stamp is None:
         return score
-    try:
-        editorial_tz = ZoneInfo(os.getenv("NEWS_EDITORIAL_TIMEZONE") or "Australia/Sydney")
-    except Exception:
-        editorial_tz = UTC
-    if stamp.astimezone(editorial_tz).date() == now.astimezone(editorial_tz).date():
-        score += 12
     age_hours = max(0.0, (now - stamp).total_seconds() / 3600.0)
     if age_hours <= 2:
         score += 6
@@ -732,17 +739,20 @@ def queue_priority_score(item, now):
     return score
 
 
-def _spread_publisher_queue(items):
-    """Keep each publisher's ranked order, taking one per publisher per pass."""
-    publishers = {}
+def _spread_publisher_queue(items, priority=None):
+    """Rotate publishers inside each priority tier, never across its boundary."""
+    tiers = {}
     for item in items:
+        tier = priority(item) if priority else 0
         host = (urlsplit(item.get('url') or '').hostname or '').removeprefix('www.')
-        publishers.setdefault(host, deque()).append(item)
+        tiers.setdefault(tier, {}).setdefault(host, deque()).append(item)
     output = []
-    while any(publishers.values()):
-        for pending in publishers.values():
-            if pending:
-                output.append(pending.popleft())
+    for tier in sorted(tiers, reverse=True):
+        publishers = tiers[tier]
+        while any(publishers.values()):
+            for pending in publishers.values():
+                if pending:
+                    output.append(pending.popleft())
     return output
 
 
@@ -769,6 +779,7 @@ def fair_news_queue(
     buckets = defaultdict(list)
     rejected = defaultdict(int)
     seen = set()
+    priorities = {}
     # RSS is collected before official HTML/JSON. For the same article, keep
     # the richest admissible representation rather than losing verified body
     # and image metadata simply because a sparse feed row arrived first.
@@ -795,6 +806,8 @@ def fair_news_queue(
             rejected['unknown_sport'] += 1; continue
         if allowed_sports is not None and sport not in allowed_sports:
             rejected['outside_editorial_focus'] += 1; continue
+        from .news_football_priority import football_editorial_priority
+        priorities[url] = football_editorial_priority(item, tags)
         seen.add(url)
         # Retain exact source URL for provenance and existing database identity.
         buckets[sport].append(item)
@@ -870,6 +883,7 @@ def fair_news_queue(
             sorted(
                 buckets[sport],
                 key=lambda item: (
+                    priorities.get(news_source_identity(item.get('url')), 0),
                     queue_priority_score(item, now) + candidate_readiness_score(item),
                     candidate_readiness_score(item),
                     publication_time(item['published_at']),
@@ -880,7 +894,9 @@ def fair_news_queue(
         for sport in order
     }
     if spread_publishers:
-        queues = {sport: deque(_spread_publisher_queue(list(pending))) for sport, pending in queues.items()}
+        queues = {sport: deque(_spread_publisher_queue(list(pending),
+                    lambda item: priorities.get(news_source_identity(item.get('url')), 0)))
+                  for sport, pending in queues.items()}
     if prioritize_major_sports:
         # Editorial priority: Football, Basketball, another major sport, then
         # a protected coverage lane. All candidates already passed the same
