@@ -41,11 +41,12 @@ def football_editorial_priority(item, tags=None):
     if re.search(r'\b(?:premier league|la liga|laliga|serie a|bundesliga|ligue 1|'
                  r'champions league|europa league|conference league|nations league|'
                  r'world cup|european championship|liga nacija|liga šampiona|'
+                 r'ligue des nations|équipe de france|équipe d[’\'](?:espagne|angleterre)|'
                  r'lige šampiona|lig[ae] sampiona|лиг[ае] нација|лиг[ае] шампиона|'
                  r'reprezentacij\w*|репрезентациј\w*)\b', text):
         return 1
     if re.search(r'/(?:premier-league|primera-division|bundesliga|serie-a|ligue-1|'
-                 r'nations-league|nationsleague|seleccion|european-qualifiers)/', path):
+                 r'nations-league|nationsleague|seleccion|european-qualifiers|ligue-des-nations|equipe-france|equipe-espagne)/', path):
         return 1
     # Club paths give useful editorial scope when a local headline names only
     # the player. This does not assert current league membership in an article.

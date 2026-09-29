@@ -21,6 +21,7 @@ _FSS_PHOTO_REPAIR_URLS = {
     'https://fss.rs/a-tim-promene-u-sastavu-pred-nastavak-lige-nacija/',
     'https://fss.rs/u21-i-u-drugom-testu-lako-sa-irakom-slede-dva-jaca-testa-protiv-rusije/',
 }
+_ZVEZDA_CIES_REPAIR_URL = 'https://www.crvenazvezdafk.com/vesti/gudelj-medju-najboljim-mladim-stoperima-sveta'
 _EDITORIAL_RETRY_REASONS = {
     'direct_quote_requires_review',
     'headline_too_similar_to_source',
@@ -231,6 +232,18 @@ def held_source_urls(urls) -> set[str]:
         cursor.execute("SET LOCAL statement_timeout = '5s'")
         _ensure_schema(cursor)
         keys = [hashes[url] for url in values]
+        if _ZVEZDA_CIES_REPAIR_URL in hashes:
+            # Audited source explicitly spells CIES as ЦИЕС. Retry only this
+            # false lexical rejection; semantic/image/dedupe checks still run.
+            cursor.execute(
+                "UPDATE news_ai_source_holds SET expires_at=NOW(), "
+                "reason='audited-cies-source-spelling-repaired', updated_at=NOW() "
+                "WHERE source_hash=%s AND expires_at > NOW() "
+                "AND reason='unsupported_acronym:CIES' AND updated_at < %s::timestamptz",
+                (hashes[_ZVEZDA_CIES_REPAIR_URL], '2026-09-29T07:35:00Z'),
+            )
+            if cursor.rowcount:
+                logger.info('[source_holds] expired audited pre-fix Zvezda CIES cooldown=%s', cursor.rowcount)
         repaired_photo_keys = [hashes[url] for url in values if url in _FSS_PHOTO_REPAIR_URLS]
         if repaired_photo_keys:
             # Two audited FSS pages expose valid full-size article photos in

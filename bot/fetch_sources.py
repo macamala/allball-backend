@@ -403,7 +403,8 @@ def _fetch_feed_entries(feed_cfg: Dict, max_articles: int) -> List[Dict]:
         excluded_paths = feed_cfg.get('excluded_article_paths') or ()
         path = urlsplit(link).path
         if ((allowed_paths and not any(path.startswith(prefix) for prefix in allowed_paths))
-                or any(path.startswith(prefix) for prefix in excluded_paths)):
+                or any(path.startswith(prefix) for prefix in excluded_paths)
+                or (feed_cfg.get('article_path_re') and not re.search(feed_cfg['article_path_re'], path))):
             continue
         if feed_cfg.get("rss_fallback_only") and word_count(summary) < 25:
             logger.info(

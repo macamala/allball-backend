@@ -353,7 +353,9 @@ def collect_page_image_candidates(html: str) -> List[dict]:
     # Yonhap uses <article> for unrelated recommendation cards too. Limit
     # body images to its actual story container; metadata remains same-page.
     canonical = _og(html or '', 'og:url') or _metadata(html or '', 'canonical') or ''
-    scoped_photo_classes = {'aleagues.com.au': 'entry-content', 'ge.globo.com': 'mc-article-body'}
+    scoped_photo_classes = {'aleagues.com.au': 'entry-content', 'ge.globo.com': 'mc-article-body',
+                            'rmcsport.bfmtv.com': 'content_body_wrapper',
+                            'www.footmercato.net': 'wysiwygContent'}
     if urlsplit(canonical).hostname in scoped_photo_classes:
         scoped = _ScopedNewsBody(scoped_photo_classes[urlsplit(canonical).hostname])
         scoped.feed(html or '')
@@ -666,6 +668,10 @@ def article_text_from_html(html: str) -> str:
         body_class = 'fss-single__content'
     if publisher_host == 'www.marca.com':
         body_class = 'ue-c-article__body'
+    if publisher_host == 'rmcsport.bfmtv.com':
+        body_class = 'content_body_wrapper'
+    if publisher_host == 'www.footmercato.net':
+        body_class = 'wysiwygContent'
     if publisher_host == 'aleagues.com.au':
         article = _ScopedNewsBody('main-article')
         article.feed(html)

@@ -284,6 +284,11 @@ def fact_lock_reason(
     # Changed/invented names remain fail-closed in the semantic validator,
     # while known entity IDs and acronym checks below stay deterministic.
     src_acronyms = _acronyms(source)
+    # Source-grounded Serbian spellings of the same organisation, not new
+    # organisations inferred from context. Semantic claim validation still runs.
+    for local, canonical in {'ЦИЕС': 'CIES', 'ФИФА': 'FIFA', 'УЕФА': 'UEFA'}.items():
+        if re.search(r'(?<!\w)' + local + r'(?!\w)', source, re.I):
+            src_acronyms.add(canonical)
     extra_acronyms = sorted(_acronyms(output) - src_acronyms)
     if extra_acronyms:
         return "unsupported_acronym:" + extra_acronyms[0]

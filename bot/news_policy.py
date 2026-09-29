@@ -42,6 +42,8 @@ def unsupported_news_sport(title, body=""):
         return True
     if re.search(r"\b(?:trap|skeet)\s+(?:individual|team|event|competition|final|shooting)\b", headline + ' ' + lead):
         return True
+    if re.search(r"\b(?:borrowed gun|air gun|(?:women|men)['’]s (?:trap|skeet))\b", headline + ' ' + lead):
+        return True
     if re.search(r"\b(?:english billiards|world billiards)\b", lead):
         return True
     return False
@@ -140,6 +142,7 @@ _SOURCE_PATH_SPORTS = (
     ("www.mozzartsport.com", "/fudbal/vesti/", "football"),
     ("www.mozzartsport.com", "/kosarka/vesti/", "basketball"),
     ("www.marca.com", "/futbol/", "football"),
+    ("rmcsport.bfmtv.com", "/football/", "football"),
     ("www.hln.be", "/formule-1/", "motorsport"),
     ("www.hln.be", "/voetbal/", "football"),
     ("www.bbc.co.uk", "/sport/football/", "football"),
@@ -353,6 +356,12 @@ def non_article_news_reason(item):
         return "non_article_analysis"
     if re.match(r'\s*analysis\s*:', title):
         return 'non_article_analysis'
+    if re.search(r'\bis a welcome example of\b', title):
+        return 'non_article_analysis'
+    if re.search(r'\bconspiración de que\b.{0,100}\b(?:no es|fue reemplazado)\b', title):
+        return 'non_news_conspiracy'
+    if re.search(r'\bround \d+ guide\b', title):
+        return 'non_article_service_guide'
     if re.search(r'\b(?:participate|participates|participating|join|joins|host|hosts)\b.{0,45}\breddit ama\b', title):
         return 'non_article_event_promotion'
     if title.strip() == "stars arrive in shenzhen":
