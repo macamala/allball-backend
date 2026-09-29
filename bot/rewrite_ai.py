@@ -331,6 +331,7 @@ def write_ninkosports_story(
         "DRAFT SAFETY CONTRACT:\n"
         "- Do not output straight or curly double quotation marks anywhere. Paraphrase every quoted statement.\n"
         f"- Source-attested Latin name spellings (omit unused names, do not invent variants): {source_spellings or 'use source spelling'}.\n"
+        "- When a source transliterates foreign names, never guess an English surname. Omit an optional named comparison if its spelling is uncertain; preserve the central news fact. Do not substitute a similar-looking player.\n"
         "- Serbian gostovanje / гостовање means an away visit, never a home fixture. Preserve the source's host and visitor.\n"
         f"- ALLOWED NUMERIC TOKENS: {numeric_contract}\n"
         "- Any numeric token not listed above is forbidden. Do not calculate or reformat numbers.\n"

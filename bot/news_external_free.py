@@ -11,6 +11,7 @@ downstream deterministic, semantic, taxonomy, dedupe and image gates decide.
 from __future__ import annotations
 
 import logging
+import json
 import os
 import re
 import time
@@ -402,6 +403,13 @@ def _cloudflare(cfg: dict, system: str, user: str, max_tokens: int, json_mode: b
         "max_tokens": max(256, min(int(max_tokens), 9000)),
         "stream": False,
     }
+    if json_mode and cfg['model'] == '@cf/qwen/qwen3-30b-a3b-fp8':
+        # The model's published Workers AI schema supports JSON mode. Merely
+        # requesting JSON in prose can spend the small validator output window
+        # without returning a usable verdict. Keep the strict downstream schema
+        # and independent-provider checks; never salvage an incomplete verdict.
+        payload['response_format'] = {'type': 'json_object'}
+        payload['max_tokens'] = max(1400, payload['max_tokens'])
     try:
         with httpx.Client(
             timeout=httpx.Timeout(120, connect=8), follow_redirects=False
@@ -431,9 +439,18 @@ def _cloudflare(cfg: dict, system: str, user: str, max_tokens: int, json_mode: b
         if not isinstance(result, dict):
             return None
         direct = result.get("response")
+        if json_mode and isinstance(direct, dict):
+            return json.dumps(direct, ensure_ascii=False)
         if isinstance(direct, str) and direct.strip():
             return direct.strip()
-        return _choice_text(result)
+        value = _choice_text(result)
+        if not value:
+            choices = result.get('choices')
+            choice = choices[0] if isinstance(choices, list) and choices and isinstance(choices[0], dict) else {}
+            finish = choice.get('finish_reason')
+            finish = finish if finish in {'stop', 'length', 'content_filter', 'tool_calls'} else 'unknown'
+            logger.warning('[external_free] cloudflare unusable_completion finish=%s json_mode=%s', finish, json_mode)
+        return value
     except Exception as exc:
         logger.warning(
             "[external_free] cloudflare request_failed=%s", type(exc).__name__
