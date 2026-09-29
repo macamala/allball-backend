@@ -1,8 +1,9 @@
 """Explicit free-tier external writer/validator pool for NinkoSports News.
 
 This module never reads or calls OpenAI. It is enabled only by
-NEWS_EXTERNAL_FREE_WRITERS_ENABLED=1 and uses already-configured Groq and
-Cloudflare credentials. Every actual HTTP attempt is reserved in the same
+NEWS_EXTERNAL_FREE_WRITERS_ENABLED=1 and uses configured Groq and
+Cloudflare credentials. Mistral additionally requires an explicit Free-account
+opt-in; an API key alone never enables it. Every HTTP attempt is reserved in the same
 durable News request ledger. Provider output is never publication authority:
 downstream deterministic, semantic, taxonomy, dedupe and image gates decide.
 """
@@ -23,6 +24,8 @@ from .news_budget import reserve_ai_request
 logger = logging.getLogger(__name__)
 
 _GROQ_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions"
+_MISTRAL_ENDPOINT = "https://api.mistral.ai/v1/chat/completions"
+_PROVIDERS = ("groq", "cloudflare", "mistral")
 _CF_MODEL_RE = re.compile(r"^@[A-Za-z0-9._/-]{3,160}$")
 _MODEL_RE = re.compile(r"^[A-Za-z0-9._/+:-]{3,160}$")
 _PURPOSES = ("writer", "validator", "translation")
@@ -111,6 +114,16 @@ def enabled() -> bool:
 def _config(provider: str) -> Optional[dict]:
     if not enabled():
         return None
+    if provider == "mistral":
+        # Mistral keys do not encode billing mode. The operator must confirm a
+        # Free account before opting in; never infer free usage from a model name.
+        if os.getenv("NEWS_MISTRAL_FREE_ENABLED") != "1":
+            return None
+        key = (os.getenv("MISTRAL_API_KEY") or "").strip()
+        model = (os.getenv("NEWS_MISTRAL_MODEL") or "mistral-small-latest").strip()
+        if not key or not _MODEL_RE.fullmatch(model):
+            return None
+        return {"provider": "mistral", "model": model, "key": key}
     if provider == "groq":
         key = (os.getenv("GROQ_API_KEY") or "").strip()
         model = (os.getenv("NEWS_GROQ_MODEL") or "openai/gpt-oss-120b").strip()
@@ -142,7 +155,7 @@ def _config(provider: str) -> Optional[dict]:
 def configured_identities(purpose: str = "writer") -> tuple[tuple[str, str], ...]:
     purpose = purpose if purpose in _UNAVAILABLE else "writer"
     rows = []
-    for provider in ("groq", "cloudflare"):
+    for provider in _PROVIDERS:
         cfg = _config(provider)
         if cfg and provider not in _UNAVAILABLE[purpose] and _provider_ready(provider):
             rows.append((provider, cfg["model"]))
@@ -163,7 +176,7 @@ def reset() -> None:
 
 def _ordered_configs(purpose: str, avoid_provider: Optional[str] = None) -> list[dict]:
     purpose = purpose if purpose in _UNAVAILABLE else "writer"
-    rows = [cfg for name in ("groq", "cloudflare") if (cfg := _config(name))]
+    rows = [cfg for name in _PROVIDERS if (cfg := _config(name))]
     rows = [row for row in rows if row["provider"] not in _UNAVAILABLE[purpose]
             and _provider_ready(row["provider"])]
     if not rows:
@@ -243,6 +256,39 @@ def _groq(cfg: dict, system: str, user: str, max_tokens: int, json_mode: bool):
         return None
 
 
+def _mistral(cfg: dict, system: str, user: str, max_tokens: int, json_mode: bool):
+    if not reserve_ai_request():
+        return None
+    if json_mode:
+        system += "\nReturn one valid JSON object only, with no markdown fences or prose."
+    payload = {
+        "model": cfg["model"],
+        "messages": [{"role": "system", "content": system},
+                     {"role": "user", "content": user}],
+        "temperature": 0.1 if json_mode else 0.35,
+        "max_tokens": max(256, min(int(max_tokens), 9000)),
+        "stream": False,
+    }
+    if json_mode:
+        payload["response_format"] = {"type": "json_object"}
+    try:
+        with httpx.Client(timeout=httpx.Timeout(95, connect=8), follow_redirects=False) as client:
+            response = client.post(
+                _MISTRAL_ENDPOINT,
+                headers={"Authorization": "Bearer " + cfg["key"],
+                         "Content-Type": "application/json", "Accept": "application/json"},
+                json=payload,
+            )
+        if response.status_code != 200:
+            _http_failure("mistral", response)
+            logger.warning("[external_free] mistral http_status=%s", response.status_code)
+            return None
+        return _choice_text(response.json())
+    except Exception as exc:
+        logger.warning("[external_free] mistral request_failed=%s", type(exc).__name__)
+        return None
+
+
 def _cloudflare(cfg: dict, system: str, user: str, max_tokens: int, json_mode: bool):
     if not reserve_ai_request():
         return None
@@ -309,6 +355,8 @@ def completion(
     for cfg in _ordered_configs(purpose, avoid_provider=avoid_provider):
         if cfg["provider"] == "groq":
             value = _groq(cfg, system, user, max_tokens, json_mode)
+        elif cfg["provider"] == "mistral":
+            value = _mistral(cfg, system, user, max_tokens, json_mode)
         else:
             value = _cloudflare(cfg, system, user, max_tokens, json_mode)
         if value:
