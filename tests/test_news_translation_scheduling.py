@@ -18,7 +18,7 @@ def test_translation_slice_leaves_writer_allowance_and_preserves_daily_stop(monk
     budget = AiRequestBudget(16, str(tmp_path / 'requests.db'))
     with ai_budget_scope(budget):
         assert scheduler._run_translation_slice(budget) == 1
-        assert budget.attempts == 4 and budget.max_requests == 16
+        assert budget.attempts == 8 and budget.max_requests == 16
         assert reserve_ai_request()
     limited = AiRequestBudget(16, str(tmp_path / 'daily.db'), daily_limit=2)
     with ai_budget_scope(limited):
@@ -94,3 +94,34 @@ def test_exhausted_slice_does_not_cool_down_unattempted_articles(monkeypatch, tm
     with ai_budget_scope(AiRequestBudget(4, str(tmp_path / 'bounded.db'))):
         assert translations.translate_latest_articles(limit=3) == 0
     assert attempted == [1]
+
+
+def test_archive_behind_more_than_120_completed_articles_remains_reachable(monkeypatch):
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+    from models import Base, ArticleTaxonomyResolution
+    from taxonomy_resolver import RESOLVER_VERSION
+    engine = create_engine('sqlite:///:memory:')
+    Base.metadata.create_all(engine)
+    monkeypatch.setenv('NEWS_TRANSLATION_LANGUAGES_PER_ARTICLE', '6')
+    with Session(engine) as db:
+        for article_id in range(1, 132):
+            db.add(Article(id=article_id, title='Source', ai_generated=True))
+            db.add(ArticleTaxonomyResolution(article_id=article_id,
+                resolver_version=RESOLVER_VERSION, public_ok=True))
+            if article_id > 1:
+                db.add_all([ArticleTranslation(article_id=article_id, language_code=lang,
+                    status='ready') for lang in translations.LANGUAGES])
+        db.commit()
+        rows = translations._latest_missing(db, 3)
+        assert [row.id for row in rows] == [1]
+        assert rows[0]._news_missing_translation_languages == translations.LANGUAGES
+        # A reported article can precede the backlog, but a complete validated
+        # copy never re-enters it. The initial unvalidated rollout is reviewed.
+        monkeypatch.setenv('NEWS_TRANSLATION_PRIORITY_ARTICLE_IDS', '2,3,invalid')
+        row = db.query(ArticleTranslation).filter_by(article_id=2, language_code='sr').one()
+        row.provider = 'multi-free-v15'
+        db.commit()
+        rows = translations._latest_missing(db, 3)
+        assert [row.id for row in rows] == [2, 1]
+        assert rows[0]._news_missing_translation_languages == ('sr',)

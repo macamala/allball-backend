@@ -15,6 +15,7 @@ import re
 from typing import Dict, Optional
 from contextvars import ContextVar
 
+from sqlalchemy import and_, or_, exists, case
 from sqlalchemy.orm import Session
 
 from models import Article, ArticleTaxonomyResolution, ArticleTranslation
@@ -25,7 +26,7 @@ from .news_policy import protected_proper_names
 logger = logging.getLogger(__name__)
 
 LANGUAGES = ("sr", "es", "de", "fr", "it", "pt")
-TRANSLATION_PROVIDER = "multi-free-v15"
+TRANSLATION_PROVIDER = "multi-free-v16"
 _TRANSLATION_META = ContextVar('news_translation_provider_by_language', default={})
 # v14 protects both proper names and numeric values with reversible tokens.
 CYRILLIC_RE = re.compile(r"[\u0400-\u04FF]")
@@ -73,11 +74,11 @@ def translations_enabled() -> bool:
 
 def _provider():
     from .news_deepl import deepl_enabled
-    return "deepl-free-v5" if deepl_enabled() else TRANSLATION_PROVIDER
+    return "deepl-free-v6" if deepl_enabled() else TRANSLATION_PROVIDER
 
 
 def _model():
-    return "deepl-xml-v1-locked" if _provider() == "deepl-free-v5" else (selected_free_model_name() or "")[:80] or None
+    return "deepl-xml-v1-locked" if _provider() == "deepl-free-v6" else (selected_free_model_name() or "")[:80] or None
 
 
 def _canonical_number(token: str) -> str:
@@ -475,7 +476,7 @@ def translate_article_payload(article: Article) -> Optional[Dict[str, Dict[str, 
         translated = (translate_source(source) if languages == LANGUAGES else
                       translate_source(source, languages=languages))
         if translated:
-            _TRANSLATION_META.set({k: ('deepl-free-v5', 'deepl-xml-v1-locked') for k in translated})
+            _TRANSLATION_META.set({k: ('deepl-free-v6', 'deepl-xml-v1-locked') for k in translated})
             return translated
     locked_names = translation_names(f'{source["title"]}\n{source["summary"]}')
     masked_source, name_locks = _mask_protected_names(source, locked_names)
@@ -496,8 +497,11 @@ def translate_article_payload(article: Article) -> Optional[Dict[str, Dict[str, 
         + "\n\nENGLISH BODY:\n" + masked_source["body"]
     )
     def system_for(selected):
+        names = {'sr': 'Serbian (Latin script)', 'es': 'Spanish', 'de': 'German',
+                 'fr': 'French', 'it': 'Italian', 'pt': 'Portuguese'}
+        targets = '; '.join(f'{lang} = {names[lang]}' for lang in selected)
         fields = ','.join(f'{lang}_{field}' for lang in selected for field in ('title','summary','body'))
-        return _SYSTEM.split('Preferred schema:', 1)[0] + (
+        return 'TARGET LANGUAGES: ' + targets + '. Translate every field into its target language.\n' + _SYSTEM.split('Preferred schema:', 1)[0] + (
             'Preferred schema: one flat object with exactly these string fields:\n'
             + fields + '\nNo omitted fields. Translate only the requested languages.')
 
@@ -510,12 +514,22 @@ def translate_article_payload(article: Article) -> Optional[Dict[str, Dict[str, 
         return _validate(source, restored, languages=selected)
 
     raw = free_json_completion(system_for(languages), prompt, max_tokens=min(9000, 2200 * len(languages)))
+    free_model = selected_free_model_name()
     translated = {}
     for language in languages:
         row = checked(raw, (language,))
         if row:
             translated.update(row)
-    free_meta = {k: (TRANSLATION_PROVIDER, selected_free_model_name()) for k in translated}
+    # Preserving names/numbers alone cannot catch a fluent but wrong meaning.
+    # The free lane must pass the same language/fact gate as DeepL and paid AI.
+    from .news_deepl import _semantic_validation
+    def semantically_checked(rows):
+        accepted = _semantic_validation(source, rows, return_languages=True)
+        return {lang: row for lang, row in rows.items() if accepted is True or
+                isinstance(accepted, (set, list, tuple)) and lang in accepted}
+    if translated:
+        translated = semantically_checked(translated)
+    free_meta = {k: (TRANSLATION_PROVIDER, free_model) for k in translated}
     _TRANSLATION_META.set(free_meta)
     missing = tuple(k for k in languages if k not in translated)
     if not missing:
@@ -526,7 +540,7 @@ def translate_article_payload(article: Article) -> Optional[Dict[str, Dict[str, 
         return translated or None
     # One durable operation per article version and language. Partial ready
     # translations survive across cycles and are never sent again unnecessarily.
-    output, paid_keys = {}, []
+    output, paid_keys = {}, {}
     with news_openai.translation_context(article, source):
         for language in missing:
             raw = news_openai.complete(system_for((language,)), prompt,
@@ -534,23 +548,44 @@ def translate_article_payload(article: Article) -> Optional[Dict[str, Dict[str, 
             row = checked(raw, (language,))
             if row:
                 output.update(row)
-                paid_keys.append(news_openai.current_request_key())
+                paid_keys[language] = news_openai.current_request_key()
             elif raw:
                 news_openai.record_quality('translation_deterministic_rejected')
     if not output:
         return translated or None
     from .news_deepl import _semantic_validation
-    valid = _semantic_validation(source, output)
-    for key in paid_keys:
+    output = semantically_checked(output)
+    for language, key in paid_keys.items():
         if key:
-            news_openai.record_quality('ok' if valid else 'translation_semantic_rejected', request_key=key)
-    if not valid:
+            news_openai.record_quality('ok' if language in output else 'translation_semantic_rejected', request_key=key)
+    if not output:
         return translated or None
     _TRANSLATION_META.set({**free_meta, **{k: ('openai', news_openai.MODEL) for k in output}})
     return {**translated, **output}
 
 
 def _latest_missing(db: Session, limit: int) -> list[Article]:
+    cutoff = datetime.utcnow() - timedelta(hours=6)
+    # Optional small operator queue for reader-reported missing articles. This
+    # is the same worker, gates and budget; completed rows fall out naturally.
+    priority_ids = [int(value) for value in
+        os.getenv('NEWS_TRANSLATION_PRIORITY_ARTICLE_IDS', '').split(',')[:10]
+        if value.strip().isdigit() and 0 < int(value) < 2147483647]
+    # Filter completed articles BEFORE the bounded scan so the older archive
+    # becomes reachable as recent articles finish. A ready copy is never resent.
+    eligible = or_(*[
+        ~exists().where(and_(
+            ArticleTranslation.article_id == Article.id,
+            ArticleTranslation.language_code == language,
+            or_(and_(ArticleTranslation.status == 'ready',
+                     or_(ArticleTranslation.provider.is_(None),
+                         ArticleTranslation.provider != 'multi-free-v15')), and_(
+                ArticleTranslation.status == 'failed',
+                ArticleTranslation.provider == _provider(),
+                ArticleTranslation.updated_at >= cutoff,
+            )),
+        )) for language in LANGUAGES
+    ])
     rows = (
         db.query(Article)
         .join(
@@ -560,13 +595,14 @@ def _latest_missing(db: Session, limit: int) -> list[Article]:
         .filter(
             ArticleTaxonomyResolution.resolver_version == RESOLVER_VERSION,
             ArticleTaxonomyResolution.public_ok.is_(True),
+            eligible,
         )
-        .order_by(Article.ai_generated.desc(), Article.id.desc())
+        .order_by(case((Article.id.in_(priority_ids), 0), else_=1),
+                  Article.ai_generated.desc(), Article.id.desc())
         .limit(max(10, min(limit * 30, 120)))
         .all()
     )
     output = []
-    cutoff = datetime.utcnow() - timedelta(hours=6)
     for article in rows:
         translation_rows = (
             db.query(ArticleTranslation)
@@ -576,7 +612,10 @@ def _latest_missing(db: Session, limit: int) -> list[Article]:
             )
             .all()
         )
-        ready = {row.language_code for row in translation_rows if row.status == "ready"}
+        # The initial v15 free rollout lacked the semantic gate. Recheck only
+        # that version, once, through v16; never resend validated ready copies.
+        ready = {row.language_code for row in translation_rows if row.status == "ready"
+                 and getattr(row, 'provider', None) != 'multi-free-v15'}
         recently_failed = {
             row.language_code for row in translation_rows if (
             row.status == "failed"
@@ -594,7 +633,8 @@ def _latest_missing(db: Session, limit: int) -> list[Article]:
             output.append(article)
     # Existing order within each group remains newest first. Fill missing
     # Serbian before spending the next article's allowance on another language.
-    output.sort(key=lambda a: 'sr' not in a._news_missing_translation_languages)
+    output.sort(key=lambda a: (a.id not in priority_ids,
+                              'sr' not in a._news_missing_translation_languages))
     return output[:limit]
 
 
@@ -613,7 +653,7 @@ def _mark_failed(db: Session, article: Article) -> None:
         if row is None:
             row = ArticleTranslation(article_id=article.id, language_code=language)
             db.add(row)
-        if row.status != "ready":
+        if row.status != "ready" or row.provider == 'multi-free-v15':
             row.status = "failed"
             row.provider = _provider()
             row.model_name = model
@@ -671,6 +711,8 @@ def translate_latest_articles(limit: int = 1) -> int:
                 continue
             with db.begin_nested():
                 translated += _store(db, article, payload)
+            db.commit()
+            logger.info('[translations] ready article=%s languages=%s', article.id, ','.join(payload))
         if translated:
             db.commit()
         return translated

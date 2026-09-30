@@ -75,6 +75,8 @@ def test_long_article_is_held_instead_of_partially_translated(monkeypatch):
     assert called == []
 
 def test_translation_masks_and_restores_exact_protected_name(monkeypatch):
+    from bot import news_deepl
+    monkeypatch.setattr(news_deepl, '_semantic_validation', lambda *args, **kwargs: True)
     article=type('ArticleFixture', (), {
         'id':22002,
         'title':'Alcaraz lifts Laver Cup after a dramatic contest',
@@ -144,6 +146,8 @@ def test_translation_validator_accepts_localized_english_ordinal_value():
     assert translations._validate(source, payload)
 
 def test_translation_masks_and_restores_numeric_values(monkeypatch):
+    from bot import news_deepl
+    monkeypatch.setattr(news_deepl, '_semantic_validation', lambda *args, **kwargs: True)
     article=type('ArticleFixture', (), {
         'id':22003,
         'title':'Azerbaijan recovery from 16th place',
@@ -184,4 +188,3 @@ def test_translation_masks_and_restores_numeric_values(monkeypatch):
         assert '16' in combined
         assert token not in combined
         assert translations._numbers(combined) == {'16'}
-

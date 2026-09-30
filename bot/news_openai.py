@@ -217,6 +217,9 @@ def complete(system, prompt, *, purpose='write', language='', max_tokens=1800,
     if purpose not in {'write', 'translate', 'edit'}:
         _last_status.set('purpose_not_allowed')
         return None
+    if purpose == 'translate' and os.getenv('OPENAI_TRANSLATIONS_ENABLED', 'true').strip().lower() != 'true':
+        _last_status.set('translations_disabled')
+        return None
     if purpose == 'translate' and config['phase'] != 'production':
         return None
     from .news_budget import active_ai_budget, ai_budget_exhausted, reserve_ai_request
@@ -277,7 +280,9 @@ def complete(system, prompt, *, purpose='write', language='', max_tokens=1800,
         if result == 'cached':
             # A reviewed shadow request is not repeated in every dry-run cycle.
             quality = row.get('quality_result')
-            if quality and (config['phase'] == 'dry_run' or quality != 'ok'):
+            translation_recheck = (purpose == 'translate'
+                                   and quality == 'translation_semantic_rejected')
+            if quality and (config['phase'] == 'dry_run' or quality != 'ok' and not translation_recheck):
                 if config['phase'] == 'dry_run':
                     _last_status.set('dry_run_reviewed')
                 return None

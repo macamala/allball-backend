@@ -178,6 +178,18 @@ def test_no_translation_characters_spent_without_semantic_allowance(enabled, mon
     assert deepl.translate_source(SOURCE) is None
 
 
+def test_language_verdict_preserves_serbian_when_spanish_has_wrong_language(monkeypatch):
+    import json
+    verdict = {'sr': {'valid': True, 'issues': []},
+               'es': {'valid': False, 'issues': ['Written in Serbian, not Spanish.']}}
+    monkeypatch.setattr(translations, 'free_json_completion', lambda *a, **k: json.dumps(verdict))
+    payload = {'sr': SOURCE, 'es': SOURCE}
+    assert deepl._semantic_validation(SOURCE, payload, return_languages=True) == {'sr'}
+    assert not deepl._semantic_validation(SOURCE, payload)
+    del verdict['sr']
+    assert not deepl._semantic_validation(SOURCE, payload, return_languages=True)
+
+
 def test_english_ordinal_suffix_is_localized_without_changing_value():
     raw = '<text>U <lock id="0">37th</lock>-oj minuti i <lock id="1">72nd</lock>. minuti.</text>'
     value = deepl._restore_xml(raw, {'0': '37th', '1': '72nd'}, 'sr')
