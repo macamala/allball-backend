@@ -660,6 +660,9 @@ def translate_latest_articles(limit: int = 1) -> int:
     translated = 0
     try:
         for article in _latest_missing(db, limit):
+            from .news_budget import ai_budget_exhausted
+            if ai_budget_exhausted():
+                break  # Do not mark an unattempted language as a failed translation.
             payload = translate_article_payload(article)
             if not payload:
                 _mark_failed(db, article)

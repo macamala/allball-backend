@@ -75,3 +75,22 @@ def test_role_is_translated_but_attested_surname_remains_locked():
     documents, locks = _xml_fields(source)
     assert 'Defender ' in documents[1]
     assert 'Vivian' in locks[1].values()
+
+
+def test_exhausted_slice_does_not_cool_down_unattempted_articles(monkeypatch, tmp_path):
+    import database
+    monkeypatch.setenv('NEWS_TRANSLATIONS_ENABLED', '1')
+    db = SimpleNamespace(commit=lambda: None, close=lambda: None, rollback=lambda: None)
+    monkeypatch.setattr(database, 'SessionLocal', lambda: db)
+    articles = [SimpleNamespace(id=i) for i in (1, 2, 3)]
+    monkeypatch.setattr(translations, '_latest_missing', lambda *a: articles)
+    def failed(article):
+        while reserve_ai_request():
+            pass
+        return None
+    attempted = []
+    monkeypatch.setattr(translations, 'translate_article_payload', failed)
+    monkeypatch.setattr(translations, '_mark_failed', lambda db, article: attempted.append(article.id))
+    with ai_budget_scope(AiRequestBudget(4, str(tmp_path / 'bounded.db'))):
+        assert translations.translate_latest_articles(limit=3) == 0
+    assert attempted == [1]
