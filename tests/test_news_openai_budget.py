@@ -209,6 +209,16 @@ def test_translation_group_rejection_is_revalidated_from_cache_without_new_payme
     assert len(calls) == 1
 
 
+def test_disabled_paid_translation_never_calls_provider_or_reserves_money(configured, book, monkeypatch):
+    monkeypatch.setenv('OPENAI_TRANSLATIONS_ENABLED', 'false')
+    calls = http_fake(monkeypatch, REPLY)
+    assert lane.complete('system', 'facts', purpose='translate', language='sr') is None
+    assert not calls and not book.report()
+    assert lane.status() == 'translations_disabled'
+    assert lane.complete('system', 'facts', purpose='write') == 'original draft'
+    assert len(calls) == 1
+
+
 def test_free_correction_cannot_overwrite_paid_quality(configured, book, monkeypatch):
     from bot import free_ai_router
     http_fake(monkeypatch, REPLY)
