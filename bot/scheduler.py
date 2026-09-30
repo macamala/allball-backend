@@ -34,6 +34,8 @@ def _run_zero_ai_public_repairs():
     try:
         images = repair_recent_news_images(db, limit=80, max_age_hours=72, recover_limit=8)
         mislabels = repair_recent_sport_mislabels(db, limit=600, max_age_hours=168)
+        from .news_league_index import repair_football_league_menus
+        mislabels += repair_football_league_menus(db)
         repaired = repair_recent_unresolved(db, limit=24)
         gossip = repair_recent_gossip_news(db, limit=600, max_age_hours=168)
         duplicates = repair_recent_duplicate_news(db, limit=600, max_age_hours=168)
@@ -88,6 +90,8 @@ def _run_image_health():
             limit=600,
             max_age_hours=168,
         )
+        from .news_league_index import repair_football_league_menus
+        taxonomy_changes += repair_football_league_menus(db)
         gossip_changes = repair_recent_gossip_news(
             db,
             limit=600,

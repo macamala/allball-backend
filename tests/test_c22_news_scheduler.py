@@ -25,6 +25,7 @@ def cycle(monkeypatch, tmp_path, *, history='0'):
     def index(db, **kw): calls.append(('index',kw)); return 400 if history == '1' else 1
     def images(db, **kw): calls.append(('images',kw)); return 0
     def mislabels(db, **kw): calls.append(('mislabels',kw)); return 0
+    def leagues(db, **kw): calls.append(('league_menus',kw)); return 0
     def unresolved(db, **kw): calls.append(('unresolved',kw)); return 0
     def duplicates(db, **kw): calls.append(('duplicates',kw)); return 0
     def gossip(db, **kw): calls.append(('gossip',kw)); return 0
@@ -36,6 +37,7 @@ def cycle(monkeypatch, tmp_path, *, history='0'):
     repairs=module('repair_content',repair_summary_only=summary,repair_contaminated=contaminated)
     module('database',SessionLocal=session)
     module('bot.news_publication_clock',ensure_news_publication_clock=lambda db:None)
+    module('bot.news_league_index',repair_football_league_menus=leagues)
     module(
         'public_index',
         index_missing=index,
@@ -94,6 +96,7 @@ def test_exhausted_daily_quota_still_runs_zero_ai_public_repairs(monkeypatch,tmp
     assert ('images',{'limit':80,'max_age_hours':72,'recover_limit':8}) in calls
     assert ('mislabels',{'limit':600,'max_age_hours':168}) in calls
     assert ('unresolved',{'limit':24}) in calls
+    assert ('league_menus',{}) in calls
     assert ('duplicates',{'limit':600,'max_age_hours':168}) in calls
     assert ('inventory',{'max_age_hours':72}) in calls
     assert not any(isinstance(c,tuple) and c[0] in ('fetch','index','summary','contaminated') for c in calls)
@@ -152,6 +155,7 @@ def test_image_health_job_is_zero_ai_and_uses_same_owner(monkeypatch,tmp_path):
     scheduler,calls,_,_,_=cycle(monkeypatch,tmp_path)
     assert scheduler.image_health_job()==0
     assert ('images',{'limit':160,'max_age_hours':72,'recover_limit':16}) in calls
+    assert ('league_menus',{}) in calls
     assert not any(isinstance(c,tuple) and c[0]=='fetch' for c in calls)
 
 
