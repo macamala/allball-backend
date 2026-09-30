@@ -160,7 +160,7 @@ def test_actual_transport_only_luna_without_tools_and_one_paid_call(configured,b
     assert lane.complete('system','source')=='original draft'
     assert len(calls)==1
     payload=calls[0]['json']
-    assert payload['model']=='gpt-6-luna' and payload['reasoning_effort']=='none'
+    assert payload['model']=='gpt-6-luna' and payload['reasoning_effort']=='low'
     assert payload['service_tier']=='default' and payload['max_completion_tokens']==1800
     assert 'tools' not in payload and payload['store'] is False
     row=book.report()[0]

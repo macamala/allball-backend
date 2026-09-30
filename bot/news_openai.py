@@ -300,7 +300,8 @@ def complete(system, prompt, *, purpose='write', language='', max_tokens=1800,
         {'role': 'system', 'content': [{'type': 'text', 'text': system,
             'prompt_cache_breakpoint': {'mode': 'explicit'}}]},
         {'role': 'user', 'content': prompt}],
-        'max_completion_tokens': max_tokens, 'reasoning_effort': 'none',
+        'max_completion_tokens': max_tokens,
+        'reasoning_effort': 'low' if purpose == 'write' else 'none',
         'service_tier': 'default', 'store': False,
         'prompt_cache_options': {'mode': 'explicit', 'ttl': '30m'}}
     if json_mode:

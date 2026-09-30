@@ -506,7 +506,7 @@ def translate_article_payload(article: Article) -> Optional[Dict[str, Dict[str, 
         restored = _restore_protected_names(restored, name_locks)
         return _validate(source, restored, languages=selected)
 
-    raw = free_json_completion(system_for(languages), prompt, max_tokens=9000)
+    raw = free_json_completion(system_for(languages), prompt, max_tokens=min(9000, 2200 * len(languages)))
     translated = {}
     for language in languages:
         row = checked(raw, (language,))
@@ -574,27 +574,31 @@ def _latest_missing(db: Session, limit: int) -> list[Article]:
             .all()
         )
         ready = {row.language_code for row in translation_rows if row.status == "ready"}
-        recently_failed = any(
+        recently_failed = {
+            row.language_code for row in translation_rows if (
             row.status == "failed"
             and row.provider == _provider()
             and row.updated_at is not None
             and row.updated_at >= cutoff
-            for row in translation_rows
-        )
-        if recently_failed:
-            continue
-        if ready != set(LANGUAGES):
-            article._news_missing_translation_languages = tuple(k for k in LANGUAGES if k not in ready)
+            )}
+        missing = tuple(k for k in LANGUAGES if k not in ready and k not in recently_failed)
+        if missing:
+            try:
+                per_article = max(1, min(6, int(os.getenv('NEWS_TRANSLATION_LANGUAGES_PER_ARTICLE', '6'))))
+            except ValueError:
+                per_article = 1
+            article._news_missing_translation_languages = missing[:per_article]
             output.append(article)
-            if len(output) >= limit:
-                break
-    return output
+    # Existing order within each group remains newest first. Fill missing
+    # Serbian before spending the next article's allowance on another language.
+    output.sort(key=lambda a: 'sr' not in a._news_missing_translation_languages)
+    return output[:limit]
 
 
 def _mark_failed(db: Session, article: Article) -> None:
     model = _model()
     now = datetime.utcnow()
-    for language in LANGUAGES:
+    for language in getattr(article, '_news_missing_translation_languages', LANGUAGES):
         row = (
             db.query(ArticleTranslation)
             .filter(

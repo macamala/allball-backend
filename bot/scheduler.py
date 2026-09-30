@@ -150,6 +150,25 @@ def _run_deepl_translations():
         return 0
 
 
+def _run_translation_slice(budget):
+    """Reserve a small part of the existing cycle so writing cannot starve readers."""
+    if (os.environ.get('NEWS_TRANSLATIONS_ENABLED') != '1'
+            or int(os.environ.get('NEWS_TRANSLATIONS_PER_CYCLE', '0')) <= 0):
+        return 0
+    from bot.news_translations import translate_latest_articles
+    original_max = budget.max_requests
+    budget.max_requests = min(original_max, budget.attempts + 4)
+    try:
+        return translate_latest_articles(limit=int(os.environ['NEWS_TRANSLATIONS_PER_CYCLE']))
+    except Exception as exc:
+        logger.error('News translation slice failed: %s', type(exc).__name__)
+        return 0
+    finally:
+        budget.max_requests = original_max
+        if budget.blocked_reason == 'cycle_request_limit':
+            budget.blocked_reason = None
+
+
 def _run_cycle():
     """Called under news_owner. Every tick rechecks flags before importing DB code."""
     errors = _start_errors()
@@ -181,6 +200,7 @@ def _run_cycle():
         # Historical retries and new articles share this one actual-request cap.
         with ai_budget_scope(budget):
             reset_openai_rate_limit()
+            translated_rows = _run_translation_slice(budget)
             if historical:
                 from repair_content import repair_summary_only
                 repair_summary_only(max_pages=1, max_rewrite=maximum)
@@ -203,27 +223,8 @@ def _run_cycle():
             # DeepL translation uses a separate durable character cap. Its
             # semantic check uses one remaining shared request after English;
             # no spare validator allowance means no translation/publication.
-            from bot.news_deepl import deepl_enabled
-            if deepl_enabled():
-                translated_rows = _run_deepl_translations()
-            elif (
-                rewritten > 0
-                and os.environ.get('NEWS_TRANSLATIONS_ENABLED') == '1'
-                and os.environ.get('NEWS_FOOTBALL_ONLY') != '1'
-                and int(os.environ.get('NEWS_TRANSLATIONS_PER_CYCLE', '0')) > 0
-                and not ai_budget_exhausted()
-                and getattr(budget, 'english_coverage_debt', None) == 0
-            ):
-                try:
-                    from bot.news_translations import translate_latest_articles
-                    translated_rows = translate_latest_articles(
-                        limit=int(os.environ['NEWS_TRANSLATIONS_PER_CYCLE'])
-                    )
-                except Exception as exc:
-                    logger.error('News translation lane failed: %s', type(exc).__name__)
-            elif os.environ.get('NEWS_TRANSLATIONS_ENABLED') == '1':
-                logger.info('News translations deferred: English coverage debt=%s',
-                    getattr(budget, 'english_coverage_debt', None))
+            # Translation ran once at the start under a four-request slice of
+            # this SAME durable allowance, including during football-only fill.
             if historical:
                 from database import SessionLocal
                 from public_index import index_missing
