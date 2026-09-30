@@ -73,11 +73,11 @@ def translations_enabled() -> bool:
 
 def _provider():
     from .news_deepl import deepl_enabled
-    return "deepl-free-v4" if deepl_enabled() else TRANSLATION_PROVIDER
+    return "deepl-free-v5" if deepl_enabled() else TRANSLATION_PROVIDER
 
 
 def _model():
-    return "deepl-xml-v1-locked" if _provider() == "deepl-free-v4" else (selected_free_model_name() or "")[:80] or None
+    return "deepl-xml-v1-locked" if _provider() == "deepl-free-v5" else (selected_free_model_name() or "")[:80] or None
 
 
 def _canonical_number(token: str) -> str:
@@ -140,6 +140,17 @@ def _name_key(value: str) -> str:
 
 def _contains_name(text: str, name: str) -> bool:
     return _name_key(name) in _name_key(text)
+
+
+def translation_names(text):
+    """Translate a role such as Defender, while keeping the attested name Vivian."""
+    output = []
+    for name in protected_proper_names(text):
+        value = re.sub(r'^(?:Defender|Midfielder|Forward|Striker|Goalkeeper|Winger|'
+                       r'Captain|Coach|Manager|President)\s+', '', name)
+        if value and value not in output:
+            output.append(value)
+    return output
 
 
 def _mask_protected_names(source: Dict[str, str], names: list[str]):
@@ -368,10 +379,7 @@ def _validate(source: Dict[str, str], payload: object, *, languages=LANGUAGES) -
     # Preserve central proper names from the source headline/summary exactly.
     # Do not classify every capitalized word in a translated sentence as a new name.
     source_head = f'{source.get("title") or ""}\n{source.get("summary") or ""}'
-    protected = [
-        name for name in protected_proper_names(source_head)
-        if len(name.split()) >= 2
-    ]
+    protected = translation_names(source_head)
     acronyms = set(re.findall(r"\b[A-Z][A-Z0-9.-]{1,7}\b", source_combined))
     source_words = max(1, _word_count(source.get("body") or ""))
 
@@ -467,14 +475,9 @@ def translate_article_payload(article: Article) -> Optional[Dict[str, Dict[str, 
         translated = (translate_source(source) if languages == LANGUAGES else
                       translate_source(source, languages=languages))
         if translated:
-            _TRANSLATION_META.set({k: ('deepl-free-v4', 'deepl-xml-v1-locked') for k in translated})
+            _TRANSLATION_META.set({k: ('deepl-free-v5', 'deepl-xml-v1-locked') for k in translated})
             return translated
-    locked_names = [
-        name for name in protected_proper_names(
-            f'{source["title"]}\n{source["summary"]}'
-        )
-        if len(name.split()) >= 2
-    ]
+    locked_names = translation_names(f'{source["title"]}\n{source["summary"]}')
     masked_source, name_locks = _mask_protected_names(source, locked_names)
     masked_source, number_locks = _mask_protected_numbers(masked_source)
     locked_block = "\n".join(f"- {token}" for token, _name in name_locks) or "- none"

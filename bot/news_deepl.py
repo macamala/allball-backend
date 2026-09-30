@@ -115,13 +115,14 @@ def _request(method, path, **kwargs):
 
 
 def _xml_fields(source):
+    from .news_translations import translation_names, NUMBER_RE
     # Explicit XML v1 preserves ignore_tags verbatim. V2 translated protected
     # names and moved sentence fragments into token tags in production. Real
     # names retain the context needed to translate player/team relationships.
     combined = "\n".join(source[field] for field in FIELDS)
     names = set()
     for sentence in re.split(r'(?<=[.!?])\s+|\n+', combined):
-        for name in protected_proper_names(sentence):
+        for name in translation_names(sentence):
             name = re.sub(r"['’]s$", '', name).rstrip('.')
             if name:
                 names.add(name)
@@ -133,7 +134,6 @@ def _xml_fields(source):
                  if len(name.split()) >= 2 and len(name.split()[-1]) >= 3
                  and name.split()[-1] not in generic_last_words)
     names.update(re.findall(r"\b[A-Z][A-Z0-9.-]{1,7}\b", combined))
-    from .news_translations import NUMBER_RE
     names_pattern = "|".join(re.escape(name) for name in sorted(names, key=len, reverse=True))
     alternatives = ([r"(?<!\w)(?:" + names_pattern + r")(?!\w)"] if names_pattern else [])
     pattern = re.compile("|".join(alternatives + [NUMBER_RE.pattern]))
@@ -302,4 +302,7 @@ def _semantic_validation(source, payload):
     valid = (isinstance(verdict, dict) and verdict.get('valid') is True
              and verdict.get('issues') == [])
     logger.info('[deepl] semantic_validation=%s', 'passed' if valid else 'held')
+    if not valid and isinstance(verdict, dict):
+        logger.info('[deepl] validation_issues=%s',
+                    [str(issue)[:240] for issue in (verdict.get('issues') or [])[:3]])
     return valid

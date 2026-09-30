@@ -58,3 +58,20 @@ def test_translation_failure_cools_only_attempted_language():
     article = SimpleNamespace(id=4, _news_missing_translation_languages=('sr',))
     translations._mark_failed(db, article)
     assert len(added) == 1 and added[0].language_code == 'sr'
+
+
+def test_role_is_translated_but_attested_surname_remains_locked():
+    source = {'title': 'Vivian returns to training',
+              'summary': 'Defender Vivian is available again.',
+              'body': 'Vivian is training with the group. ' * 8}
+    translated = {'sr': {'title': 'Vivian ponovo trenira',
+                        'summary': 'Defanzivac Vivian je ponovo na raspolaganju.',
+                        'body': 'Vivian trenira sa ekipom i radi sa ostalim igračima. ' * 6}}
+    assert translations.translation_names(source['summary']) == ['Vivian']
+    assert translations._validate(source, translated, languages=('sr',))
+    changed = {'sr': {k: v.replace('Vivian', 'Drugoime') for k, v in translated['sr'].items()}}
+    assert translations._validate(source, changed, languages=('sr',)) is None
+    from bot.news_deepl import _xml_fields
+    documents, locks = _xml_fields(source)
+    assert 'Defender ' in documents[1]
+    assert 'Vivian' in locks[1].values()
