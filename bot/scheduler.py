@@ -133,8 +133,10 @@ def image_health_job():
 def _run_deepl_translations():
     """Bounded translation-only allowance, after English ingestion/maintenance."""
     from bot.news_deepl import deepl_enabled
+    from bot.news_budget import ai_budget_exhausted
     if (not deepl_enabled() or os.environ.get('NEWS_TRANSLATIONS_ENABLED') != '1'
-            or int(os.environ.get('NEWS_TRANSLATIONS_PER_CYCLE', '0')) <= 0):
+            or int(os.environ.get('NEWS_TRANSLATIONS_PER_CYCLE', '0')) <= 0
+            or ai_budget_exhausted()):
         return 0
     try:
         from bot.news_translations import translate_latest_articles
@@ -194,9 +196,9 @@ def _run_cycle():
                     bump_public_cache()
             except Exception as exc:
                 logger.error('Recent News taxonomy repair failed: %s', type(exc).__name__)
-            # DeepL has a separate durable character cap and cannot consume
-            # original-writer requests. Legacy LLM translations still yield
-            # their shared allowance to English coverage.
+            # DeepL translation uses a separate durable character cap. Its
+            # semantic check uses one remaining shared request after English;
+            # no spare validator allowance means no translation/publication.
             from bot.news_deepl import deepl_enabled
             if deepl_enabled():
                 translated_rows = _run_deepl_translations()

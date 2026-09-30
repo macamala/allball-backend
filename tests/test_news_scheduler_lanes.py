@@ -33,12 +33,12 @@ def test_removed_result_news_lane_never_imports_or_runs(monkeypatch, tmp_path):
     assert scheduler._run_cycle() == 0
 
 
-@pytest.mark.parametrize('debt,football_only,deepl_on,expected', [
-    (0, False, False, ['english','translations']), (3,False,False,['english']),
-    (None,False,False,['english']), (0,True,False,['english']),
-    (3,True,True,['english','translations']),
+@pytest.mark.parametrize('debt,football_only,deepl_on,exhaust,expected', [
+    (0, False, False,False, ['english','translations']), (3,False,False,False,['english']),
+    (None,False,False,False,['english']), (0,True,False,False,['english']),
+    (3,True,True,False,['english','translations']), (3,True,True,True,['english']),
 ])
-def test_translation_lane_runs_after_english_with_separate_deepl_allowance(monkeypatch, tmp_path, debt, football_only, deepl_on, expected):
+def test_translation_lane_runs_after_english_with_separate_deepl_allowance(monkeypatch, tmp_path, debt, football_only, deepl_on, exhaust, expected):
     _base_env(monkeypatch, tmp_path, max_articles="1", translations="1")
     monkeypatch.setenv('NEWS_FOOTBALL_ONLY', '1' if football_only else '0')
     monkeypatch.setenv('NEWS_DEEPL_FREE_ENABLED', '1' if deepl_on else '0')
@@ -47,7 +47,7 @@ def test_translation_lane_runs_after_english_with_separate_deepl_allowance(monke
     def ingest(**kwargs):
         from bot.news_budget import active_ai_budget
         active_ai_budget().english_coverage_debt = debt
-        if deepl_on:
+        if exhaust:
             assert all(active_ai_budget().reserve() for _ in range(3))
         order.append('english')
         return 1

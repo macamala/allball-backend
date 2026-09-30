@@ -17,6 +17,8 @@ def enabled(monkeypatch):
     monkeypatch.setenv('NEWS_DEEPL_FREE_ENABLED', '1')
     monkeypatch.setenv('DEEPL_API_KEY', 'fixture:fx')
     monkeypatch.setattr(deepl, '_cooldown_until', 0.)
+    monkeypatch.setattr('bot.news_budget.ai_budget_exhausted', lambda: False)
+    monkeypatch.setattr(translations, 'free_json_completion', lambda *args, **kw: '{"valid":true,"issues":[]}')
 
 
 def test_only_explicit_free_key_is_enabled(enabled, monkeypatch):
@@ -40,18 +42,18 @@ def test_xml_locks_names_numbers_acronyms_and_preserves_paragraphs():
 
 @pytest.mark.parametrize('mutation', ['missing', 'changed', 'duplicate', 'foreign-tag', 'doctype'])
 def test_xml_fails_closed_for_missing_changed_or_injected_locks(mutation):
-    value = '<text>Result <lock id="0" /> confirmed.</text>'
+    value = '<text>Result <lock id="0">__NINKOLOCK_A__</lock> confirmed.</text>'
     if mutation == 'missing': value = '<text>Result confirmed.</text>'
-    if mutation == 'changed': value = value.replace('<lock id="0" />', '<lock id="0">3-1</lock>')
-    if mutation == 'duplicate': value = value.replace('</text>', '<lock id="0" /></text>')
+    if mutation == 'changed': value = value.replace('__NINKOLOCK_A__', '3-1')
+    if mutation == 'duplicate': value = value.replace('</text>', '<lock id="0">__NINKOLOCK_A__</lock></text>')
     if mutation == 'foreign-tag': value = value.replace('Result', '<script>Result</script>')
     if mutation == 'doctype': value = '<!DOCTYPE text>' + value
     assert deepl._restore_xml(value, {'0': '2-1'}, 'sr') is None
 
 
 def test_serbian_script_conversion_keeps_protected_names_and_digraph_case():
-    value = '<text>Љубав и ЊЕГОВ тим: <lock id="a" /> — Џек.</text>'
-    assert deepl._restore_xml(value, {'a': 'Luka Marin'}, 'sr') == 'Ljubav i NJEGOV tim: Luka Marin — Džek.'
+    value = '<text>Љубав и ЊЕГОВ тим: <lock id="0">__NINKOLOCK_A__</lock> — Џек.</text>'
+    assert deepl._restore_xml(value, {'0': 'Luka Marin'}, 'sr') == 'Ljubav i NJEGOV tim: Luka Marin — Džek.'
     assert deepl._latin('Ђорђе Ћирић, Шабац, Чачак, Жарко.') == 'Đorđe Ćirić, Šabac, Čačak, Žarko.'
 
 
@@ -127,11 +129,46 @@ def test_single_language_validation_stays_strict():
     assert translations._validate(SOURCE, {}, languages=()) is None
 
 
-def test_production_deepl_empty_placeholder_restores_world_cup_and_word_boundary():
+def test_visible_token_restores_world_cup_and_word_boundary():
     # Actual DeepL v2 response after the normal ignore_tags field translated
     # the protected competition name despite the instruction to preserve it.
-    response = '<text>Селекција женске фудбалске репрезентације Енглеске за <lock id="0" />плеј-оф против Грчке</text>'
+    response = '<text>Селекција женске фудбалске репрезентације Енглеске за <lock id="0">__NINKOLOCK_A__</lock>плеј-оф против Грчке</text>'
     restored = deepl._restore_xml(response, {'0': 'World Cup'}, 'sr')
     assert restored == 'Selekcija ženske fudbalske reprezentacije Engleske za World Cup plej-of protiv Grčke'
-    changed = response.replace('<lock id="0" />', '<lock id="0">Светског првенства</lock>')
+    changed = response.replace('__NINKOLOCK_A__', 'Светског првенства')
     assert deepl._restore_xml(changed, {'0': 'World Cup'}, 'sr') is None
+
+
+def test_adjacent_locks_keep_numeric_word_boundaries():
+    raw = '<text><lock id="0">__NINKOLOCK_A__</lock><lock id="1">__NINKOLOCK_B__</lock></text>'
+    assert deepl._restore_xml(raw, {'0': 'World Cup', '1': '2026'}, 'de') == 'World Cup 2026'
+
+
+def test_names_never_span_sentence_boundaries_and_short_forms_are_locked():
+    source = {'title': 'Roma keep Dybala and Molina from Messi farewell',
+              'summary': 'AS Roma explained Paulo Dybala, Nahuel Molina and Lionel Messi.',
+              'body': "The date is 6 October. Roma play on 11 October. Gian Piero Gasperini's team won."}
+    documents, locks = deepl._xml_fields(source)
+    assert {'Roma', 'Dybala', 'Molina', 'Messi'} <= set(locks[0].values())
+    assert 'October. Roma' not in locks[2].values()
+    assert 'Gian Piero Gasperini' in locks[2].values()
+
+
+def test_only_punctuation_may_move_inside_a_protected_token():
+    raw = '<text>Игра <lock id="0">__NINKOLOCK_A__.</lock> октобра.</text>'
+    assert deepl._restore_xml(raw, {'0': '11'}, 'sr') == 'Igra 11. oktobra.'
+    assert deepl._restore_xml(raw.replace('__NINKOLOCK_A__.', '__NINKOLOCK_A__10'), {'0': '11'}, 'sr') is None
+    assert deepl._restore_xml(raw.replace('__NINKOLOCK_A__.', '__NINKOLOCK_A__injured'), {'0': '11'}, 'sr') is None
+
+
+@pytest.mark.parametrize('response', [None, '{}', '{"valid":false,"issues":["sr: changed team"]}',
+    '{"valid":true}', '{"valid":true,"issues":["sr: uncertainty"]}'])
+def test_translation_semantics_fail_closed(enabled, monkeypatch, response):
+    monkeypatch.setattr(translations, 'free_json_completion', lambda *a, **kw: response)
+    assert not deepl._semantic_validation(SOURCE, {'sr': SOURCE})
+
+
+def test_no_translation_characters_spent_without_semantic_allowance(enabled, monkeypatch):
+    monkeypatch.setattr('bot.news_budget.ai_budget_exhausted', lambda: True)
+    monkeypatch.setattr(deepl, '_character_ledger', lambda *a, **kw: pytest.fail('spent characters'))
+    assert deepl.translate_source(SOURCE) is None
