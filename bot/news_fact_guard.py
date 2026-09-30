@@ -133,6 +133,9 @@ def _proper_phrases(text: str) -> set[str]:
 
 def _acronyms(text: str) -> set[str]:
     ignored = {"USD", "GMT", "UTC", "TV", "AI"}
+    # English youth-team plurals name the same age band: U17s == U17.
+    # Keep the number, word boundaries and other acronyms fully strict.
+    text = re.sub(r'(?<!\w)(U(?:1[0-9]|2[0-3]))s(?!\w)', r'\1', text or '')
     return {m.group(0) for m in ACRONYM_RE.finditer(text or "") if m.group(0) not in ignored}
 
 

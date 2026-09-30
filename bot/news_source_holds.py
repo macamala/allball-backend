@@ -24,6 +24,7 @@ _FSS_PHOTO_REPAIR_URLS = {
 _ZVEZDA_CIES_REPAIR_URL = 'https://www.crvenazvezdafk.com/vesti/gudelj-medju-najboljim-mladim-stoperima-sveta'
 _ZVEZDA_CLOCK_REPAIR_URL = 'https://www.crvenazvezdafk.com/vesti/boaci-protiv-kopenhagena-ocekujem-pravu-zvezdasku-atmosferu'
 _GRAFICAR_REPAIR_URL = 'https://www.crvenazvezdafk.com/vesti/zvezdini-biseri---graficar-ubedljiv-protiv-teleoptika'
+_BROWN_U17_REPAIR_URL = 'https://www.bundesliga.com/en/bundesliga/news/bayern-munich-nathaniel-brown-number-10-left-back-germany-39382'
 _EDITORIAL_RETRY_REASONS = {
     'direct_quote_requires_review',
     'headline_too_similar_to_source',
@@ -234,6 +235,18 @@ def held_source_urls(urls) -> set[str]:
         cursor.execute("SET LOCAL statement_timeout = '5s'")
         _ensure_schema(cursor)
         keys = [hashes[url] for url in values]
+        if _BROWN_U17_REPAIR_URL in hashes:
+            # Source explicitly says U17s; the 06:52 draft said U17. Retry
+            # only that pre-fix spelling failure, never a new factual failure.
+            cursor.execute(
+                "UPDATE news_ai_source_holds SET expires_at=NOW(), "
+                "reason='audited-youth-age-plural-repaired', updated_at=NOW() "
+                "WHERE source_hash=%s AND expires_at > NOW() "
+                "AND reason='unsupported_acronym:U17' AND updated_at < %s::timestamptz",
+                (hashes[_BROWN_U17_REPAIR_URL], '2026-09-30T06:53:00Z'),
+            )
+            if cursor.rowcount:
+                logger.info('[source_holds] expired audited pre-fix Brown U17 cooldown=%s', cursor.rowcount)
         if _GRAFICAR_REPAIR_URL in hashes:
             # Audited 06:11-06:12 false holds: source explicitly states 4:1
             # and Прве лиге Србије. Expire only pre-fix format/name failures;

@@ -10,6 +10,39 @@ from bot.news_policy import fair_news_queue, numeric_tokens
 NOW = datetime(2026, 9, 30, 6, tzinfo=timezone.utc)
 
 
+def test_youth_age_plural_keeps_exact_age_and_unrelated_acronyms():
+    from bot.news_fact_guard import _acronyms
+    assert _acronyms('The U17s player joined the U21s squad.') == {'U17', 'U21'}
+    assert _acronyms('The U17 player joined the U21 squad.') == {'U17', 'U21'}
+    assert 'U19' in (_acronyms('U19') - _acronyms('U17s'))
+    assert 'FIFA' in (_acronyms('FIFA') - _acronyms('U17s'))
+    assert 'U17' not in _acronyms('AU17s U17stuff')
+
+
+def test_brown_retry_releases_only_old_exact_age_spelling_hold(monkeypatch):
+    from bot import news_source_holds as holds
+    statements = []
+    class Cursor:
+        rowcount = 0
+        def execute(self, query, params=None): statements.append((query, params))
+        def fetchall(self): return [(holds._fingerprint(holds._BROWN_U17_REPAIR_URL), 'validator-unsupported-claim')]
+        def close(self): pass
+    class Connection:
+        def cursor(self): return Cursor()
+        def commit(self): pass
+        def close(self): pass
+    monkeypatch.setattr(holds, '_postgres_dsn', lambda:'fixture')
+    monkeypatch.setattr(holds, '_connect', lambda _:Connection())
+    monkeypatch.setattr(holds, '_ensure_schema', lambda _:None)
+    assert holds.held_source_urls([holds._BROWN_U17_REPAIR_URL]) == {holds._BROWN_U17_REPAIR_URL}
+    writes = [(q,p) for q,p in statements if q.startswith('UPDATE')]
+    assert len(writes) == 1
+    query, params = writes[0]
+    assert params == (holds._fingerprint(holds._BROWN_U17_REPAIR_URL), '2026-09-30T06:53:00Z')
+    assert "reason='unsupported_acronym:U17'" in query
+    assert 'updated_at < %s::timestamptz' in query
+
+
 def test_empty_major_leagues_and_other_leagues_get_slots_without_displacing_zvezda():
     def row(index, title, league=None, host='news.test'):
         return dict(url=f'https://{host}/{index}', title=title, league=league,
