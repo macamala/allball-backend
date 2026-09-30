@@ -39,6 +39,17 @@ def test_explicit_german_score_retains_order_and_does_not_add_scores():
     assert not {'1-4', '0-1', '4-0', '2-0'} & allowed
 
 
+def test_serbian_fixture_clock_format_is_not_a_timezone_conversion():
+    source='Црвена звезда ће од 18 часова и 45 минута угостити Копенхаген.'
+    allowed=numeric_tokens(source, include_spelled=True)
+    assert '18:45' in allowed
+    assert not {'6:45','20:45','18:54'} & allowed
+    assert '18:45' not in numeric_tokens(source)
+    for text in ('Трајање је 18 часова и 45 минута.', 'Од 25 часова и 45 минута.',
+                 'Од 18 часова и 65 минута.', 'Од 18 часова до 45 минута.'):
+        assert '18:45' not in numeric_tokens(text, include_spelled=True)
+
+
 @pytest.mark.parametrize('source,allowed', [
     ('Der Präsident der Vereinigten Arabischen Emirate sprach.', True),
     ('The United Arab Emirates issued a statement.', True),
@@ -133,3 +144,26 @@ def test_explicit_retry_after_is_not_replaced_by_guessed_backoff(monkeypatch):
     monkeypatch.setattr(pool.time, 'monotonic', lambda:100.)
     pool._http_failure('mistral', httpx.Response(429, headers={'retry-after':'90'}))
     assert pool._COOLDOWN_UNTIL['mistral'] == 190.
+
+
+def test_reordered_confirmed_verdict_is_one_announcement():
+    from bot.dedupe import titles_are_near_duplicate
+    a='Independent commission finds Manchester City guilty of Premier League financial rule breaches'
+    assert titles_are_near_duplicate(a, 'Premier League finds Manchester City guilty in financial case')
+    assert titles_are_near_duplicate(a, 'Manchester City found guilty of 115 Premier League financial charges')
+
+
+@pytest.mark.parametrize('different', [
+    'Premier League finds Chelsea guilty in financial case',
+    'Manchester City found not guilty of Premier League financial charges',
+    'Manchester City appeals Premier League financial verdict',
+    'Manchester City could be found guilty of Premier League financial charges',
+    'UEFA finds Manchester City guilty of financial rule breaches',
+    'Premier League confirms sanctions for Manchester City financial breaches',
+    'Manchester City chief executive reacts to Premier League financial verdict',
+])
+def test_verdict_key_preserves_different_clubs_decisions_and_developments(different):
+    from bot.dedupe import _confirmed_financial_verdict, titles_are_near_duplicate
+    a='Independent commission finds Manchester City guilty of Premier League financial rule breaches'
+    assert _confirmed_financial_verdict(a) != _confirmed_financial_verdict(different)
+    assert not titles_are_near_duplicate(a, different)

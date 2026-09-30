@@ -48,3 +48,29 @@ def test_transport_and_unavailable_validator_remain_retryable():
     for reason in ('empty', 'validator-unavailable', 'validator-independent-unavailable'):
         assert holds._retryable_reason(reason)
     assert not holds._retryable_reason('missing-or-unreachable-publishable-image')
+
+
+def test_audited_clock_retry_matches_only_one_url_old_numeric_reason(monkeypatch):
+    statements=[]
+    class Cursor:
+        rowcount=1
+        def execute(self,sql,args=None): statements.append((sql,args))
+        def fetchall(self):return []
+        def close(self):pass
+    class Connection:
+        def cursor(self):return Cursor()
+        def commit(self):pass
+        def close(self):pass
+    monkeypatch.setattr(holds,'_postgres_dsn',lambda:'test-only')
+    monkeypatch.setattr(holds,'_connect',lambda dsn:Connection())
+    monkeypatch.setattr(holds,'_ensure_schema',lambda cursor:None)
+    other='https://example.test/unrelated'
+    assert holds.held_source_urls([other]) == set()
+    assert not [s for s,a in statements if s.startswith('UPDATE')]
+    statements.clear()
+    assert holds.held_source_urls([holds._ZVEZDA_CLOCK_REPAIR_URL,other]) == set()
+    updates=[(s,a) for s,a in statements if s.startswith('UPDATE')]
+    assert len(updates)==1
+    sql,args=updates[0]
+    assert "reason='unsupported_number'" in sql and 'updated_at < %s::timestamptz' in sql
+    assert args == (holds._fingerprint(holds._ZVEZDA_CLOCK_REPAIR_URL),'2026-09-30T01:02:00Z')

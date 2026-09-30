@@ -80,6 +80,13 @@ def numeric_tokens(text, *, include_spelled=False):
                 or (re.search(r'\bzum\s+$', before, re.I)
                     and re.search(r'\b(?:trifft|traf|schliesst|schließt|schloss|tor|treffer)\b', before, re.I))):
             tokens.add(match[1] + '-' + match[2])
+    # Serbian fixture clock: "од 18 часова и 45 минута" is 18:45,
+    # not a new number or a duration. Never infer an AM/PM or timezone shift.
+    for hour, minute in re.findall(
+        r'(?<!\w)(?:од|у|od|u)\s+([01]?\d|2[0-3])\s+(?:часова|часа|sati|časova|casova|časa|casa)'
+        r'\s+(?:и|i)\s+([0-5]?\d)\s+(?:минута|minuta)(?!\w)', text or '', re.I
+    ):
+        tokens.add(str(int(hour)) + ':' + minute.zfill(2))
     # "60 percent" is the lexical equivalent of source "60%". Keep scores,
     # ranges and monetary multipliers intact; this is not arithmetic.
     tokens.update(value[:-1] for value in list(tokens) if value.endswith('%'))

@@ -22,6 +22,7 @@ _FSS_PHOTO_REPAIR_URLS = {
     'https://fss.rs/u21-i-u-drugom-testu-lako-sa-irakom-slede-dva-jaca-testa-protiv-rusije/',
 }
 _ZVEZDA_CIES_REPAIR_URL = 'https://www.crvenazvezdafk.com/vesti/gudelj-medju-najboljim-mladim-stoperima-sveta'
+_ZVEZDA_CLOCK_REPAIR_URL = 'https://www.crvenazvezdafk.com/vesti/boaci-protiv-kopenhagena-ocekujem-pravu-zvezdasku-atmosferu'
 _EDITORIAL_RETRY_REASONS = {
     'direct_quote_requires_review',
     'headline_too_similar_to_source',
@@ -232,6 +233,19 @@ def held_source_urls(urls) -> set[str]:
         cursor.execute("SET LOCAL statement_timeout = '5s'")
         _ensure_schema(cursor)
         keys = [hashes[url] for url in values]
+        if _ZVEZDA_CLOCK_REPAIR_URL in hashes:
+            # Exact observed false rejection at 01:01 UTC: source explicitly
+            # says 18 hours and 45 minutes. Release only that old numeric hold;
+            # subsequent failures and every normal publication gate remain.
+            cursor.execute(
+                "UPDATE news_ai_source_holds SET expires_at=NOW(), "
+                "reason='audited-serbian-clock-format-repaired', updated_at=NOW() "
+                "WHERE source_hash=%s AND expires_at > NOW() "
+                "AND reason='unsupported_number' AND updated_at < %s::timestamptz",
+                (hashes[_ZVEZDA_CLOCK_REPAIR_URL], '2026-09-30T01:02:00Z'),
+            )
+            if cursor.rowcount:
+                logger.info('[source_holds] expired audited pre-fix Zvezda clock cooldown=%s', cursor.rowcount)
         if _ZVEZDA_CIES_REPAIR_URL in hashes:
             # Audited source explicitly spells CIES as ЦИЕС. Retry only this
             # false lexical rejection; semantic/image/dedupe checks still run.

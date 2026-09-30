@@ -126,6 +126,23 @@ def test_valid_original_keeps_source_identity_but_stores_own_body(monkeypatch):
         db.query(Article).filter(Article.source_url==item['url']).delete();db.commit();db.close()
 
 
+def test_translated_duplicate_is_blocked_before_article_insert(monkeypatch):
+    item=prepare_ingest(monkeypatch)
+    item['title']='Fudbalski savez objavio format kupa'
+    calls=[]
+    def duplicate(db,title,stamp):
+        calls.append(title)
+        return SimpleNamespace(id=22231) if title == DRAFT['title'] else None
+    monkeypatch.setattr(ingest,'existing_near_duplicate',duplicate)
+    holds=[]
+    monkeypatch.setattr(ingest,'_hold_ai_source',lambda url,reason: holds.append((url,reason)))
+    db=Mock()
+    assert ingest._ingest_item(db,item,True,6000,1) == (None,False)
+    assert calls == [item['title'],DRAFT['title']]
+    assert holds == [(item['url'],'duplicate_english_draft')]
+    db.add.assert_not_called();db.commit.assert_not_called()
+
+
 @pytest.mark.parametrize('days',[4,-1])
 def test_stale_or_future_item_no_extraction(monkeypatch,days):
     item=prepare_ingest(monkeypatch)

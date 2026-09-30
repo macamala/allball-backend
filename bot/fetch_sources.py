@@ -826,6 +826,16 @@ def _ingest_item(
     story_body = _sanitize_body(story_body, title=story_title)
     story_summary = _sanitize_summary(story_summary, title=story_title)
 
+    # Cross-language source titles cannot reliably match our English archive.
+    # Recheck the actual publishable headline after writing and sanitization,
+    # before allocating a slug or inserting any Article row.
+    duplicate = existing_near_duplicate(db, story_title, published_at)
+    if duplicate is not None:
+        _hold_ai_source(source_url, 'duplicate_english_draft')
+        logger.info('[fetch_sources] hold duplicate English draft existing_id=%s title=%s',
+                    getattr(duplicate, 'id', None), story_title[:100])
+        return None, False
+
     if news_freshness_reason(published_at, datetime.now(timezone.utc)):
         logger.info('[fetch_sources] hold: source left freshness window before publication')
         return None, False

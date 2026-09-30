@@ -119,7 +119,38 @@ def title_similarity(left: str, right: str) -> float:
     return max(chars, jaccard * 0.92)
 
 
+def _confirmed_financial_verdict(title: str):
+    """A narrow repeated-announcement family, not all news about one club.
+
+    Confirmed overnight: several publishers rewrote the same Premier League
+    finding with different word order and counts. Appeals, reactions, penalties
+    and predictions are separate developments and must not be collapsed here.
+    Unknown clubs/jurisdictions retain ordinary conservative title matching.
+    """
+    value = normalize_title(title or '')
+    if not all(re.search(pattern, value) for pattern in (
+        r'\bpremier league\b', r'\bfinancial\b', r'\bguilty\b',
+        r'\b(?:finds|found|declares|declared|rules|ruled)\b',
+    )):
+        return None
+    if re.search(r'\b(?:not|if|could|may|might|whether|awaits?|appeals?|denies|denial|innocence|'
+                 r'reacts?|reaction|response|sanctions?|points?|fines?|relegation|damages|'
+                 r'revelations?|leaked|ceo|owner|before|after)\b', value):
+        return None
+    from .taxonomy import TEAMS
+    clubs = {alias for team in TEAMS if team.get('sport') == 'football'
+             for alias in team.get('aliases', [])
+             if len(alias) >= 5 and re.search(r'(?<!\w)' + re.escape(alias) + r'(?!\w)', value)}
+    return ('premier-league-financial-verdict', next(iter(clubs))) if len(clubs) == 1 else None
+
+
 def titles_are_near_duplicate(left: str, right: str) -> bool:
+    left_verdict = _confirmed_financial_verdict(left)
+    right_verdict = _confirmed_financial_verdict(right)
+    if left_verdict is not None or right_verdict is not None:
+        # A one-word negation, different club or appeal can still have a very
+        # similar headline. Do not let fuzzy matching erase that distinction.
+        return left_verdict == right_verdict
     return title_similarity(left, right) >= 0.86
 
 
