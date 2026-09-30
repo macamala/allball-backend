@@ -375,6 +375,9 @@ def non_article_news_reason(item):
 
     body = str((item or {}).get("body") or (item or {}).get("summary") or "")
     copy = '\n'.join(str((item or {}).get(key) or '') for key in ('title', 'summary', 'body'))
+    if ('/david-squires-on-' in path or re.search(
+            r'\b(?:presents? (?:a )?(?:new |his latest )?cartoon|the (?:illustration|artwork) (?:focuses|depicts))\b', copy, re.I)):
+        return 'non_article_cartoon'
     if re.search(r'(?im)^\s*\[?blank\s+line\]?\s*$', copy):
         return 'draft_placeholder'
     if re.search(r'\b(?:is|serves as) (?:the )?(?:editor|journalist|reporter|correspondent) (?:of|at|for)\b', copy, re.I):

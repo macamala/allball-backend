@@ -1,0 +1,182 @@
+{
+  "verified_at": "2026-09-30",
+  "valid_from": "2026-07-01",
+  "valid_until": "2027-06-30",
+  "leagues": {
+    "england-premier-league": {
+      "source": "https://www.premierleague.com/en/news/4675097/all-380-fixtures-for-202627-premier-league-season",
+      "clubs": [
+        "Arsenal",
+        "Aston Villa",
+        "Bournemouth",
+        "Brentford",
+        "Brighton",
+        "Chelsea",
+        "Coventry City",
+        "Crystal Palace",
+        "Everton",
+        "Fulham",
+        "Hull City",
+        "Ipswich Town",
+        "Leeds United",
+        "Liverpool",
+        "Manchester City",
+        "Manchester United",
+        "Newcastle United",
+        "Nottingham Forest",
+        "Sunderland",
+        "Tottenham",
+        "Tottenham Hotspur"
+      ]
+    },
+    "italy-serie-a": {
+      "source": "https://www.juventus.com/it/news/articoli/il-calendario-della-juventus-nella-serie-a-2026-27",
+      "clubs": [
+        "Juventus",
+        "Frosinone",
+        "Parma",
+        "AC Milan",
+        "Milan",
+        "Sassuolo",
+        "Atalanta",
+        "Cagliari",
+        "Lazio",
+        "Lecce",
+        "Genoa",
+        "Napoli",
+        "Fiorentina",
+        "Venezia",
+        "Como",
+        "Udinese",
+        "Monza",
+        "AS Roma",
+        "Roma",
+        "Bologna",
+        "Torino",
+        "Inter Milan",
+        "Internazionale"
+      ]
+    },
+    "spain-la-liga": {
+      "source": "https://www.laliga.com/laliga-easports/clubes",
+      "clubs": [
+        "Athletic Club",
+        "Athletic Bilbao",
+        "Atletico Madrid",
+        "Atletico de Madrid",
+        "Osasuna",
+        "Celta Vigo",
+        "Alaves",
+        "Elche",
+        "FC Barcelona",
+        "Barcelona",
+        "Getafe",
+        "Levante",
+        "Malaga",
+        "Racing Santander",
+        "Rayo Vallecano",
+        "Deportivo La Coruna",
+        "Espanyol",
+        "Real Betis",
+        "Real Madrid",
+        "Real Sociedad",
+        "Sevilla",
+        "Valencia",
+        "Villarreal"
+      ]
+    },
+    "spain-la-liga-2": {
+      "source": "https://www.laliga.com/laliga-hypermotion/clubes",
+      "clubs": [
+        "Real Valladolid",
+        "Valladolid",
+        "RCD Mallorca",
+        "Real Mallorca",
+        "Mallorca",
+        "Girona",
+        "Real Oviedo",
+        "Granada",
+        "Cadiz",
+        "Leganes",
+        "Tenerife",
+        "Almeria",
+        "Las Palmas",
+        "Eibar"
+      ]
+    },
+    "germany-bundesliga": {
+      "source": "https://www.bundesliga.com/de/bundesliga/clubs",
+      "clubs": [
+        "Bayern Munich",
+        "Bayern Munchen",
+        "Borussia Dortmund",
+        "VfB Stuttgart",
+        "Stuttgart",
+        "Bayer Leverkusen",
+        "RB Leipzig",
+        "Eintracht Frankfurt",
+        "Freiburg",
+        "Hoffenheim",
+        "Werder Bremen",
+        "Union Berlin",
+        "Mainz",
+        "Borussia Monchengladbach",
+        "Hamburger SV",
+        "Augsburg",
+        "Schalke",
+        "Elversberg",
+        "Paderborn"
+      ]
+    },
+    "serbia-superliga": {
+      "source": "https://www.superliga.rs/",
+      "clubs": [
+        "Crvena zvezda",
+        "Red Star Belgrade",
+        "Partizan",
+        "Vojvodina",
+        "OFK Beograd",
+        "Radnicki 1923",
+        "Radnicki Nis",
+        "Novi Pazar",
+        "Zemun",
+        "IMT",
+        "Macva"
+      ]
+    },
+    "england-womens-super-league": {
+      "source": "https://www.chelseafc.com/en/news/article/chelseas-2026-27-womens-super-league-fixtures-announced",
+      "clubs": [
+        "Chelsea",
+        "Arsenal",
+        "Liverpool",
+        "Aston Villa",
+        "Manchester City",
+        "Manchester United",
+        "London City Lionesses",
+        "Everton",
+        "Brighton",
+        "Tottenham",
+        "West Ham United"
+      ]
+    },
+    "brazil-serie-a": {
+      "source": "https://www.cbf.com.br/futebol-brasileiro/times/campeonato-brasileiro/serie-a/2026",
+      "valid_until": "2026-12-31",
+      "clubs": [
+        "Botafogo",
+        "Flamengo",
+        "Fluminense",
+        "Palmeiras",
+        "Corinthians",
+        "Sao Paulo",
+        "Santos",
+        "Cruzeiro",
+        "Gremio",
+        "Internacional",
+        "Bahia",
+        "Vasco da Gama"
+      ]
+    }
+  }
+}

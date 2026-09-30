@@ -44,7 +44,7 @@ def test_existing_public_news_is_tagged_without_republishing_or_changing_copy():
             ('held','England win UEFA Nations League football match',False,'football',0),
             ('old','England win UEFA Nations League football match',True,'football',10),
             ('unrelated','Basketball coach discusses next season',True,'basketball',0),
-            ('unspecified','England coach assesses the victory',True,'football',0),
+            ('unspecified','A coach assesses the victory',True,'football',0),
         ]:
             a=Article(slug='league-menu-'+suffix,external_id='league-menu-'+suffix,title=title,
                 sport=sport,ai_generated=True,summary=title,content='Preserve this original article body.',

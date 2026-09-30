@@ -1,6 +1,6 @@
 """Assign existing public football stories to newly available News menus.
 
-Only explicit headline evidence can change a tag. Text, publication time,
+Headline/lead competition evidence or verified club membership can change a tag. Text, publication time,
 quality, image and public/held status are never changed by this maintenance.
 """
 from datetime import datetime, timedelta
@@ -9,9 +9,8 @@ import logging
 from sqlalchemy import func
 
 from models import Article, ArticleTaxonomyResolution
-from taxonomy_resolver import RESOLVER_VERSION, resolve_article_competition
-from .news_fact_guard import competition_in_source
-from .taxonomy import COMPETITIONS
+from taxonomy_resolver import RESOLVER_VERSION
+from .news_football_sections import assign_public_football_section
 
 logger = logging.getLogger(__name__)
 
@@ -27,20 +26,8 @@ def repair_football_league_menus(db, limit=300):
         .order_by(Article.id.desc()).limit(max(1, min(int(limit), 600))).all())
     changed = 0
     for article, tax in rows:
-        # Existing specific domestic tags are retained. Repair missing/broad
-        # tags and the shared Champions League / World Cup naming collisions.
-        if tax.resolved_competition not in {None, 'football-international', 'uefa-champions-league', 'fifa-world-cup'}:
+        if not assign_public_football_section(article, tax):
             continue
-        resolved = resolve_article_competition(article)
-        key = resolved.public_competition
-        if (resolved.sport != 'football' or not key or key == tax.resolved_competition
-                or resolved.competition_confidence < .9
-                or not competition_in_source(key, article.title or '')):
-            continue
-        tax.resolved_competition = key
-        tax.competition_confidence = f'{resolved.competition_confidence:.3f}'
-        article.league = key
-        article.country = COMPETITIONS[key]['country']
         db.add(tax)
         db.add(article)
         changed += 1

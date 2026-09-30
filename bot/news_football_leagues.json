@@ -41,7 +41,9 @@
     "path": "spain-la-liga-2",
     "aliases": [
       "la liga 2",
-      "segunda división"
+      "segunda división",
+      "spanish second division",
+      "laliga hypermotion"
     ]
   },
   {
@@ -134,7 +136,9 @@
     "aliases": [
       "prva liga srbije",
       "prve lige srbije",
-      "serbian first league"
+      "serbian first league",
+      "mozzart bet prva liga",
+      "mozzart bet prve lige"
     ]
   },
   {
@@ -753,7 +757,8 @@
       "a-league women",
       "a-league womens",
       "a-league women’s",
-      "a-league women's"
+      "a-league women's",
+      "ninja a league"
     ]
   },
   {
@@ -898,6 +903,129 @@
     "path": "international",
     "aliases": [
       "international football"
+    ]
+  },
+  {
+    "league": "england-womens-super-league",
+    "label": "Women's Super League",
+    "country": "england",
+    "region": "GB-ENG",
+    "tier": null,
+    "path": "womens-super-league",
+    "aliases": [
+      "women's super league",
+      "womens super league",
+      "barclays wsl",
+      "wsl"
+    ]
+  },
+  {
+    "league": "usa-nwsl",
+    "label": "NWSL",
+    "country": "usa",
+    "region": "US",
+    "tier": null,
+    "path": "nwsl",
+    "aliases": [
+      "nwsl",
+      "national womens soccer league",
+      "national women's soccer league"
+    ]
+  },
+  {
+    "league": "belgium-cup",
+    "label": "Belgian Cup",
+    "country": "belgium",
+    "region": "BE",
+    "tier": null,
+    "path": "belgium-cup",
+    "aliases": [
+      "belgian cup",
+      "croky cup"
+    ]
+  },
+  {
+    "league": "uefa-womens-champions-league",
+    "label": "UEFA Women's Champions League",
+    "country": "international",
+    "region": "",
+    "tier": null,
+    "path": "womens-champions-league",
+    "aliases": [
+      "women's champions league",
+      "womens champions league",
+      "uwcl"
+    ]
+  },
+  {
+    "league": "fifa-womens-world-cup",
+    "label": "FIFA Women's World Cup",
+    "country": "international",
+    "region": "",
+    "tier": null,
+    "path": "womens-world-cup",
+    "aliases": [
+      "women's world cup",
+      "womens world cup"
+    ]
+  },
+  {
+    "league": "uefa-womens-nations-league",
+    "label": "UEFA Women's Nations League",
+    "country": "international",
+    "region": "",
+    "tier": null,
+    "path": "womens-nations-league",
+    "aliases": [
+      "women's nations league",
+      "womens nations league"
+    ]
+  },
+  {
+    "league": "uefa-under-21-euro",
+    "label": "UEFA Under-21 EURO",
+    "country": "international",
+    "region": "",
+    "tier": null,
+    "path": "under-21-euro",
+    "aliases": [
+      "under-21 euro",
+      "u21 euro",
+      "under 21 euro",
+      "under-21 european championship"
+    ]
+  },
+  {
+    "league": "football-youth",
+    "label": "Youth Football",
+    "country": "international",
+    "region": "",
+    "tier": null,
+    "path": "youth-football",
+    "aliases": [
+      "youth international football"
+    ]
+  },
+  {
+    "league": "football-women",
+    "label": "Women's Football",
+    "country": "international",
+    "region": "",
+    "tier": null,
+    "path": "womens-football",
+    "aliases": [
+      "international women's football"
+    ]
+  },
+  {
+    "league": "football-national-teams",
+    "label": "National Teams",
+    "country": "international",
+    "region": "",
+    "tier": null,
+    "path": "national-teams",
+    "aliases": [
+      "national team football"
     ]
   }
 ]

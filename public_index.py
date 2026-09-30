@@ -101,6 +101,10 @@ def persist_public_article(db: Session, article: Article, resolution=None, commi
     row.public_ok = public
     row.hero_media_kind = media_kind
     row.word_count = int(quality.get("word_count") or 0)
+    # Menu placement is downstream of every factual/quality/public admission
+    # gate. It cannot rescue a rejected article or insert claims into its copy.
+    from bot.news_football_sections import assign_public_football_section
+    assign_public_football_section(article, row)
     db.add(row)
     if commit:
         db.commit()
