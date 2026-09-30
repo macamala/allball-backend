@@ -54,6 +54,14 @@ def test_bundesliga_discovery_is_scoped_to_articles_and_explicit_other_sport_win
     assert _classify_candidate(candidate).sport == 'basketball'
 
 
+def test_german_basketball_headline_overrides_generic_bundesliga_body_on_mixed_feed():
+    from bot.fetch_sources import _classify_candidate
+    item = {'url':'https://www.sportschau.de/regional/br/story',
+        'title':'Bayern-Basketballer gehen gegen Fenerbahce unter',
+        'summary':'Bayern München spielen in der Bundesliga.', 'feed':{'kind':'mixed'}}
+    assert _classify_candidate(item).sport == 'basketball'
+
+
 def test_serbian_score_and_competition_translation_keep_exact_source_facts():
     source = 'Графичар је убедљиво савладао екипу Телеоптика (4:1) у оквиру 11. кола Прве лиге Србије.'
     assert '4-1' in numeric_tokens(source, include_spelled=True)
@@ -116,6 +124,17 @@ def test_fantasy_products_never_consume_an_empty_leagues_writer_slot(title):
     assert non_article_news_reason({'title':title}) == 'non_article_fantasy_product'
 
 
+def test_retrospective_rankings_and_rewritten_playoff_analysis_stay_out_of_news():
+    from bot.news_policy import non_article_news_reason
+    for title in ['Van Machlas tot Limnios: de 10 productiefste Grieken uit de geschiedenis',
+                  'Nikos Machlas leads list of most productive Greek players in Netherlands Eredivisie history']:
+        assert non_article_news_reason({'title':title}) == 'non_news_retrospective_rankings'
+    assert non_article_news_reason({'title':'LAFC seeks new direction following departure of head coach',
+        'url':'https://www.mlssoccer.com/news/playoff-countdown-can-seattle-sounders-new-york-city-fc-hang-on'}) == 'non_article_analysis'
+    assert non_article_news_reason({'title':'MLS Disciplinary Committee fines player',
+        'url':'https://www.mlssoccer.com/news/player-fined-by-mls-disciplinary-committee'}) is None
+
+
 @pytest.mark.parametrize('title,expected', [
     ('PSG confirm contract extension','france-ligue-1'),
     ('Marseille name new coach','france-ligue-1'),
@@ -137,6 +156,27 @@ def test_audited_zvezda_european_fixture_uses_exact_primary_source_not_club_memb
     assert football_news_section(article,today=NOW.date()) == 'uefa-conference-league'
     article.source_url = article.source_url.replace('www.crvenazvezdafk.com','foreign.test')
     assert football_news_section(article,today=NOW.date()) == 'serbia-superliga'
+    article.id = 22217
+    assert football_news_section(article,today=NOW.date()) == 'uefa-conference-league'
+    article.title = 'Red Star Belgrade confirm a new signing'
+    assert football_news_section(article,today=NOW.date()) == 'serbia-superliga'
+
+
+def test_source_discovery_excludes_reviewed_products_before_spending_hydration_slots(monkeypatch):
+    from bot import news_official_indexes as idx
+    cases = [('bundesliga-english-news','fantasy-manager-unlimited-transfers-international-break-39384'),
+             ('bundesliga-german-news','spieler-clubs-vereine-landerspiele-international-39312'),
+             ('bundesliga-2-news','darmstadt-san-antonio-fc-friendly-live-usa-tour-2026-34351'),
+             ('mls-official-news','power-rankings-club-chase-record'),
+             ('eredivisie-official-news','het-espn-fantasy-voetbal-elftal')]
+    for name, slug in cases:
+        cfg = next(c for c in idx.HTML_INDEXES if c['id']==name)
+        prefix = cfg['paths'][0]
+        assert idx._same_host_url(cfg['url'],prefix+slug,cfg['host'],cfg) is None
+        monkeypatch.setattr(idx,'read_news_feed',lambda _, p=prefix, s=slug:
+            f'<a href="{p}{s}">Product</a><a href="{p}club-confirms-injury-39400">Club confirms injury</a>'.encode())
+        assert len(idx._anchor_candidates(cfg))==1
+        assert idx._anchor_candidates(cfg)[0][0].endswith('club-confirms-injury-39400')
 
 
 def test_graficar_retry_is_limited_to_exact_source_prefixed_format_failures(monkeypatch):

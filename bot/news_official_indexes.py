@@ -40,31 +40,31 @@ HTML_INDEXES = (
         'id': 'mls-official-news', 'sport': 'football', 'publisher': 'MLS',
         'url': 'https://www.mlssoccer.com/news/', 'host': 'www.mlssoccer.com',
         'paths': ('/news/',), 'article_path_re': r'^/news/[^/]+/?$',
-        'exclude_articles': ('power-rankings', 'playoff-countdown'),
+        'exclude_article_fragments': ('power-rankings', 'playoff-countdown'),
     },
     {
         'id': 'eredivisie-official-news', 'sport': 'football', 'publisher': 'Eredivisie',
         'url': 'https://eredivisie.nl/nieuws/', 'host': 'eredivisie.nl',
         'paths': ('/nieuws/',), 'article_path_re': r'^/nieuws/[^/]+/?$',
-        'exclude_articles': ('fantasy', 'dreamteam', 'het-shirt-'),
+        'exclude_article_fragments': ('fantasy', 'dreamteam', 'het-shirt-'),
     },
     {
         'id': 'bundesliga-german-news', 'sport': 'football', 'publisher': 'Bundesliga',
         'url': 'https://www.bundesliga.com/de/bundesliga/news', 'host': 'www.bundesliga.com',
         'paths': ('/de/bundesliga/news/',), 'article_path_re': r'/news/[^/]+-\d+$',
-        'exclude_articles': ('fantasy-manager', 'spieltag-quiz', 'spieler-clubs-vereine-landerspiele'),
+        'exclude_article_fragments': ('fantasy-manager', 'spieltag-quiz', 'spieler-clubs-vereine-landerspiele'),
     },
     {
         'id': 'bundesliga-english-news', 'sport': 'football', 'publisher': 'Bundesliga',
         'url': 'https://www.bundesliga.com/en/bundesliga/news', 'host': 'www.bundesliga.com',
         'paths': ('/en/bundesliga/news/',), 'article_path_re': r'/news/[^/]+-\d+$',
-        'exclude_articles': ('fantasy', 'paderborn-usa-tour', 'stars-international-duty'),
+        'exclude_article_fragments': ('fantasy', 'paderborn-usa-tour', 'stars-international-duty'),
     },
     {
         'id': 'bundesliga-2-news', 'sport': 'football', 'publisher': 'Bundesliga',
         'url': 'https://www.bundesliga.com/en/2bundesliga/news', 'host': 'www.bundesliga.com',
         'paths': ('/en/2bundesliga/news/',), 'article_path_re': r'/news/[^/]+-\d+$',
-        'exclude_articles': ('darmstadt-san-antonio-fc-friendly-live', 'goal-of-the-month-season-vote'),
+        'exclude_article_fragments': ('darmstadt-san-antonio-fc-friendly-live', 'goal-of-the-month-season-vote'),
     },
     {
         'id': 'ge-brazil-football-news', 'sport': 'football', 'publisher': 'ge',
@@ -481,6 +481,9 @@ def _same_host_url(base: str, href: str, expected_host: str, cfg: Dict) -> Optio
     if path.rstrip("/") == urlsplit(base).path.rstrip("/"):
         return None
     if path.rstrip("/").split("/")[-1] in cfg.get("exclude_articles", ()):
+        return None
+    if any(fragment in path.rstrip('/').split('/')[-1]
+           for fragment in cfg.get('exclude_article_fragments', ())):
         return None
     if re.search(r"/(?:category|topic|series|pages|tag)/|\.(?:json|xml|js|css)$", path, re.I):
         return None

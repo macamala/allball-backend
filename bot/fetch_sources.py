@@ -573,6 +573,12 @@ def _ingest_item(
         )
         return None, False
 
+    source_reason = non_article_news_reason({**item, 'body': facts})
+    if source_reason:
+        _hold_ai_source(source_url, source_reason)
+        logger.info('[fetch_sources] hold source before writer reason=%s title=%s', source_reason, item['title'][:80])
+        return None, False
+
     image_candidates = list(item.get("image_candidates") or [])
     if extracted_image:
         image_candidates.append(
@@ -934,14 +940,14 @@ def _classify_item(item, evidence):
     )
     if getattr(tags, "reason", "") == "unsupported-news-sport":
         return tags
-    hinted = source_path_sport_hint(item.get("url"))
-    if not hinted or tags.sport == hinted:
-        return tags
     from .news_policy import explicit_headline_sport
     explicit = explicit_headline_sport(item.get('title'))
-    if explicit and explicit != hinted:
+    if explicit and tags.sport != explicit:
         return Classification(explicit, tags.league if tags.sport == explicit else None,
             feed.get('country'), 'high', 'explicit-headline-sport')
+    hinted = source_path_sport_hint(item.get("url"))
+    if not hinted or tags.sport == hinted or explicit:
+        return tags
     return Classification(
         sport=hinted,
         league=None,

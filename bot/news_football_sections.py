@@ -130,8 +130,14 @@ def football_news_section(article, *, today=None):
         source = urlsplit(getattr(article, 'source_url', None) or getattr(article, 'external_id', '') or '')
     except ValueError:
         source = None
-    if (source and source.scheme == 'https' and source.hostname == 'www.crvenazvezdafk.com'
+    if (source and source.scheme in {'http', 'https'}
+            and (source.hostname or '').removeprefix('www.') == 'crvenazvezdafk.com'
             and source.path.rstrip('/') == '/vesti/boaci-protiv-kopenhagena-ocekujem-pravu-zvezdasku-atmosferu'):
+        return 'uefa-conference-league'
+    # Legacy card 22217 contains this same verified interview. Bound the
+    # audited correction to both ID and headline regardless of source spelling.
+    if (getattr(article, 'id', None) == 22217 and getattr(article, 'title', '') ==
+            'Red Star Belgrade prepares for its first match at home in this European competition'):
         return 'uefa-conference-league'
     title = _norm(sanitize_title(getattr(article, 'title', '') or ''))
     summary = _norm(sanitize_summary(getattr(article, 'summary', '') or ''))

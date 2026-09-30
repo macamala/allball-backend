@@ -255,7 +255,7 @@ def explicit_headline_sport(title):
         ('field-hockey', r'\bfield hockey\b'), ('ice-hockey', r'\b(?:ice hockey|nhl)\b'),
         ('mma', r'\b(?:mma|ufc|mixed martial arts|oktagon(?:u|e|em)?)\b'),
         ('cricket', CRICKET_TITLE_RE), ('volleyball', VOLLEYBALL_TITLE_RE),
-        ('basketball', r'\b(?:basketball|nba|wnba|košarka|kosarka)\b'),
+        ('basketball', r'\b(?:basketball(?:er(?:innen)?|erin|ern)?|nba|wnba|košarka|kosarka)\b'),
         ('football', r'\b(?:football|soccer|fudbal|futebol|fußball)\b'),
         ('handball', r'\b(?:handball|ehf|ihf|rukomet)\b'),
         ('tennis', r'\b(?:tennis|atp|wta)\b'), ('badminton', r'\b(?:badminton|shuttlers?)\b'),
@@ -377,11 +377,18 @@ def non_article_news_reason(item):
     url = str((item or {}).get("url") or "")
     try:
         path = urlsplit(url).path.casefold()
+        host = (urlsplit(url).hostname or '').casefold()
     except ValueError:
         path = ""
+        host = ""
 
     body = str((item or {}).get("body") or (item or {}).get("summary") or "")
     copy = '\n'.join(str((item or {}).get(key) or '') for key in ('title', 'summary', 'body'))
+    if host == 'www.mlssoccer.com' and re.search(r'^/news/(?:playoff-countdown|power-rankings)', path):
+        return 'non_article_analysis'
+    if (re.search(r'\bde \d+ productiefste grieken\b', title)
+            or re.search(r'\bmost productive greek players\b.{0,70}\bhistory\b', title)):
+        return 'non_news_retrospective_rankings'
     if ('/david-squires-on-' in path or re.search(
             r'\b(?:presents? (?:a )?(?:new |his latest )?cartoon|the (?:illustration|artwork) (?:focuses|depicts))\b', copy, re.I)):
         return 'non_article_cartoon'
