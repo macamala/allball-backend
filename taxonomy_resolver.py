@@ -33,6 +33,12 @@ CONTINENTAL = {
     "uefa-conference-league",
     "fifa-world-cup",
     "uefa-euro",
+    "uefa-nations-league",
+    "fifa-club-world-cup",
+    "conmebol-libertadores",
+    "conmebol-sudamericana",
+    "afc-champions-league-elite",
+    "caf-champions-league",
 }
 
 BROAD_BUCKETS = {

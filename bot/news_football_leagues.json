@@ -1,0 +1,903 @@
+[
+  {
+    "league": "england-premier-league",
+    "label": "Premier League",
+    "country": "england",
+    "region": "GB-ENG",
+    "tier": 1,
+    "path": "premier-league",
+    "aliases": [
+      "english premier league"
+    ]
+  },
+  {
+    "league": "england-championship",
+    "label": "Championship",
+    "country": "england",
+    "region": "GB-ENG",
+    "tier": 2,
+    "path": "england-championship",
+    "aliases": [
+      "efl championship"
+    ]
+  },
+  {
+    "league": "spain-la-liga",
+    "label": "La Liga",
+    "country": "spain",
+    "region": "ES",
+    "tier": 1,
+    "path": "la-liga",
+    "aliases": [
+      "la liga"
+    ]
+  },
+  {
+    "league": "spain-la-liga-2",
+    "label": "La Liga 2",
+    "country": "spain",
+    "region": "ES",
+    "tier": 2,
+    "path": "spain-la-liga-2",
+    "aliases": [
+      "la liga 2",
+      "segunda división"
+    ]
+  },
+  {
+    "league": "italy-serie-a",
+    "label": "Serie A",
+    "country": "italy",
+    "region": "IT",
+    "tier": 1,
+    "path": "serie-a",
+    "aliases": [
+      "serie a"
+    ]
+  },
+  {
+    "league": "italy-serie-b",
+    "label": "Serie B",
+    "country": "italy",
+    "region": "IT",
+    "tier": 2,
+    "path": "italy-serie-b",
+    "aliases": [
+      "serie b"
+    ]
+  },
+  {
+    "league": "germany-bundesliga",
+    "label": "Bundesliga",
+    "country": "germany",
+    "region": "DE",
+    "tier": 1,
+    "path": "bundesliga",
+    "aliases": [
+      "bundesliga"
+    ]
+  },
+  {
+    "league": "germany-2-bundesliga",
+    "label": "2. Bundesliga",
+    "country": "germany",
+    "region": "DE",
+    "tier": 2,
+    "path": "germany-2-bundesliga",
+    "aliases": [
+      "2. bundesliga"
+    ]
+  },
+  {
+    "league": "france-ligue-1",
+    "label": "Ligue 1",
+    "country": "france",
+    "region": "FR",
+    "tier": 1,
+    "path": "ligue-1",
+    "aliases": [
+      "ligue 1"
+    ]
+  },
+  {
+    "league": "france-ligue-2",
+    "label": "Ligue 2",
+    "country": "france",
+    "region": "FR",
+    "tier": 2,
+    "path": "france-ligue-2",
+    "aliases": [
+      "ligue 2"
+    ]
+  },
+  {
+    "league": "serbia-superliga",
+    "label": "SuperLiga Srbije",
+    "country": "serbia",
+    "region": "RS",
+    "tier": 1,
+    "path": "superliga",
+    "aliases": [
+      "serbian superliga",
+      "super liga srbije",
+      "superliga srbije",
+      "mozzart bet superliga"
+    ]
+  },
+  {
+    "league": "serbia-prva-liga",
+    "label": "Prva liga Srbije",
+    "country": "serbia",
+    "region": "RS",
+    "tier": 2,
+    "path": "serbia-prva-liga",
+    "aliases": [
+      "prva liga srbije",
+      "prve lige srbije",
+      "serbian first league"
+    ]
+  },
+  {
+    "league": "netherlands-eredivisie",
+    "label": "Eredivisie",
+    "country": "netherlands",
+    "region": "NL",
+    "tier": 1,
+    "path": "netherlands-eredivisie",
+    "aliases": [
+      "eredivisie"
+    ]
+  },
+  {
+    "league": "netherlands-eerste-divisie",
+    "label": "Eerste Divisie",
+    "country": "netherlands",
+    "region": "NL",
+    "tier": 2,
+    "path": "netherlands-eerste-divisie",
+    "aliases": [
+      "eerste divisie",
+      "keuken kampioen divisie"
+    ]
+  },
+  {
+    "league": "portugal-primeira-liga",
+    "label": "Primeira Liga",
+    "country": "portugal",
+    "region": "PT",
+    "tier": 1,
+    "path": "portugal-primeira-liga",
+    "aliases": [
+      "primeira liga"
+    ]
+  },
+  {
+    "league": "portugal-liga-2",
+    "label": "Liga Portugal 2",
+    "country": "portugal",
+    "region": "PT",
+    "tier": 2,
+    "path": "portugal-liga-2",
+    "aliases": [
+      "liga portugal 2",
+      "liga portugal 2 meu super",
+      "liga portugal sabseg"
+    ]
+  },
+  {
+    "league": "belgium-pro-league",
+    "label": "Belgian Pro League",
+    "country": "belgium",
+    "region": "BE",
+    "tier": 1,
+    "path": "belgium-pro-league",
+    "aliases": [
+      "belgian pro league"
+    ]
+  },
+  {
+    "league": "belgium-challenger-pro-league",
+    "label": "Challenger Pro League",
+    "country": "belgium",
+    "region": "BE",
+    "tier": 2,
+    "path": "belgium-challenger-pro-league",
+    "aliases": [
+      "challenger pro league"
+    ]
+  },
+  {
+    "league": "turkey-super-lig",
+    "label": "Süper Lig",
+    "country": "turkey",
+    "region": "TR",
+    "tier": 1,
+    "path": "turkey-super-lig",
+    "aliases": [
+      "süper lig"
+    ]
+  },
+  {
+    "league": "turkey-first-league",
+    "label": "TFF 1. Lig",
+    "country": "turkey",
+    "region": "TR",
+    "tier": 2,
+    "path": "turkey-first-league",
+    "aliases": [
+      "tff 1. lig",
+      "tff first league",
+      "turkish first league"
+    ]
+  },
+  {
+    "league": "greece-super-league",
+    "label": "Super League Greece",
+    "country": "greece",
+    "region": "GR",
+    "tier": 1,
+    "path": "greece-super-league",
+    "aliases": [
+      "super league greece"
+    ]
+  },
+  {
+    "league": "greece-super-league-2",
+    "label": "Super League Greece 2",
+    "country": "greece",
+    "region": "GR",
+    "tier": 2,
+    "path": "greece-super-league-2",
+    "aliases": [
+      "super league greece 2",
+      "greek super league 2",
+      "super league 2"
+    ]
+  },
+  {
+    "league": "scotland-premiership",
+    "label": "Scottish Premiership",
+    "country": "scotland",
+    "region": "GB-SCT",
+    "tier": 1,
+    "path": "scotland-premiership",
+    "aliases": [
+      "scottish premiership"
+    ]
+  },
+  {
+    "league": "scotland-championship",
+    "label": "Scottish Championship",
+    "country": "scotland",
+    "region": "GB-SCT",
+    "tier": 2,
+    "path": "scotland-championship",
+    "aliases": [
+      "scottish championship"
+    ]
+  },
+  {
+    "league": "switzerland-super-league",
+    "label": "Swiss Super League",
+    "country": "switzerland",
+    "region": "CH",
+    "tier": 1,
+    "path": "switzerland-super-league",
+    "aliases": [
+      "swiss super league"
+    ]
+  },
+  {
+    "league": "switzerland-challenge-league",
+    "label": "Swiss Challenge League",
+    "country": "switzerland",
+    "region": "CH",
+    "tier": 2,
+    "path": "switzerland-challenge-league",
+    "aliases": [
+      "swiss challenge league",
+      "dieci challenge league"
+    ]
+  },
+  {
+    "league": "croatia-hnl",
+    "label": "HNL",
+    "country": "croatia",
+    "region": "HR",
+    "tier": 1,
+    "path": "croatia-hnl",
+    "aliases": [
+      "hnl"
+    ]
+  },
+  {
+    "league": "croatia-prva-nl",
+    "label": "Prva NL",
+    "country": "croatia",
+    "region": "HR",
+    "tier": 2,
+    "path": "croatia-prva-nl",
+    "aliases": [
+      "prva nl",
+      "prve nl",
+      "croatian first football league"
+    ]
+  },
+  {
+    "league": "poland-ekstraklasa",
+    "label": "Ekstraklasa",
+    "country": "poland",
+    "region": "PL",
+    "tier": 1,
+    "path": "poland-ekstraklasa",
+    "aliases": [
+      "ekstraklasa"
+    ]
+  },
+  {
+    "league": "poland-first-league",
+    "label": "Polish I liga",
+    "country": "poland",
+    "region": "PL",
+    "tier": 2,
+    "path": "poland-first-league",
+    "aliases": [
+      "polish first league",
+      "polish i liga",
+      "betclic 1 liga"
+    ]
+  },
+  {
+    "league": "czech-first-league",
+    "label": "Czech First League",
+    "country": "czech-republic",
+    "region": "CZ",
+    "tier": 1,
+    "path": "czech-first-league",
+    "aliases": [
+      "czech first league"
+    ]
+  },
+  {
+    "league": "czech-second-league",
+    "label": "Czech National Football League",
+    "country": "czech-republic",
+    "region": "CZ",
+    "tier": 2,
+    "path": "czech-second-league",
+    "aliases": [
+      "czech national football league",
+      "fotbalová národní liga",
+      "chance národní liga"
+    ]
+  },
+  {
+    "league": "austria-bundesliga",
+    "label": "Austrian Bundesliga",
+    "country": "austria",
+    "region": "AT",
+    "tier": 1,
+    "path": "austria-bundesliga",
+    "aliases": [
+      "austrian bundesliga",
+      "österreichische bundesliga",
+      "österreichischen bundesliga"
+    ]
+  },
+  {
+    "league": "austria-second-league",
+    "label": "Austrian 2. Liga",
+    "country": "austria",
+    "region": "AT",
+    "tier": 2,
+    "path": "austria-second-league",
+    "aliases": [
+      "austrian 2. liga",
+      "austrian second league",
+      "österreichische 2. liga"
+    ]
+  },
+  {
+    "league": "denmark-superliga",
+    "label": "Danish Superliga",
+    "country": "denmark",
+    "region": "DK",
+    "tier": 1,
+    "path": "denmark-superliga",
+    "aliases": [
+      "danish superliga",
+      "danish super league",
+      "superligaen"
+    ]
+  },
+  {
+    "league": "denmark-first-division",
+    "label": "Danish 1st Division",
+    "country": "denmark",
+    "region": "DK",
+    "tier": 2,
+    "path": "denmark-first-division",
+    "aliases": [
+      "danish 1st division",
+      "danish first division"
+    ]
+  },
+  {
+    "league": "norway-eliteserien",
+    "label": "Eliteserien",
+    "country": "norway",
+    "region": "NO",
+    "tier": 1,
+    "path": "norway-eliteserien",
+    "aliases": [
+      "eliteserien"
+    ]
+  },
+  {
+    "league": "norway-first-division",
+    "label": "Norwegian First Division",
+    "country": "norway",
+    "region": "NO",
+    "tier": 2,
+    "path": "norway-first-division",
+    "aliases": [
+      "obos-ligaen",
+      "obos ligaen",
+      "norwegian first division"
+    ]
+  },
+  {
+    "league": "sweden-allsvenskan",
+    "label": "Allsvenskan",
+    "country": "sweden",
+    "region": "SE",
+    "tier": 1,
+    "path": "sweden-allsvenskan",
+    "aliases": [
+      "allsvenskan"
+    ]
+  },
+  {
+    "league": "sweden-superettan",
+    "label": "Superettan",
+    "country": "sweden",
+    "region": "SE",
+    "tier": 2,
+    "path": "sweden-superettan",
+    "aliases": [
+      "superettan"
+    ]
+  },
+  {
+    "league": "finland-veikkausliiga",
+    "label": "Veikkausliiga",
+    "country": "finland",
+    "region": "FI",
+    "tier": 1,
+    "path": "finland-veikkausliiga",
+    "aliases": [
+      "veikkausliiga"
+    ]
+  },
+  {
+    "league": "finland-ykkosliiga",
+    "label": "Ykkösliiga",
+    "country": "finland",
+    "region": "FI",
+    "tier": 2,
+    "path": "finland-ykkosliiga",
+    "aliases": [
+      "ykkösliiga",
+      "ykkosliiga"
+    ]
+  },
+  {
+    "league": "romania-liga-1",
+    "label": "Romanian Liga I",
+    "country": "romania",
+    "region": "RO",
+    "tier": 1,
+    "path": "romania-liga-1",
+    "aliases": [
+      "romanian liga i",
+      "romanian superliga",
+      "superliga româniei"
+    ]
+  },
+  {
+    "league": "romania-liga-2",
+    "label": "Romanian Liga II",
+    "country": "romania",
+    "region": "RO",
+    "tier": 2,
+    "path": "romania-liga-2",
+    "aliases": [
+      "romanian liga ii",
+      "liga a ii-a"
+    ]
+  },
+  {
+    "league": "bulgaria-first-league",
+    "label": "Bulgarian First League",
+    "country": "bulgaria",
+    "region": "BG",
+    "tier": 1,
+    "path": "bulgaria-first-league",
+    "aliases": [
+      "bulgarian first league",
+      "bulgarian parva liga"
+    ]
+  },
+  {
+    "league": "bulgaria-second-league",
+    "label": "Bulgarian Second League",
+    "country": "bulgaria",
+    "region": "BG",
+    "tier": 2,
+    "path": "bulgaria-second-league",
+    "aliases": [
+      "bulgarian second league",
+      "bulgarian vtora liga"
+    ]
+  },
+  {
+    "league": "hungary-nb-1",
+    "label": "Nemzeti Bajnokság I",
+    "country": "hungary",
+    "region": "HU",
+    "tier": 1,
+    "path": "hungary-nb-1",
+    "aliases": [
+      "nemzeti bajnokság i",
+      "hungarian nb i"
+    ]
+  },
+  {
+    "league": "hungary-nb-2",
+    "label": "Nemzeti Bajnokság II",
+    "country": "hungary",
+    "region": "HU",
+    "tier": 2,
+    "path": "hungary-nb-2",
+    "aliases": [
+      "nemzeti bajnokság ii",
+      "hungarian nb ii"
+    ]
+  },
+  {
+    "league": "usa-mls",
+    "label": "MLS",
+    "country": "usa",
+    "region": "US",
+    "tier": 1,
+    "path": "usa-mls",
+    "aliases": [
+      "major league soccer"
+    ]
+  },
+  {
+    "league": "usa-usl-championship",
+    "label": "USL Championship",
+    "country": "usa",
+    "region": "US",
+    "tier": 2,
+    "path": "usa-usl-championship",
+    "aliases": [
+      "usl championship"
+    ]
+  },
+  {
+    "league": "brazil-serie-a",
+    "label": "Brasileirão Série A",
+    "country": "brazil",
+    "region": "BR",
+    "tier": 1,
+    "path": "brazil-serie-a",
+    "aliases": [
+      "brasileirão",
+      "brazilian serie a"
+    ]
+  },
+  {
+    "league": "brazil-serie-b",
+    "label": "Brasileirão Série B",
+    "country": "brazil",
+    "region": "BR",
+    "tier": 2,
+    "path": "brazil-serie-b",
+    "aliases": [
+      "brasileirão série b",
+      "brasileiro série b",
+      "brazilian serie b"
+    ]
+  },
+  {
+    "league": "argentina-liga-profesional",
+    "label": "Liga Profesional",
+    "country": "argentina",
+    "region": "AR",
+    "tier": 1,
+    "path": "argentina-liga-profesional",
+    "aliases": [
+      "liga profesional"
+    ]
+  },
+  {
+    "league": "argentina-primera-nacional",
+    "label": "Primera Nacional",
+    "country": "argentina",
+    "region": "AR",
+    "tier": 2,
+    "path": "argentina-primera-nacional",
+    "aliases": [
+      "primera nacional"
+    ]
+  },
+  {
+    "league": "mexico-liga-mx",
+    "label": "Liga MX",
+    "country": "mexico",
+    "region": "MX",
+    "tier": 1,
+    "path": "mexico-liga-mx",
+    "aliases": [
+      "liga mx"
+    ]
+  },
+  {
+    "league": "mexico-liga-expansion",
+    "label": "Liga de Expansión MX",
+    "country": "mexico",
+    "region": "MX",
+    "tier": 2,
+    "path": "mexico-liga-expansion",
+    "aliases": [
+      "liga de expansión mx",
+      "liga de expansion mx"
+    ]
+  },
+  {
+    "league": "japan-j1-league",
+    "label": "J1 League",
+    "country": "japan",
+    "region": "JP",
+    "tier": 1,
+    "path": "japan-j1-league",
+    "aliases": [
+      "j1 league",
+      "j1リーグ"
+    ]
+  },
+  {
+    "league": "japan-j2-league",
+    "label": "J2 League",
+    "country": "japan",
+    "region": "JP",
+    "tier": 2,
+    "path": "japan-j2-league",
+    "aliases": [
+      "j2 league",
+      "j2リーグ"
+    ]
+  },
+  {
+    "league": "south-korea-k-league-1",
+    "label": "K League 1",
+    "country": "south-korea",
+    "region": "KR",
+    "tier": 1,
+    "path": "south-korea-k-league-1",
+    "aliases": [
+      "k league 1",
+      "k리그1"
+    ]
+  },
+  {
+    "league": "south-korea-k-league-2",
+    "label": "K League 2",
+    "country": "south-korea",
+    "region": "KR",
+    "tier": 2,
+    "path": "south-korea-k-league-2",
+    "aliases": [
+      "k league 2",
+      "k리그2"
+    ]
+  },
+  {
+    "league": "saudi-pro-league",
+    "label": "Saudi Pro League",
+    "country": "saudi-arabia",
+    "region": "SA",
+    "tier": 1,
+    "path": "saudi-pro-league",
+    "aliases": [
+      "saudi pro league",
+      "saudi professional league"
+    ]
+  },
+  {
+    "league": "saudi-first-division",
+    "label": "Saudi First Division",
+    "country": "saudi-arabia",
+    "region": "SA",
+    "tier": 2,
+    "path": "saudi-first-division",
+    "aliases": [
+      "saudi first division",
+      "yelo league"
+    ]
+  },
+  {
+    "league": "australia-a-league-men",
+    "label": "A-League Men",
+    "country": "australia",
+    "region": "AU",
+    "tier": 1,
+    "path": "australia-a-league-men",
+    "aliases": [
+      "a-league men",
+      "a-league mens",
+      "a-league men’s",
+      "a-league men's"
+    ]
+  },
+  {
+    "league": "australia-a-league-women",
+    "label": "A-League Women",
+    "country": "australia",
+    "region": "AU",
+    "tier": 1,
+    "path": "australia-a-league-women",
+    "aliases": [
+      "a-league women",
+      "a-league womens",
+      "a-league women’s",
+      "a-league women's"
+    ]
+  },
+  {
+    "league": "uefa-champions-league",
+    "label": "UEFA Champions League",
+    "country": "international",
+    "region": "",
+    "tier": null,
+    "path": "champions-league",
+    "aliases": [
+      "uefa champions league"
+    ]
+  },
+  {
+    "league": "uefa-europa-league",
+    "label": "Europa League",
+    "country": "international",
+    "region": "",
+    "tier": null,
+    "path": "europa-league",
+    "aliases": [
+      "uefa europa league"
+    ]
+  },
+  {
+    "league": "uefa-conference-league",
+    "label": "Conference League",
+    "country": "international",
+    "region": "",
+    "tier": null,
+    "path": "conference-league",
+    "aliases": [
+      "uefa conference league"
+    ]
+  },
+  {
+    "league": "uefa-nations-league",
+    "label": "UEFA Nations League",
+    "country": "international",
+    "region": "",
+    "tier": null,
+    "path": "nations-league",
+    "aliases": [
+      "uefa nations league",
+      "nations league",
+      "liga nacija",
+      "lige nacija",
+      "лига нација",
+      "лиге нација",
+      "ligue des nations",
+      "liga de las naciones"
+    ]
+  },
+  {
+    "league": "uefa-euro",
+    "label": "European Championship",
+    "country": "international",
+    "region": "",
+    "tier": null,
+    "path": "euro",
+    "aliases": [
+      "uefa euro"
+    ]
+  },
+  {
+    "league": "fifa-world-cup",
+    "label": "FIFA World Cup",
+    "country": "international",
+    "region": "",
+    "tier": null,
+    "path": "world-cup",
+    "aliases": [
+      "fifa world cup"
+    ]
+  },
+  {
+    "league": "fifa-club-world-cup",
+    "label": "FIFA Club World Cup",
+    "country": "international",
+    "region": "",
+    "tier": null,
+    "path": "club-world-cup",
+    "aliases": [
+      "fifa club world cup",
+      "club world cup",
+      "mundial de clubes"
+    ]
+  },
+  {
+    "league": "conmebol-libertadores",
+    "label": "Copa Libertadores",
+    "country": "international",
+    "region": "",
+    "tier": null,
+    "path": "libertadores",
+    "aliases": [
+      "copa libertadores",
+      "conmebol libertadores"
+    ]
+  },
+  {
+    "league": "conmebol-sudamericana",
+    "label": "Copa Sudamericana",
+    "country": "international",
+    "region": "",
+    "tier": null,
+    "path": "sudamericana",
+    "aliases": [
+      "copa sudamericana",
+      "conmebol sudamericana"
+    ]
+  },
+  {
+    "league": "afc-champions-league-elite",
+    "label": "AFC Champions League Elite",
+    "country": "international",
+    "region": "",
+    "tier": null,
+    "path": "afc-champions-league",
+    "aliases": [
+      "afc champions league elite"
+    ]
+  },
+  {
+    "league": "caf-champions-league",
+    "label": "CAF Champions League",
+    "country": "international",
+    "region": "",
+    "tier": null,
+    "path": "caf-champions-league",
+    "aliases": [
+      "caf champions league",
+      "african champions league"
+    ]
+  },
+  {
+    "league": "football-international",
+    "label": "International",
+    "country": "international",
+    "region": "",
+    "tier": null,
+    "path": "international",
+    "aliases": [
+      "international football"
+    ]
+  }
+]

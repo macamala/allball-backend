@@ -3,7 +3,8 @@
 This module never reads or calls OpenAI. It is enabled only by
 NEWS_EXTERNAL_FREE_WRITERS_ENABLED=1 and uses configured Groq and
 Cloudflare credentials. Mistral and Gemini require an explicit Free-account
-opt-in; Z.ai is limited to the explicitly free GLM-4.7-Flash writer. An API key
+opt-in; Routeway requires an explicitly free model and current zero-price
+catalog evidence. Z.ai is limited to the explicitly free GLM-4.7-Flash writer. An API key
 alone never enables either route. Every HTTP attempt is reserved in the same
 durable News request ledger. Provider output is never publication authority:
 downstream deterministic, semantic, taxonomy, dedupe and image gates decide.
@@ -15,6 +16,7 @@ import json
 import os
 import re
 import time
+from threading import Lock
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from zoneinfo import ZoneInfo
@@ -32,7 +34,12 @@ _ZAI_ENDPOINT = "https://api.z.ai/api/paas/v4/chat/completions"
 _ZAI_FREE_MODEL = "glm-4.7-flash"
 _GEMINI_FREE_MODEL = "gemini-3.1-flash-lite"
 _GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/" + _GEMINI_FREE_MODEL + ":generateContent"
-_PROVIDERS = ("groq", "cloudflare", "gemini", "mistral", "zai")
+_ROUTEWAY_ENDPOINT = "https://api.routeway.ai/v1/chat/completions"
+_ROUTEWAY_MODELS_ENDPOINT = "https://api.routeway.ai/v1/models"
+_ROUTEWAY_FREE_MODEL = "muse-glimmer-30b:free"
+_ROUTEWAY_VERIFIED_UNTIL = 0.0
+_ROUTEWAY_LOCK = Lock()
+_PROVIDERS = ("groq", "cloudflare", "gemini", "routeway", "mistral", "zai")
 _CF_MODEL_RE = re.compile(r"^@[A-Za-z0-9._/-]{3,160}$")
 _MODEL_RE = re.compile(r"^[A-Za-z0-9._/+:-]{3,160}$")
 _PURPOSES = ("writer", "validator", "translation")
@@ -79,7 +86,7 @@ def _retry_seconds(value) -> Optional[float]:
 def _http_failure(provider: str, response, *, model: str = '') -> None:
     """Share provider quota/auth failures across purposes; never log response bodies."""
     status = response.status_code
-    if status not in {401, 403, 429}:
+    if status not in {401, 403, 429} and not (provider == 'routeway' and status == 402):
         return
     headers = getattr(response, "headers", {}) or {}
     seconds = _retry_seconds(headers.get("retry-after"))
@@ -92,6 +99,18 @@ def _http_failure(provider: str, response, *, model: str = '') -> None:
             payload = payload if isinstance(payload, dict) else {}
             error = payload.get("error")
             message = str(error.get("message") if isinstance(error, dict) else error or "").lower()
+            if provider == 'routeway':
+                # Official free limits are account-wide: never rotate models
+                # or keys after quota exhaustion. Daily reset is UTC midnight.
+                if headers.get('x-ratelimit-remaining-day') == '0' or re.search(r'per[ -]day|daily|\brpd\b', message):
+                    dimension = 'daily_free_requests'
+                    now = datetime.now(timezone.utc)
+                    reset = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+                    seconds = max(seconds or 0, _retry_seconds(headers.get('x-ratelimit-reset-day')) or 0,
+                                  (reset - now).total_seconds() + 60)
+                elif re.search(r'per[ -]minute|\brpm\b', message):
+                    dimension = 'minute_requests'
+                    seconds = max(seconds or 0, _retry_seconds(headers.get('x-ratelimit-reset-minute')) or 60)
             if provider == 'gemini' and isinstance(error, dict):
                 # Google's structured quota dimensions, never the response text.
                 for detail in error.get('details', []):
@@ -179,6 +198,11 @@ def enabled() -> bool:
 def _config(provider: str) -> Optional[dict]:
     if not enabled():
         return None
+    if provider == "routeway":
+        key = (os.getenv("ROUTEWAY_API_KEY") or "").strip()
+        if os.getenv("NEWS_ROUTEWAY_FREE_ENABLED") != "1" or not key:
+            return None
+        return {"provider": "routeway", "model": _ROUTEWAY_FREE_MODEL, "key": key}
     if provider == "gemini":
         # Operator's Free-project opt-in; never enable billing, Search grounding,
         # Pro models, paid fallbacks or model rotation after quota exhaustion.
@@ -410,6 +434,57 @@ def _gemini(cfg: dict, system: str, user: str, max_tokens: int, json_mode: bool)
         return None
 
 
+def _routeway(cfg: dict, system: str, user: str, max_tokens: int, json_mode: bool):
+    global _ROUTEWAY_VERIFIED_UNTIL
+    if cfg.get('model') != _ROUTEWAY_FREE_MODEL or not _ROUTEWAY_LOCK.acquire(blocking=False):
+        return None
+    try:
+        with httpx.Client(timeout=httpx.Timeout(95, connect=8), follow_redirects=False) as client:
+            if time.monotonic() >= _ROUTEWAY_VERIFIED_UNTIL:
+                catalog = client.get(_ROUTEWAY_MODELS_ENDPOINT, headers={'Accept': 'application/json'})
+                if catalog.status_code != 200:
+                    _http_failure('routeway', catalog)
+                    return None
+                rows = catalog.json().get('data', [])
+                match = next((row for row in rows if isinstance(row, dict) and row.get('id') == _ROUTEWAY_FREE_MODEL), {})
+                prices = match.get('pricing') or {}
+                if match.get('available') is not True or any(
+                    type((prices.get(side) or {}).get('price_per_million_t')) not in (int, float)
+                    or prices[side]['price_per_million_t'] != 0 for side in ('input', 'output')
+                ):
+                    logger.warning('[external_free] routeway free_catalog_unverified')
+                    return None
+                _ROUTEWAY_VERIFIED_UNTIL = time.monotonic() + 300
+            if not reserve_ai_request():
+                return None
+            payload = {
+                'model': _ROUTEWAY_FREE_MODEL,
+                'messages': [{'role': 'system', 'content': system}, {'role': 'user', 'content': user}],
+                'max_completion_tokens': max(4096, min(int(max_tokens), 9000)),
+                'temperature': 0.1 if json_mode else 0.35, 'stream': False,
+            }
+            if json_mode:
+                payload['response_format'] = {'type': 'json_object'}
+            response = client.post(_ROUTEWAY_ENDPOINT, headers={
+                'Authorization': 'Bearer ' + cfg['key'], 'Content-Type': 'application/json',
+            }, json=payload)
+        if response.status_code != 200:
+            _http_failure('routeway', response)
+            logger.warning('[external_free] routeway http_status=%s', response.status_code)
+            return None
+        # One request at a time, at most five/minute; no waiting inside News.
+        _COOLDOWN_UNTIL['routeway'] = time.monotonic() + 13
+        data = response.json()
+        if data.get('model') != _ROUTEWAY_FREE_MODEL:
+            return None
+        return _choice_text(data)
+    except Exception as exc:
+        logger.warning('[external_free] routeway request_failed=%s', type(exc).__name__)
+        return None
+    finally:
+        _ROUTEWAY_LOCK.release()
+
+
 def _mistral(cfg: dict, system: str, user: str, max_tokens: int, json_mode: bool):
     if not reserve_ai_request():
         return None
@@ -575,6 +650,8 @@ def completion(
             value = _zai(cfg, system, user, max_tokens, json_mode)
         elif cfg["provider"] == "gemini":
             value = _gemini(cfg, system, user, max_tokens, json_mode)
+        elif cfg["provider"] == "routeway":
+            value = _routeway(cfg, system, user, max_tokens, json_mode)
         else:
             value = _cloudflare(cfg, system, user, max_tokens, json_mode)
         if value:

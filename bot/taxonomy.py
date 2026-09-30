@@ -6,6 +6,8 @@ taxonomy behaviour is not rewritten.
 """
 
 from typing import Dict, List, Optional, TypedDict
+import json
+from pathlib import Path
 
 from sports_registry.news_aliases import extra_sport_aliases
 from sports_registry.sports import (
@@ -674,6 +676,17 @@ for _slug, _label, _sport in (
             "country": "international",
             "label": _label,
             "aliases": [],
+        }
+
+
+# News navigation and source-evidence classification share canonical IDs.
+# A catalog entry does not claim source coverage or create an article.
+for _news_league in json.loads(Path(__file__).with_name('news_football_leagues.json').read_text()):
+    _key = _news_league['league']
+    if _key not in COMPETITIONS:
+        COMPETITIONS[_key] = {
+            'sport': 'football', 'country': _news_league['country'],
+            'label': _news_league['label'], 'aliases': _news_league['aliases'],
         }
 
 
