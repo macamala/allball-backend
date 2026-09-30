@@ -1210,7 +1210,7 @@ def repair_recent_duplicate_news(
     from bot.dedupe import _title_tokens
 
     kept_titles: dict[str, dict[int, str]] = {}
-    kept_interviews: dict[str, set[str]] = {}
+    kept_interviews: dict[str, dict[str, int]] = {}
     token_index: dict[str, dict[str, set[int]]] = {}
     hidden = 0
     for tax, article_id, article_title, article_body in rows:
@@ -1222,7 +1222,7 @@ def repair_recent_duplicate_news(
         sport_titles = kept_titles.setdefault(sport, {})
         sport_index = token_index.setdefault(sport, {})
         interview_key = confirmed_interview_key(article_body)
-        sport_interviews = kept_interviews.setdefault(sport, set())
+        sport_interviews = kept_interviews.setdefault(sport, {})
 
         candidate_ids: set[int] = set()
         token_hits: dict[int, int] = {}
@@ -1235,29 +1235,40 @@ def repair_recent_duplicate_news(
             candidate_id for candidate_id, hits in token_hits.items() if hits >= 3
         )
         normalized = None
-        duplicate = bool(interview_key and interview_key in sport_interviews)
+        duplicate_id = sport_interviews.get(interview_key) if interview_key else None
         for candidate_id in candidate_ids:
             other = sport_titles.get(candidate_id, "")
             if other and titles_are_near_duplicate(title, other):
-                duplicate = True
+                duplicate_id = candidate_id
                 break
-        if not duplicate:
+        if duplicate_id is None:
             from bot.textutil import normalize_title
 
             normalized = normalize_title(title)
-            duplicate = any(
-                normalize_title(other) == normalized
-                for other in sport_titles.values()
-            )
-        if duplicate:
+            duplicate_id = next((
+                kept_id for kept_id, other in sport_titles.items()
+                if normalize_title(other) == normalized
+            ), None)
+        if duplicate_id is not None:
             tax.public_ok = False
             db.add(tax)
+            # A plain public_ok=False is reversible by taxonomy/image repair.
+            # Use the existing post-publication incident gate so maintenance
+            # cannot resurrect the duplicate. No row or timestamp is deleted.
+            from bot.news_learning import record_incident
+            record_incident(db, article_id=article_id, sport=sport,
+                reason_code='duplicate_story', phase='postpublish', status='open',
+                writer_provider='news-audit', writer_model='deterministic',
+                draft={'title': title, 'body': article_body or ''},
+                details={'kept_article_id': duplicate_id,
+                         'evidence': interview_key or 'strict_headline_duplicate'})
+            logger.info('[public_index] held duplicate article=%s kept_article=%s', article_id, duplicate_id)
             hidden += 1
             continue
 
         sport_titles[int(article_id)] = title
         if interview_key:
-            sport_interviews.add(interview_key)
+            sport_interviews[interview_key] = int(article_id)
         for token in tokens:
             sport_index.setdefault(token, set()).add(int(article_id))
     if hidden:

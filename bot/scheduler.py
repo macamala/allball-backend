@@ -65,7 +65,7 @@ def _run_image_health():
     """Bounded zero-AI hero-image maintenance for the current public feed."""
     from database import SessionLocal
     from public_cache import bump_public_cache
-    from public_index import repair_recent_gossip_news, repair_recent_news_images, repair_recent_sport_mislabels
+    from public_index import repair_recent_duplicate_news, repair_recent_gossip_news, repair_recent_news_images, repair_recent_sport_mislabels
 
     db = SessionLocal()
     try:
@@ -93,7 +93,8 @@ def _run_image_health():
             limit=600,
             max_age_hours=168,
         )
-        changed = image_changes + taxonomy_changes + gossip_changes
+        duplicate_changes = repair_recent_duplicate_news(db, limit=600, max_age_hours=168)
+        changed = image_changes + taxonomy_changes + gossip_changes + duplicate_changes
     except Exception as exc:
         try:
             db.rollback()
@@ -106,8 +107,8 @@ def _run_image_health():
     if changed:
         bump_public_cache()
     logger.info(
-        'News image-health finished: changed=%s images=%s taxonomy=%s gossip=%s',
-        changed, image_changes, taxonomy_changes, gossip_changes,
+        'News image-health finished: changed=%s images=%s taxonomy=%s gossip=%s duplicates=%s',
+        changed, image_changes, taxonomy_changes, gossip_changes, duplicate_changes,
     )
     return changed
 

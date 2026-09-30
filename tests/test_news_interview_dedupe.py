@@ -4,8 +4,8 @@ import pytest
 
 from bot.dedupe import confirmed_interview_key, existing_near_duplicate, titles_are_near_duplicate
 from database import SessionLocal
-from models import Article, ArticleTaxonomyResolution
-from public_index import repair_recent_duplicate_news
+from models import Article, ArticleTaxonomyResolution, NewsIncident
+from public_index import repair_recent_duplicate_news, persist_public_article
 from taxonomy_resolver import RESOLVER_VERSION
 
 
@@ -32,7 +32,7 @@ def test_same_club_player_or_partial_background_cannot_collapse_distinct_news(de
     assert confirmed_interview_key(BODY.replace(detail, 'other')) is None
 
 
-def test_ingest_and_public_repair_share_content_key_and_retain_both_rows():
+def test_ingest_and_public_repair_share_content_key_and_retain_both_rows(monkeypatch):
     db = SessionLocal()
     ids = []
     try:
@@ -53,7 +53,27 @@ def test_ingest_and_public_repair_share_content_key_and_retain_both_rows():
             ArticleTaxonomyResolution.article_id.in_(ids),
             ArticleTaxonomyResolution.public_ok.is_(True)).all()
         assert len(visible) == 1 and visible[0].article_id == ids[-1]
+        from bot.news_learning import article_has_open_incident
+        from taxonomy_resolver import TaxonomyResolution
+        import public_index
+        assert article_has_open_incident(db, ids[0])
+        monkeypatch.setattr(public_index, 'evaluate_quality', lambda **kwargs: {'ok': True, 'word_count': 100})
+        monkeypatch.setattr(public_index, 'isolation_ok', lambda *args, **kwargs: True)
+        monkeypatch.setattr(public_index, 'news_image_is_publishable', lambda *args: True)
+        held = db.get(Article, ids[0])
+        resolution = TaxonomyResolution(sport='football', competition=None,
+            sport_confidence=0.99, competition_confidence=0.0)
+        persist_public_article(db, held, resolution, commit=True)
+        tax = db.query(ArticleTaxonomyResolution).filter_by(article_id=held.id).one()
+        assert tax.public_ok is False
+        # Establish the incident, rather than an unrelated quality failure,
+        # is what prevents a reindex/repair from making the row public again.
+        db.query(NewsIncident).filter_by(article_id=held.id).update({'status': 'dismissed'})
+        db.commit()
+        persist_public_article(db, held, resolution, commit=True)
+        assert tax.public_ok is True
     finally:
+        db.query(NewsIncident).filter(NewsIncident.article_id.in_(ids)).delete(synchronize_session=False)
         db.query(ArticleTaxonomyResolution).filter(ArticleTaxonomyResolution.article_id.in_(ids)).delete(synchronize_session=False)
         db.query(Article).filter(Article.id.in_(ids)).delete(synchronize_session=False)
         db.commit(); db.close()

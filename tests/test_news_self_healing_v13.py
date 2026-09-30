@@ -118,7 +118,7 @@ def _prepare_ingest(monkeypatch):
     monkeypatch.setattr(ingest, 'news_image_is_reachable', lambda url: True)
     monkeypatch.setattr('public_read.public_query', lambda db: db.query(Article))
     monkeypatch.setattr(ingest, "existing_by_url", lambda *a: None)
-    monkeypatch.setattr(ingest, "existing_near_duplicate", lambda *a: None)
+    monkeypatch.setattr(ingest, "existing_near_duplicate", lambda *a, **kw: None)
     monkeypatch.setattr(ingest, "_source_on_ai_cooldown", lambda *a: False)
     monkeypatch.setattr(ingest, "_hold_ai_source", lambda *a, **k: None)
     monkeypatch.setattr(ingest, "extract_from_url", lambda *a: (FACTS, "https://example.test/hero.jpg"))
