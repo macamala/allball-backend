@@ -312,6 +312,45 @@ def test_failed_free_draft_gets_one_paid_quality_attempt(configured,monkeypatch)
     assert parsed and reason=='ok' and calls==[False,True]
 
 
+@pytest.mark.parametrize('rejection', ['direct_quote_requires_review', 'too-short',
+    'unsupported_known_entity:ac-milan', 'unsupported_number', 'quality:missing-body', 'empty'])
+@pytest.mark.parametrize('paid_status', ['cycle_allowance_exhausted', 'budget_exhausted:daily',
+    'budget_exhausted:monthly', 'budget_exhausted:total', 'model_unavailable', 'ledger_unavailable', 'cached'])
+def test_unavailable_paid_fallback_preserves_free_rejection_and_evidence(configured, monkeypatch, rejection, paid_status):
+    from bot import fetch_sources as ingest
+    calls = []
+    evidence = {'draft': {'body': 'Rejected free draft'}, 'source_facts': 'Verified source facts',
+                'validator_feedback': {'unsupported_claims': ['Unsupported assertion']}}
+    def attempt(**kwargs):
+        calls.append(lane.forced())
+        if not lane.forced():
+            ingest._LAST_STORY_FAILURE.set(evidence)
+            return None, rejection
+        assert kwargs['correction_reason'] == rejection
+        ingest._LAST_STORY_FAILURE.set({'draft': {}, 'source_facts': 'Verified source facts'})
+        lane._last_status.set(paid_status)
+        return None, 'empty'
+    monkeypatch.setattr(ingest, '_ai_story_attempt', attempt)
+    assert ingest._ai_story(title='source', facts='facts', sport='football', league='', max_ai_chars=6000) == (None, rejection)
+    assert calls == [False, True]
+    assert ingest._LAST_STORY_FAILURE.get() is evidence
+    assert not lane.forced() and not lane.paid_was_used()
+
+
+def test_paid_draft_failure_keeps_its_own_reason_and_evidence(configured, monkeypatch):
+    from bot import fetch_sources as ingest
+    def attempt(**kwargs):
+        if not lane.forced():
+            ingest._LAST_STORY_FAILURE.set({'draft': {'body': 'Free draft'}})
+            return None, 'unsupported_number'
+        configured['paid_returned'] = True
+        ingest._LAST_STORY_FAILURE.set({'draft': {'body': 'Paid draft'}})
+        return None, 'direct_quote_requires_review'
+    monkeypatch.setattr(ingest, '_ai_story_attempt', attempt)
+    assert ingest._ai_story(title='source', facts='facts', sport='football', league='', max_ai_chars=6000) == (None, 'direct_quote_requires_review')
+    assert ingest._LAST_STORY_FAILURE.get()['draft']['body'] == 'Paid draft'
+
+
 @pytest.mark.parametrize('reason',['validator-unavailable','validator-independent-unavailable',
                                  'validator-source-type:fan_poll'])
 def test_no_paid_rewrite_can_bypass_bad_source_or_missing_validator(configured,monkeypatch,reason):

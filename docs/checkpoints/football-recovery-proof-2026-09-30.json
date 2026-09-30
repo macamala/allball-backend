@@ -1,0 +1,67 @@
+{
+  "news": {
+    "sha": "5a82fa743c2a7661cf50fc62e319e78ed9703b24",
+    "tree": "4f179bcd397b741fdfc4f0ffb53c19cf2fbd3859",
+    "paths": [
+      "bot/fetch_sources.py",
+      "bot/news_policy.py",
+      "tests/test_news03_integration.py",
+      "tests/test_news_openai_budget.py",
+      "tests/test_news_football_cycle_recovery.py"
+    ],
+    "deployment": "bbfbaf46-40c0-4163-8bcd-8d6b148ee98d"
+  },
+  "tests": {
+    "passed": 263,
+    "paid_requests": 0
+  },
+  "cutoff_probe": {
+    "daily": true,
+    "monthly": true,
+    "total": true,
+    "paid_requests": 0
+  },
+  "protected": [
+    {
+      "service": "c08822c6-e602-4f32-a2bc-87aedbbe9b05",
+      "deployment": "a6018808-ec70-44a9-8ddc-5a65b30f9c57",
+      "commit": "ff091f98b6c879c85978d78df7bdcd0853b08dfb",
+      "status": "SUCCESS"
+    },
+    {
+      "service": "2c89eecf-b094-428a-8f7c-9642605a6baa",
+      "deployment": "25287c7e-08a8-46f8-aa3b-0d85ba6eaf53",
+      "commit": "ff091f98b6c879c85978d78df7bdcd0853b08dfb",
+      "status": "SUCCESS"
+    }
+  ],
+  "frontend_changed": false,
+  "images_changed": false,
+  "translation_enabled": false,
+  "runtime": [
+    {
+      "timestamp": "2026-09-30T10:12:00.313338497Z",
+      "message": "INFO:bot.news_openai:[news-openai] usage model=gpt-6-luna purpose=write article=None request=d72bbb3dbe4f input=2398 cached=1294 cache_write=0 output=458 usd=0.00035234 phase=production"
+    },
+    {
+      "timestamp": "2026-09-30T10:12:00.313346046Z",
+      "message": "INFO:bot.news_openai:[news-openai] quality=too-short request=d72bbb3dbe4f article=None"
+    },
+    {
+      "timestamp": "2026-09-30T10:12:26.220397111Z",
+      "message": "INFO:bot.news_openai:[news-openai] quality=ok request=fd87192e5258 article=None"
+    },
+    {
+      "timestamp": "2026-09-30T10:12:26.220456830Z",
+      "message": "INFO:bot.news_openai:[news-openai] usage model=gpt-6-luna purpose=write article=None request=fd87192e5258 input=2010 cached=1294 cache_write=0 output=363 usd=0.00026604 phase=production"
+    },
+    {
+      "timestamp": "2026-09-30T10:12:32.597903869Z",
+      "message": "INFO:bot.fetch_sources:[fetch_sources] published id=22315 sport=football slug=ivn-cullar-returns-to-rcd-mallorca-football-training-after-head-injury title=Iván Cuéllar returns to RCD Mallorca football training after head injury source_published_at=2026-09-30 10:07:39+00:00 stored_published_at=2026-09-30 10:07:39"
+    },
+    {
+      "timestamp": "2026-09-30T10:13:00.643618363Z",
+      "message": "INFO:bot.fetch_sources:[fetch_sources] paid fallback unavailable=cycle_allowance_exhausted retained_rejection=validator-unsupported-claim"
+    }
+  ]
+}
