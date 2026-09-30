@@ -461,6 +461,7 @@ def _routeway(cfg: dict, system: str, user: str, max_tokens: int, json_mode: boo
                 'model': _ROUTEWAY_FREE_MODEL,
                 'messages': [{'role': 'system', 'content': system}, {'role': 'user', 'content': user}],
                 'max_completion_tokens': max(4096, min(int(max_tokens), 9000)),
+                'reasoning_effort': 'none',
                 'temperature': 0.1 if json_mode else 0.35, 'stream': False,
             }
             if json_mode:

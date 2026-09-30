@@ -37,6 +37,21 @@ logger = logging.getLogger(__name__)
 
 HTML_INDEXES = (
     {
+        'id': 'bundesliga-german-news', 'sport': 'football', 'publisher': 'Bundesliga',
+        'url': 'https://www.bundesliga.com/de/bundesliga/news', 'host': 'www.bundesliga.com',
+        'paths': ('/de/bundesliga/news/',), 'article_path_re': r'/news/[^/]+-\d+$',
+    },
+    {
+        'id': 'bundesliga-english-news', 'sport': 'football', 'publisher': 'Bundesliga',
+        'url': 'https://www.bundesliga.com/en/bundesliga/news', 'host': 'www.bundesliga.com',
+        'paths': ('/en/bundesliga/news/',), 'article_path_re': r'/news/[^/]+-\d+$',
+    },
+    {
+        'id': 'bundesliga-2-news', 'sport': 'football', 'publisher': 'Bundesliga',
+        'url': 'https://www.bundesliga.com/en/2bundesliga/news', 'host': 'www.bundesliga.com',
+        'paths': ('/en/2bundesliga/news/',), 'article_path_re': r'/news/[^/]+-\d+$',
+    },
+    {
         'id': 'ge-brazil-football-news', 'sport': 'football', 'publisher': 'ge',
         'url': 'https://ge.globo.com/futebol/', 'host': 'ge.globo.com',
         'paths': ('/futebol/',), 'article_path_re': r'/noticia/\d{4}/\d{2}/\d{2}/[^/]+\.ghtml$',
@@ -782,6 +797,7 @@ def _hydrate(cfg: Dict, url: str, fallback_title: str, *, diagnostics=None, site
         "_publication_evidence": "article-published",
         "feed": feed,
         "_extracted": body,
+        "_classification_text": body,
         "_extracted_image": image,
     }
 

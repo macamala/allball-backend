@@ -45,6 +45,7 @@ def test_only_verified_zero_cost_route_is_called(pool,monkeypatch,tmp_path,price
             assert url == 'https://api.routeway.ai/v1/chat/completions'
             assert kwargs['json']['model'].endswith(':free')
             assert kwargs['json']['response_format']=={'type':'json_object'}
+            assert kwargs['json']['reasoning_effort']=='none'
             assert not {'tools','service_tier','fallbacks'} & kwargs['json'].keys()
             return httpx.Response(200,json={'model':returned_model,'choices':[{'finish_reason':finish,'message':{'content':'{"ok":true}'}}]})
     monkeypatch.setattr(external.httpx,'Client',Client)

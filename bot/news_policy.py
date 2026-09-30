@@ -77,6 +77,8 @@ def numeric_tokens(text, *, include_spelled=False):
     for match in re.finditer(r'(?<![\w:])([0-9]|[1-9][0-9]):([0-9]|[1-9][0-9])(?![\w:])', text or ''):
         before, after = (text or '')[max(0, match.start()-160):match.start()], (text or '')[match.end():match.end()+100]
         if (re.match(r'(?:\s*\(\d{1,2}:\d{1,2}\))?[-–](?:Sieg|Niederlage|Erfolg|Führung|Fuehrung)\b', after, re.I)
+                or (re.search(r'\b(?:савладали|савладао|победили|победио|savladali|savladao|pobedili|pobedio)\b[^.!?\n]{0,75}\(?$', before, re.I)
+                    and re.match(r'\)?\s+(?:у оквиру|u okviru)\b', after, re.I))
                 or (re.search(r'\bnach dem\s+$', before, re.I)
                     and re.match(r'\s+zum Auftakt gegen\b', after, re.I))
                 or (re.search(r'\bmit\s+$', before, re.I)
@@ -157,6 +159,9 @@ def canonical_news_url(value):
 
 
 _SOURCE_PATH_SPORTS = (
+    ("www.bundesliga.com", "/de/bundesliga/news/", "football"),
+    ("www.bundesliga.com", "/en/bundesliga/news/", "football"),
+    ("www.bundesliga.com", "/en/2bundesliga/news/", "football"),
     ("lnfoficial.com.br", "/noticias/", "futsal"),
     ("www.theguardian.com", "/football/", "football"),
     ("www.sportschau.de", "/fussball/", "football"),
@@ -853,6 +858,7 @@ def fair_news_queue(
     max_age_hours=72,
     sport_order=(),
     sport_inventory=None,
+    football_inventory=None,
     coverage_floor=6,
     same_day_timezone=None,
     prioritize_major_sports=False,
@@ -869,6 +875,7 @@ def fair_news_queue(
     rejected = defaultdict(int)
     seen = set()
     priorities = {}
+    sections = {}
     # RSS is collected before official HTML/JSON. For the same article, keep
     # the richest admissible representation rather than losing verified body
     # and image metadata simply because a sparse feed row arrived first.
@@ -897,6 +904,11 @@ def fair_news_queue(
             rejected['outside_editorial_focus'] += 1; continue
         from .news_football_priority import football_editorial_priority
         priorities[url] = football_editorial_priority(item, tags)
+        if sport == 'football' and football_inventory is not None:
+            from .news_football_priority import candidate_football_section, PRIMARY_COMPETITIONS
+            sections[url] = candidate_football_section(item, tags, today=now.date())
+            if sections[url] in PRIMARY_COMPETITIONS:
+                priorities[url] = max(1, priorities[url])
         seen.add(url)
         # Retain exact source URL for provenance and existing database identity.
         buckets[sport].append(item)
@@ -986,6 +998,12 @@ def fair_news_queue(
         queues = {sport: deque(_spread_publisher_queue(list(pending),
                     lambda item: priorities.get(news_source_identity(item.get('url')), 0)))
                   for sport, pending in queues.items()}
+    if football_inventory is not None and 'football' in queues:
+        from .news_football_priority import spread_football_leagues
+        queues['football'] = deque(spread_football_leagues(
+            list(queues['football']), football_inventory,
+            section=lambda item: sections.get(news_source_identity(item.get('url'))),
+            priority=lambda item: priorities.get(news_source_identity(item.get('url')), 0)))
     if prioritize_major_sports:
         # Editorial priority: Football, Basketball, another major sport, then
         # a protected coverage lane. All candidates already passed the same

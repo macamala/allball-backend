@@ -162,6 +162,7 @@ def competition_in_source(competition: str, text: str) -> bool:
     # Exact language equivalents seen in football sources. These establish
     # only a competition name; the independent validator still checks claims.
     local = {
+        'serbia-prva-liga': r'(?:Прв[аеуој]+ лиг[аеуи] Србиј[аеуи]|Prv[aeuoj]+ lig[aeui] Srbij[aeui])',
         'uefa-champions-league': r'(?:Лиг[аеуи] шампиона|Lig[aeui] šampiona|Liga dos Campeões|Ligue des champions)',
         'uefa-conference-league': r'(?:Лиг[аеуи] конференциј[аеуи]|Lig[aeui] konferencij[aeui])',
         'uefa-europa-league': r'(?:Лиг[аеуи] Европ[аеуи]|Lig[aeui] Evrop[aeui])',

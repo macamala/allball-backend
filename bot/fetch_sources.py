@@ -1124,7 +1124,7 @@ def _fetch_and_store_all_articles(
         images = repair_recent_news_images(db, limit=80, max_age_hours=72, recover_limit=8)
         after_images = time.monotonic()
         mislabels = repair_recent_sport_mislabels(db, limit=600, max_age_hours=168)
-        from .news_league_index import repair_football_league_menus
+        from .news_league_index import repair_football_league_menus, recent_public_football_inventory
         mislabels += repair_football_league_menus(db)
         after_mislabels = time.monotonic()
         repaired = repair_recent_unresolved(db, limit=24)
@@ -1134,6 +1134,7 @@ def _fetch_and_store_all_articles(
         duplicates = repair_recent_duplicate_news(db, limit=600, max_age_hours=168)
         after_dedupe = time.monotonic()
         sport_inventory = recent_public_sport_inventory(db, max_age_hours=NEWS_FRESHNESS_HOURS)
+        football_inventory = recent_public_football_inventory(db, max_age_hours=NEWS_FRESHNESS_HOURS)
         logger.info('[fetch_sources] freshness_policy=rolling_utc max_age_hours=%s archive_retained=true', NEWS_FRESHNESS_HOURS)
         logger.info(
             "[fetch_sources] repair phases images=%s %.3fs mislabels=%s %.3fs "
@@ -1160,6 +1161,7 @@ def _fetch_and_store_all_articles(
                 if row["active"] and row["supports_news"]
             ],
             sport_inventory=sport_inventory,
+            football_inventory=football_inventory,
             coverage_floor=6,
             prioritize_major_sports=True,
             allowed_sports={'football'} if os.getenv('NEWS_FOOTBALL_ONLY') == '1' else None,
@@ -1196,6 +1198,10 @@ def _fetch_and_store_all_articles(
              "title": item["title"][:90]}
             for item in queued[:8]
         ])
+        from .news_football_priority import candidate_football_section
+        logger.info('[fetch_sources] football_league_inventory=%s queue_sections=%s',
+            football_inventory, [candidate_football_section(item, _classify_candidate(item))
+                                 for item in queued[:8]])
         active_news_sports = [
             row["id"]
             for row in SPORTS

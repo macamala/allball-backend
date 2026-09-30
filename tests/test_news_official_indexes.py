@@ -66,6 +66,7 @@ def test_hydrate_requires_explicit_timestamp_and_article_prose(monkeypatch):
     assert item['feed']['sport']=='handball'
     assert item['published_at'].tzinfo is not None
     assert 'international championship' in item['_extracted']
+    assert item['_classification_text'] == item['_extracted']
 
     no_date=html.replace(
         b'<meta property="article:published_time" content="2026-09-26T12:00:00+00:00">', b''

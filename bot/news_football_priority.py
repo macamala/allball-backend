@@ -1,5 +1,7 @@
 """News-only editorial order. Priority is never taxonomy or admission evidence."""
 import re
+from collections import defaultdict, deque
+from types import SimpleNamespace
 from urllib.parse import urlsplit
 
 PRIMARY_COMPETITIONS = frozenset({
@@ -8,6 +10,52 @@ PRIMARY_COMPETITIONS = frozenset({
     'uefa-europa-league', 'uefa-conference-league', 'uefa-nations-league',
     'fifa-world-cup', 'fifa-club-world-cup', 'uefa-euro',
 })
+
+
+def candidate_football_section(item, tags, *, today=None):
+    """Scheduling hint from source evidence, never a published league claim."""
+    if getattr(tags, 'sport', None) != 'football':
+        return None
+    from .news_football_sections import football_news_section
+    body = item.get('_classification_text') or item.get('_extracted') or ''
+    source = SimpleNamespace(title=item.get('title') or '',
+        summary=item.get('summary') or str(body)[:500], content=body,
+        published_at=item.get('published_at'))
+    return football_news_section(source, today=today) or getattr(tags, 'league', None)
+
+
+def spread_football_leagues(items, inventory, *, section, priority):
+    """Keep Zvezda first, then balance known leagues with a protected other lane.
+
+    Three major slots alternate with one other-league slot. Within each lane,
+    the smallest public inventory wins; projected slots prevent one empty
+    league from consuming the cycle. Preserve the existing publisher order
+    inside each league. Unknown sections receive no invented coverage debt.
+    """
+    output, lanes = [], {1: {}, 0: {}}
+    for item in items:
+        tier = priority(item)
+        if tier >= 2:
+            output.append(item)
+            continue
+        key = section(item)
+        lanes[1 if tier else 0].setdefault(key, deque()).append(item)
+    scheduled = defaultdict(int)
+    slot = 0
+    while lanes[1] or lanes[0]:
+        tier = 0 if slot % 4 == 3 else 1
+        if not lanes[tier]:
+            tier = 1 - tier
+        pending = lanes[tier]
+        key = min(pending, key=lambda k: (
+            max(0, int(inventory.get(k, 0) or 0)) + scheduled[k] if k else 2 + scheduled[k],
+        ))
+        output.append(pending[key].popleft())
+        scheduled[key] += 1
+        if not pending[key]:
+            del pending[key]
+        slot += 1
+    return output
 
 
 def football_editorial_priority(item, tags=None):
