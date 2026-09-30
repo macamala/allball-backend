@@ -242,6 +242,8 @@ def _run_cycle():
             rewritten, translated_rows, indexed, budget.attempts,
             budget.blocked_reason, historical,
         )
+        from .news_openai import usage_summary
+        usage_summary()
         return rewritten
     except Exception as exc:
         logger.error('News AI cycle failed: %s', type(exc).__name__)
@@ -296,8 +298,9 @@ def main():
     )
     try:
         if os.getenv('OPENAI_MODEL_PREFLIGHT', '').lower() == 'true':
-            from .news_openai import model_preflight
+            from .news_openai import model_preflight, cutoff_probe
             model_preflight()
+            cutoff_probe()
         # A bounded zero-AI public sanity pass is safe on deploy and immediately
         # removes bad taxonomy / hero media. This is deliberately NOT the AI
         # writer cycle, so deploys cannot consume the durable request allowance.

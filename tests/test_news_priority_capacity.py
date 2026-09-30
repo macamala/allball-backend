@@ -198,7 +198,7 @@ def test_cloudflare_writer_can_use_independent_xkiro_fallback(monkeypatch):
 def test_numeric_contract_and_corrective_data_keep_source_authority(monkeypatch):
     prompts = []
     monkeypatch.setattr(writer, 'openai_rate_limited', lambda: False)
-    monkeypatch.setattr(writer, '_call_selected_ai', lambda prompt: prompts.append(prompt))
+    monkeypatch.setattr(writer, '_call_selected_ai', lambda prompt, **kw: prompts.append(prompt))
     writer.write_ninkosports_story('Club confirms 2026 plan', 'There are 12 teams and a 3-1 result.',
         correction_reason='validator-unsupported-claim',
         correction_feedback={'unsupported_claims': ['Invented capacity of 999 seats'], 'changed_names': []})
@@ -288,7 +288,7 @@ def test_modal_may_is_not_a_month_and_cannot_authorize_a_new_date():
 def test_length_correction_paraphrases_quotes_and_uses_verified_free_corrective_route(monkeypatch):
     prompts = []
     monkeypatch.setattr(writer, 'openai_rate_limited', lambda: False)
-    monkeypatch.setattr(writer, '_call_selected_ai', lambda prompt: prompts.append(prompt))
+    monkeypatch.setattr(writer, '_call_selected_ai', lambda prompt, **kw: prompts.append(prompt))
     writer.write_ninkosports_story('Football squad announcement', 'The club announced its new squad.', retry_for_length=True)
     assert 'VALIDATION_FAILURE: too-short' in prompts[0]
     assert 'paraphrased reported statements' in prompts[0]

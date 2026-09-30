@@ -114,14 +114,17 @@ def test_complete_batch_keeps_existing_validation_and_reserves_before_http(enabl
         assert next(i for i,c in enumerate(calls) if c[0] == 'reserve') < next(i for i,c in enumerate(calls) if c[0] == 'POST')
 
 
-def test_deepl_failure_cannot_fall_back_to_writer_or_modify_english(enabled, monkeypatch):
+def test_deepl_failure_tries_free_translation_without_modifying_english(enabled, monkeypatch):
     article = SimpleNamespace(id=1, **SOURCE, ai_content=None)
     article.content = article.body
     before = copy.deepcopy(article.__dict__)
     monkeypatch.setattr(deepl, 'translate_source', lambda source: None)
-    monkeypatch.setattr(translations, 'free_json_completion', lambda *a, **k: pytest.fail('spent writer quota'))
+    calls = []
+    monkeypatch.setattr(translations, 'free_json_completion', lambda *a, **k: calls.append('free') or None)
+    monkeypatch.setenv('OPENAI_ENABLED', 'false')
     assert translations.translate_article_payload(article) is None
     assert article.__dict__ == before
+    assert calls == ['free']
 
 
 def test_single_language_validation_stays_strict():

@@ -207,7 +207,7 @@ def _restore_xml(value, locks, language):
     return "".join(parts).strip()
 
 
-def translate_source(source):
+def translate_source(source, *, languages=None):
     """Translate the complete article to six languages, with existing gates."""
     if not deepl_enabled() or time.monotonic() < _cooldown_until:
         return None
@@ -217,7 +217,10 @@ def translate_source(source):
         return None
     documents, locks = _xml_fields(source)
     # XML overhead is included deliberately; reservations overestimate billing.
-    characters = sum(len(value) for value in documents) * len(TARGETS)
+    targets = {k:v for k,v in TARGETS.items() if languages is None or k in languages}
+    if not targets:
+        return None
+    characters = sum(len(value) for value in documents) * len(targets)
     if not _character_ledger(characters):
         logger.info("[deepl] held reason=daily_character_budget requested=%s", characters)
         return None
@@ -259,11 +262,11 @@ def translate_source(source):
     # Three bounded calls at a time avoid six serial long-running requests.
     # The whole batch was reserved before any HTTP translation was sent.
     with ThreadPoolExecutor(max_workers=3) as pool:
-        results = list(pool.map(translate_language, TARGETS.items()))
+        results = list(pool.map(translate_language, targets.items()))
     if any(result is None for result in results):
         return None
     payload = dict(results)
-    validated = _validate(source, payload)
+    validated = _validate(source, payload, languages=tuple(targets))
     if validated and not _semantic_validation(source, validated):
         return None
     if validated:
@@ -290,7 +293,7 @@ def _semantic_validation(source, payload):
         'broken/incomprehensible sentences. Exact English proper names and '
         'localized punctuation are intentional; do not reject those alone. '
         'Serbian must be Latin script. Fail closed on factual uncertainty. '
-        'Return only {"valid":true,"issues":[]} when all six are faithful; '
+        'Return only {"valid":true,"issues":[]} when all supplied translations are faithful; '
         'otherwise return {"valid":false,"issues":["language: short reason"]}.'
     )
     raw = free_json_completion(system, json.dumps({'english': source, 'translations': payload},

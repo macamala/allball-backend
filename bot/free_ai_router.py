@@ -163,6 +163,21 @@ def last_writer_identity() -> tuple[str, str]:
     return _LAST_WRITER.get()
 
 
+def mark_writer_identity(provider: str, model: str):
+    _LAST_WRITER.set((provider, model))
+
+
+def independent_validator_available() -> bool:
+    """An OpenAI writer can be validated by any existing free provider."""
+    try:
+        from .news_external_free import configured_identities
+        if configured_identities('validator'):
+            return True
+    except Exception:
+        pass
+    return not _rate_limited and _xkiro_available()
+
+
 def last_json_identity() -> tuple[str, str]:
     return _LAST_JSON.get()
 

@@ -23,7 +23,7 @@ from .free_ai_router import (
 logger = logging.getLogger(__name__)
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-6-luna")
 AI_PROVIDER_MODE = (os.getenv("NEWS_AI_PROVIDER_MODE") or "xkiro_free").strip().lower()
 
 _rate_limited = False
@@ -168,15 +168,26 @@ def reset_openai_rate_limit() -> None:
 def openai_rate_limited() -> bool:
     """Legacy function name retained for callers; reflects the selected AI route."""
     if AI_PROVIDER_MODE == "xkiro_free":
-        return free_ai_rate_limited()
+        if not free_ai_rate_limited():
+            return False
+        from .news_openai import available
+        from .free_ai_router import independent_validator_available
+        return not (available() and independent_validator_available())
     return _rate_limited or _hard_quota
 
 
 def ai_available() -> bool:
     if AI_PROVIDER_MODE == "xkiro_free":
-        return free_ai_available()
+        if free_ai_available():
+            return True
+        from .news_openai import available
+        from .free_ai_router import independent_validator_available
+        return available() and independent_validator_available()
     if AI_PROVIDER_MODE == "openai_legacy":
-        return os.getenv("NEWS_ALLOW_PAID_AI") == "1" and bool(OPENAI_API_KEY)
+        # Old paid-only config cannot bypass the new monetary ledger.
+        from .news_openai import available
+        from .free_ai_router import independent_validator_available
+        return available() and independent_validator_available()
     return False
 
 
@@ -208,81 +219,37 @@ def _is_quota_error(info: dict) -> bool:
 
 
 def _call_openai(prompt: str) -> Optional[str]:
-    global _rate_limited, _hard_quota
-    if openai_rate_limited():
-        return None
-    if not OPENAI_API_KEY:
-        logger.warning("[rewrite_ai] OPENAI_API_KEY is not set")
-        return None
-    for attempt in range(2):
-        # This reservation covers each actual HTTP attempt, including 429 retries
-        # and separate length retries. No active budget/ledger means no request.
-        if not reserve_ai_request():
-            logger.warning("[rewrite_ai] request budget unavailable or exhausted")
-            return None
-        try:
-            with httpx.Client(timeout=60) as client:
-                resp = client.post(
-                    "https://api.openai.com/v1/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {OPENAI_API_KEY}",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "model": OPENAI_MODEL,
-                        "messages": [
-                            {"role": "system", "content": SYSTEM_PROMPT},
-                            {"role": "user", "content": prompt},
-                        ],
-                        "temperature": 0.35,
-                        "max_tokens": 1800,
-                    },
-                )
-            if resp.status_code == 429:
-                info = _parse_openai_error(resp)
-                logger.error(
-                    "[rewrite_ai] OpenAI 429 type=%s code=%s retry_after=%s message=%s",
-                    info["type"] or "unknown",
-                    info["code"] or "unknown",
-                    info["retry_after"] or "none",
-                    info["message"] or resp.text[:300],
-                )
-                if _is_quota_error(info):
-                    _hard_quota = True
-                    logger.error(
-                        "[rewrite_ai] OpenAI quota/billing lock; skipping AI until process restart"
-                    )
-                    return None
-                if attempt == 0:
-                    wait_s = 5.0
-                    if info["retry_after"]:
-                        try:
-                            wait_s = min(20.0, max(1.0, float(info["retry_after"])))
-                        except ValueError:
-                            wait_s = 5.0
-                    time.sleep(wait_s + random.uniform(0.1, 0.6))
-                    continue
-                _rate_limited = True
-                logger.error("[rewrite_ai] OpenAI rate-limited; pausing AI for this run")
-                return None
-            resp.raise_for_status()
-            data = resp.json()
-            choice = data["choices"][0]
-            if choice.get("finish_reason") != "stop" or choice.get("message", {}).get("refusal"):
-                return None
-            content = choice.get("message", {}).get("content")
-            return content.strip() if isinstance(content, str) else None
-        except Exception as e:
-            logger.error("[rewrite_ai] OpenAI call failed: %s", e)
-            return None
-    return None
+    """Compatibility entry point; no unmetered legacy transport remains."""
+    from .news_openai import complete, MODEL
+    from .free_ai_router import mark_writer_identity
+    raw = complete(SYSTEM_PROMPT, prompt)
+    if raw:
+        mark_writer_identity('openai', MODEL)
+    return raw
 
 
-def _call_selected_ai(prompt: str) -> Optional[str]:
+def _call_selected_ai(prompt: str, *, quality_retry=False) -> Optional[str]:
     if AI_PROVIDER_MODE == "xkiro_free":
-        return write_free_story(SYSTEM_PROMPT, prompt)
-    if AI_PROVIDER_MODE == "openai_legacy" and os.getenv("NEWS_ALLOW_PAID_AI") == "1":
-        return _call_openai(prompt)
+        from . import news_openai
+        from .free_ai_router import mark_writer_identity
+        def paid():
+            raw = news_openai.complete(SYSTEM_PROMPT, prompt)
+            if raw:
+                mark_writer_identity('openai', news_openai.MODEL)
+            return raw
+        if news_openai.prefer_paid(quality_retry=quality_retry):
+            raw = paid()
+            if raw or news_openai.forced():
+                return raw
+        raw = write_free_story(SYSTEM_PROMPT, prompt)
+        return raw or paid()
+    if AI_PROVIDER_MODE == "openai_legacy":
+        from .news_openai import complete, MODEL
+        from .free_ai_router import mark_writer_identity
+        raw = complete(SYSTEM_PROMPT, prompt)
+        if raw:
+            mark_writer_identity('openai', MODEL)
+        return raw
     logger.warning("[rewrite_ai] no permitted AI provider route")
     return None
 
@@ -294,8 +261,6 @@ def validate_story_facts(
     trusted_context: str = "",
 ) -> tuple[bool, str]:
     """Fail closed on free mode unless the second-pass fact checker approves."""
-    if AI_PROVIDER_MODE != "xkiro_free":
-        return True, "legacy-route"
     if not isinstance(parsed, dict):
         return False, "missing-draft"
     verified = source_facts
@@ -386,7 +351,7 @@ def write_ninkosports_story(
                 + "\nRemove the identified unsupported assertions. Use only the verified source facts above. "
                   "Do not replace a rejected assertion with a guess. The corrected draft will be independently validated again.\n"
             )
-    return _call_selected_ai(prompt)
+    return _call_selected_ai(prompt, quality_retry=bool(correction_reason or retry_for_length))
 
 
 def parse_ai_output(ai_text: str) -> dict:

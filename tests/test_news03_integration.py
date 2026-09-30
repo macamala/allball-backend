@@ -48,7 +48,25 @@ def mock_http(monkeypatch,responses):
 
 def response(status=200,finish='stop',refusal=None):
     return httpx.Response(status,request=httpx.Request('POST','https://example.test'),json={
+        'model':'gpt-6-luna', 'service_tier':'default',
+        'usage':{'prompt_tokens':100,'completion_tokens':20},
         'choices':[{'finish_reason':finish,'message':{'content':'Original test draft','refusal':refusal}}]})
+
+
+@pytest.fixture
+def paid_operation(monkeypatch, tmp_path):
+    from sqlalchemy import create_engine
+    from bot import news_openai, news_openai_ledger
+    monkeypatch.setenv('OPENAI_ENABLED', 'true')
+    monkeypatch.setenv('OPENAI_ROLLOUT_MODE', 'production')
+    monkeypatch.setenv('OPENAI_PRODUCTION_APPROVED', 'true')
+    monkeypatch.setattr(news_openai, 'model_preflight', lambda:True)
+    monkeypatch.setattr(news_openai, '_cooldown_until', 0)
+    book = news_openai_ledger.OpenAILedger(create_engine('sqlite:///' + str(tmp_path/'cost.db')))
+    monkeypatch.setattr(news_openai_ledger, '_default', book)
+    with news_openai.source_context({'url':'https://source.test/verified'}) as context:
+        context.update(verified=True, evidence_hash='fixture')
+        yield book
 
 
 def test_no_active_budget_means_no_request(monkeypatch):
@@ -57,26 +75,27 @@ def test_no_active_budget_means_no_request(monkeypatch):
     assert not posts
 
 
-def test_every_retry_charged_and_no_refund(monkeypatch,tmp_path):
+def test_429_has_no_automatic_paid_retry(monkeypatch,tmp_path,paid_operation):
     posts=mock_http(monkeypatch,[response(429),response()])
     budget=AiRequestBudget(2,str(tmp_path/'ledger.db'))
     with ai_budget_scope(budget):
-        assert writer._call_openai('fixture')=='Original test draft'
         assert writer._call_openai('fixture') is None
-    assert budget.attempts==len(posts)==2
+        assert writer._call_openai('fixture') is None
+    assert budget.attempts==len(posts)==1
 
 
-def test_retry_cannot_exceed_remaining_allowance(monkeypatch,tmp_path):
+def test_retry_cannot_exceed_remaining_allowance(monkeypatch,tmp_path,paid_operation):
     posts=mock_http(monkeypatch,[response(429)])
     budget=AiRequestBudget(1,str(tmp_path/'ledger.db'))
     with ai_budget_scope(budget):assert writer._call_openai('fixture') is None
-    assert len(posts)==budget.attempts==1
+    # Preserve a request for the independent validator; don't buy an unusable draft.
+    assert len(posts)==budget.attempts==0
 
 
 @pytest.mark.parametrize('result',[response(finish='length'),response(refusal='Not produced'),httpx.ReadTimeout('synthetic timeout')])
-def test_incomplete_or_failed_response_still_charged(monkeypatch,tmp_path,result):
+def test_incomplete_or_failed_response_still_charged(monkeypatch,tmp_path,result,paid_operation):
     posts=mock_http(monkeypatch,[result])
-    budget=AiRequestBudget(1,str(tmp_path/'ledger.db'))
+    budget=AiRequestBudget(2,str(tmp_path/'ledger.db'))
     with ai_budget_scope(budget): assert writer._call_openai('fixture') is None
     assert len(posts)==budget.attempts==1
 
@@ -459,7 +478,7 @@ def test_coverage_debt_does_not_reserve_writer_budget_for_translations(monkeypat
 
 def test_writer_prompt_includes_numeric_and_quote_safety_contract(monkeypatch):
     captured=[]
-    monkeypatch.setattr(writer, "_call_selected_ai", lambda prompt: captured.append(prompt) or "draft")
+    monkeypatch.setattr(writer, "_call_selected_ai", lambda prompt, **kw: captured.append(prompt) or "draft")
     writer.write_ninkosports_story(
         "Club wins 3:1 in 2026 final",
         "The club won 3:1 in the 2026 final.",
@@ -563,7 +582,7 @@ def test_live_ingest_rejects_candidate_older_than_24_hours(monkeypatch):
 @pytest.mark.parametrize('first_coverage,reason,attempts',[(False,'validator-unsupported-claim',1),(True,'validator-unsupported-claim',2),(True,'validator-source-type:fan_poll',1)])
 def test_first_coverage_can_correct_facts_but_never_rewrite_a_non_news_source(monkeypatch,tmp_path,first_coverage,reason,attempts):
     item=prepare_ingest(monkeypatch)
-    monkeypatch.setattr(ingest,'classify_article',lambda *a,**kw:SimpleNamespace(sport='snooker',league='snooker-international',country='international'))
+    monkeypatch.setattr(ingest,'_classify_item',lambda *a,**kw:SimpleNamespace(sport='snooker',league='snooker-international',country='international'))
     calls=[]
     def story(**kwargs):
         calls.append(kwargs)
@@ -579,7 +598,7 @@ def test_first_coverage_can_correct_facts_but_never_rewrite_a_non_news_source(mo
 
 def test_sport_mismatch_retry_gets_taxonomy_correction_prompt(monkeypatch):
     captured=[]
-    monkeypatch.setattr(writer, "_call_selected_ai", lambda prompt: captured.append(prompt) or "draft")
+    monkeypatch.setattr(writer, "_call_selected_ai", lambda prompt, **kw: captured.append(prompt) or "draft")
     writer.write_ninkosports_story(
         "NRLW signing update",
         "The source reports a rugby league signing update.",

@@ -31,6 +31,7 @@ from .news_learning import (
 )
 from .news_budget import active_ai_budget, ai_budget_scope, configured_budget, ai_budget_exhausted
 from .news_deepl import deepl_enabled
+from . import news_openai
 from sports_registry.sports import SPORTS
 from .classify import Classification, classify_article
 from .dedupe import existing_by_url, existing_near_duplicate, unprocessed_source_items
@@ -153,7 +154,7 @@ def _correction_retry_allowed(*, prefer_breadth: bool = False, force: bool = Fal
     return int(budget.attempts) + 2 <= source_ceiling
 
 
-def _ai_story(
+def _ai_story_attempt(
     title: str,
     facts: str,
     sport: str,
@@ -192,6 +193,9 @@ def _ai_story(
     if not body:
         return reject("empty", parsed)
     if is_dramatic_shortening(facts, body):
+        from .free_ai_router import last_writer_identity
+        if last_writer_identity()[0] == 'openai':
+            return reject('too-short', parsed)
         raw = write_ninkosports_story(
             title=title,
             facts=payload,
@@ -266,6 +270,36 @@ def _ai_story(
         logger.info("[fetch_sources] validation_review=%s title=%s", feedback, title[:80])
         return reject(facts_reason, parsed, feedback)
     return parsed, "ok"
+
+
+def _ai_story(*args, **kwargs):
+    """Keep every existing gate; give a rejected free draft one paid fallback."""
+    parsed, reason = _ai_story_attempt(*args, **kwargs)
+    if parsed and reason == 'ok':
+        ok, why = quality_check(parsed.get('title') or '', parsed.get('body') or '',
+                                kwargs.get('sport'), require_english=True)
+        if not ok:
+            parsed, reason = None, 'quality:' + why
+    if news_openai.paid_was_used():
+        news_openai.record_quality(reason)
+        return parsed, reason
+    # Buying a second writer cannot replace a missing independent validator or
+    # turn a non-news product into a news source.
+    if (parsed is None and news_openai.available() and not ai_budget_exhausted()
+            and not str(reason).startswith(('validator-source-type:', 'validator-unavailable',
+                                           'validator-independent-unavailable'))):
+        failure = _LAST_STORY_FAILURE.get()
+        retry = dict(kwargs, correction_reason=reason,
+                     correction_feedback=failure.get('validator_feedback') or {})
+        with news_openai.force_paid():
+            parsed, reason = _ai_story_attempt(*args, **retry)
+        if parsed and reason == 'ok':
+            ok, why = quality_check(parsed.get('title') or '', parsed.get('body') or '',
+                                    kwargs.get('sport'), require_english=True)
+            if not ok:
+                parsed, reason = None, 'quality:' + why
+        news_openai.record_quality(reason)
+    return parsed, reason
 
 
 def _extract_image_url(entry) -> Optional[str]:
@@ -519,6 +553,7 @@ def _source_grounded_resolution(resolved, title: str, facts: str):
     return resolved
 
 
+@news_openai.with_source_context
 def _ingest_item(
     db: Session,
     item: Dict,
@@ -621,6 +656,8 @@ def _ingest_item(
         logger.info("[fetch_sources] skip quality=%s title=%s", reason, item["title"][:80])
         return None, False
 
+    news_openai.verified_source(item, tags, facts)
+
     story_title = item["title"]
     story_body = facts
     story_summary = facts[:400]
@@ -666,6 +703,12 @@ def _ingest_item(
             if learned_violation:
                 parsed = None
                 rewrite_reason = learned_violation
+
+        if news_openai.shadow_result():
+            news_openai.record_quality(rewrite_reason)
+            logger.info('[fetch_sources] OpenAI dry-run quality=%s source=%s public_write=false',
+                        rewrite_reason, news_openai.source_key(source_url)[:12])
+            return None, False
 
         incident = None
         if rewrite_reason != "ok":
@@ -868,6 +911,7 @@ def _ingest_item(
     db.add(article)
     db.commit()
     db.refresh(article)
+    news_openai.bind_article(article.id)
     try:
         from public_index import persist_public_article
 

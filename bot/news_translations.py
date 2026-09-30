@@ -13,6 +13,7 @@ import logging
 import os
 import re
 from typing import Dict, Optional
+from contextvars import ContextVar
 
 from sqlalchemy.orm import Session
 
@@ -25,6 +26,7 @@ logger = logging.getLogger(__name__)
 
 LANGUAGES = ("sr", "es", "de", "fr", "it", "pt")
 TRANSLATION_PROVIDER = "multi-free-v15"
+_TRANSLATION_META = ContextVar('news_translation_provider_by_language', default={})
 # v14 protects both proper names and numeric values with reversible tokens.
 CYRILLIC_RE = re.compile(r"[\u0400-\u04FF]")
 NUMBER_RE = re.compile(r"(?<!\w)\d+(?:[.,:/–-]\d+)*(?:st|nd|rd|th|%|\b)", re.I)
@@ -450,6 +452,8 @@ def _decode_json_payload(raw: str):
 
 
 def translate_article_payload(article: Article) -> Optional[Dict[str, Dict[str, str]]]:
+    _TRANSLATION_META.set({})
+    languages = tuple(getattr(article, '_news_missing_translation_languages', LANGUAGES))
     source = {
         "title": str(article.title or "").strip(),
         "summary": str(article.summary or "").strip(),
@@ -460,8 +464,11 @@ def translate_article_payload(article: Article) -> Optional[Dict[str, Dict[str, 
         return None
     from .news_deepl import deepl_enabled, translate_source
     if deepl_enabled():
-        # DeepL failure never spends original-writer quota as an implicit retry.
-        return translate_source(source)
+        translated = (translate_source(source) if languages == LANGUAGES else
+                      translate_source(source, languages=languages))
+        if translated:
+            _TRANSLATION_META.set({k: ('deepl-free-v4', 'deepl-xml-v1-locked') for k in translated})
+            return translated
     locked_names = [
         name for name in protected_proper_names(
             f'{source["title"]}\n{source["summary"]}'
@@ -485,25 +492,48 @@ def translate_article_payload(article: Article) -> Optional[Dict[str, Dict[str, 
         + "\n\nENGLISH SUMMARY:\n" + masked_source["summary"][:1600]
         + "\n\nENGLISH BODY:\n" + masked_source["body"]
     )
-    raw = free_json_completion(_SYSTEM, prompt, max_tokens=9000)
-    if not raw:
-        logger.info("[translations] response unavailable article=%s", article.id)
+    def system_for(selected):
+        fields = ','.join(f'{lang}_{field}' for lang in selected for field in ('title','summary','body'))
+        return _SYSTEM.split('Preferred schema:', 1)[0] + (
+            'Preferred schema: one flat object with exactly these string fields:\n'
+            + fields + '\nNo omitted fields. Translate only the requested languages.')
+
+    def checked(raw, selected):
+        normalized = _canonical_translation_payload(_decode_json_payload(raw or ''), selected)
+        if normalized is None:
+            return None
+        restored = _restore_protected_numbers(normalized, number_locks)
+        restored = _restore_protected_names(restored, name_locks)
+        return _validate(source, restored, languages=selected)
+
+    raw = free_json_completion(system_for(languages), prompt, max_tokens=9000)
+    translated = checked(raw, languages)
+    if translated:
+        _TRANSLATION_META.set({k: (TRANSLATION_PROVIDER, selected_free_model_name()) for k in translated})
+        return translated
+
+    from . import news_openai
+    if not news_openai.available():
         return None
-    payload = _decode_json_payload(raw)
-    if payload is None:
-        logger.info("[translations] invalid JSON response article=%s", article.id)
+    # One durable operation per article version and language. Partial ready
+    # translations survive across cycles and are never sent again unnecessarily.
+    output = {}
+    with news_openai.translation_context(article, source):
+        for language in languages:
+            raw = news_openai.complete(system_for((language,)), prompt,
+                purpose='translate', language=language, max_tokens=2200, json_mode=True)
+            row = checked(raw, (language,))
+            if row:
+                output.update(row)
+            elif raw:
+                news_openai.record_quality('translation_deterministic_rejected')
+    if not output:
         return None
-    normalized = _canonical_translation_payload(payload)
-    if normalized is None:
-        logger.info(
-            "[translations] unsupported response shape article=%s top_keys=%s",
-            article.id,
-            sorted(payload.keys())[:24] if isinstance(payload, dict) else [],
-        )
+    from .news_deepl import _semantic_validation
+    if not _semantic_validation(source, output):
         return None
-    restored = _restore_protected_numbers(normalized, number_locks)
-    restored = _restore_protected_names(restored, name_locks)
-    return _validate(source, restored)
+    _TRANSLATION_META.set({k: ('openai', news_openai.MODEL) for k in output})
+    return output
 
 
 def _latest_missing(db: Session, limit: int) -> list[Article]:
@@ -543,6 +573,7 @@ def _latest_missing(db: Session, limit: int) -> list[Article]:
         if recently_failed:
             continue
         if ready != set(LANGUAGES):
+            article._news_missing_translation_languages = tuple(k for k in LANGUAGES if k not in ready)
             output.append(article)
             if len(output) >= limit:
                 break
@@ -575,8 +606,9 @@ def _store(db: Session, article: Article, translations: Dict[str, Dict[str, str]
     model = _model()
     now = datetime.utcnow()
     stored = 0
-    for language in LANGUAGES:
-        data = translations[language]
+    for language, data in translations.items():
+        if language not in LANGUAGES:
+            continue
         row = (
             db.query(ArticleTranslation)
             .filter(
@@ -592,8 +624,8 @@ def _store(db: Session, article: Article, translations: Dict[str, Dict[str, str]
         row.translated_summary = data["summary"]
         row.translated_body = data["body"]
         row.status = "ready"
-        row.provider = _provider()
-        row.model_name = model
+        identity = _TRANSLATION_META.get().get(language, (_provider(), model))
+        row.provider, row.model_name = identity
         row.updated_at = now
         stored += 1
     return stored
