@@ -1124,6 +1124,8 @@ def _fetch_and_store_all_articles(
         images = repair_recent_news_images(db, limit=80, max_age_hours=72, recover_limit=8)
         after_images = time.monotonic()
         mislabels = repair_recent_sport_mislabels(db, limit=600, max_age_hours=168)
+        from .news_league_index import repair_football_league_menus
+        mislabels += repair_football_league_menus(db)
         after_mislabels = time.monotonic()
         repaired = repair_recent_unresolved(db, limit=24)
         after_unresolved = time.monotonic()
