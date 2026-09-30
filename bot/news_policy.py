@@ -384,6 +384,16 @@ def non_article_news_reason(item):
 
     body = str((item or {}).get("body") or (item or {}).get("summary") or "")
     copy = '\n'.join(str((item or {}).get(key) or '') for key in ('title', 'summary', 'body'))
+    # UEFA refreshes these reference pages with today's date. Their scorer
+    # tables/record collections are not a new report. Keep this bounded to
+    # the publisher's article-title formats, preserving actual record-breaking
+    # news and award/injury announcements about a competition's top scorer.
+    if host in {'uefa.com', 'www.uefa.com'} and '/news/' in path:
+        uefa_title = title.split('|', 1)[0].strip().replace('’', "'")
+        competition = r"(?:uefa\s+)?(?:(?:women's|womens)\s+)?(?:champions|europa|conference|nations)\s+league"
+        if (re.fullmatch(competition + r'\s+records', uefa_title)
+                or re.match(competition + r'\s+\d{4}/\d{2,4}\s+(?:top|leading)\s+scorers?\s*:', uefa_title)):
+            return 'non_article_rolling_tracker'
     if host == 'www.mlssoccer.com' and re.search(r'^/news/(?:playoff-countdown|power-rankings)', path):
         return 'non_article_analysis'
     if (re.search(r'\bde \d+ productiefste grieken\b', title)

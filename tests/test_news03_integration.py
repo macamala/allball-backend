@@ -57,6 +57,9 @@ def response(status=200,finish='stop',refusal=None):
 def paid_operation(monkeypatch, tmp_path):
     from sqlalchemy import create_engine
     from bot import news_openai, news_openai_ledger
+    # The metered provider reads its key from env, not rewrite_ai's legacy
+    # module constant. All HTTP is replaced by mock_http in these tests.
+    monkeypatch.setenv('OPENAI_API_KEY', 'isolated-test-not-a-real-key')
     monkeypatch.setenv('OPENAI_ENABLED', 'true')
     monkeypatch.setenv('OPENAI_ROLLOUT_MODE', 'production')
     monkeypatch.setenv('OPENAI_PRODUCTION_APPROVED', 'true')

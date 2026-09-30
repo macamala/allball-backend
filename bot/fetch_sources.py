@@ -293,10 +293,20 @@ def _ai_story(*args, **kwargs):
             and not str(reason).startswith(('validator-source-type:', 'validator-unavailable',
                                            'validator-independent-unavailable'))):
         failure = _LAST_STORY_FAILURE.get()
+        free_reason = reason
         retry = dict(kwargs, correction_reason=reason,
                      correction_feedback=failure.get('validator_feedback') or {})
         with news_openai.force_paid():
             parsed, reason = _ai_story_attempt(*args, **retry)
+        if parsed is None and reason == 'empty' and not news_openai.paid_was_used():
+            # A blocked/unavailable paid lane has no new draft to judge. Keep
+            # the free writer's rejection and evidence for correction/cooldown;
+            # replacing it with transient "empty" requeues the same bad source
+            # every cycle and starves other leagues of their writer allowance.
+            _LAST_STORY_FAILURE.set(failure)
+            logger.info('[fetch_sources] paid fallback unavailable=%s retained_rejection=%s',
+                        news_openai.status(), free_reason)
+            return None, free_reason
         if parsed and reason == 'ok':
             ok, why = quality_check(parsed.get('title') or '', parsed.get('body') or '',
                                     kwargs.get('sport'), require_english=True)
