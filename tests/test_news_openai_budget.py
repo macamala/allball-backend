@@ -370,3 +370,23 @@ def test_production_ledger_reuses_news_configured_driver(monkeypatch):
     monkeypatch.setenv('NEWS_ACCOUNTING_BACKEND','postgres')
     monkeypatch.setenv('DATABASE_URL','postgresql://fixture:fixture@fixture/fixture')
     assert accounting.ledger().engine is engine
+
+
+def test_free_translation_with_wrong_meaning_uses_paid_quality_fallback(configured, monkeypatch):
+    import json
+    from bot import news_translations as translations, news_deepl
+    from tests.test_news_translations import SOURCE
+    article = SimpleNamespace(id=12, title=SOURCE['title'], summary=SOURCE['summary'],
+        content=SOURCE['body'], ai_content=None, _news_missing_translation_languages=('sr',))
+    monkeypatch.setattr(news_deepl, 'deepl_enabled', lambda: False)
+    bad = {**SOURCE, 'body': SOURCE['body'] + ' The player did not score.'}
+    monkeypatch.setattr(translations, 'free_json_completion', lambda *a, **k: json.dumps({'sr': bad}))
+    checked = []
+    def validate(source, output):
+        checked.append(output)
+        return output == {'sr': SOURCE}
+    monkeypatch.setattr(news_deepl, '_semantic_validation', validate)
+    calls = []
+    monkeypatch.setattr(lane, 'complete', lambda *a, **k: calls.append(k['language']) or json.dumps({'sr': SOURCE}))
+    assert translations.translate_article_payload(article) == {'sr': SOURCE}
+    assert calls == ['sr'] and len(checked) == 2

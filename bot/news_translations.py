@@ -15,6 +15,7 @@ import re
 from typing import Dict, Optional
 from contextvars import ContextVar
 
+from sqlalchemy import and_, or_, exists, case
 from sqlalchemy.orm import Session
 
 from models import Article, ArticleTaxonomyResolution, ArticleTranslation
@@ -25,7 +26,7 @@ from .news_policy import protected_proper_names
 logger = logging.getLogger(__name__)
 
 LANGUAGES = ("sr", "es", "de", "fr", "it", "pt")
-TRANSLATION_PROVIDER = "multi-free-v15"
+TRANSLATION_PROVIDER = "multi-free-v16"
 _TRANSLATION_META = ContextVar('news_translation_provider_by_language', default={})
 # v14 protects both proper names and numeric values with reversible tokens.
 CYRILLIC_RE = re.compile(r"[\u0400-\u04FF]")
@@ -510,12 +511,18 @@ def translate_article_payload(article: Article) -> Optional[Dict[str, Dict[str, 
         return _validate(source, restored, languages=selected)
 
     raw = free_json_completion(system_for(languages), prompt, max_tokens=min(9000, 2200 * len(languages)))
+    free_model = selected_free_model_name()
     translated = {}
     for language in languages:
         row = checked(raw, (language,))
         if row:
             translated.update(row)
-    free_meta = {k: (TRANSLATION_PROVIDER, selected_free_model_name()) for k in translated}
+    # Preserving names/numbers alone cannot catch a fluent but wrong meaning.
+    # The free lane must pass the same language/fact gate as DeepL and paid AI.
+    from .news_deepl import _semantic_validation
+    if translated and not _semantic_validation(source, translated):
+        translated = {}
+    free_meta = {k: (TRANSLATION_PROVIDER, free_model) for k in translated}
     _TRANSLATION_META.set(free_meta)
     missing = tuple(k for k in languages if k not in translated)
     if not missing:
@@ -551,6 +558,27 @@ def translate_article_payload(article: Article) -> Optional[Dict[str, Dict[str, 
 
 
 def _latest_missing(db: Session, limit: int) -> list[Article]:
+    cutoff = datetime.utcnow() - timedelta(hours=6)
+    # Optional small operator queue for reader-reported missing articles. This
+    # is the same worker, gates and budget; completed rows fall out naturally.
+    priority_ids = [int(value) for value in
+        os.getenv('NEWS_TRANSLATION_PRIORITY_ARTICLE_IDS', '').split(',')[:10]
+        if value.strip().isdigit() and 0 < int(value) < 2147483647]
+    # Filter completed articles BEFORE the bounded scan so the older archive
+    # becomes reachable as recent articles finish. A ready copy is never resent.
+    eligible = or_(*[
+        ~exists().where(and_(
+            ArticleTranslation.article_id == Article.id,
+            ArticleTranslation.language_code == language,
+            or_(and_(ArticleTranslation.status == 'ready',
+                     or_(ArticleTranslation.provider.is_(None),
+                         ArticleTranslation.provider != 'multi-free-v15')), and_(
+                ArticleTranslation.status == 'failed',
+                ArticleTranslation.provider == _provider(),
+                ArticleTranslation.updated_at >= cutoff,
+            )),
+        )) for language in LANGUAGES
+    ])
     rows = (
         db.query(Article)
         .join(
@@ -560,13 +588,14 @@ def _latest_missing(db: Session, limit: int) -> list[Article]:
         .filter(
             ArticleTaxonomyResolution.resolver_version == RESOLVER_VERSION,
             ArticleTaxonomyResolution.public_ok.is_(True),
+            eligible,
         )
-        .order_by(Article.ai_generated.desc(), Article.id.desc())
+        .order_by(case((Article.id.in_(priority_ids), 0), else_=1),
+                  Article.ai_generated.desc(), Article.id.desc())
         .limit(max(10, min(limit * 30, 120)))
         .all()
     )
     output = []
-    cutoff = datetime.utcnow() - timedelta(hours=6)
     for article in rows:
         translation_rows = (
             db.query(ArticleTranslation)
@@ -576,7 +605,10 @@ def _latest_missing(db: Session, limit: int) -> list[Article]:
             )
             .all()
         )
-        ready = {row.language_code for row in translation_rows if row.status == "ready"}
+        # The initial v15 free rollout lacked the semantic gate. Recheck only
+        # that version, once, through v16; never resend validated ready copies.
+        ready = {row.language_code for row in translation_rows if row.status == "ready"
+                 and getattr(row, 'provider', None) != 'multi-free-v15'}
         recently_failed = {
             row.language_code for row in translation_rows if (
             row.status == "failed"
@@ -594,7 +626,8 @@ def _latest_missing(db: Session, limit: int) -> list[Article]:
             output.append(article)
     # Existing order within each group remains newest first. Fill missing
     # Serbian before spending the next article's allowance on another language.
-    output.sort(key=lambda a: 'sr' not in a._news_missing_translation_languages)
+    output.sort(key=lambda a: (a.id not in priority_ids,
+                              'sr' not in a._news_missing_translation_languages))
     return output[:limit]
 
 
@@ -613,7 +646,7 @@ def _mark_failed(db: Session, article: Article) -> None:
         if row is None:
             row = ArticleTranslation(article_id=article.id, language_code=language)
             db.add(row)
-        if row.status != "ready":
+        if row.status != "ready" or row.provider == 'multi-free-v15':
             row.status = "failed"
             row.provider = _provider()
             row.model_name = model
@@ -671,6 +704,8 @@ def translate_latest_articles(limit: int = 1) -> int:
                 continue
             with db.begin_nested():
                 translated += _store(db, article, payload)
+            db.commit()
+            logger.info('[translations] ready article=%s languages=%s', article.id, ','.join(payload))
         if translated:
             db.commit()
         return translated

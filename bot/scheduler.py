@@ -157,7 +157,9 @@ def _run_translation_slice(budget):
         return 0
     from bot.news_translations import translate_latest_articles
     original_max = budget.max_requests
-    budget.max_requests = min(original_max, budget.attempts + 4)
+    # Includes the independent translation quality check. Keep at least half
+    # of a regular cycle for the existing writer/source flow.
+    budget.max_requests = min(original_max, budget.attempts + min(8, original_max // 2))
     try:
         return translate_latest_articles(limit=int(os.environ['NEWS_TRANSLATIONS_PER_CYCLE']))
     except Exception as exc:
