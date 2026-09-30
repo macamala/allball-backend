@@ -177,6 +177,19 @@ def test_timeout_restart_keeps_reservation_without_replaying(configured,book,mon
     assert len(calls)==1 and Decimal(book.report()[0]['charged_usd'])>0
 
 
+def test_substantial_paid_source_requests_full_body_without_changing_system(configured, monkeypatch):
+    configured['source_words'] = 250
+    calls = http_fake(monkeypatch, REPLY)
+    assert lane.complete('stable system', 'verified source')
+    messages = calls[0]['json']['messages']
+    assert messages[0]['content'][0]['text'] == 'stable system'
+    assert '180-240 words' in messages[1]['content']
+    assert 'Never repeat facts, invent context' in messages[1]['content']
+    # Prompt refinement does not replay a previously charged source.
+    assert lane.complete('stable system', 'refined instructions')
+    assert len(calls) == 1
+
+
 def test_budget_cutoff_makes_no_http_request(configured,monkeypatch):
     monkeypatch.setenv('OPENAI_DAILY_BUDGET_USD','.0000001')
     calls=http_fake(monkeypatch,REPLY)

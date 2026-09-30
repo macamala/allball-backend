@@ -104,6 +104,7 @@ def verified_source(item, tags, facts):
     if candidate_football_section(enriched, tags) in PRIMARY_COMPETITIONS:
         priority = max(priority, 1)
     context.update(priority=priority, verified=True,
+        source_words=len(facts.split()),
         evidence_hash=hashlib.sha256((str(item.get('title') or '') + '\n' + facts).encode()).hexdigest())
 
 
@@ -214,6 +215,22 @@ def complete(system, prompt, *, purpose='write', language='', max_tokens=1800,
     max_tokens = max(128, min(int(max_tokens), 1800 if purpose != 'translate' else 2200))
     if purpose == 'write':
         item = context.get('item') or {}
+        # The pilot exposed summary-sized drafts despite the shared system
+        # prompt. State the deliverable at the end of the task, without changing
+        # free writers or relaxing the existing source/length/fact gates.
+        from .quality import MIN_SOURCE_WORDS
+        if context.get('source_words', 0) >= MIN_SOURCE_WORDS:
+            prompt += (
+                '\n\nDELIVERABLE: a complete original news article, not a summary. '
+                'After the headline and one-sentence summary, write a separate BODY '
+                'of about 180-240 words in 3-5 paragraphs. The headline and summary '
+                'do not count toward body length. Cover the relevant verified '
+                'developments, details and attributed statements from the supplied '
+                'facts in your own structure. Do not omit available supporting '
+                'facts merely to be concise. Never repeat facts, invent context or '
+                'add filler to reach a length. If the evidence cannot support a '
+                'full article, return no draft. These length numbers are formatting '
+                'instructions, not facts to include in the article.')
         provenance = {'source_url': str(item.get('url') or '')[:600],
                       'source_published_at': str(item.get('published_at') or '')[:40],
                       'publisher': str((item.get('feed') or {}).get('publisher') or '')[:100]}

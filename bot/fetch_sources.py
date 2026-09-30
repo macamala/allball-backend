@@ -195,6 +195,8 @@ def _ai_story_attempt(
     if is_dramatic_shortening(facts, body):
         from .free_ai_router import last_writer_identity
         if last_writer_identity()[0] == 'openai':
+            logger.info('[fetch_sources] paid draft too short source_words=%s body_words=%s title=%s',
+                        word_count(facts), word_count(body), title[:80])
             return reject('too-short', parsed)
         raw = write_ninkosports_story(
             title=title,
