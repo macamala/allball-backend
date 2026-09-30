@@ -85,7 +85,7 @@ def prepare_ingest(monkeypatch,draft=DRAFT):
     from bot import extract as extract_module
     monkeypatch.setattr(extract_module,'extract_image_candidates_from_url',lambda *a,**k:[])
     monkeypatch.setattr(ingest,'existing_by_url',lambda *a:None)
-    monkeypatch.setattr(ingest,'existing_near_duplicate',lambda *a:None)
+    monkeypatch.setattr(ingest,'existing_near_duplicate',lambda *a,**kw:None)
     monkeypatch.setattr(ingest,'_source_on_ai_cooldown',lambda *a:False)
     monkeypatch.setattr(ingest,'_hold_ai_source',lambda *a,**k:None)
     monkeypatch.setattr(ingest,'extract_from_url',lambda url:(FACTS,'https://example.test/hero.jpg'))
@@ -130,7 +130,7 @@ def test_translated_duplicate_is_blocked_before_article_insert(monkeypatch):
     item=prepare_ingest(monkeypatch)
     item['title']='Fudbalski savez objavio format kupa'
     calls=[]
-    def duplicate(db,title,stamp):
+    def duplicate(db,title,stamp,**kwargs):
         calls.append(title)
         return SimpleNamespace(id=22231) if title == DRAFT['title'] else None
     monkeypatch.setattr(ingest,'existing_near_duplicate',duplicate)

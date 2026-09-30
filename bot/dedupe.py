@@ -3,6 +3,7 @@
 from datetime import datetime, timedelta
 from difflib import SequenceMatcher
 import re
+import unicodedata
 from typing import Optional
 
 from sqlalchemy.orm import Session, load_only
@@ -154,10 +155,32 @@ def titles_are_near_duplicate(left: str, right: str) -> bool:
     return title_similarity(left, right) >= 0.86
 
 
+def confirmed_interview_key(body: str):
+    """One audited repeated interview, despite English/Serbian name spelling.
+
+    All independent details must agree. A new injury, transfer, fixture preview
+    or another player's interview never matches just because the club is shared.
+    Callers restrict comparisons to their existing recent-News window.
+    """
+    value = ''.join(ch for ch in unicodedata.normalize('NFKD', body or '')
+                    if not unicodedata.combining(ch)).casefold()
+    markers = (
+        r'\b(?:boakye|boaci)\b', r'\b(?:red star|crvena zvezda)\b',
+        r'\bmilunovic\b', r'\bbukari\b', r'\bivanic\b',
+        r'\bpenalties\b', r'\bbench\b', r'\bminor injury\b',
+        r'\bunity\b', r'\bvictory\b',
+    )
+    if all(re.search(pattern, value) for pattern in markers):
+        return 'boakye-copenhagen-retrospective-interview'
+    return None
+
+
 def existing_near_duplicate(
     db: Session,
     title: str,
     published_at: Optional[datetime],
+    *,
+    body: Optional[str] = None,
 ) -> Optional[Article]:
     key = normalize_title(title)
     if not key or len(key) < 16:
@@ -167,12 +190,18 @@ def existing_near_duplicate(
     if published_at:
         window_start = published_at - timedelta(hours=48)
 
-    query = db.query(Article).options(load_only(Article.id, Article.title, Article.created_at))
+    interview_key = confirmed_interview_key(body) if body else None
+    columns = [Article.id, Article.title, Article.created_at]
+    if interview_key:
+        columns.extend((Article.ai_content, Article.content))
+    query = db.query(Article).options(load_only(*columns))
     if window_start:
         query = query.filter(Article.created_at >= window_start - timedelta(days=2))
     recent = query.order_by(Article.created_at.desc()).limit(400).all()
     for article in recent:
         existing = article.title or ""
         if normalize_title(existing) == key or titles_are_near_duplicate(existing, title):
+            return article
+        if interview_key and confirmed_interview_key(article.ai_content or article.content) == interview_key:
             return article
     return None

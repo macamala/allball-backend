@@ -1181,7 +1181,7 @@ def repair_recent_duplicate_news(
     Newest public row wins. The stricter ingest-time detector prevents recurrence;
     this bounded repair cleans legacy duplicate cards already in the public index.
     """
-    from bot.dedupe import titles_are_near_duplicate
+    from bot.dedupe import titles_are_near_duplicate, confirmed_interview_key
 
     cutoff = datetime.utcnow() - timedelta(hours=max(1, int(max_age_hours)))
     rows = (
@@ -1189,6 +1189,7 @@ def repair_recent_duplicate_news(
             ArticleTaxonomyResolution,
             Article.id,
             Article.title,
+            func.coalesce(Article.ai_content, Article.content, Article.summary),
         )
         .join(
             Article,
@@ -1209,9 +1210,10 @@ def repair_recent_duplicate_news(
     from bot.dedupe import _title_tokens
 
     kept_titles: dict[str, dict[int, str]] = {}
+    kept_interviews: dict[str, set[str]] = {}
     token_index: dict[str, dict[str, set[int]]] = {}
     hidden = 0
-    for tax, article_id, article_title in rows:
+    for tax, article_id, article_title, article_body in rows:
         sport = str(tax.resolved_sport or "")
         title = article_title or ""
         if not sport or not title:
@@ -1219,6 +1221,8 @@ def repair_recent_duplicate_news(
         tokens = _title_tokens(title)
         sport_titles = kept_titles.setdefault(sport, {})
         sport_index = token_index.setdefault(sport, {})
+        interview_key = confirmed_interview_key(article_body)
+        sport_interviews = kept_interviews.setdefault(sport, set())
 
         candidate_ids: set[int] = set()
         token_hits: dict[int, int] = {}
@@ -1231,7 +1235,7 @@ def repair_recent_duplicate_news(
             candidate_id for candidate_id, hits in token_hits.items() if hits >= 3
         )
         normalized = None
-        duplicate = False
+        duplicate = bool(interview_key and interview_key in sport_interviews)
         for candidate_id in candidate_ids:
             other = sport_titles.get(candidate_id, "")
             if other and titles_are_near_duplicate(title, other):
@@ -1252,6 +1256,8 @@ def repair_recent_duplicate_news(
             continue
 
         sport_titles[int(article_id)] = title
+        if interview_key:
+            sport_interviews.add(interview_key)
         for token in tokens:
             sport_index.setdefault(token, set()).add(int(article_id))
     if hidden:
