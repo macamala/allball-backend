@@ -75,8 +75,12 @@ def numeric_tokens(text, *, include_spelled=False):
     # Audited German football report uses 4:1-Sieg and zum 1:0. Only explicit
     # score grammar admits a hyphen equivalent; clocks/ratios remain untouched.
     for match in re.finditer(r'(?<![\w:])([0-9]|[1-9][0-9]):([0-9]|[1-9][0-9])(?![\w:])', text or ''):
-        before, after = (text or '')[max(0, match.start()-160):match.start()], (text or '')[match.end():match.end()+30]
-        if (re.match(r'[-–](?:Sieg|Niederlage|Erfolg|Führung|Fuehrung)\b', after, re.I)
+        before, after = (text or '')[max(0, match.start()-160):match.start()], (text or '')[match.end():match.end()+100]
+        if (re.match(r'(?:\s*\(\d{1,2}:\d{1,2}\))?[-–](?:Sieg|Niederlage|Erfolg|Führung|Fuehrung)\b', after, re.I)
+                or (re.search(r'\bnach dem\s+$', before, re.I)
+                    and re.match(r'\s+zum Auftakt gegen\b', after, re.I))
+                or (re.search(r'\bmit\s+$', before, re.I)
+                    and re.match(r'\s+gegen\b[^.!?\n]{1,60}\b(?:verloren|gewonnen)\b', after, re.I))
                 or (re.search(r'\bzum\s+$', before, re.I)
                     and re.search(r'\b(?:trifft|traf|schliesst|schließt|schloss|tor|treffer)\b', before, re.I))):
             tokens.add(match[1] + '-' + match[2])
@@ -614,6 +618,21 @@ def gossip_news_reason(item):
     except ValueError:
         host = ""
         path = ""
+
+    # The sporting name does not make an online body-double/alien theory news.
+    # Check the editorial lead too: a rewrite may remove "conspiracy" from its
+    # headline. Keep formal club statements and disciplinary developments out
+    # of this rule; a financial case mentioning a "conspiracy" is not this story.
+    lead = title + ' ' + summary + ' ' + str((item or {}).get('body') or '')[:500].casefold()
+    online = re.search(r'\b(?:social media|online|internet|r[eé]seaux(?: sociaux)?)\b', lead)
+    theory = re.search(r'\b(?:conspiracy theor(?:y|ies)|unverified theor(?:y|ies)|'
+                       r'online theor(?:y|ies)|th[eé]orie\w*|conspiraci[oó]n)\b', lead)
+    identity_claim = re.search(r'\b(?:body double|imposter|impostor|sosie|extraterrestrial\w*|'
+                               r'extraterrestre\w*|aliens?|replaced by a double)\b', lead)
+    official_action = re.search(r'\b(?:bans?|banned|sanctions?|sanctioned|suspends?|suspended|'
+                                r'investigates?|investigation|charges?|charged|files? complaint)\b', title)
+    if online and theory and identity_claim and not official_action:
+        return 'non_news_social_media_conspiracy'
 
     # Known off-field/tabloid lanes that should never enter NinkoSports News.
     if host == "isport.blesk.cz" and path.startswith("/clanek/blesk-sport/"):

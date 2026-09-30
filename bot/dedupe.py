@@ -1,6 +1,6 @@
 """Conservative duplicate detection for NEW articles."""
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from difflib import SequenceMatcher
 import re
 import unicodedata
@@ -175,6 +175,47 @@ def confirmed_interview_key(body: str):
     return None
 
 
+def confirmed_football_report_key(title: str, body: str):
+    """Audited England/Czechia recap family, never a fixture/result authority.
+
+    The headline must report the same win and the copy must contain all five
+    named participants plus the dismissal. Reactions, injuries, youth/women's
+    matches and different scores remain separate. Callers also require source
+    publication times within 24 hours; this cannot join rematches/seasons.
+    """
+    def plain(value):
+        return ''.join(ch for ch in unicodedata.normalize('NFKD', value or '')
+                       if not unicodedata.combining(ch)).casefold()
+
+    headline, copy = plain(title), plain(body)
+    if not re.match(r'^england\b.{0,35}\b(?:beats?|wins?|earns?|secure[sd]?)\b', headline):
+        return None
+    if not all(re.search(p, headline) for p in (
+        r'\bczech(?:ia| republic)\b', r'\bnations league\b',
+    )):
+        return None
+    if re.search(r'\b(?:women\w*|youth|under[ -]?\d+|u\d+|says?|react\w*|'
+                 r'injur\w*|appeal\w*|denies|preview|could|might|not|no)\b', headline):
+        return None
+    scores = re.findall(r'(?<![\w\d-])(\d{1,2})[:–-](\d{1,2})(?![\w\d-])', headline)
+    if any(score != ('2', '0') for score in scores):
+        return None
+    if not all(re.search(p, copy) for p in (
+        r'\banthony gordon\b', r'\bharry kane\b', r'\bpavel sulc\b',
+        r'\belliot anderson\b', r'\b(?:trent )?alexander-arnold\b', r'\bred card\b',
+    )):
+        return None
+    return 'england-czechia-nations-league-gordon-kane-sulc'
+
+
+def same_report_window(left: Optional[datetime], right: Optional[datetime]) -> bool:
+    if left is None or right is None:
+        return False
+    def utc(value):
+        return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
+    return abs(utc(left) - utc(right)) <= timedelta(hours=24)
+
+
 def existing_near_duplicate(
     db: Session,
     title: str,
@@ -191,15 +232,23 @@ def existing_near_duplicate(
         window_start = published_at - timedelta(hours=48)
 
     interview_key = confirmed_interview_key(body) if body else None
+    report_key = confirmed_football_report_key(title, body) if body else None
     columns = [Article.id, Article.title, Article.created_at]
-    if interview_key:
-        columns.extend((Article.ai_content, Article.content))
+    if interview_key or report_key:
+        columns.extend((Article.ai_content, Article.content, Article.published_at))
     query = db.query(Article).options(load_only(*columns))
     if window_start:
         query = query.filter(Article.created_at >= window_start - timedelta(days=2))
     recent = query.order_by(Article.created_at.desc()).limit(400).all()
     for article in recent:
         existing = article.title or ""
+        existing_report = (confirmed_football_report_key(existing, article.ai_content or article.content)
+                           if report_key else None)
+        if report_key and existing_report:
+            if report_key == existing_report and same_report_window(published_at, article.published_at):
+                return article
+            # Fuzzy or exact headlines cannot undo the source-date boundary.
+            continue
         if normalize_title(existing) == key or titles_are_near_duplicate(existing, title):
             return article
         if interview_key and confirmed_interview_key(article.ai_content or article.content) == interview_key:

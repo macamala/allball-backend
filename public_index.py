@@ -1181,7 +1181,8 @@ def repair_recent_duplicate_news(
     Newest public row wins. The stricter ingest-time detector prevents recurrence;
     this bounded repair cleans legacy duplicate cards already in the public index.
     """
-    from bot.dedupe import titles_are_near_duplicate, confirmed_interview_key
+    from bot.dedupe import (titles_are_near_duplicate, confirmed_interview_key,
+                           confirmed_football_report_key, same_report_window)
 
     cutoff = datetime.utcnow() - timedelta(hours=max(1, int(max_age_hours)))
     rows = (
@@ -1190,6 +1191,7 @@ def repair_recent_duplicate_news(
             Article.id,
             Article.title,
             func.coalesce(Article.ai_content, Article.content, Article.summary),
+            Article.published_at,
         )
         .join(
             Article,
@@ -1211,9 +1213,10 @@ def repair_recent_duplicate_news(
 
     kept_titles: dict[str, dict[int, str]] = {}
     kept_interviews: dict[str, dict[str, int]] = {}
+    kept_reports: dict[str, dict[int, tuple[str, Optional[datetime]]]] = {}
     token_index: dict[str, dict[str, set[int]]] = {}
     hidden = 0
-    for tax, article_id, article_title, article_body in rows:
+    for tax, article_id, article_title, article_body, published_at in rows:
         sport = str(tax.resolved_sport or "")
         title = article_title or ""
         if not sport or not title:
@@ -1223,6 +1226,12 @@ def repair_recent_duplicate_news(
         sport_index = token_index.setdefault(sport, {})
         interview_key = confirmed_interview_key(article_body)
         sport_interviews = kept_interviews.setdefault(sport, {})
+        report_key = confirmed_football_report_key(title, article_body) if sport == 'football' else None
+        sport_reports = kept_reports.setdefault(sport, {})
+
+        def outside_report_window(kept_id):
+            prior = sport_reports.get(kept_id)
+            return bool(report_key and prior and not same_report_window(prior[1], published_at))
 
         candidate_ids: set[int] = set()
         token_hits: dict[int, int] = {}
@@ -1236,7 +1245,12 @@ def repair_recent_duplicate_news(
         )
         normalized = None
         duplicate_id = sport_interviews.get(interview_key) if interview_key else None
+        if duplicate_id is None and report_key:
+            duplicate_id = next((kept_id for kept_id, (key, stamp) in sport_reports.items()
+                                 if key == report_key and same_report_window(stamp, published_at)), None)
         for candidate_id in candidate_ids:
+            if outside_report_window(candidate_id):
+                continue
             other = sport_titles.get(candidate_id, "")
             if other and titles_are_near_duplicate(title, other):
                 duplicate_id = candidate_id
@@ -1247,7 +1261,7 @@ def repair_recent_duplicate_news(
             normalized = normalize_title(title)
             duplicate_id = next((
                 kept_id for kept_id, other in sport_titles.items()
-                if normalize_title(other) == normalized
+                if normalize_title(other) == normalized and not outside_report_window(kept_id)
             ), None)
         if duplicate_id is not None:
             tax.public_ok = False
@@ -1261,7 +1275,7 @@ def repair_recent_duplicate_news(
                 writer_provider='news-audit', writer_model='deterministic',
                 draft={'title': title, 'body': article_body or ''},
                 details={'kept_article_id': duplicate_id,
-                         'evidence': interview_key or 'strict_headline_duplicate'})
+                         'evidence': interview_key or report_key or 'strict_headline_duplicate'})
             logger.info('[public_index] held duplicate article=%s kept_article=%s', article_id, duplicate_id)
             hidden += 1
             continue
@@ -1269,6 +1283,8 @@ def repair_recent_duplicate_news(
         sport_titles[int(article_id)] = title
         if interview_key:
             sport_interviews[interview_key] = int(article_id)
+        if report_key:
+            sport_reports[int(article_id)] = (report_key, published_at)
         for token in tokens:
             sport_index.setdefault(token, set()).add(int(article_id))
     if hidden:
