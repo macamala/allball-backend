@@ -295,6 +295,9 @@ def main():
         first_image_run.isoformat(),
     )
     try:
+        if os.getenv('OPENAI_MODEL_PREFLIGHT', '').lower() == 'true':
+            from .news_openai import model_preflight
+            model_preflight()
         # A bounded zero-AI public sanity pass is safe on deploy and immediately
         # removes bad taxonomy / hero media. This is deliberately NOT the AI
         # writer cycle, so deploys cannot consume the durable request allowance.
