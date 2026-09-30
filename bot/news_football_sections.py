@@ -9,6 +9,7 @@ import re
 import unicodedata
 from datetime import date
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from editorial import sanitize_body, sanitize_summary, sanitize_title
 from .taxonomy import COMPETITIONS
@@ -121,6 +122,17 @@ def football_news_section(article, *, today=None):
     lead establish the event. The full body may identify women's/youth context,
     but incidental body mentions never select a men's domestic league.
     """
+    # Audited 2026-09-30 against this exact club article's visible introduction:
+    # Copenhagen, 22 October, round two of Лиге конференције. The published
+    # English lead only says "this European competition"; club membership
+    # must not turn that fixture into a Serbian Superliga story. Menu only.
+    try:
+        source = urlsplit(getattr(article, 'source_url', None) or getattr(article, 'external_id', '') or '')
+    except ValueError:
+        source = None
+    if (source and source.scheme == 'https' and source.hostname == 'www.crvenazvezdafk.com'
+            and source.path.rstrip('/') == '/vesti/boaci-protiv-kopenhagena-ocekujem-pravu-zvezdasku-atmosferu'):
+        return 'uefa-conference-league'
     title = _norm(sanitize_title(getattr(article, 'title', '') or ''))
     summary = _norm(sanitize_summary(getattr(article, 'summary', '') or ''))
     body = _norm(sanitize_body(getattr(article, 'ai_content', None) or

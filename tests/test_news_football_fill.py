@@ -128,3 +128,36 @@ def test_fantasy_products_never_consume_an_empty_leagues_writer_slot(title):
 def test_verified_french_and_dutch_clubs_keep_women_youth_and_relegated_teams_separate(title,expected):
     from bot.news_football_sections import football_news_section
     assert football_news_section(SimpleNamespace(title=title),today=NOW.date()) == expected
+
+
+def test_audited_zvezda_european_fixture_uses_exact_primary_source_not_club_membership():
+    from bot.news_football_sections import football_news_section
+    article = SimpleNamespace(title='Red Star Belgrade prepares for its first match at home in this European competition',
+        source_url='https://www.crvenazvezdafk.com/vesti/boaci-protiv-kopenhagena-ocekujem-pravu-zvezdasku-atmosferu')
+    assert football_news_section(article,today=NOW.date()) == 'uefa-conference-league'
+    article.source_url = article.source_url.replace('www.crvenazvezdafk.com','foreign.test')
+    assert football_news_section(article,today=NOW.date()) == 'serbia-superliga'
+
+
+def test_graficar_retry_is_limited_to_exact_source_prefixed_format_failures(monkeypatch):
+    from bot import news_source_holds as holds
+    statements = []
+    class Cursor:
+        rowcount = 0
+        def execute(self, query, params=None): statements.append((query,params))
+        def fetchall(self): return [(holds._fingerprint(holds._GRAFICAR_REPAIR_URL), 'validator-unsupported-claim')]
+        def close(self): pass
+    class Connection:
+        def cursor(self): return Cursor()
+        def commit(self): pass
+        def close(self): pass
+    monkeypatch.setattr(holds, '_postgres_dsn', lambda:'fixture')
+    monkeypatch.setattr(holds, '_connect', lambda _:Connection())
+    monkeypatch.setattr(holds, '_ensure_schema', lambda _:None)
+    assert holds.held_source_urls([holds._GRAFICAR_REPAIR_URL]) == {holds._GRAFICAR_REPAIR_URL}
+    writes = [(q,p) for q,p in statements if q.startswith('UPDATE')]
+    assert len(writes)==1
+    query, params = writes[0]
+    assert params==(holds._fingerprint(holds._GRAFICAR_REPAIR_URL),'2026-09-30T06:28:00Z')
+    assert "reason IN ('unsupported_number', 'unsupported_competition:serbia-prva-liga')" in query
+    assert 'updated_at < %s::timestamptz' in query
