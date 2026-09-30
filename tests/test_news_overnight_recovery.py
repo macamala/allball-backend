@@ -63,6 +63,25 @@ def test_country_acronym_requires_explicit_full_source_country(monkeypatch, sour
     assert (reason != 'unsupported_acronym:UAE') is allowed
 
 
+@pytest.mark.parametrize('competition,source,allowed', [
+    ('uefa-conference-league','У другом колу лигашке фазе Лиге конференције.',True),
+    ('uefa-conference-league','Klub igra u Ligi konferencija.',True),
+    ('uefa-europa-league','Utakmica Lige Evrope.',True),
+    ('uefa-nations-league','Селекција игра у Лиги нација.',True),
+    ('uefa-conference-league','Женске Лиге конференције.',False),
+    ('uefa-conference-league','SuperЛиге конференцијеFake',False),
+    ('uefa-conference-league','Лиге шампиона',False),
+])
+def test_serbian_competition_name_keeps_scope(competition,source,allowed):
+    assert guard.competition_in_source(competition,source) is allowed
+
+
+def test_portuguese_fifa_capitalization_is_the_same_explicit_federation(monkeypatch):
+    monkeypatch.setattr(guard,'original_draft_reason',lambda *a:None)
+    assert guard.fact_lock_reason({'body':'The FIFA window ended.'},'', 'A Data Fifa terminou.') != 'unsupported_acronym:FIFA'
+    assert guard.fact_lock_reason({'body':'The FIFA window ended.'},'', 'A janela terminou.') == 'unsupported_acronym:FIFA'
+
+
 def test_record_rally_source_is_never_soccer_despite_shared_names():
     item = {'title':'João Ferreira vence primeira etapa em Marrocos após parar para socorrer piloto',
             'url':'https://www.record.pt/modalidades/motores/todo-o-terreno/detalhe/joao-ferreira-vence-primeira-etapa',

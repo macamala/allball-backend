@@ -163,6 +163,9 @@ def competition_in_source(competition: str, text: str) -> bool:
     # only a competition name; the independent validator still checks claims.
     local = {
         'uefa-champions-league': r'(?:Лиг[аеуи] шампиона|Lig[aeui] šampiona|Liga dos Campeões|Ligue des champions)',
+        'uefa-conference-league': r'(?:Лиг[аеуи] конференциј[аеуи]|Lig[aeui] konferencij[aeui])',
+        'uefa-europa-league': r'(?:Лиг[аеуи] Европ[аеуи]|Lig[aeui] Evrop[aeui])',
+        'uefa-nations-league': r'(?:Лиг[аеуи] нациј[аеуи]|Lig[aeui] nacij[aeui])',
         'fifa-world-cup': r'Coupe du monde',
     }.get(competition)
     if not local:
@@ -392,6 +395,11 @@ def fact_lock_reason(
     # organisations inferred from context. Semantic claim validation still runs.
     for local, canonical in {'ЦИЕС': 'CIES', 'ФИФА': 'FIFA', 'УЕФА': 'UEFA'}.items():
         if re.search(r'(?<!\w)' + local + r'(?!\w)', source, re.I):
+            src_acronyms.add(canonical)
+    # Portuguese article headings use Fifa / Uefa. Case is formatting, not a
+    # different organisation. Restrict this to explicit federation tokens.
+    for canonical in ('FIFA', 'UEFA', 'CIES'):
+        if re.search(r'(?<!\w)' + canonical + r'(?!\w)', source, re.I):
             src_acronyms.add(canonical)
     # Country explicitly named in the audited German report; no ownership,
     # nationality or other claim may be inferred merely from this equivalence.

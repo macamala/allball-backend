@@ -488,23 +488,24 @@ def test_articles_endpoint_uses_same_72h_window_as_public_inventory():
         assert detail.status_code == 200
 
 
-def test_recent_image_repair_refreshes_dead_hero_from_source(monkeypatch):
+@pytest.mark.parametrize('failure_reason',['http_403','signed_image_display_incompatible'])
+def test_recent_image_repair_refreshes_dead_hero_from_source(monkeypatch,failure_reason):
     from models import ArticleTaxonomyResolution
     from public_index import repair_recent_news_images
 
     old_url="https://example.com/dead-hero.jpg"
     new_url="https://example.com/fresh-hero.jpg"
     article=_make(
-        slug="image-repair-refresh",
+        slug="image-repair-refresh-"+failure_reason,
         title="Arsenal prepare for Premier League match after training update",
         image_url=old_url,
-        external_id="https://example.com/image-repair-refresh",
+        external_id="https://example.com/image-repair-refresh-"+failure_reason,
     )
 
     monkeypatch.setattr(
         "bot.news_image_http.probe_news_images",
         lambda urls, **kw: {
-            url: ((url != old_url), "ok" if url != old_url else "http_403")
+                url: ((url != old_url), "ok" if url != old_url else failure_reason)
             for url in urls
         },
     )
@@ -513,13 +514,14 @@ def test_recent_image_repair_refreshes_dead_hero_from_source(monkeypatch):
         lambda url: url == new_url,
     )
     monkeypatch.setattr(
-        "bot.extract.extract_from_url",
-        lambda url, timeout=12.0: ("", new_url),
+        "bot.extract.extract_image_candidates_from_url",
+        lambda url, timeout=12.0: [{'url':new_url,'source':'og'}],
     )
 
     db=SessionLocal()
     try:
         assert repair_recent_news_images(db,limit=100,max_age_hours=72,recover_limit=8) >= 1
+        article=db.get(Article,article.id)
         db.refresh(article)
         tax=db.query(ArticleTaxonomyResolution).filter(
             ArticleTaxonomyResolution.article_id==article.id
@@ -570,6 +572,7 @@ def test_recent_image_repair_hides_every_dead_hero_without_replacement(monkeypat
     try:
         assert repair_recent_news_images(db,limit=200,max_age_hours=72,recover_limit=1) >= 2
         for article in articles:
+            article=db.get(Article,article.id)
             db.refresh(article)
             tax=db.query(ArticleTaxonomyResolution).filter(
                 ArticleTaxonomyResolution.article_id==article.id
@@ -608,6 +611,7 @@ def test_recent_image_repair_keeps_transient_probe_failure_public(monkeypatch):
     db=SessionLocal()
     try:
         assert repair_recent_news_images(db,limit=200,max_age_hours=72,recover_limit=8) == 0
+        article=db.get(Article,article.id)
         db.refresh(article)
         tax=db.query(ArticleTaxonomyResolution).filter(
             ArticleTaxonomyResolution.article_id==article.id

@@ -35,6 +35,7 @@ def cycle(monkeypatch, tmp_path, *, history='0'):
     module('public_cache',bump_public_cache=lambda:calls.append('cache'))
     repairs=module('repair_content',repair_summary_only=summary,repair_contaminated=contaminated)
     module('database',SessionLocal=session)
+    module('bot.news_publication_clock',ensure_news_publication_clock=lambda db:None)
     module(
         'public_index',
         index_missing=index,
@@ -150,7 +151,7 @@ def test_next_interval_boundary_is_shared_across_redeploys(monkeypatch,tmp_path)
 def test_image_health_job_is_zero_ai_and_uses_same_owner(monkeypatch,tmp_path):
     scheduler,calls,_,_,_=cycle(monkeypatch,tmp_path)
     assert scheduler.image_health_job()==0
-    assert ('images',{'limit':80,'max_age_hours':72,'recover_limit':8}) in calls
+    assert ('images',{'limit':160,'max_age_hours':72,'recover_limit':16}) in calls
     assert not any(isinstance(c,tuple) and c[0]=='fetch' for c in calls)
 
 

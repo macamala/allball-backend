@@ -79,9 +79,9 @@ def _run_image_health():
             logger.warning('News publication clock not ready; public repairs continue, writers remain held')
         image_changes = repair_recent_news_images(
             db,
-            limit=80,
+            limit=160,
             max_age_hours=72,
-            recover_limit=8,
+            recover_limit=16,
         )
         taxonomy_changes = repair_recent_sport_mislabels(
             db,

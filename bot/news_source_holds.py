@@ -246,6 +246,16 @@ def held_source_urls(urls) -> set[str]:
             )
             if cursor.rowcount:
                 logger.info('[source_holds] expired audited pre-fix Zvezda clock cooldown=%s', cursor.rowcount)
+            cursor.execute(
+                "UPDATE news_ai_source_holds SET expires_at=NOW(), "
+                "reason='audited-serbian-conference-name-repaired', updated_at=NOW() "
+                "WHERE source_hash=%s AND expires_at > NOW() "
+                "AND reason='unsupported_competition:uefa-conference-league' "
+                "AND updated_at < %s::timestamptz",
+                (hashes[_ZVEZDA_CLOCK_REPAIR_URL], '2026-09-30T01:13:00Z'),
+            )
+            if cursor.rowcount:
+                logger.info('[source_holds] expired audited pre-fix Zvezda Conference-name cooldown=%s', cursor.rowcount)
         if _ZVEZDA_CIES_REPAIR_URL in hashes:
             # Audited source explicitly spells CIES as ЦИЕС. Retry only this
             # false lexical rejection; semantic/image/dedupe checks still run.

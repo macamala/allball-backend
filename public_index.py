@@ -408,6 +408,7 @@ def repair_recent_news_images(
                    for article, _tax in rows
                    if not news_image_is_publishable(article.image_url)})
     definitive_reasons = {
+        "signed_image_display_incompatible",
         "non_editorial_hero",
         "invalid_or_nonpublic_url",
         "redirect_without_location",

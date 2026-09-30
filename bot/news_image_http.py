@@ -193,6 +193,15 @@ def probe_news_image(url: str, *, client=None) -> tuple[bool, str]:
         keys = {key.lower() for key in parse_qs(urlsplit(value).query)}
     except ValueError:
         return False, "invalid_or_nonpublic_url"
+    # The independently deployed reader still resizes Guardian card/hero URLs.
+    # A valid signed source URL then becomes HTTP 401 on the public page.
+    # Never strip/regenerate its signature: select an explicitly published
+    # unsigned same-article photo candidate instead. This is News-only repair.
+    parts = urlsplit(value)
+    query = dict(parse_qsl(parts.query, keep_blank_values=True))
+    if (parts.hostname == 'i.guim.co.uk' and 'width' in query
+            and query.get('s', '').lower() not in {'', 'none'}):
+        return False, 'signed_image_display_incompatible'
     # Confirmed NBL incident: a repeated navigation/product logo outranked the
     # article's player photograph. Large dimensions do not make a logo a hero.
     if (urlsplit(value).hostname == "cdn.prod.website-files.com"

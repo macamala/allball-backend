@@ -188,6 +188,32 @@ def test_publisher_signed_photo_is_never_resized_or_stripped():
     assert '&s=none&crop=none' in images.news_hero_url(unsigned)
 
 
+def test_signed_guardian_photo_cannot_be_published_through_legacy_resizer():
+    signed='https://i.guim.co.uk/img/media/photo/master/5072.jpg?width=700&s=source-signature'
+    client=Client([])
+    assert images.news_hero_url(signed) == signed
+    assert images.probe_news_image(signed,client=client) == (False,'signed_image_display_incompatible')
+    assert client.calls == []
+
+
+def test_same_article_unsigned_photo_is_used_without_changing_signed_candidate(monkeypatch):
+    from bot import fetch_sources, extract
+    import public_index
+    signed='https://i.guim.co.uk/img/media/photo/master/5072.jpg?width=700&s=source-signature'
+    unsigned='https://i.guim.co.uk/img/media/photo/master/5072.jpg?width=465&dpr=1&s=none&crop=none'
+    candidates=[{'url':signed,'source':'jsonld','in_article':True},
+                {'url':unsigned,'source':'body','in_article':True,'width':465}]
+    client=Client([Response()])
+    monkeypatch.setattr(fetch_sources,'news_image_is_reachable',lambda url:images.probe_news_image(url,client=client)[0])
+    expected=unsigned.replace('width=465','width=1600')
+    assert fetch_sources._pick_reachable_article_image(candidates) == expected
+    assert candidates[0]['url'] == signed
+    assert all(url==expected for method,url in client.calls)
+    monkeypatch.setattr(extract,'extract_image_candidates_from_url',lambda *a,**k:candidates)
+    monkeypatch.setattr(images,'news_image_is_reachable',lambda url:images.probe_news_image(url,client=client)[0])
+    assert public_index._reachable_source_image('https://www.theguardian.com/football/story',current_url=signed) == expected
+
+
 def test_uefa_ingest_and_repair_both_probe_and_return_the_actual_hero(monkeypatch):
     from bot import fetch_sources
     import public_index

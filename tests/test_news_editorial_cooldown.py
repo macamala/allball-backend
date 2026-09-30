@@ -70,7 +70,10 @@ def test_audited_clock_retry_matches_only_one_url_old_numeric_reason(monkeypatch
     statements.clear()
     assert holds.held_source_urls([holds._ZVEZDA_CLOCK_REPAIR_URL,other]) == set()
     updates=[(s,a) for s,a in statements if s.startswith('UPDATE')]
-    assert len(updates)==1
+    assert len(updates)==2
     sql,args=updates[0]
     assert "reason='unsupported_number'" in sql and 'updated_at < %s::timestamptz' in sql
     assert args == (holds._fingerprint(holds._ZVEZDA_CLOCK_REPAIR_URL),'2026-09-30T01:02:00Z')
+    sql,args=updates[1]
+    assert "reason='unsupported_competition:uefa-conference-league'" in sql
+    assert args == (holds._fingerprint(holds._ZVEZDA_CLOCK_REPAIR_URL),'2026-09-30T01:13:00Z')
