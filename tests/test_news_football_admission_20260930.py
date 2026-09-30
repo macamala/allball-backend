@@ -59,6 +59,9 @@ def test_only_explicit_german_score_grammar_gets_formatting_equivalents():
 def test_match_report_identity_uses_the_audited_full_event_and_not_shared_clubs():
     keys = {confirmed_football_report_key(title, BODY) for title in TITLES}
     assert len(keys) == 1 and None not in keys
+    assert confirmed_football_report_key(
+        'England defeats Czechia 2:0 in Nations League match after red card',
+        BODY.replace('Trent Alexander-Arnold', 'Alexander-Arnold')) in keys
     for name in ('Pavel Šulc', 'Elliot Anderson', 'Trent Alexander-Arnold', 'Anthony Gordon', 'Harry Kane', 'red card'):
         assert confirmed_football_report_key(TITLES[0], BODY.replace(name, 'other')) is None
 

@@ -188,7 +188,7 @@ def confirmed_football_report_key(title: str, body: str):
                        if not unicodedata.combining(ch)).casefold()
 
     headline, copy = plain(title), plain(body)
-    if not re.match(r'^england\b.{0,35}\b(?:beats?|wins?|earns?|secure[sd]?)\b', headline):
+    if not re.match(r'^england\b.{0,35}\b(?:beats?|defeats?|wins?|earns?|secure[sd]?)\b', headline):
         return None
     if not all(re.search(p, headline) for p in (
         r'\bczech(?:ia| republic)\b', r'\bnations league\b',
