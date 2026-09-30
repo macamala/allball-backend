@@ -354,7 +354,9 @@ def _groq(cfg: dict, system: str, user: str, max_tokens: int, json_mode: bool):
         ],
         "temperature": 0.1 if json_mode else 0.35,
         "max_completion_tokens": (
-            max(700, min(int(max_tokens), 2200))
+            # A complete multi-language article can exceed the old 2200 JSON
+            # ceiling. Honor the caller's bounded translation allowance.
+            max(700, min(int(max_tokens), 9000))
             if json_mode
             else max(4096, min(int(max_tokens), 9000))
         ),
