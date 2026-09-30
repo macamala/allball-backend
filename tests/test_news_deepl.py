@@ -40,17 +40,17 @@ def test_xml_locks_names_numbers_acronyms_and_preserves_paragraphs():
 
 @pytest.mark.parametrize('mutation', ['missing', 'changed', 'duplicate', 'foreign-tag', 'doctype'])
 def test_xml_fails_closed_for_missing_changed_or_injected_locks(mutation):
-    value = '<text>Result <lock id="0">2-1</lock> confirmed.</text>'
+    value = '<text>Result <lock id="0" /> confirmed.</text>'
     if mutation == 'missing': value = '<text>Result confirmed.</text>'
-    if mutation == 'changed': value = value.replace('2-1', '3-1')
-    if mutation == 'duplicate': value = value.replace('</text>', '<lock id="0">2-1</lock></text>')
+    if mutation == 'changed': value = value.replace('<lock id="0" />', '<lock id="0">3-1</lock>')
+    if mutation == 'duplicate': value = value.replace('</text>', '<lock id="0" /></text>')
     if mutation == 'foreign-tag': value = value.replace('Result', '<script>Result</script>')
     if mutation == 'doctype': value = '<!DOCTYPE text>' + value
     assert deepl._restore_xml(value, {'0': '2-1'}, 'sr') is None
 
 
 def test_serbian_script_conversion_keeps_protected_names_and_digraph_case():
-    value = '<text>Љубав и ЊЕГОВ тим: <lock id="a">Luka Marin</lock> — Џек.</text>'
+    value = '<text>Љубав и ЊЕГОВ тим: <lock id="a" /> — Џек.</text>'
     assert deepl._restore_xml(value, {'a': 'Luka Marin'}, 'sr') == 'Ljubav i NJEGOV tim: Luka Marin — Džek.'
     assert deepl._latin('Ђорђе Ћирић, Шабац, Чачак, Жарко.') == 'Đorđe Ćirić, Šabac, Čačak, Žarko.'
 
@@ -96,7 +96,7 @@ def test_complete_batch_keeps_existing_validation_and_reserves_before_http(enabl
         docs = kwargs['json']['text']
         if kwargs['json']['target_lang'] == 'DE':
             if bad == 'numeric': docs = [v.replace('</text>', ' 999</text>') for v in docs]
-            if bad == 'lock': docs = [v.replace('Southport United', 'Southport City') for v in docs]
+            if bad == 'lock': docs = [v.replace('id="0"', 'id="unknown"') for v in docs]
         return {'translations': [{'text': value} for value in docs]}
     monkeypatch.setattr(deepl, '_request', request)
     result = deepl.translate_source(SOURCE)
@@ -125,3 +125,13 @@ def test_single_language_validation_stays_strict():
     assert translations._validate(SOURCE, {'sr': {**SOURCE, 'summary': 'Ћирилица'}}, languages=('sr',)) is None
     assert translations._validate(SOURCE, {'de': SOURCE}) is None
     assert translations._validate(SOURCE, {}, languages=()) is None
+
+
+def test_production_deepl_empty_placeholder_restores_world_cup_and_word_boundary():
+    # Actual DeepL v2 response after the normal ignore_tags field translated
+    # the protected competition name despite the instruction to preserve it.
+    response = '<text>Селекција женске фудбалске репрезентације Енглеске за <lock id="0" />плеј-оф против Грчке</text>'
+    restored = deepl._restore_xml(response, {'0': 'World Cup'}, 'sr')
+    assert restored == 'Selekcija ženske fudbalske reprezentacije Engleske za World Cup plej-of protiv Grčke'
+    changed = response.replace('<lock id="0" />', '<lock id="0">Светског првенства</lock>')
+    assert deepl._restore_xml(changed, {'0': 'World Cup'}, 'sr') is None

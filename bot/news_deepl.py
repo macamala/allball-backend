@@ -114,8 +114,9 @@ def _request(method, path, **kwargs):
 
 
 def _xml_fields(source):
-    # Real names inside ignore_tags retain context while remaining immutable.
-    # Protect body names and acronyms as well as the headline/summary names.
+    # Production DeepL v2 translated World Cup even inside ignore_tags. Empty
+    # indexed placeholders remove protected text from the translation surface;
+    # original English context is supplied separately. All IDs/counts are gated.
     combined = "\n".join(source[field] for field in FIELDS)
     names = set(protected_proper_names(combined))
     names.update(re.findall(r"\b[A-Z][A-Z0-9.-]{1,7}\b", combined))
@@ -137,7 +138,6 @@ def _xml_fields(source):
                 previous.tail = before
             token = str(len(locks))
             previous = ET.SubElement(root, "lock", {"id": token})
-            previous.text = match.group(0)
             locks[token] = match.group(0)
             position = match.end()
         if previous is None:
@@ -165,10 +165,17 @@ def _restore_xml(value, locks, language):
     for node in root:
         token = node.get("id")
         if (node.tag != "lock" or set(node.attrib) != {"id"} or len(node)
-                or token not in locks or node.text != locks[token]):
+                or token not in locks or node.text not in (None, "")):
             return None
         seen[token] += 1
-        parts.extend((locks[token], convert(node.tail or "")))
+        original, tail = locks[token], convert(node.tail or "")
+        # DeepL can attach an empty XML tag to the following word. Restore
+        # word boundaries, keeping punctuation/possessives/currency adjacent.
+        if parts[-1:] and parts[-1] and parts[-1][-1].isalnum() and original[0].isalnum():
+            original = " " + original
+        if tail and original[-1].isalnum() and tail[0].isalnum():
+            tail = " " + tail
+        parts.extend((original, tail))
     if seen != Counter({token: 1 for token in locks}):
         return None
     return "".join(parts).strip()
@@ -200,6 +207,7 @@ def translate_source(source):
         language, target = item
         result = _request("POST", "/translate", json={
             "text": documents, "source_lang": "EN", "target_lang": target,
+            "context": "\n".join(source[field] for field in FIELDS),
             "tag_handling": "xml", "tag_handling_version": "v2",
             "ignore_tags": ["lock"], "non_splitting_tags": ["lock"],
             "preserve_formatting": True,
