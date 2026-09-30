@@ -173,8 +173,10 @@ def ledger():
         import os
         if accounting_backend(os.environ) != 'postgres' or not postgres_dsn(os.environ):
             raise RuntimeError('durable_openai_ledger_required')
-        from sqlalchemy import create_engine
-        _default = OpenAILedger(create_engine(postgres_dsn(os.environ),
-            pool_size=2, max_overflow=0, pool_pre_ping=True, pool_timeout=5,
-            connect_args={'connect_timeout': 5, 'application_name': 'news-openai-budget'}))
+        # Reuse News' configured psycopg2 engine. Bare PostgreSQL URLs select
+        # a different driver in SQLAlchemy 2.1; database.py already handles it.
+        from database import engine
+        if engine.dialect.name != 'postgresql':
+            raise RuntimeError('durable_openai_ledger_required')
+        _default = OpenAILedger(engine)
     return _default

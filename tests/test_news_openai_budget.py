@@ -294,3 +294,13 @@ def test_successful_deepl_never_calls_paid_lane(configured,monkeypatch):
     monkeypatch.setattr(news_deepl,'translate_source',lambda *a,**k:{'sr':SOURCE})
     monkeypatch.setattr(lane,'complete',lambda *a,**kw:pytest.fail('unnecessary paid translation'))
     assert translations.translate_article_payload(article)=={'sr':SOURCE}
+
+
+def test_production_ledger_reuses_news_configured_driver(monkeypatch):
+    import database
+    engine=SimpleNamespace(dialect=SimpleNamespace(name='postgresql'))
+    monkeypatch.setattr(database,'engine',engine)
+    monkeypatch.setattr(accounting,'_default',None)
+    monkeypatch.setenv('NEWS_ACCOUNTING_BACKEND','postgres')
+    monkeypatch.setenv('DATABASE_URL','postgresql://fixture:fixture@fixture/fixture')
+    assert accounting.ledger().engine is engine
