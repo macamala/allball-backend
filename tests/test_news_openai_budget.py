@@ -190,6 +190,40 @@ def test_substantial_paid_source_requests_full_body_without_changing_system(conf
     assert len(calls) == 1
 
 
+def test_rejected_cached_paid_draft_does_not_block_free_fallback(configured, book, monkeypatch):
+    from bot import rewrite_ai as writer
+    calls = http_fake(monkeypatch, REPLY)
+    assert lane.complete('system', 'facts')
+    book.record_quality(configured['request_key'], 'too-short')
+    monkeypatch.setattr(writer, 'AI_PROVIDER_MODE', 'xkiro_free')
+    monkeypatch.setattr(writer, 'write_free_story', lambda *a: 'accepted free draft')
+    assert writer._call_selected_ai('facts') == 'accepted free draft'
+    assert len(calls) == 1
+
+
+def test_free_correction_cannot_overwrite_paid_quality(configured, book, monkeypatch):
+    from bot import free_ai_router
+    http_fake(monkeypatch, REPLY)
+    assert lane.complete('system', 'facts')
+    monkeypatch.setattr(free_ai_router, 'last_writer_identity', lambda: ('openai', lane.MODEL))
+    lane.record_quality('unsupported_number')
+    monkeypatch.setattr(free_ai_router, 'last_writer_identity', lambda: ('groq', 'free-model'))
+    lane.record_quality('ok')
+    assert book.report()[0]['quality_result'] == 'unsupported_number'
+
+
+def test_reviewed_shadow_source_skips_repeated_writers(configured, book, monkeypatch):
+    from bot import rewrite_ai as writer
+    calls = http_fake(monkeypatch, REPLY)
+    monkeypatch.setenv('OPENAI_ROLLOUT_MODE', 'dry_run')
+    assert lane.complete('system', 'facts')
+    book.record_quality(configured['request_key'], 'ok')
+    monkeypatch.setattr(writer, 'AI_PROVIDER_MODE', 'xkiro_free')
+    monkeypatch.setattr(writer, 'write_free_story', lambda *a: pytest.fail('shadow already reviewed'))
+    assert writer._call_selected_ai('facts') is None
+    assert lane.status() == 'dry_run_reviewed' and len(calls) == 1
+
+
 def test_budget_cutoff_makes_no_http_request(configured,monkeypatch):
     monkeypatch.setenv('OPENAI_DAILY_BUDGET_USD','.0000001')
     calls=http_fake(monkeypatch,REPLY)
@@ -307,6 +341,25 @@ def test_successful_deepl_never_calls_paid_lane(configured,monkeypatch):
     monkeypatch.setattr(news_deepl,'translate_source',lambda *a,**k:{'sr':SOURCE})
     monkeypatch.setattr(lane,'complete',lambda *a,**kw:pytest.fail('unnecessary paid translation'))
     assert translations.translate_article_payload(article)=={'sr':SOURCE}
+
+
+def test_partial_free_translation_only_pays_for_failed_language(configured, monkeypatch):
+    import json
+    from bot import news_translations as translations, news_deepl
+    from tests.test_news_translations import SOURCE
+    article = SimpleNamespace(id=11, title=SOURCE['title'], summary=SOURCE['summary'],
+        content=SOURCE['body'], ai_content=None, _news_missing_translation_languages=('sr', 'de'))
+    monkeypatch.setattr(news_deepl, 'deepl_enabled', lambda: False)
+    monkeypatch.setattr(translations, 'free_json_completion', lambda *a, **k: json.dumps({'sr': SOURCE}))
+    calls = []
+    def paid(*args, **kwargs):
+        calls.append(kwargs['language'])
+        return json.dumps({'de': SOURCE})
+    monkeypatch.setattr(lane, 'complete', paid)
+    monkeypatch.setattr(news_deepl, '_semantic_validation', lambda *a: True)
+    assert translations.translate_article_payload(article) == {'sr': SOURCE, 'de': SOURCE}
+    assert calls == ['de']
+    assert translations._TRANSLATION_META.get()['sr'][0] == translations.TRANSLATION_PROVIDER
 
 
 def test_production_ledger_reuses_news_configured_driver(monkeypatch):

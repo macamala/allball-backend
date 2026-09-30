@@ -239,7 +239,7 @@ def _call_selected_ai(prompt: str, *, quality_retry=False) -> Optional[str]:
             return raw
         if news_openai.prefer_paid(quality_retry=quality_retry):
             raw = paid()
-            if raw or news_openai.forced():
+            if raw or news_openai.forced() or news_openai.status() == 'dry_run_reviewed':
                 return raw
         raw = write_free_story(SYSTEM_PROMPT, prompt)
         return raw or paid()

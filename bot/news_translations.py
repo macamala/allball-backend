@@ -507,33 +507,44 @@ def translate_article_payload(article: Article) -> Optional[Dict[str, Dict[str, 
         return _validate(source, restored, languages=selected)
 
     raw = free_json_completion(system_for(languages), prompt, max_tokens=9000)
-    translated = checked(raw, languages)
-    if translated:
-        _TRANSLATION_META.set({k: (TRANSLATION_PROVIDER, selected_free_model_name()) for k in translated})
+    translated = {}
+    for language in languages:
+        row = checked(raw, (language,))
+        if row:
+            translated.update(row)
+    free_meta = {k: (TRANSLATION_PROVIDER, selected_free_model_name()) for k in translated}
+    _TRANSLATION_META.set(free_meta)
+    missing = tuple(k for k in languages if k not in translated)
+    if not missing:
         return translated
 
     from . import news_openai
     if not news_openai.available():
-        return None
+        return translated or None
     # One durable operation per article version and language. Partial ready
     # translations survive across cycles and are never sent again unnecessarily.
-    output = {}
+    output, paid_keys = {}, []
     with news_openai.translation_context(article, source):
-        for language in languages:
+        for language in missing:
             raw = news_openai.complete(system_for((language,)), prompt,
                 purpose='translate', language=language, max_tokens=2200, json_mode=True)
             row = checked(raw, (language,))
             if row:
                 output.update(row)
+                paid_keys.append(news_openai.current_request_key())
             elif raw:
                 news_openai.record_quality('translation_deterministic_rejected')
     if not output:
-        return None
+        return translated or None
     from .news_deepl import _semantic_validation
-    if not _semantic_validation(source, output):
-        return None
-    _TRANSLATION_META.set({k: ('openai', news_openai.MODEL) for k in output})
-    return output
+    valid = _semantic_validation(source, output)
+    for key in paid_keys:
+        if key:
+            news_openai.record_quality('ok' if valid else 'translation_semantic_rejected', request_key=key)
+    if not valid:
+        return translated or None
+    _TRANSLATION_META.set({**free_meta, **{k: ('openai', news_openai.MODEL) for k in output}})
+    return {**translated, **output}
 
 
 def _latest_missing(db: Session, limit: int) -> list[Article]:

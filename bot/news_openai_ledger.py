@@ -156,7 +156,8 @@ class OpenAILedger:
 
     def report(self):
         with self.transaction() as conn:
-            rows = conn.execute(select(usage).order_by(usage.c.created_at)).mappings().all()
+            columns = [column for column in usage.c if column.name != 'response_text']
+            rows = conn.execute(select(*columns).order_by(usage.c.created_at)).mappings().all()
         # No source prose, request body, response body, key or connection string.
         return [{k: (str(v) if isinstance(v, Decimal) else v.isoformat()
                      if isinstance(v, (datetime, type(utc_now().date()))) else v)

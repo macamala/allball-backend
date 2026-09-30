@@ -277,6 +277,8 @@ def _ai_story_attempt(
 def _ai_story(*args, **kwargs):
     """Keep every existing gate; give a rejected free draft one paid fallback."""
     parsed, reason = _ai_story_attempt(*args, **kwargs)
+    if not parsed and news_openai.status() == 'dry_run_reviewed':
+        return None, 'dry-run-reviewed'
     if parsed and reason == 'ok':
         ok, why = quality_check(parsed.get('title') or '', parsed.get('body') or '',
                                 kwargs.get('sport'), require_english=True)
@@ -691,6 +693,8 @@ def _ingest_item(
             learned_instructions=learned_instructions,
         )
         provider, model = writer_identity()
+        if rewrite_reason == 'dry-run-reviewed':
+            return None, False
         if isinstance(db, Session) and not writer_allowed(db, provider, model):
             logger.error(
                 "[fetch_sources] writer circuit open provider=%s model=%s",

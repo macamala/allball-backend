@@ -76,6 +76,7 @@ def source_key(url):
 
 @contextmanager
 def source_context(item, *, article_id=None):
+    status_token = _last_status.set('idle')
     token = _context.set({'source_key': source_key(item.get('url')),
         'article_id': article_id, 'item': item, 'priority': 0, 'verified': False,
         'force_paid': False, 'paid_returned': False, 'request_key': None})
@@ -83,6 +84,7 @@ def source_context(item, *, article_id=None):
         yield _context.get()
     finally:
         _context.reset(token)
+        _last_status.reset(status_token)
 
 
 def with_source_context(function):
@@ -136,19 +138,30 @@ def paid_was_used():
     return bool((_context.get() or {}).get('paid_returned'))
 
 
+def current_request_key():
+    return (_context.get() or {}).get('request_key')
+
+
 def shadow_result():
     config = settings()
     return bool(config and config['phase'] == 'dry_run' and paid_was_used())
 
 
-def record_quality(reason):
+def record_quality(reason, *, request_key=None):
     context = _context.get() or {}
-    if context.get('request_key'):
+    key = request_key or context.get('request_key')
+    if not request_key and context.get('request_purpose') == 'write':
+        from .free_ai_router import last_writer_identity
+        # A later free corrective draft must not overwrite the paid draft's
+        # own quality verdict in the cost/quality ledger.
+        if last_writer_identity()[0] != 'openai':
+            return
+    if key:
         try:
             from .news_openai_ledger import ledger
-            ledger().record_quality(context['request_key'], reason)
+            ledger().record_quality(key, reason)
             logger.info('[news-openai] quality=%s request=%s article=%s',
-                str(reason)[:160], context['request_key'][:12], context.get('article_id'))
+                str(reason)[:160], key[:12], context.get('article_id'))
         except Exception as exc:
             logger.warning('[news-openai] quality_ledger=%s', type(exc).__name__)
 
@@ -197,6 +210,7 @@ def complete(system, prompt, *, purpose='write', language='', max_tokens=1800,
              json_mode=False):
     """Exactly one HTTP attempt per durable operation; no SDK automatic retries."""
     global _cooldown_until
+    _last_status.set('unavailable')
     context, config = _context.get(), settings()
     if not context or not config or not context['verified'] or not available():
         return None
@@ -262,14 +276,18 @@ def complete(system, prompt, *, purpose='write', language='', max_tokens=1800,
         _last_status.set(result)
         if result == 'cached':
             # A reviewed shadow request is not repeated in every dry-run cycle.
-            if config['phase'] == 'dry_run' and row.get('quality_result'):
+            quality = row.get('quality_result')
+            if quality and (config['phase'] == 'dry_run' or quality != 'ok'):
+                if config['phase'] == 'dry_run':
+                    _last_status.set('dry_run_reviewed')
                 return None
-            context.update(paid_returned=True, request_key=request_key)
+            context.update(paid_returned=True, request_key=request_key, request_purpose=purpose)
             return row['response_text']
         if result != 'reserved':
             logger.info('[news-openai] held=%s purpose=%s', result, purpose)
             return None
         context['request_key'] = request_key
+        context['request_purpose'] = purpose
         if not reserve_ai_request():
             book.finish(request_key, status='cancelled', cost=0)
             return None
