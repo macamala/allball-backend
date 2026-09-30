@@ -177,6 +177,62 @@
         "Bahia",
         "Vasco da Gama"
       ]
+    },
+    "france-ligue-1": {
+      "source": "https://ligue1.com/fr/articles/l1_article_5284-",
+      "clubs": [
+        "Angers SCO",
+        "LOSC",
+        "Lille",
+        "Le Havre",
+        "Havre AC",
+        "AS Monaco",
+        "Le Mans FC",
+        "Stade Brestois",
+        "Brest",
+        "RC Lens",
+        "AJ Auxerre",
+        "Olympique de Marseille",
+        "Marseille",
+        "RC Strasbourg",
+        "Strasbourg",
+        "OGC Nice",
+        "FC Lorient",
+        "Paris Saint-Germain",
+        "Paris Saint Germain",
+        "PSG",
+        "Stade Rennais",
+        "Rennes",
+        "Toulouse FC",
+        "Olympique Lyonnais",
+        "Lyon",
+        "ESTAC Troyes",
+        "Paris FC"
+      ]
+    },
+    "netherlands-eredivisie": {
+      "source": "https://eredivisie.nl/nieuws/",
+      "clubs": [
+        "ADO Den Haag",
+        "Ajax",
+        "AZ Alkmaar",
+        "Excelsior Rotterdam",
+        "FC Groningen",
+        "FC Twente",
+        "FC Utrecht",
+        "Feyenoord",
+        "Fortuna Sittard",
+        "Go Ahead Eagles",
+        "NEC Nijmegen",
+        "PEC Zwolle",
+        "PSV",
+        "PSV Eindhoven",
+        "SC Cambuur",
+        "Heerenveen",
+        "Sparta Rotterdam",
+        "Telstar",
+        "Willem II"
+      ]
     }
   }
 }

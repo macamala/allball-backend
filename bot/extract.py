@@ -354,10 +354,16 @@ def collect_page_image_candidates(html: str) -> List[dict]:
     # body images to its actual story container; metadata remains same-page.
     canonical = _og(html or '', 'og:url') or _metadata(html or '', 'canonical') or ''
     scoped_photo_classes = {'aleagues.com.au': 'entry-content', 'ge.globo.com': 'mc-article-body',
+                            'www.mlssoccer.com': 'oc-c-article__body',
+                            'eredivisie.nl': 'news-grid-main__content',
                             'rmcsport.bfmtv.com': 'content_body_wrapper',
                             'www.footmercato.net': 'wysiwygContent'}
     if urlsplit(canonical).hostname in scoped_photo_classes:
         scoped = _ScopedNewsBody(scoped_photo_classes[urlsplit(canonical).hostname])
+        scoped.feed(html or '')
+        html = '<article>' + ''.join(scoped.parts) + '</article>' if scoped.finished else ''
+    if urlsplit(canonical).hostname == 'www.bundesliga.com':
+        scoped = _ScopedNewsBody(None, body_tag='dfl-editorial-news')
         scoped.feed(html or '')
         html = '<article>' + ''.join(scoped.parts) + '</article>' if scoped.finished else ''
     if urlsplit(canonical).hostname == 'fss.rs':
@@ -616,6 +622,7 @@ class _ScopedNewsBody(HTMLParser):
                 return
             values = dict(attrs)
             if ((self.body_id and values.get('id') == self.body_id)
+                    or (self.body_tag and not self.body_class and not self.body_id)
                     or (not self.body_id and self.body_class in values.get('class', '').split())):
                 self.root_tag = tag
                 self.root_attrs = values
@@ -678,6 +685,12 @@ def article_text_from_html(html: str) -> str:
         body_class = 'content_body_wrapper'
     if publisher_host == 'www.footmercato.net':
         body_class = 'wysiwygContent'
+    if publisher_host == 'www.mlssoccer.com':
+        body_class = 'oc-c-article__body'
+    if publisher_host == 'eredivisie.nl':
+        body_class = 'news-grid-main__content'
+    if publisher_host == 'www.bundesliga.com':
+        body_class, body_tag = None, 'dfl-editorial-news'
     if publisher_host == 'football-italia.net':
         # The author biography is a sibling of article.small.single.
         body_class = 'single'
@@ -726,7 +739,7 @@ def article_text_from_html(html: str) -> str:
         # Elementor places unrelated headlines after this exact article widget.
         # Fail closed if it is absent instead of treating recommendations as facts.
         body_class = 'elementor-widget-my-custom-post-content'
-    if body_class or body_id:
+    if body_class or body_id or body_tag:
         scoped = _ScopedNewsBody(body_class, body_id=body_id, body_tag=body_tag)
         try:
             scoped.feed(html)

@@ -159,6 +159,8 @@ def canonical_news_url(value):
 
 
 _SOURCE_PATH_SPORTS = (
+    ("www.mlssoccer.com", "/news/", "football"),
+    ("eredivisie.nl", "/nieuws/", "football"),
     ("www.bundesliga.com", "/de/bundesliga/news/", "football"),
     ("www.bundesliga.com", "/en/bundesliga/news/", "football"),
     ("www.bundesliga.com", "/en/2bundesliga/news/", "football"),
@@ -541,7 +543,7 @@ def non_article_news_reason(item):
     if path.rstrip("/") == "/news/2026/09/28/fans-march-across-harbour-bridge-to-launch-grand-final-week":
         return "non_article_photo_gallery"
     if "/fantasy/" in path or re.search(
-        r"\bfantasy (?:hockey|football|basketball|baseball|cricket|sports?|drafts?|rankings?|previews?)\b|\bsupercoach (?:nbl|classic)\b", title
+        r"\bfantasy (?:manager|voetbal|hockey|football|basketball|baseball|cricket|sports?|drafts?|rankings?|previews?)\b|\bsupercoach (?:nbl|classic)\b", title
     ):
         return "non_article_fantasy_product"
     # Confirmed legacy roundup mixes highlight cards and site acknowledgements.

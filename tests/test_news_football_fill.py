@@ -91,3 +91,40 @@ def test_inventory_excludes_held_stale_future_wrong_version_and_missing_image():
                 public_ok=changes.get('public_ok',True), hero_media_kind='EDITORIAL_PHOTO'))
         db.commit()
         assert recent_public_football_inventory(db, now=NOW) == {'germany-bundesliga':1}
+
+
+@pytest.mark.parametrize('host,container', [
+    ('www.mlssoccer.com','<div class="oc-c-article__body">{body}</div>'),
+    ('www.bundesliga.com','<dfl-editorial-news><section>{body}</section></dfl-editorial-news>'),
+    ('eredivisie.nl','<div class="news-grid-main__content">{body}</div>'),
+])
+def test_new_publisher_bodies_exclude_recommendations_and_fail_closed(host, container):
+    from bot.extract import article_text_from_html
+    body = '<p>' + 'The club confirmed a new contract after discussions with the player. '*15 + '</p>'
+    head = f'<meta property="og:url" content="https://{host}/news/test">'
+    html = head + container.format(body=body) + '<main><h2>Unrelated fantasy promotion</h2><p>Other club signs a new coach.</p></main>'
+    extracted = article_text_from_html(html)
+    assert 'confirmed a new contract' in extracted
+    assert 'fantasy' not in extracted and 'new coach' not in extracted
+    assert article_text_from_html(head+'<main>'+body+'</main>') == ''
+
+
+@pytest.mark.parametrize('title', ['Fantasy Manager: Jetzt nach Herzenslust den Kader umbauen',
+    'Unlimited transfers in Bundesliga Fantasy Manager!', 'Het ESPN Fantasy Voetbal elftal tot dusver'])
+def test_fantasy_products_never_consume_an_empty_leagues_writer_slot(title):
+    from bot.news_policy import non_article_news_reason
+    assert non_article_news_reason({'title':title}) == 'non_article_fantasy_product'
+
+
+@pytest.mark.parametrize('title,expected', [
+    ('PSG confirm contract extension','france-ligue-1'),
+    ('Marseille name new coach','france-ligue-1'),
+    ('Le Mans FC confirm signing','france-ligue-1'),
+    ('Ajax confirm injury','netherlands-eredivisie'),
+    ('PSG women confirm new coach','football-women'),
+    ('PSG academy announce new coach','football-youth'),
+    ('Nantes confirm new coach',None),
+])
+def test_verified_french_and_dutch_clubs_keep_women_youth_and_relegated_teams_separate(title,expected):
+    from bot.news_football_sections import football_news_section
+    assert football_news_section(SimpleNamespace(title=title),today=NOW.date()) == expected
