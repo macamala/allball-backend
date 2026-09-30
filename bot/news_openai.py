@@ -277,7 +277,9 @@ def complete(system, prompt, *, purpose='write', language='', max_tokens=1800,
         if result == 'cached':
             # A reviewed shadow request is not repeated in every dry-run cycle.
             quality = row.get('quality_result')
-            if quality and (config['phase'] == 'dry_run' or quality != 'ok'):
+            translation_recheck = (purpose == 'translate'
+                                   and quality == 'translation_semantic_rejected')
+            if quality and (config['phase'] == 'dry_run' or quality != 'ok' and not translation_recheck):
                 if config['phase'] == 'dry_run':
                     _last_status.set('dry_run_reviewed')
                 return None

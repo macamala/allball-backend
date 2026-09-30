@@ -275,7 +275,7 @@ def translate_source(source, *, languages=None):
     return validated
 
 
-def _semantic_validation(source, payload):
+def _semantic_validation(source, payload, *, return_languages=False):
     """One remaining shared free request validates all six translations.
 
     Numeric/name locks cannot establish who did what, negations or injury roles.
@@ -293,16 +293,29 @@ def _semantic_validation(source, payload):
         'broken/incomprehensible sentences. Exact English proper names and '
         'localized punctuation are intentional; do not reject those alone. '
         'Serbian must be Latin script. Fail closed on factual uncertainty. '
-        'Return only {"valid":true,"issues":[]} when all supplied translations are faithful; '
-        'otherwise return {"valid":false,"issues":["language: short reason"]}.'
+        'Language codes: sr=Serbian Latin, es=Spanish, de=German, fr=French, '
+        'it=Italian, pt=Portuguese. Judge each language separately. Return one '
+        'JSON object keyed by EVERY supplied language code, with its own '
+        '{"valid":true,"issues":[]} or {"valid":false,"issues":["short reason"]}. '
+        'Never let a failure in one language reject another correct translation.'
     )
     raw = free_json_completion(system, json.dumps({'english': source, 'translations': payload},
                                                 ensure_ascii=False), max_tokens=700)
     verdict = _decode_json_payload(raw)
-    valid = (isinstance(verdict, dict) and verdict.get('valid') is True
-             and verdict.get('issues') == [])
+    accepted = set()
+    if isinstance(verdict, dict):
+        # An explicit all-valid legacy verdict remains a complete judgment.
+        if verdict.get('valid') is True and verdict.get('issues') == []:
+            accepted = set(payload)
+        else:
+            accepted = {language for language in payload
+                        if isinstance(verdict.get(language), dict)
+                        and verdict[language].get('valid') is True
+                        and verdict[language].get('issues') == []}
+    valid = accepted == set(payload)
     logger.info('[deepl] semantic_validation=%s', 'passed' if valid else 'held')
     if not valid and isinstance(verdict, dict):
-        logger.info('[deepl] validation_issues=%s',
-                    [str(issue)[:240] for issue in (verdict.get('issues') or [])[:3]])
-    return valid
+        issues = verdict.get('issues') or [f'{language}: {verdict.get(language)}'
+                                         for language in payload if language not in accepted]
+        logger.info('[deepl] validation_issues=%s', [str(issue)[:240] for issue in issues[:3]])
+    return accepted if return_languages else valid

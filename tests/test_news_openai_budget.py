@@ -201,6 +201,14 @@ def test_rejected_cached_paid_draft_does_not_block_free_fallback(configured, boo
     assert len(calls) == 1
 
 
+def test_translation_group_rejection_is_revalidated_from_cache_without_new_payment(configured, book, monkeypatch):
+    calls = http_fake(monkeypatch, REPLY)
+    assert lane.complete('system', 'facts', purpose='translate', language='sr') == 'original draft'
+    book.record_quality(configured['request_key'], 'translation_semantic_rejected')
+    assert lane.complete('more explicit target language', 'facts', purpose='translate', language='sr') == 'original draft'
+    assert len(calls) == 1
+
+
 def test_free_correction_cannot_overwrite_paid_quality(configured, book, monkeypatch):
     from bot import free_ai_router
     http_fake(monkeypatch, REPLY)
@@ -327,7 +335,7 @@ def test_translation_free_first_then_paid_only_missing_languages(configured,monk
         assert 'sr_title,sr_summary,sr_body' in system and 'de_body' not in system
         return json.dumps({'sr': SOURCE})
     monkeypatch.setattr(lane,'complete',paid)
-    monkeypatch.setattr(news_deepl,'_semantic_validation',lambda *a:order.append('validator') or True)
+    monkeypatch.setattr(news_deepl,'_semantic_validation',lambda *a, **k:order.append('validator') or True)
     assert translations.translate_article_payload(article)=={'sr': SOURCE}
     assert order==['deepl','free','paid:sr','validator']
     assert translations._TRANSLATION_META.get()=={'sr':('openai','gpt-6-luna')}
@@ -356,7 +364,7 @@ def test_partial_free_translation_only_pays_for_failed_language(configured, monk
         calls.append(kwargs['language'])
         return json.dumps({'de': SOURCE})
     monkeypatch.setattr(lane, 'complete', paid)
-    monkeypatch.setattr(news_deepl, '_semantic_validation', lambda *a: True)
+    monkeypatch.setattr(news_deepl, '_semantic_validation', lambda *a, **k: True)
     assert translations.translate_article_payload(article) == {'sr': SOURCE, 'de': SOURCE}
     assert calls == ['de']
     assert translations._TRANSLATION_META.get()['sr'][0] == translations.TRANSLATION_PROVIDER
@@ -382,7 +390,7 @@ def test_free_translation_with_wrong_meaning_uses_paid_quality_fallback(configur
     bad = {**SOURCE, 'body': SOURCE['body'] + ' The player did not score.'}
     monkeypatch.setattr(translations, 'free_json_completion', lambda *a, **k: json.dumps({'sr': bad}))
     checked = []
-    def validate(source, output):
+    def validate(source, output, **kwargs):
         checked.append(output)
         return output == {'sr': SOURCE}
     monkeypatch.setattr(news_deepl, '_semantic_validation', validate)
@@ -390,3 +398,22 @@ def test_free_translation_with_wrong_meaning_uses_paid_quality_fallback(configur
     monkeypatch.setattr(lane, 'complete', lambda *a, **k: calls.append(k['language']) or json.dumps({'sr': SOURCE}))
     assert translations.translate_article_payload(article) == {'sr': SOURCE}
     assert calls == ['sr'] and len(checked) == 2
+
+
+def test_good_free_language_survives_bad_language_and_paid_rejection(configured, monkeypatch):
+    import json
+    from bot import news_translations as translations, news_deepl
+    from tests.test_news_translations import SOURCE
+    article = SimpleNamespace(id=13, title=SOURCE['title'], summary=SOURCE['summary'],
+        content=SOURCE['body'], ai_content=None, _news_missing_translation_languages=('sr', 'es'))
+    monkeypatch.setattr(news_deepl, 'deepl_enabled', lambda: False)
+    monkeypatch.setattr(translations, 'free_json_completion', lambda *a, **k: json.dumps({'sr': SOURCE, 'es': SOURCE}))
+    monkeypatch.setattr(news_deepl, '_semantic_validation', lambda *a, **k: {'sr'})
+    calls = []
+    def paid(system, prompt, **kwargs):
+        calls.append(kwargs['language'])
+        assert 'es = Spanish' in system and 'sr = Serbian' not in system
+        return json.dumps({'es': SOURCE})
+    monkeypatch.setattr(lane, 'complete', paid)
+    assert translations.translate_article_payload(article) == {'sr': SOURCE}
+    assert calls == ['es']
