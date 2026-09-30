@@ -36,6 +36,7 @@ _PURPOSES = ("writer", "validator", "translation")
 _UNAVAILABLE = {name: set() for name in _PURPOSES}
 _CURSOR = {name: 0 for name in _PURPOSES}
 _COOLDOWN_UNTIL = {}
+_UNKNOWN_QUOTA_STREAK = {}
 # Explicitly supported production model in Groq's Free Plan on 2026-09-29.
 # Writer-only: the existing independent validator remains the publication gate.
 _GROQ_FREE_WRITER_FALLBACKS = frozenset({'openai/gpt-oss-20b'})
@@ -134,8 +135,15 @@ def _http_failure(provider: str, response, *, model: str = '') -> None:
         if seconds is None:
             reset_key = "x-ratelimit-reset-requests" if dimension == "rpd" else "x-ratelimit-reset-tokens"
             seconds = _retry_seconds(headers.get(reset_key)) if dimension in {"rpd", "tpm"} else None
-    seconds = seconds or (3600 if status in {401, 403} else 600)
     scope = _route_key(provider, model) if model_scope else provider
+    if status == 429 and seconds is None and dimension == 'unknown':
+        # Repeated unknown 429s must not consume one request every News cycle.
+        # Preserve explicit reset/Retry-After evidence, and periodically probe
+        # this route again without changing providers, keys or billing tiers.
+        streak = min(4, (_UNKNOWN_QUOTA_STREAK.get(scope, 0) if scope in _COOLDOWN_UNTIL else 0) + 1)
+        _UNKNOWN_QUOTA_STREAK[scope] = streak
+        seconds = min(3600, 600 * 2 ** (streak - 1))
+    seconds = seconds or (3600 if status in {401, 403} else 600)
     _COOLDOWN_UNTIL[scope] = max(_COOLDOWN_UNTIL.get(scope, 0), time.monotonic() + seconds)
     for unavailable in _UNAVAILABLE.values():
         unavailable.add(scope)
@@ -494,6 +502,7 @@ def completion(
         else:
             value = _cloudflare(cfg, system, user, max_tokens, json_mode)
         if value:
+            _UNKNOWN_QUOTA_STREAK.pop(cfg['provider'], None)
             return value, (cfg["provider"], cfg["model"])
         # Do not hammer a failed transport/shape route again in this cycle.
         _UNAVAILABLE[purpose].add(_route_key(cfg['provider'], cfg['model']))

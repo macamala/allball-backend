@@ -11,7 +11,7 @@ from .taxonomy import (
     TEAMS,
 )
 from .textutil import clean_text
-from .news_policy import CRICKET_TITLE_RE, VOLLEYBALL_TITLE_RE, RUGBY_LEAGUE_TITLE_RE, RUGBY_UNION_TITLE_RE, unsupported_news_sport
+from .news_policy import CRICKET_TITLE_RE, VOLLEYBALL_TITLE_RE, RUGBY_LEAGUE_TITLE_RE, RUGBY_UNION_TITLE_RE, RALLY_TITLE_RE, unsupported_news_sport
 
 
 @dataclass
@@ -58,6 +58,8 @@ def classify_article(
         return Classification(None, None, None, "low", "empty-text")
     if unsupported_news_sport(title, body):
         return Classification(None, None, None, "low", "unsupported-news-sport")
+    if RALLY_TITLE_RE.search(title_text):
+        return Classification('motorsport', None, None, 'high', 'explicit-rally-title')
 
     sport_scores: Dict[str, int] = {}
     title_evidence = 0

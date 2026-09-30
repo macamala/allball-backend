@@ -393,6 +393,10 @@ def fact_lock_reason(
     for local, canonical in {'ЦИЕС': 'CIES', 'ФИФА': 'FIFA', 'УЕФА': 'UEFA'}.items():
         if re.search(r'(?<!\w)' + local + r'(?!\w)', source, re.I):
             src_acronyms.add(canonical)
+    # Country explicitly named in the audited German report; no ownership,
+    # nationality or other claim may be inferred merely from this equivalence.
+    if re.search(r'(?<!\w)(?:United Arab Emirates|Vereinigte(?:n)? Arabische(?:n)? Emirate(?:n)?)(?!\w)', source, re.I):
+        src_acronyms.add('UAE')
     extra_acronyms = sorted(_acronyms(output) - src_acronyms)
     if extra_acronyms:
         return "unsupported_acronym:" + extra_acronyms[0]

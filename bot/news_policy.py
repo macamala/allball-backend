@@ -19,6 +19,10 @@ VOLLEYBALL_TITLE_RE = re.compile(
 )
 RUGBY_LEAGUE_TITLE_RE = re.compile(r"(?<!\w)(?:rugby[\s-]+league|nrlw?)(?!\w)", re.I)
 RUGBY_UNION_TITLE_RE = re.compile(r"(?<!\w)rugby[\s-]+union(?!\w)", re.I)
+RALLY_TITLE_RE = re.compile(
+    r"(?<!\w)(?:rally2|wrc|(?:morocco|dakar|monte[ -]carlo) rally|"
+    r"rallye? (?:of |du |de )?(?:morocco|maroc|portugal|monte[ -]carlo))(?!\w)", re.I
+)
 
 
 def unsupported_news_sport(title, body=""):
@@ -57,10 +61,25 @@ def numeric_tokens(text, *, include_spelled=False):
     tokens.update(re.findall(r'(?<!\w)[£$€](\d+(?:[.,]\d+)*)\s*(?:bn|[mbk])\b', text or '', re.I))
     if not include_spelled:
         return tokens
-    # An explicit French euro amount may use a decimal comma. This only
-    # admits its same-value English spelling beside the stated money unit.
-    for amount in re.findall(r"(?<!\w)(\d+,\d{1,2})\s+millions?\s+d['’]euros\b", text or '', re.I):
+    # Same coefficient, explicit monetary unit: no currency conversion or
+    # expansion of millions. Confirmed Marca report: 31,5 millones de euros.
+    money_scale = r"(?:millions?\s+d['’]euros|mill[oó]n(?:es)?\s+de\s+(?:euros?|d[oó]lares?|libras?))"
+    for amount in re.findall(r"(?<![\w.,])(\d+,\d{1,2})\s+" + money_scale + r"\b", text or '', re.I):
         tokens.add(amount.replace(',', '.'))
+    # Spanish thousands punctuation needs both language and currency evidence.
+    # Do not reinterpret a decimal, score, percentage or unrelated measurement.
+    spanish_words = set(re.findall(r'\b(?:los|las|del|para|por|una|que|sus)\b', (text or '').casefold()))
+    if len(spanish_words) >= 3:
+        for amount in re.findall(r'(?<![\w.,])([1-9]\d{0,2}(?:\.\d{3})+)\s+(?:euros?|d[oó]lares?|libras?)\b', text or '', re.I):
+            tokens.update((amount.replace('.', ','), amount.replace('.', '')))
+    # Audited German football report uses 4:1-Sieg and zum 1:0. Only explicit
+    # score grammar admits a hyphen equivalent; clocks/ratios remain untouched.
+    for match in re.finditer(r'(?<![\w:])([0-9]|[1-9][0-9]):([0-9]|[1-9][0-9])(?![\w:])', text or ''):
+        before, after = (text or '')[max(0, match.start()-160):match.start()], (text or '')[match.end():match.end()+30]
+        if (re.match(r'[-–](?:Sieg|Niederlage|Erfolg|Führung|Fuehrung)\b', after, re.I)
+                or (re.search(r'\bzum\s+$', before, re.I)
+                    and re.search(r'\b(?:trifft|traf|schliesst|schließt|schloss|tor|treffer)\b', before, re.I))):
+            tokens.add(match[1] + '-' + match[2])
     # "60 percent" is the lexical equivalent of source "60%". Keep scores,
     # ranges and monetary multipliers intact; this is not arithmetic.
     tokens.update(value[:-1] for value in list(tokens) if value.endswith('%'))
@@ -172,6 +191,7 @@ _SOURCE_PATH_SPORTS = (
     ("www.bbc.co.uk", "/sport/table-tennis/", "table-tennis"),
     ("www.bbc.co.uk", "/sport/water-polo/", "water-polo"),
     ("www.record.pt", "/modalidades/tenis/", "tennis"),
+    ("www.record.pt", "/modalidades/motores/", "motorsport"),
     ("www.record.pt", "/futebol/", "football"),
     ("www.record.pt", "/internacional/competicoes-de-selecoes/", "football"),
     ("isport.blesk.cz", "/clanek/fotbal-", "football"),
@@ -206,6 +226,8 @@ def source_path_sport_hint(url):
 def explicit_headline_sport(title):
     """Unambiguous sport words, never shared city/team or competition names."""
     value = str(title or '').casefold()
+    if RALLY_TITLE_RE.search(value):
+        return 'motorsport'
     for sport, pattern in (
         ('table-tennis', r'\b(?:table[ -]tennis|ping pong)\b'),
         ('american-football', r'\b(?:american football|nfl)\b'),

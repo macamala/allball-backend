@@ -23,7 +23,7 @@ from models import Article, ArticleTaxonomyResolution
 from sport_match import MAIN_SPORTS, isolation_ok
 from bot.taxonomy import COMPETITIONS
 from bot.news_learning import article_has_open_incident
-from bot.news_policy import CRICKET_TITLE_RE, VOLLEYBALL_TITLE_RE, RUGBY_LEAGUE_TITLE_RE, RUGBY_UNION_TITLE_RE, gossip_news_reason, non_article_news_reason, publisher_branding_reason, source_path_conflict_reason
+from bot.news_policy import CRICKET_TITLE_RE, VOLLEYBALL_TITLE_RE, RUGBY_LEAGUE_TITLE_RE, RUGBY_UNION_TITLE_RE, RALLY_TITLE_RE, gossip_news_reason, non_article_news_reason, publisher_branding_reason, source_path_conflict_reason
 from taxonomy_resolver import (
     MIN_SPORT_CONFIDENCE,
     RESOLVER_VERSION,
@@ -1297,6 +1297,8 @@ def _distinctive_title_sport_support(title: str, sport: str) -> bool:
 def _explicit_title_sport_override(title: str) -> Optional[str]:
     """Very narrow, high-signal title markers allowed to correct a cached sport."""
     value = " " + (title or "").casefold() + " "
+    if RALLY_TITLE_RE.search(value):
+        return 'motorsport'
     # MMA/UFC are unambiguous sport labels in a News headline. They must outrank
     # incidental city/club words such as Brighton that otherwise resemble football.
     if re.search(r"(?<!\w)(?:mma|ufc|mixed\s+martial\s+arts|oktagon)(?!\w)", value, re.I):
