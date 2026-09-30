@@ -126,7 +126,9 @@ def football_news_section(article, *, today=None):
     body = _norm(sanitize_body(getattr(article, 'ai_content', None) or
                               getattr(article, 'content', '') or ''))[:2200]
     lead = title + ' ' + summary
-    women = bool(_WOMEN.search(lead) or _WOMEN.search(body[:1000]))
+    # A passing mention of a women's competition in a mixed season-launch
+    # article cannot turn Manchester City's financial case into WSL news.
+    women = bool(_WOMEN.search(lead) or _explicit(body[:350], women=True))
     youth = bool(_YOUTH.search(lead) or re.search(r'\bacademy\b', title))
     today = today or date.today()
     # Disability tournaments have their own formats; do not confuse a blind
@@ -162,7 +164,9 @@ def football_news_section(article, *, today=None):
     key = _explicit(title) or _explicit(summary)
     if key:
         return key
-    national = bool(_NATIONAL.search(lead)) or (
+    headline_club = _club_section(title, '', article, False, today)
+    national = (bool(_NATIONAL.search(title)) or
+                (bool(_NATIONAL.search(summary)) and not headline_club)) or (
         any(_has(lead, country) for country in _COUNTRIES)
         and (re.search(r'\b(?:national anthem|senior .{0,25}debut|(?:serbia|italy|england|france|netherlands|dutch) (?:a )?(?:squad|team|debut))\b', lead)
              or (any(title.startswith(country + ' ') for country in _COUNTRIES)
