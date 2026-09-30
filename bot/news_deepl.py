@@ -115,9 +115,9 @@ def _request(method, path, **kwargs):
 
 
 def _xml_fields(source):
-    # DeepL v2 translated ignored real words and clustered empty tags. Visible,
-    # digit-free immutable tokens retain word positions without exposing locked
-    # names/numbers to either translation or localized date formatting.
+    # Explicit XML v1 preserves ignore_tags verbatim. V2 translated protected
+    # names and moved sentence fragments into token tags in production. Real
+    # names retain the context needed to translate player/team relationships.
     combined = "\n".join(source[field] for field in FIELDS)
     names = set()
     for sentence in re.split(r'(?<=[.!?])\s+|\n+', combined):
@@ -133,7 +133,7 @@ def _xml_fields(source):
                  if len(name.split()) >= 2 and len(name.split()[-1]) >= 3
                  and name.split()[-1] not in generic_last_words)
     names.update(re.findall(r"\b[A-Z][A-Z0-9.-]{1,7}\b", combined))
-    from .news_translations import NUMBER_RE, _token_letters
+    from .news_translations import NUMBER_RE
     names_pattern = "|".join(re.escape(name) for name in sorted(names, key=len, reverse=True))
     alternatives = ([r"(?<!\w)(?:" + names_pattern + r")(?!\w)"] if names_pattern else [])
     pattern = re.compile("|".join(alternatives + [NUMBER_RE.pattern]))
@@ -151,7 +151,7 @@ def _xml_fields(source):
                 previous.tail = before
             token = str(len(locks))
             previous = ET.SubElement(root, "lock", {"id": token})
-            previous.text = f"__NINKOLOCK_{_token_letters(int(token))}__"
+            previous.text = match.group(0)
             locks[token] = match.group(0)
             position = match.end()
         if previous is None:
@@ -178,8 +178,7 @@ def _restore_xml(value, locks, language):
     parts.append(convert(root.text or ""))
     for node in root:
         token = node.get("id")
-        from .news_translations import _token_letters
-        expected = f"__NINKOLOCK_{_token_letters(int(token))}__" if token in locks else None
+        expected = locks.get(token)
         # Tag handling can move an ordinal full stop inside an otherwise intact
         # token (observed with Serbian "11."). Only surrounding punctuation or
         # whitespace may move; no changed/missing token, digit or word is repaired.
@@ -190,7 +189,10 @@ def _restore_xml(value, locks, language):
                 or token not in locks or not locked):
             return None
         seen[token] += 1
-        original = locked.group(1) + locks[token] + locked.group(2)
+        # Keep the numeric value, but don't carry an English ordinal suffix
+        # into another language (37th -> 37, followed by the localized suffix).
+        original_value = re.sub(r'^(\d+)(?:st|nd|rd|th)$', r'\1', locks[token], flags=re.I)
+        original = locked.group(1) + original_value + locked.group(2)
         tail = convert(node.tail or "")
         # DeepL can attach an empty XML tag to the following word. Restore
         # word boundaries, keeping punctuation/possessives/currency adjacent.
@@ -235,7 +237,7 @@ def translate_source(source):
         language, target = item
         result = _request("POST", "/translate", json={
             "text": documents, "source_lang": "EN", "target_lang": target,
-            "tag_handling": "xml", "tag_handling_version": "v2",
+            "tag_handling": "xml", "tag_handling_version": "v1",
             "ignore_tags": ["lock"], "non_splitting_tags": ["lock"],
             "preserve_formatting": True,
         })

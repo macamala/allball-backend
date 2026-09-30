@@ -71,11 +71,11 @@ def translations_enabled() -> bool:
 
 def _provider():
     from .news_deepl import deepl_enabled
-    return "deepl-free-v3" if deepl_enabled() else TRANSLATION_PROVIDER
+    return "deepl-free-v4" if deepl_enabled() else TRANSLATION_PROVIDER
 
 
 def _model():
-    return "deepl-xml-v2-tokens" if _provider() == "deepl-free-v3" else (selected_free_model_name() or "")[:80] or None
+    return "deepl-xml-v1-locked" if _provider() == "deepl-free-v4" else (selected_free_model_name() or "")[:80] or None
 
 
 def _canonical_number(token: str) -> str:

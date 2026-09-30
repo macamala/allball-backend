@@ -34,7 +34,7 @@ def test_xml_locks_names_numbers_acronyms_and_preserves_paragraphs():
     source = {**SOURCE, 'body': SOURCE['body'] + '\n\nUEFA confirmed 18:45 & no change.'}
     documents, locks = deepl._xml_fields(source)
     for field, document, locked in zip(deepl.FIELDS, documents, locks):
-        assert deepl._restore_xml(document, locked, 'de') == source[field]
+        assert deepl._restore_xml(document, locked, 'de') == source[field].replace('18th', '18')
     assert 'UEFA' in locks[2].values() and '18:45' in locks[2].values()
     assert 'Southport United' in locks[2].values()
     assert '&amp;' in documents[2]
@@ -42,17 +42,17 @@ def test_xml_locks_names_numbers_acronyms_and_preserves_paragraphs():
 
 @pytest.mark.parametrize('mutation', ['missing', 'changed', 'duplicate', 'foreign-tag', 'doctype'])
 def test_xml_fails_closed_for_missing_changed_or_injected_locks(mutation):
-    value = '<text>Result <lock id="0">__NINKOLOCK_A__</lock> confirmed.</text>'
+    value = '<text>Result <lock id="0">2-1</lock> confirmed.</text>'
     if mutation == 'missing': value = '<text>Result confirmed.</text>'
-    if mutation == 'changed': value = value.replace('__NINKOLOCK_A__', '3-1')
-    if mutation == 'duplicate': value = value.replace('</text>', '<lock id="0">__NINKOLOCK_A__</lock></text>')
+    if mutation == 'changed': value = value.replace('2-1', '3-1')
+    if mutation == 'duplicate': value = value.replace('</text>', '<lock id="0">2-1</lock></text>')
     if mutation == 'foreign-tag': value = value.replace('Result', '<script>Result</script>')
     if mutation == 'doctype': value = '<!DOCTYPE text>' + value
     assert deepl._restore_xml(value, {'0': '2-1'}, 'sr') is None
 
 
 def test_serbian_script_conversion_keeps_protected_names_and_digraph_case():
-    value = '<text>Љубав и ЊЕГОВ тим: <lock id="0">__NINKOLOCK_A__</lock> — Џек.</text>'
+    value = '<text>Љубав и ЊЕГОВ тим: <lock id="0">Luka Marin</lock> — Џек.</text>'
     assert deepl._restore_xml(value, {'0': 'Luka Marin'}, 'sr') == 'Ljubav i NJEGOV tim: Luka Marin — Džek.'
     assert deepl._latin('Ђорђе Ћирић, Шабац, Чачак, Жарко.') == 'Đorđe Ćirić, Šabac, Čačak, Žarko.'
 
@@ -95,6 +95,7 @@ def test_complete_batch_keeps_existing_validation_and_reserves_before_http(enabl
         calls.append((method, path))
         if path == '/usage':
             return {'character_count': 0, 'character_limit': 1 if bad == 'monthly' else 1000000}
+        assert kwargs['json']['tag_handling_version'] == 'v1'
         docs = kwargs['json']['text']
         if kwargs['json']['target_lang'] == 'DE':
             if bad == 'numeric': docs = [v.replace('</text>', ' 999</text>') for v in docs]
@@ -105,7 +106,8 @@ def test_complete_batch_keeps_existing_validation_and_reserves_before_http(enabl
     if bad:
         assert result is None
     else:
-        assert result == {language: SOURCE for language in deepl.TARGETS}
+        expected = {**SOURCE, 'body': SOURCE['body'].replace('18th', '18')}
+        assert result == {language: expected for language in deepl.TARGETS}
     if bad == 'monthly':
         assert not any(c[0] in ('POST', 'reserve') for c in calls)
     else:
@@ -129,18 +131,17 @@ def test_single_language_validation_stays_strict():
     assert translations._validate(SOURCE, {}, languages=()) is None
 
 
-def test_visible_token_restores_world_cup_and_word_boundary():
-    # Actual DeepL v2 response after the normal ignore_tags field translated
-    # the protected competition name despite the instruction to preserve it.
-    response = '<text>Селекција женске фудбалске репрезентације Енглеске за <lock id="0">__NINKOLOCK_A__</lock>плеј-оф против Грчке</text>'
+def test_v1_locked_name_preserves_world_cup_and_word_boundary():
+    # V1 keeps real protected text intact; a translated name is still rejected.
+    response = '<text>Селекција женске фудбалске репрезентације Енглеске за <lock id="0">World Cup</lock>плеј-оф против Грчке</text>'
     restored = deepl._restore_xml(response, {'0': 'World Cup'}, 'sr')
     assert restored == 'Selekcija ženske fudbalske reprezentacije Engleske za World Cup plej-of protiv Grčke'
-    changed = response.replace('__NINKOLOCK_A__', 'Светског првенства')
+    changed = response.replace('World Cup', 'Светског првенства')
     assert deepl._restore_xml(changed, {'0': 'World Cup'}, 'sr') is None
 
 
 def test_adjacent_locks_keep_numeric_word_boundaries():
-    raw = '<text><lock id="0">__NINKOLOCK_A__</lock><lock id="1">__NINKOLOCK_B__</lock></text>'
+    raw = '<text><lock id="0">World Cup</lock><lock id="1">2026</lock></text>'
     assert deepl._restore_xml(raw, {'0': 'World Cup', '1': '2026'}, 'de') == 'World Cup 2026'
 
 
@@ -155,10 +156,10 @@ def test_names_never_span_sentence_boundaries_and_short_forms_are_locked():
 
 
 def test_only_punctuation_may_move_inside_a_protected_token():
-    raw = '<text>Игра <lock id="0">__NINKOLOCK_A__.</lock> октобра.</text>'
+    raw = '<text>Игра <lock id="0">11.</lock> октобра.</text>'
     assert deepl._restore_xml(raw, {'0': '11'}, 'sr') == 'Igra 11. oktobra.'
-    assert deepl._restore_xml(raw.replace('__NINKOLOCK_A__.', '__NINKOLOCK_A__10'), {'0': '11'}, 'sr') is None
-    assert deepl._restore_xml(raw.replace('__NINKOLOCK_A__.', '__NINKOLOCK_A__injured'), {'0': '11'}, 'sr') is None
+    assert deepl._restore_xml(raw.replace('11.', '1110'), {'0': '11'}, 'sr') is None
+    assert deepl._restore_xml(raw.replace('11.', '11injured'), {'0': '11'}, 'sr') is None
 
 
 @pytest.mark.parametrize('response', [None, '{}', '{"valid":false,"issues":["sr: changed team"]}',
@@ -172,3 +173,14 @@ def test_no_translation_characters_spent_without_semantic_allowance(enabled, mon
     monkeypatch.setattr('bot.news_budget.ai_budget_exhausted', lambda: True)
     monkeypatch.setattr(deepl, '_character_ledger', lambda *a, **kw: pytest.fail('spent characters'))
     assert deepl.translate_source(SOURCE) is None
+
+
+def test_english_ordinal_suffix_is_localized_without_changing_value():
+    raw = '<text>U <lock id="0">37th</lock>-oj minuti i <lock id="1">72nd</lock>. minuti.</text>'
+    value = deepl._restore_xml(raw, {'0': '37th', '1': '72nd'}, 'sr')
+    assert value == 'U 37-oj minuti i 72. minuti.'
+    assert translations._numbers(value) == {'37', '72'}
+
+def test_real_v2_sentence_fragment_inside_lock_is_still_rejected():
+    raw = '<text>Tim <lock id="0">rangiran na 49th mestu</lock>.</text>'
+    assert deepl._restore_xml(raw, {'0': '49th'}, 'sr') is None
