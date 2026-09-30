@@ -1,0 +1,127 @@
+"""No real credentials/provider requests; durable quota and publication gates."""
+import copy
+import sys
+from types import SimpleNamespace
+from xml.etree import ElementTree as ET
+
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+from bot import news_deepl as deepl, news_translations as translations
+from tests.test_news_translations import SOURCE
+
+
+@pytest.fixture
+def enabled(monkeypatch):
+    monkeypatch.setenv('NEWS_DEEPL_FREE_ENABLED', '1')
+    monkeypatch.setenv('DEEPL_API_KEY', 'fixture:fx')
+    monkeypatch.setattr(deepl, '_cooldown_until', 0.)
+
+
+def test_only_explicit_free_key_is_enabled(enabled, monkeypatch):
+    assert deepl.deepl_enabled()
+    monkeypatch.setenv('DEEPL_API_KEY', 'pro-fixture')
+    assert not deepl.deepl_enabled()
+    monkeypatch.setenv('DEEPL_API_KEY', 'fixture:fx')
+    monkeypatch.setenv('NEWS_DEEPL_FREE_ENABLED', '0')
+    assert not deepl.deepl_enabled()
+
+
+def test_xml_locks_names_numbers_acronyms_and_preserves_paragraphs():
+    source = {**SOURCE, 'body': SOURCE['body'] + '\n\nUEFA confirmed 18:45 & no change.'}
+    documents, locks = deepl._xml_fields(source)
+    for field, document, locked in zip(deepl.FIELDS, documents, locks):
+        assert deepl._restore_xml(document, locked, 'de') == source[field]
+    assert 'UEFA' in locks[2].values() and '18:45' in locks[2].values()
+    assert 'Southport United' in locks[2].values()
+    assert '&amp;' in documents[2]
+
+
+@pytest.mark.parametrize('mutation', ['missing', 'changed', 'duplicate', 'foreign-tag', 'doctype'])
+def test_xml_fails_closed_for_missing_changed_or_injected_locks(mutation):
+    value = '<text>Result <lock id="0">2-1</lock> confirmed.</text>'
+    if mutation == 'missing': value = '<text>Result confirmed.</text>'
+    if mutation == 'changed': value = value.replace('2-1', '3-1')
+    if mutation == 'duplicate': value = value.replace('</text>', '<lock id="0">2-1</lock></text>')
+    if mutation == 'foreign-tag': value = value.replace('Result', '<script>Result</script>')
+    if mutation == 'doctype': value = '<!DOCTYPE text>' + value
+    assert deepl._restore_xml(value, {'0': '2-1'}, 'sr') is None
+
+
+def test_serbian_script_conversion_keeps_protected_names_and_digraph_case():
+    value = '<text>Љубав и ЊЕГОВ тим: <lock id="a">Luka Marin</lock> — Џек.</text>'
+    assert deepl._restore_xml(value, {'a': 'Luka Marin'}, 'sr') == 'Ljubav i NJEGOV tim: Luka Marin — Džek.'
+    assert deepl._latin('Ђорђе Ћирић, Шабац, Чачак, Жарко.') == 'Đorđe Ćirić, Šabac, Čačak, Žarko.'
+
+
+def test_character_reservations_survive_sessions_and_never_exceed_daily_limit(monkeypatch, tmp_path):
+    engine = create_engine('sqlite:///' + str(tmp_path/'deepl.sqlite'))
+    factory = sessionmaker(bind=engine)
+    monkeypatch.setitem(sys.modules, 'database', SimpleNamespace(SessionLocal=factory))
+    monkeypatch.setenv('NEWS_DEEPL_MAX_CHARACTERS_PER_DAY', '100')
+    assert deepl._character_ledger(60)
+    assert deepl._character_ledger(60, reserve=True)
+    assert not deepl._character_ledger(60)
+    assert not deepl._character_ledger(60, reserve=True)
+    assert deepl._character_ledger(40, reserve=True)
+    assert not deepl._character_ledger(1, reserve=True)
+    assert not deepl._character_ledger(0, reserve=True)
+    engine.dispose()
+
+
+def test_transport_uses_only_free_host_and_does_not_follow_redirects(enabled, monkeypatch, caplog):
+    calls = []
+    def request(method, url, **kwargs):
+        calls.append((method, url, kwargs))
+        return SimpleNamespace(status_code=456)
+    monkeypatch.setattr(deepl.requests, 'request', request)
+    assert deepl._request('GET', '/usage') is None
+    assert deepl._request('GET', '/usage') is None
+    assert len(calls) == 1
+    assert calls[0][1] == 'https://api-free.deepl.com/v2/usage'
+    assert calls[0][2]['allow_redirects'] is False
+    assert calls[0][2]['headers']['Authorization'] == 'DeepL-Auth-Key fixture:fx'
+    assert 'fixture:fx' not in caplog.text
+
+
+@pytest.mark.parametrize('bad', [None, 'monthly', 'numeric', 'lock'])
+def test_complete_batch_keeps_existing_validation_and_reserves_before_http(enabled, monkeypatch, bad):
+    calls = []
+    monkeypatch.setattr(deepl, '_character_ledger', lambda n, reserve=False: calls.append(('reserve' if reserve else 'check', n)) or True)
+    def request(method, path, **kwargs):
+        calls.append((method, path))
+        if path == '/usage':
+            return {'character_count': 0, 'character_limit': 1 if bad == 'monthly' else 1000000}
+        docs = kwargs['json']['text']
+        if kwargs['json']['target_lang'] == 'DE':
+            if bad == 'numeric': docs = [v.replace('</text>', ' 999</text>') for v in docs]
+            if bad == 'lock': docs = [v.replace('Southport United', 'Southport City') for v in docs]
+        return {'translations': [{'text': value} for value in docs]}
+    monkeypatch.setattr(deepl, '_request', request)
+    result = deepl.translate_source(SOURCE)
+    if bad:
+        assert result is None
+    else:
+        assert result == {language: SOURCE for language in deepl.TARGETS}
+    if bad == 'monthly':
+        assert not any(c[0] in ('POST', 'reserve') for c in calls)
+    else:
+        assert next(i for i,c in enumerate(calls) if c[0] == 'reserve') < next(i for i,c in enumerate(calls) if c[0] == 'POST')
+
+
+def test_deepl_failure_cannot_fall_back_to_writer_or_modify_english(enabled, monkeypatch):
+    article = SimpleNamespace(id=1, **SOURCE, ai_content=None)
+    article.content = article.body
+    before = copy.deepcopy(article.__dict__)
+    monkeypatch.setattr(deepl, 'translate_source', lambda source: None)
+    monkeypatch.setattr(translations, 'free_json_completion', lambda *a, **k: pytest.fail('spent writer quota'))
+    assert translations.translate_article_payload(article) is None
+    assert article.__dict__ == before
+
+
+def test_single_language_validation_stays_strict():
+    assert translations._validate(SOURCE, {'de': SOURCE}, languages=('de',))
+    assert translations._validate(SOURCE, {'sr': {**SOURCE, 'summary': 'Ћирилица'}}, languages=('sr',)) is None
+    assert translations._validate(SOURCE, {'de': SOURCE}) is None
+    assert translations._validate(SOURCE, {}, languages=()) is None

@@ -2,7 +2,7 @@
 
 This module never reads or calls OpenAI. It is enabled only by
 NEWS_EXTERNAL_FREE_WRITERS_ENABLED=1 and uses configured Groq and
-Cloudflare credentials. Mistral additionally requires an explicit Free-account
+Cloudflare credentials. Mistral and Gemini require an explicit Free-account
 opt-in; Z.ai is limited to the explicitly free GLM-4.7-Flash writer. An API key
 alone never enables either route. Every HTTP attempt is reserved in the same
 durable News request ledger. Provider output is never publication authority:
@@ -17,6 +17,7 @@ import re
 import time
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
+from zoneinfo import ZoneInfo
 from typing import Optional
 
 import httpx
@@ -29,7 +30,9 @@ _GROQ_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions"
 _MISTRAL_ENDPOINT = "https://api.mistral.ai/v1/chat/completions"
 _ZAI_ENDPOINT = "https://api.z.ai/api/paas/v4/chat/completions"
 _ZAI_FREE_MODEL = "glm-4.7-flash"
-_PROVIDERS = ("groq", "cloudflare", "mistral", "zai")
+_GEMINI_FREE_MODEL = "gemini-3.1-flash-lite"
+_GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/" + _GEMINI_FREE_MODEL + ":generateContent"
+_PROVIDERS = ("groq", "cloudflare", "gemini", "mistral", "zai")
 _CF_MODEL_RE = re.compile(r"^@[A-Za-z0-9._/-]{3,160}$")
 _MODEL_RE = re.compile(r"^[A-Za-z0-9._/+:-]{3,160}$")
 _PURPOSES = ("writer", "validator", "translation")
@@ -89,6 +92,24 @@ def _http_failure(provider: str, response, *, model: str = '') -> None:
             payload = payload if isinstance(payload, dict) else {}
             error = payload.get("error")
             message = str(error.get("message") if isinstance(error, dict) else error or "").lower()
+            if provider == 'gemini' and isinstance(error, dict):
+                # Google's structured quota dimensions, never the response text.
+                for detail in error.get('details', []):
+                    if not isinstance(detail, dict):
+                        continue
+                    if seconds is None:
+                        seconds = _retry_seconds(detail.get('retryDelay'))
+                    for violation in detail.get('violations', []):
+                        if not isinstance(violation, dict):
+                            continue
+                        quota = str(violation.get('quotaId') or '') + str(violation.get('quotaMetric') or '')
+                        if re.search(r'per.?day', quota, re.I):
+                            dimension = 'daily_free_requests'
+                            now = datetime.now(ZoneInfo('America/Los_Angeles'))
+                            reset = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+                            seconds = max(seconds or 0, reset.timestamp() - now.timestamp() + 60)
+                        elif dimension == 'unknown' and re.search(r'per.?minute', quota, re.I):
+                            dimension = 'minute_requests_or_tokens'
             # Mistral errors use top-level message/code, unlike Groq's nested
             # error. Inspect only for classification; never log response text.
             if provider == 'mistral':
@@ -158,6 +179,15 @@ def enabled() -> bool:
 def _config(provider: str) -> Optional[dict]:
     if not enabled():
         return None
+    if provider == "gemini":
+        # Operator's Free-project opt-in; never enable billing, Search grounding,
+        # Pro models, paid fallbacks or model rotation after quota exhaustion.
+        if os.getenv("NEWS_GEMINI_FREE_ENABLED") != "1":
+            return None
+        key = (os.getenv("GEMINI_API_KEY") or "").strip()
+        if not key:
+            return None
+        return {"provider": "gemini", "model": _GEMINI_FREE_MODEL, "key": key}
     if provider == "zai":
         # Official pricing lists this exact model as free input and output.
         # No configurable alias, paid FlashX fallback, tools or coding endpoint.
@@ -336,6 +366,50 @@ def _groq(cfg: dict, system: str, user: str, max_tokens: int, json_mode: bool):
         return None
 
 
+def _gemini(cfg: dict, system: str, user: str, max_tokens: int, json_mode: bool):
+    if cfg.get('model') != _GEMINI_FREE_MODEL or not reserve_ai_request():
+        return None
+    generation = {
+        "temperature": 0.1 if json_mode else 0.35,
+        "maxOutputTokens": max(2048, min(int(max_tokens), 9000)),
+        "thinkingConfig": {"thinkingLevel": "minimal"},
+    }
+    if json_mode:
+        generation['responseMimeType'] = 'application/json'
+    try:
+        with httpx.Client(timeout=httpx.Timeout(95, connect=8), follow_redirects=False) as client:
+            response = client.post(_GEMINI_ENDPOINT,
+                headers={"x-goog-api-key": cfg['key'], "Content-Type": "application/json"},
+                json={
+                    "systemInstruction": {"parts": [{"text": system}]},
+                    "contents": [{"role": "user", "parts": [{"text": user}]}],
+                    "generationConfig": generation,
+                })
+        if response.status_code != 200:
+            _http_failure('gemini', response)
+            logger.warning('[external_free] gemini http_status=%s', response.status_code)
+            return None
+        data = response.json()
+        candidates = data.get('candidates') if isinstance(data, dict) else None
+        if not isinstance(candidates, list) or len(candidates) != 1:
+            return None
+        choice = candidates[0]
+        if not isinstance(choice, dict) or choice.get('finishReason') != 'STOP':
+            return None
+        content = choice.get('content')
+        parts = content.get('parts') if isinstance(content, dict) else None
+        if not isinstance(parts, list) or any(not isinstance(part, dict) for part in parts):
+            return None
+        if any('functionCall' in part for part in parts):
+            return None
+        value = ''.join(part['text'] for part in parts
+                        if isinstance(part.get('text'), str) and not part.get('thought'))
+        return value.strip() or None
+    except Exception as exc:
+        logger.warning('[external_free] gemini request_failed=%s', type(exc).__name__)
+        return None
+
+
 def _mistral(cfg: dict, system: str, user: str, max_tokens: int, json_mode: bool):
     if not reserve_ai_request():
         return None
@@ -499,6 +573,8 @@ def completion(
             value = _mistral(cfg, system, user, max_tokens, json_mode)
         elif cfg["provider"] == "zai":
             value = _zai(cfg, system, user, max_tokens, json_mode)
+        elif cfg["provider"] == "gemini":
+            value = _gemini(cfg, system, user, max_tokens, json_mode)
         else:
             value = _cloudflare(cfg, system, user, max_tokens, json_mode)
         if value:

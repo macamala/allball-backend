@@ -30,6 +30,7 @@ from .news_learning import (
     writer_identity,
 )
 from .news_budget import active_ai_budget, ai_budget_scope, configured_budget, ai_budget_exhausted
+from .news_deepl import deepl_enabled
 from sports_registry.sports import SPORTS
 from .classify import Classification, classify_article
 from .dedupe import existing_by_url, existing_near_duplicate, unprocessed_source_items
@@ -134,7 +135,8 @@ def _correction_retry_allowed(*, prefer_breadth: bool = False, force: bool = Fal
         # one retry because it is a mechanical originality failure, not a fact guess.
         return False
     translation_reserve = 0
-    if not prefer_breadth and os.getenv("NEWS_TRANSLATIONS_ENABLED") == "1":
+    if (not prefer_breadth and os.getenv("NEWS_TRANSLATIONS_ENABLED") == "1"
+            and not deepl_enabled()):
         try:
             translation_reserve = 1 if int(os.getenv("NEWS_TRANSLATIONS_PER_CYCLE", "0")) > 0 else 0
         except ValueError:
@@ -1213,6 +1215,7 @@ def _fetch_and_store_all_articles(
             if (
                 not prefer_breadth
                 and os.getenv("NEWS_TRANSLATIONS_ENABLED") == "1"
+                and not deepl_enabled()
                 and int(os.getenv("NEWS_TRANSLATIONS_PER_CYCLE", "0") or "0") > 0
                 and active_budget is not None
                 and (active_budget.max_requests - active_budget.attempts) < 3

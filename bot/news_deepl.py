@@ -1,0 +1,233 @@
+"""DeepL API Free translation lane, isolated from original-writer quotas.
+
+Only the Free endpoint is allowed. Character reservations survive restarts;
+timeouts are not refunded. English publication never depends on this module.
+"""
+from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
+import logging
+import os
+import re
+import time
+from xml.etree import ElementTree as ET
+
+import requests
+from sqlalchemy import text
+
+from .news_policy import protected_proper_names
+
+logger = logging.getLogger(__name__)
+FREE_URL = "https://api-free.deepl.com/v2"
+TARGETS = {"sr": "SR", "es": "ES", "de": "DE", "fr": "FR", "it": "IT", "pt": "PT-PT"}
+FIELDS = ("title", "summary", "body")
+_cooldown_until = 0.0
+_SERBIAN = dict(zip(
+    "абвгдђежзијклљмнњопрстћуфхцчџш",
+    ("a", "b", "v", "g", "d", "đ", "e", "ž", "z", "i", "j", "k", "l", "lj", "m", "n", "nj", "o", "p", "r", "s", "t", "ć", "u", "f", "h", "c", "č", "dž", "š"),
+))
+
+
+def deepl_enabled():
+    return (os.getenv("NEWS_DEEPL_FREE_ENABLED") == "1"
+            and os.getenv("DEEPL_API_KEY", "").strip().endswith(":fx"))
+
+
+def _latin(text_value):
+    """Script conversion only, before restoring unchanged protected names."""
+    def word(match):
+        value = match.group(0)
+        uppercase = value.isupper()
+        out = []
+        for char in value:
+            replacement = _SERBIAN.get(char.lower(), char)
+            if char.isupper():
+                replacement = replacement.upper() if uppercase else replacement.capitalize()
+            out.append(replacement)
+        return "".join(out)
+    return re.sub(r"[\u0400-\u04FF]+", word, text_value)
+
+
+def _daily_limit():
+    try:
+        return max(0, min(30000, int(os.getenv("NEWS_DEEPL_MAX_CHARACTERS_PER_DAY", "30000"))))
+    except ValueError:
+        return 0
+
+
+def _character_ledger(amount, *, reserve=False):
+    """Atomic conservative reservation in a separate, News-only ledger."""
+    limit = _daily_limit()
+    if amount <= 0 or amount > limit:
+        return False
+    from database import SessionLocal
+    db = SessionLocal()
+    try:
+        db.execute(text(
+            "CREATE TABLE IF NOT EXISTS news_deepl_characters ("
+            "day DATE PRIMARY KEY, characters INTEGER NOT NULL CHECK (characters >= 0))"
+        ))
+        params = {"day": datetime.now(timezone.utc).date(), "amount": amount, "cap": limit}
+        if reserve:
+            row = db.execute(text(
+                "INSERT INTO news_deepl_characters(day, characters) VALUES (:day, :amount) "
+                "ON CONFLICT(day) DO UPDATE SET characters=news_deepl_characters.characters + :amount "
+                "WHERE news_deepl_characters.characters + :amount <= :cap RETURNING characters"
+            ), params).first()
+            allowed = row is not None
+        else:
+            used = db.execute(text(
+                "SELECT characters FROM news_deepl_characters WHERE day=:day"
+            ), params).scalar() or 0
+            allowed = int(used) + amount <= limit
+        db.commit()
+        return allowed
+    except Exception as exc:
+        db.rollback()
+        logger.info("[deepl] held reason=character_ledger error=%s", type(exc).__name__)
+        return False
+    finally:
+        db.close()
+
+
+def _request(method, path, **kwargs):
+    global _cooldown_until
+    if not deepl_enabled() or time.monotonic() < _cooldown_until:
+        return None
+    try:
+        response = requests.request(
+            method, FREE_URL + path,
+            headers={"Authorization": "DeepL-Auth-Key " + os.environ["DEEPL_API_KEY"].strip()},
+            timeout=(8, 75), allow_redirects=False, **kwargs,
+        )
+        if response.status_code != 200:
+            delay = 3600 if response.status_code in (401, 403, 456) else 600
+            _cooldown_until = time.monotonic() + delay
+            # Never log response bodies, request headers or credentials.
+            logger.info("[deepl] held path=%s status=%s cooldown_seconds=%s", path, response.status_code, delay)
+            return None
+        return response.json()
+    except Exception as exc:
+        _cooldown_until = time.monotonic() + 600
+        logger.info("[deepl] held path=%s transport=%s", path, type(exc).__name__)
+        return None
+
+
+def _xml_fields(source):
+    # Real names inside ignore_tags retain context while remaining immutable.
+    # Protect body names and acronyms as well as the headline/summary names.
+    combined = "\n".join(source[field] for field in FIELDS)
+    names = set(protected_proper_names(combined))
+    names.update(re.findall(r"\b[A-Z][A-Z0-9.-]{1,7}\b", combined))
+    from .news_translations import NUMBER_RE
+    names_pattern = "|".join(re.escape(name) for name in sorted(names, key=len, reverse=True))
+    alternatives = ([r"(?<!\w)(?:" + names_pattern + r")(?!\w)"] if names_pattern else [])
+    pattern = re.compile("|".join(alternatives + [NUMBER_RE.pattern]))
+    documents, locks_by_field = [], []
+    for field in FIELDS:
+        root = ET.Element("text")
+        previous = None
+        position = 0
+        locks = {}
+        for match in pattern.finditer(source[field]):
+            before = source[field][position:match.start()]
+            if previous is None:
+                root.text = before
+            else:
+                previous.tail = before
+            token = str(len(locks))
+            previous = ET.SubElement(root, "lock", {"id": token})
+            previous.text = match.group(0)
+            locks[token] = match.group(0)
+            position = match.end()
+        if previous is None:
+            root.text = source[field]
+        else:
+            previous.tail = source[field][position:]
+        documents.append(ET.tostring(root, encoding="unicode"))
+        locks_by_field.append(locks)
+    return documents, locks_by_field
+
+
+def _restore_xml(value, locks, language):
+    if not isinstance(value, str) or len(value) > 100000 or "<!" in value:
+        return None
+    try:
+        root = ET.fromstring(value)
+    except ET.ParseError:
+        return None
+    if root.tag != "text" or root.attrib:
+        return None
+    seen = Counter()
+    parts = []
+    convert = _latin if language == "sr" else lambda value: value
+    parts.append(convert(root.text or ""))
+    for node in root:
+        token = node.get("id")
+        if (node.tag != "lock" or set(node.attrib) != {"id"} or len(node)
+                or token not in locks or node.text != locks[token]):
+            return None
+        seen[token] += 1
+        parts.extend((locks[token], convert(node.tail or "")))
+    if seen != Counter({token: 1 for token in locks}):
+        return None
+    return "".join(parts).strip()
+
+
+def translate_source(source):
+    """Translate the complete article to six languages, with existing gates."""
+    if not deepl_enabled() or time.monotonic() < _cooldown_until:
+        return None
+    documents, locks = _xml_fields(source)
+    # XML overhead is included deliberately; reservations overestimate billing.
+    characters = sum(len(value) for value in documents) * len(TARGETS)
+    if not _character_ledger(characters):
+        logger.info("[deepl] held reason=daily_character_budget requested=%s", characters)
+        return None
+    usage = _request("GET", "/usage")
+    if not isinstance(usage, dict):
+        return None
+    count, limit = usage.get("character_count"), usage.get("character_limit")
+    if (type(count) is not int or type(limit) is not int or count < 0
+            or count + characters > limit):
+        logger.info("[deepl] held reason=account_character_budget")
+        return None
+    if not _character_ledger(characters, reserve=True):
+        return None
+    from .news_translations import _validate
+
+    def translate_language(item):
+        language, target = item
+        result = _request("POST", "/translate", json={
+            "text": documents, "source_lang": "EN", "target_lang": target,
+            "tag_handling": "xml", "tag_handling_version": "v2",
+            "ignore_tags": ["lock"], "non_splitting_tags": ["lock"],
+            "preserve_formatting": True,
+        })
+        rows = result.get("translations") if isinstance(result, dict) else None
+        if not isinstance(rows, list) or len(rows) != len(FIELDS):
+            return None
+        row = {}
+        for field, translated, field_locks in zip(FIELDS, rows, locks):
+            value = _restore_xml(translated.get("text") if isinstance(translated, dict) else None,
+                                 field_locks, language)
+            if not value:
+                logger.info("[deepl] held reason=protected_text language=%s field=%s", language, field)
+                return None
+            row[field] = value
+        if not _validate(source, {language: row}, languages=(language,)):
+            return None
+        return language, row
+
+    # Three bounded calls at a time avoid six serial long-running requests.
+    # The whole batch was reserved before any HTTP translation was sent.
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        results = list(pool.map(translate_language, TARGETS.items()))
+    if any(result is None for result in results):
+        return None
+    payload = dict(results)
+    validated = _validate(source, payload)
+    if validated:
+        logger.info("[deepl] translated languages=%s reserved_characters=%s account_used=%s account_limit=%s",
+                    len(validated), characters, count, limit)
+    return validated

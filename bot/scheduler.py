@@ -129,6 +129,20 @@ def image_health_job():
         logger.info('News image-health skipped: %s', exc)
         return 0
 
+def _run_deepl_translations():
+    """Bounded translation-only allowance, after English ingestion/maintenance."""
+    from bot.news_deepl import deepl_enabled
+    if (not deepl_enabled() or os.environ.get('NEWS_TRANSLATIONS_ENABLED') != '1'
+            or int(os.environ.get('NEWS_TRANSLATIONS_PER_CYCLE', '0')) <= 0):
+        return 0
+    try:
+        from bot.news_translations import translate_latest_articles
+        return translate_latest_articles(limit=1)
+    except Exception as exc:
+        logger.error('News DeepL translation lane failed: %s', type(exc).__name__)
+        return 0
+
+
 def _run_cycle():
     """Called under news_owner. Every tick rechecks flags before importing DB code."""
     errors = _start_errors()
@@ -146,6 +160,11 @@ def _run_cycle():
     if maximum <= 0 or not budget.can_start():
         reason = 'article_limit_disabled' if maximum <= 0 else (budget.blocked_reason or 'allowance_or_ledger_unavailable')
         _run_zero_ai_public_repairs()
+        if maximum > 0:
+            translated_rows = _run_deepl_translations()
+            if translated_rows:
+                bump_public_cache()
+                logger.info('News independent translations finished: translated_rows=%s', translated_rows)
         logger.info('News AI lane held: %s', reason)
         return 0
 
@@ -174,9 +193,13 @@ def _run_cycle():
                     bump_public_cache()
             except Exception as exc:
                 logger.error('Recent News taxonomy repair failed: %s', type(exc).__name__)
-            # English freshness always wins. Translate only after new-story
-            # ingestion, from whatever request allowance remains.
-            if (
+            # DeepL has a separate durable character cap and cannot consume
+            # original-writer requests. Legacy LLM translations still yield
+            # their shared allowance to English coverage.
+            from bot.news_deepl import deepl_enabled
+            if deepl_enabled():
+                translated_rows = _run_deepl_translations()
+            elif (
                 rewritten > 0
                 and os.environ.get('NEWS_TRANSLATIONS_ENABLED') == '1'
                 and os.environ.get('NEWS_FOOTBALL_ONLY') != '1'
@@ -205,7 +228,7 @@ def _run_cycle():
                 finally:
                     db.close()
                 repair_contaminated(max_pages=1)
-        if rewritten or historical:
+        if rewritten or translated_rows or historical:
             bump_public_cache()
         logger.info(
             'News cycle finished: ai_articles=%s translated_rows=%s indexed=%s attempts=%s stop=%s history=%s',

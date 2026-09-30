@@ -1,7 +1,7 @@
 """Cached six-language translations for already-public NinkoSports articles.
 
-Translations are strictly secondary to English News creation. One bounded
-zero-price JSON request translates one article into all configured languages,
+Translations follow English News creation. The free writer pool or a separate
+DeepL Free character allowance translates all configured languages,
 then deterministic gates reject changed proper names, invented numbers, links,
 incomplete bodies, or Serbian Cyrillic. Failures never hide the English article.
 """
@@ -67,6 +67,15 @@ Do not return arrays, prose, markdown or omitted fields.
 
 def translations_enabled() -> bool:
     return os.getenv("NEWS_TRANSLATIONS_ENABLED") == "1"
+
+
+def _provider():
+    from .news_deepl import deepl_enabled
+    return "deepl-free-v1" if deepl_enabled() else TRANSLATION_PROVIDER
+
+
+def _model():
+    return "deepl-xml-v2" if _provider() == "deepl-free-v1" else (selected_free_model_name() or "")[:80] or None
 
 
 def _canonical_number(token: str) -> str:
@@ -234,11 +243,11 @@ def _translation_reject(reason: str, language: Optional[str] = None):
     return None
 
 
-def _canonical_translation_payload(payload: object):
+def _canonical_translation_payload(payload: object, languages=LANGUAGES):
     """Accept only structurally equivalent complete translation payloads."""
     import json
 
-    if not isinstance(payload, dict):
+    if not isinstance(payload, dict) or not languages or not set(languages).issubset(LANGUAGES):
         return None
 
     # Some compatible models wrap the requested object once.
@@ -253,7 +262,7 @@ def _canonical_translation_payload(payload: object):
     # Preferred flat schema: sr_title, sr_summary, sr_body, ...
     flat = {}
     flat_ok = True
-    for language in LANGUAGES:
+    for language in languages:
         row = {}
         for field in required:
             key = f"{language}_{field}"
@@ -265,13 +274,13 @@ def _canonical_translation_payload(payload: object):
         if not flat_ok:
             break
         flat[language] = row
-    if flat_ok and set(flat) == set(LANGUAGES):
+    if flat_ok and set(flat) == set(languages):
         return flat
 
     # Backward-compatible nested schema. Each language may itself be a JSON
     # string or a one-item list containing the same required object.
     nested = {}
-    for language in LANGUAGES:
+    for language in languages:
         row = payload.get(language)
         if isinstance(row, str):
             try:
@@ -293,7 +302,7 @@ def _canonical_translation_payload(payload: object):
         if not set(required).issubset(row):
             return None
         nested[language] = {field: row.get(field) for field in required}
-    return nested if set(nested) == set(LANGUAGES) else None
+    return nested if set(nested) == set(languages) else None
 
 
 def _json_key(value: str) -> str:
@@ -348,8 +357,8 @@ def _normalize_language_row(row):
     return None
 
 
-def _validate(source: Dict[str, str], payload: object) -> Optional[Dict[str, Dict[str, str]]]:
-    payload = _canonical_translation_payload(payload)
+def _validate(source: Dict[str, str], payload: object, *, languages=LANGUAGES) -> Optional[Dict[str, Dict[str, str]]]:
+    payload = _canonical_translation_payload(payload, languages)
     if payload is None:
         return _translation_reject("top-level-shape")
     source_combined = "\n".join(source.values())
@@ -365,7 +374,7 @@ def _validate(source: Dict[str, str], payload: object) -> Optional[Dict[str, Dic
     source_words = max(1, _word_count(source.get("body") or ""))
 
     cleaned: Dict[str, Dict[str, str]] = {}
-    for language in LANGUAGES:
+    for language in languages:
         raw_row = payload.get(language)
         row = _normalize_language_row(raw_row)
         if row is None:
@@ -449,6 +458,10 @@ def translate_article_payload(article: Article) -> Optional[Dict[str, Dict[str, 
     if not all(source.values()) or len(source["body"]) > 12000:
         # Never cache a translation of only the first part of an article.
         return None
+    from .news_deepl import deepl_enabled, translate_source
+    if deepl_enabled():
+        # DeepL failure never spends original-writer quota as an implicit retry.
+        return translate_source(source)
     locked_names = [
         name for name in protected_proper_names(
             f'{source["title"]}\n{source["summary"]}'
@@ -522,7 +535,7 @@ def _latest_missing(db: Session, limit: int) -> list[Article]:
         ready = {row.language_code for row in translation_rows if row.status == "ready"}
         recently_failed = any(
             row.status == "failed"
-            and row.provider == TRANSLATION_PROVIDER
+            and row.provider == _provider()
             and row.updated_at is not None
             and row.updated_at >= cutoff
             for row in translation_rows
@@ -537,7 +550,7 @@ def _latest_missing(db: Session, limit: int) -> list[Article]:
 
 
 def _mark_failed(db: Session, article: Article) -> None:
-    model = (selected_free_model_name() or "")[:80] or None
+    model = _model()
     now = datetime.utcnow()
     for language in LANGUAGES:
         row = (
@@ -553,13 +566,13 @@ def _mark_failed(db: Session, article: Article) -> None:
             db.add(row)
         if row.status != "ready":
             row.status = "failed"
-            row.provider = TRANSLATION_PROVIDER
+            row.provider = _provider()
             row.model_name = model
             row.updated_at = now
 
 
 def _store(db: Session, article: Article, translations: Dict[str, Dict[str, str]]) -> int:
-    model = (selected_free_model_name() or "")[:80] or None
+    model = _model()
     now = datetime.utcnow()
     stored = 0
     for language in LANGUAGES:
@@ -579,7 +592,7 @@ def _store(db: Session, article: Article, translations: Dict[str, Dict[str, str]
         row.translated_summary = data["summary"]
         row.translated_body = data["body"]
         row.status = "ready"
-        row.provider = TRANSLATION_PROVIDER
+        row.provider = _provider()
         row.model_name = model
         row.updated_at = now
         stored += 1
@@ -587,7 +600,7 @@ def _store(db: Session, article: Article, translations: Dict[str, Dict[str, str]
 
 
 def translate_latest_articles(limit: int = 1) -> int:
-    """Translate latest missing public articles. One AI request per article."""
+    """Translate latest missing public articles using the selected free lane."""
     if not translations_enabled():
         return 0
     limit = max(1, min(int(limit), 3))
