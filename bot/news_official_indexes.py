@@ -719,7 +719,13 @@ def _hydrate(cfg: Dict, url: str, fallback_title: str, *, diagnostics=None, site
         r'\bid\s*=\s*["\']vue-gallery-list["\']', html, re.I
     ):
         return reject("non_article_photo_gallery")
-    published_at = page_published_at_from_html(html)
+    first_party = None
+    if cfg['id'] == 'ligaportugal-official-news':
+        from .news_ligaportugal import read_ligaportugal_article
+        first_party = read_ligaportugal_article(html, url)
+        if first_party is None:
+            return reject('unverified_same_article_payload')
+    published_at = first_party['published_at'] if first_party else page_published_at_from_html(html)
     if cfg["id"] == "chelsea-football-news":
         components = public_components(html, ("ArticleHeader", "ArticleLoginOverlay"))
         if components.get("ArticleLoginOverlay", {}).get("requiresLogin") is not False:
@@ -754,8 +760,8 @@ def _hydrate(cfg: Dict, url: str, fallback_title: str, *, diagnostics=None, site
     reason = news_freshness_reason(published_at, now)
     if reason:
         return reject(reason)
-    title = page_title_from_html(html) or fallback_title
-    body = article_text_from_html(html)
+    title = first_party["title"] if first_party else page_title_from_html(html) or fallback_title
+    body = first_party["body"] if first_party else article_text_from_html(html)
     if not title or not body:
         return reject("missing_title" if not title else "missing_article_body")
     if cfg['id'] == 'chelsea-football-news':
@@ -778,7 +784,7 @@ def _hydrate(cfg: Dict, url: str, fallback_title: str, *, diagnostics=None, site
     try:
         from .news_image_http import pick_news_article_image
 
-        for candidate in collect_page_image_candidates(html):
+        for candidate in (first_party["image_candidates"] if first_party else collect_page_image_candidates(html)):
             if not isinstance(candidate, dict):
                 continue
             raw_url = str(candidate.get("url") or "").strip()

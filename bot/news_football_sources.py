@@ -4,6 +4,9 @@ All sources use the existing robots-aware transport and publication, original
 writing, factual and same-article image gates. No paid API is added here.
 """
 HTML_INDEXES = (
+    {'id':'ligaportugal-official-news', 'sport':'football', 'publisher':'Liga Portugal',
+     'url':'https://www.ligaportugal.pt/noticias', 'host':'www.ligaportugal.pt',
+     'paths':('/news/',), 'article_path_re':r'^/news/\d+/[^/]+/?$'},
     {'id':'laliga-official-news', 'sport':'football', 'publisher':'LALIGA',
      'url':'https://www.laliga.com/noticias', 'host':'www.laliga.com',
      'paths':('/noticias/',), 'article_path_re':r'^/noticias/[^/]+/?$',
@@ -73,6 +76,7 @@ RSS_FEEDS = (
 # This is only a source-association map for monitoring gaps, not evidence that
 # any source has written a current article for every associated competition.
 SOURCE_DESKS = {
+    'Liga Portugal': ['portugal-primeira-liga','portugal-liga-2'],
     'LALIGA': ['spain-la-liga','spain-la-liga-2'],
     'Lega B': ['italy-serie-b'],
     'Ekstraklasa': ['poland-ekstraklasa'],

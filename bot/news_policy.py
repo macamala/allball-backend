@@ -396,6 +396,14 @@ def non_article_news_reason(item):
 
     body = str((item or {}).get("body") or (item or {}).get("summary") or "")
     copy = '\n'.join(str((item or {}).get(key) or '') for key in ('title', 'summary', 'body'))
+    # A transfer wishlist is an opinion product, not a report of a deal.
+    # The observed The72 format was consuming scarce writer/validator slots.
+    # Match the full proposal structure; actual signings remain eligible.
+    if host in {'the72.co.uk', 'www.the72.co.uk'} and re.search(
+            r'^\s*(?:[2-9]|[1-9]\d|two|three|four|five|six|seven|eight|nine|ten)\s+'
+            r'(?:free[ -]agent\s+)?(?:players|midfielders|defenders|strikers|forwards|goalkeepers|wingers)\s+'
+            r'for\s+[^.!?]{2,80}?\s+to\s+(?:consider|target|sign)\b', title):
+        return 'non_article_transfer_wishlist'
     # UEFA refreshes these reference pages with today's date. Their scorer
     # tables/record collections are not a new report. Keep this bounded to
     # the publisher's article-title formats, preserving actual record-breaking
