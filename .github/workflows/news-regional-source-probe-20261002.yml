@@ -1,0 +1,112 @@
+name: Regional football source verification 20261002
+on:
+  push:
+    branches: [audit/news-football-20261002]
+    paths: [.github/workflows/news-regional-source-probe-20261002.yml]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DATABASE_URL: 'sqlite:///:memory:'
+      NEWS_FOOTBALL_ONLY: '1'
+      NINKO_SKIP_STARTUP_INDEX: '1'
+      NINKO_SKIP_INTEGRITY_BACKFILL: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: b519a62d3d9b45d544d4ccba524eb2f210269428
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: pip install -q -r requirements.txt
+      - name: Inspect public feed and article evidence without AI or publication
+        run: |
+          mkdir -p regional-evidence/pages
+          python - <<'PY'
+          import json,pathlib,logging,re
+          from concurrent.futures import ThreadPoolExecutor
+          from html.parser import HTMLParser
+          from urllib.parse import urlsplit,urljoin
+          from datetime import datetime,timezone
+          from bot.news_feed_http import read_news_feed
+          from bot.fetch_sources import _fetch_feed_entries,_classify_candidate,_pick_reachable_article_image,source_article_facts
+          from bot.extract import extract_from_url
+          from bot.news_policy import non_article_news_reason
+          from bot.quality import quality_check
+          from bot.news_football_priority import candidate_football_section
+          from bot.news_football_memberships import refresh_football_news_memberships
+          logging.basicConfig(level=logging.WARNING)
+          root=pathlib.Path('regional-evidence')
+          candidates=[
+            ('index-football','Index.hr','https://www.index.hr/rss/sport-nogomet','football'),
+            ('sportnet-football','Sportnet','https://sportnet.hr/rss.aspx?id=nogomet','football'),
+            ('nos-football','NOS','https://feeds.nos.nl/nossportvoetbal','football'),
+            ('rtp-sport','RTP','https://www.rtp.pt/noticias/rss/desporto',None),
+            ('svt-sport','SVT','https://www.svt.se/sport/rss.xml',None),
+            ('orf-sport','ORF','https://rss.orf.at/sport.xml',None),
+            ('nrk-sport','NRK','https://www.nrk.no/sport/toppsaker.rss',None),
+            ('goal-poland','Goal.pl','https://www.goal.pl/feed/','football'),
+            ('gsp-romania','GSP','https://www.gsp.ro/rss2.xml',None),
+            ('nb1-hungary','NB1.hu','https://nb1.hu/feed/','football'),
+            ('gazzetta-greece','Gazzetta Greece','https://www.gazzetta.gr/rssfeed.xml',None),
+            ('sport24-greece','Sport24 Greece','https://www.sport24.gr/rss/',None),
+            ('ntv-turkey','NTV Spor','https://www.ntvspor.net/rss',None),
+            ('sport-czech','Sport.cz','https://www.sport.cz/rss2',None),
+            ('bold-denmark','Bold','https://bold.dk/rss','football'),
+            ('tipsbladet-denmark','Tipsbladet','https://www.tipsbladet.dk/feed','football'),
+            ('footballscotland','Football Scotland','https://www.footballscotland.co.uk/?service=rss','football'),
+            ('the72-england','The72','https://the72.co.uk/feed/','football'),
+            ('ligabb-news','Serie B News','https://www.seriebnews.com/feed/','football'),
+            ('socceroos','Football Australia','https://www.footballaustralia.com.au/news',None),
+          ]
+          class FeedLinks(HTMLParser):
+              def __init__(self):super().__init__();self.links=[]
+              def handle_starttag(self,tag,attrs):
+                  a=dict(attrs)
+                  if tag=='link' and a.get('rel')=='alternate' and any(x in a.get('type','') for x in ['rss','atom']):self.links.append(a.get('href',''))
+          membership=refresh_football_news_memberships()
+          def probe(c):
+              sid,publisher,url,sport=c;cfg={'url':url,'kind':'league' if sport else 'mixed','publisher':publisher,'enabled':True}
+              if sport:cfg['sport']=sport
+              out={'id':sid,'config':cfg,'items':[],'checked_at':datetime.now(timezone.utc).isoformat()}
+              try:
+                  raw=read_news_feed(url);(root/'pages'/f'{sid}.feed').write_bytes(raw)
+                  import feedparser
+                  feed=feedparser.parse(raw);out['format']=feed.version;out['raw_entries']=len(feed.entries)
+                  if not feed.version:
+                      p=FeedLinks();p.feed(raw.decode('utf8','replace'));out['advertised_feeds']=[urljoin(url,l) for l in p.links];return out
+                  items=_fetch_feed_entries(cfg,4)
+                  for index,item in enumerate(items[:3]):
+                      detail={'title':item['title'],'url':item['url'],'published_at':str(item.get('published_at'))}
+                      try:
+                          body,image=extract_from_url(item['url'])
+                          facts,origin=source_article_facts(body,item.get('summary',''),source_url=item['url'])
+                          detail.update({'body':facts,'body_words':len(facts.split()),'body_origin':origin})
+                          item['_extracted']=facts;tags=_classify_candidate(item)
+                          photos=list(item.get('image_candidates') or [])
+                          if image:photos.insert(0,{'url':image,'source':'page','in_article':True})
+                          if item.get('image'):photos.append({'url':item['image'],'source':'rss','in_article':False})
+                          hero=_pick_reachable_article_image(photos,max_checks=3)
+                          ok,reason=quality_check(item['title'],facts,tags.sport,require_english=False)
+                          non=non_article_news_reason({**item,'body':facts})
+                          detail.update({'sport':tags.sport,'league':tags.league,'news_section':candidate_football_section(item,tags),'image':hero,'quality_ok':ok,'quality_reason':reason,'non_article_reason':non,'eligible':bool(ok and hero and not non and tags.sport=='football' and origin=='source')})
+                      except Exception as e:detail['error']=type(e).__name__+': '+str(e)[:150]
+                      out['items'].append(detail)
+              except Exception as e:out['error']=type(e).__name__+': '+str(e)[:180]
+              finally:(root/f'{sid}.json').write_text(json.dumps(out,ensure_ascii=False,indent=2))
+              print(sid,out.get('error'),out.get('raw_entries'),sum(bool(i.get('eligible')) for i in out['items']),flush=True)
+              return out
+          with ThreadPoolExecutor(max_workers=4) as pool:results=list(pool.map(probe,candidates))
+          summary={'memberships':membership,'sources':len(results),'eligible_sources':[r['id'] for r in results if any(i.get('eligible') for i in r['items'])],'AI_requests':0,'publication_writes':0}
+          (root/'summary.json').write_text(json.dumps(summary,indent=2));print(json.dumps(summary,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: regional-football-source-probe-20261002
+          path: regional-evidence/
+          retention-days: 7
