@@ -1,0 +1,102 @@
+name: Football News regional release gate 20261002
+on:
+  push:
+    branches: [audit/news-football-20261002]
+    paths: [.github/workflows/news-regional-release-20261002.yml]
+permissions:
+  contents: write
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    env:
+      DATABASE_URL: 'sqlite:///:memory:'
+      NINKO_SKIP_STARTUP_INDEX: '1'
+      NINKO_SKIP_INTEGRITY_BACKFILL: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: bundle
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: b519a62d3d9b45d544d4ccba524eb2f210269428
+          path: source
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Apply exact tested four-file News extension
+        working-directory: source
+        run: |
+          mkdir -p ../regional-release-evidence
+          git apply --check ../bundle/audit/news_regional_20261002.patch
+          git apply ../bundle/audit/news_regional_20261002.patch
+          cp ../bundle/audit/news_football_sources_regional_20261002.py bot/news_football_sources.py
+          cp ../bundle/audit/test_news_regional_sources_20261002.py tests/test_news_regional_sources.py
+          python - <<'PY'
+          import hashlib,pathlib,json,subprocess
+          expected={'bot/extract.py':'0fdec5ddb30cff5ade0a1948b967b32d099935aab6e94d4369bb8f30ea186abc','bot/fetch_sources.py':'d5a92ae282fde9a2faecff19a0963c33d352ed4f0da92baf0f1edca9d06b0a96','bot/news_football_sources.py':'f5bca81bcca03852ace0674f29b0547d4764af1d07c66f4cfe4fa51ed6c3fe79','tests/test_news_regional_sources.py':'bb1cb031e138741e42a777001ace25cf78204dd147d348b9f81a4ec7515e0f57'}
+          actual={p:hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest() for p in expected}
+          pathlib.Path('../regional-release-evidence/hashes.json').write_text(json.dumps(actual,indent=2))
+          assert expected==actual,actual
+          changed=set(subprocess.check_output(['git','diff','--name-only'],text=True).splitlines())|set(subprocess.check_output(['git','ls-files','--others','--exclude-standard'],text=True).splitlines())
+          assert changed==set(expected),changed
+          PY
+      - name: Full retained News tests and byte compilation
+        working-directory: source
+        run: |
+          pip install -q -r requirements.txt
+          python -m pytest -q tests/test_news* --junitxml=../regional-release-evidence/tests.xml > ../regional-release-evidence/tests.txt 2>&1 || { tail -80 ../regional-release-evidence/tests.txt; exit 1; }
+          tail -3 ../regional-release-evidence/tests.txt
+          python -m compileall -q bot
+      - name: Real source admission before any production write
+        working-directory: source
+        run: |
+          python - <<'PY'
+          import json,pathlib,logging
+          from concurrent.futures import ThreadPoolExecutor
+          from bot.news_football_sources import RSS_FEEDS
+          from bot.fetch_sources import _fetch_feed_entries,_pick_reachable_article_image,_classify_item
+          from bot.extract import extract_from_url
+          from bot.quality import enough_for_brief,quality_check
+          from bot.news_policy import non_article_news_reason
+          logging.basicConfig(level=logging.WARNING)
+          root=pathlib.Path('../regional-release-evidence')
+          feeds=[f for f in RSS_FEEDS if f.get('publisher') in {'Index.hr','NB1.hu','Goal.pl','The72'}]
+          def check(feed):
+              out={'publisher':feed['publisher'],'items':[]}
+              try:
+                  for item in _fetch_feed_entries(feed,2):
+                      body,image=(item.get('_extracted'),None) if item.get('_extracted') else extract_from_url(item['url'])
+                      photos=list(item.get('image_candidates') or [])
+                      if image:photos.append({'url':image,'source':'og','in_article':False})
+                      hero=_pick_reachable_article_image(photos,max_checks=3)
+                      tags=_classify_item(item,body)
+                      ok,reason=quality_check(item['title'],body,tags.sport,require_english=False)
+                      enough=enough_for_brief(item['title'],body)
+                      why=non_article_news_reason({**item,'body':body})
+                      out['items'].append({'url':item['url'],'title':item['title'],'source_published_at':str(item['published_at']),'source_words':len(body.split()),'image':hero,'sport':tags.sport,'source_admissible':bool(ok and enough and hero and not why and tags.sport=='football'),'reason':reason,'non_news':why})
+              except Exception as exc:out['error']=str(exc)[:200]
+              return out
+          with ThreadPoolExecutor(max_workers=3) as pool:result=list(pool.map(check,feeds))
+          (root/'source-checks.json').write_text(json.dumps(result,ensure_ascii=False,indent=2))
+          print(json.dumps(result,ensure_ascii=False,indent=2))
+          assert len(result)==4 and all(any(i['source_admissible'] for i in r['items']) for r in result),result
+          PY
+      - name: Commit only tested News files to a clean release branch
+        working-directory: source
+        run: |
+          git add bot/extract.py bot/fetch_sources.py bot/news_football_sources.py tests/test_news_regional_sources.py
+          git config user.name 'NinkoSports News validation'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix(news): add four verified regional football desks with isolated article bodies and images'
+          git push origin HEAD:refs/heads/audit/news-football-regional-release-20261002
+          git rev-parse HEAD > ../regional-release-evidence/tested-commit.txt
+          git show --stat --oneline HEAD > ../regional-release-evidence/commit.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: football-news-regional-release-20261002
+          path: regional-release-evidence/
+          retention-days: 7
