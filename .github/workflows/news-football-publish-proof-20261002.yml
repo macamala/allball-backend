@@ -1,0 +1,50 @@
+name: Football News public publication proof 20261002
+on:
+  push:
+    branches: [audit/news-football-20261002]
+    paths: [.github/workflows/news-football-publish-proof-20261002.yml]
+permissions:
+  contents: read
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 753b0ad8a89a4a4bef6aab90aa50439085fe3311
+          persist-credentials: false
+      - name: Read actual published articles and every football News menu
+        run: |
+          mkdir -p publish-proof
+          python - <<'PY'
+          import json,pathlib,urllib.request,urllib.parse
+          from concurrent.futures import ThreadPoolExecutor
+          from datetime import datetime,timezone
+          root=pathlib.Path('publish-proof');now=datetime.now(timezone.utc)
+          base='https://allball-backend-production.up.railway.app'
+          def get(path):
+              with urllib.request.urlopen(urllib.request.Request(base+path,headers={'User-Agent':'NinkoSports-News-Publication-Audit/1.0'}),timeout=20) as response:return json.loads(response.read(4000000))
+          def check(row):
+              out={'league':row['league'],'label':row['label']}
+              try:
+                  articles=get('/articles?'+urllib.parse.urlencode({'sport':'football','league':row['league'],'limit':3}))
+                  out['articles']=[{key:a.get(key) for key in ['id','slug','title','league','published_at','created_at','image_url','image']} for a in articles]
+                  out['recent']=sum((now-datetime.fromisoformat(a['published_at'].replace('Z','+00:00')).replace(tzinfo=timezone.utc)).total_seconds()<86400 for a in articles if a.get('published_at'))
+              except Exception as exc:out['error']=str(exc)[:150]
+              return out
+          catalog=json.loads(pathlib.Path('bot/news_football_leagues.json').read_text())
+          with ThreadPoolExecutor(max_workers=3) as pool:rows=list(pool.map(check,catalog))
+          (root/'coverage.json').write_text(json.dumps(rows,ensure_ascii=False,indent=2))
+          slug='daejeon-hana-citizen-players-target-afc-champions-league-qualification-following-recent-fo'
+          try:
+              article=get('/articles/'+slug);(root/'new-korean-article.json').write_text(json.dumps(article,ensure_ascii=False,indent=2));proof={'id':article.get('id'),'slug':article.get('slug'),'league':article.get('league'),'sport':article.get('sport'),'title':article.get('title'),'published_at':article.get('published_at'),'image_url':article.get('image_url') or article.get('image'),'word_count':len(str(article.get('content','')).split())}
+          except Exception as exc:proof={'error':str(exc)[:150]}
+          summary={'checked_at':datetime.now(timezone.utc).isoformat(),'menus':len(rows),'nonempty_menus':sum(bool(r.get('articles')) for r in rows),'menus_with_recent_articles':sum(bool(r.get('recent')) for r in rows),'cross_league_articles':sum(a.get('league')!=r['league'] for r in rows for a in r.get('articles',[])),'empty_menus':[r['league'] for r in rows if not r.get('articles')],'errors':[r for r in rows if r.get('error')],'new_source_article':proof}
+          (root/'summary.json').write_text(json.dumps(summary,ensure_ascii=False,indent=2));print(json.dumps(summary,ensure_ascii=False,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: football-news-publication-proof-20261002
+          path: publish-proof/
+          retention-days: 7
