@@ -1,0 +1,81 @@
+name: News confirmed-copy release 20261002
+on:
+  push:
+    branches: [audit/news-football-20261002]
+    paths: [.github/workflows/news-confirmed-copy-release-20261002.yml]
+permissions:
+  contents: write
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      DATABASE_URL: 'sqlite:///:memory:'
+      NINKO_SKIP_STARTUP_INDEX: '1'
+      NINKO_SKIP_INTEGRITY_BACKFILL: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: bundle
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 1969ccc8141d653189f7f1681c97f7502f2e7da5
+          path: source
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Apply only the exact reviewed correction and regression fixtures
+        working-directory: source
+        run: |
+          mkdir -p ../copy-evidence tests/fixtures
+          cp ../bundle/audit/test_news_confirmed_duffy_20261002.py tests/test_news_confirmed_duffy.py
+          cp ../bundle/audit/news_duffy_22632_fixture.json tests/fixtures/news_duffy_22632.json
+          git apply --check ../bundle/audit/news_duffy_22632_correction.patch
+          git apply ../bundle/audit/news_duffy_22632_correction.patch
+          python - <<'PY'
+          import json,pathlib,hashlib,subprocess
+          expected={'public_index.py':'a0b7ef3e4a614ab13e0a0fa0f9888141257e8f305840acf569f6dfa533ed6df0','tests/test_news_confirmed_duffy.py':'50541083a449773bce15d27e0adda1a9426a55c309dcd9a8d360553f8cb4347a','tests/fixtures/news_duffy_22632.json':'6f8f1f0a863105f8eeb37642978d6c34e5d2e7afd70ecba3da41a35a7cfc61d4'}
+          actual={p:hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest() for p in expected}
+          pathlib.Path('../copy-evidence/hashes.json').write_text(json.dumps(actual,indent=2))
+          assert actual==expected,actual
+          changed=set(subprocess.check_output(['git','diff','--name-only'],text=True).splitlines())|set(subprocess.check_output(['git','ls-files','--others','--exclude-standard'],text=True).splitlines())
+          assert changed==set(expected),changed
+          PY
+      - name: Full retained News suite, no production database or paid API
+        working-directory: source
+        run: |
+          pip install -q -r requirements.txt
+          python -m pytest -q tests/test_news* --junitxml=../copy-evidence/tests.xml > ../copy-evidence/tests.txt 2>&1 || { tail -70 ../copy-evidence/tests.txt; exit 1; }
+          tail -4 ../copy-evidence/tests.txt
+          python -m compileall -q bot public_index.py
+      - name: Verify the public original matches the correction's protected source snapshot
+        working-directory: source
+        run: |
+          python - <<'PY'
+          import urllib.request,json,hashlib,pathlib
+          url='https://allball-backend-production.up.railway.app/articles/mark-duffy-named-southport-manager-after-interim-spell'
+          with urllib.request.urlopen(url,timeout=25) as response:article=json.loads(response.read(100000))
+          sha=hashlib.sha256(article['content'].encode()).hexdigest()
+          assert article['id']==22632 and article['published_at']=='2026-10-02T07:37:31'
+          assert sha in {'5ba9557f0b365ab09093c42e62adba28fffd04485da01bca4b5643820228aea1','8642b95115a95d990c904f91b841c11702576bde004b4bad6c0f595b48c8cf8b'}
+          proof={'article_id':22632,'original_published_at':article['published_at'],'observed_body_sha256':sha,'source_identity_verified_in_code':True,'production_writes':0,'AI_requests':0}
+          pathlib.Path('../copy-evidence/public-original.json').write_text(json.dumps(proof,indent=2));print(json.dumps(proof,indent=2))
+          PY
+      - name: Preserve only the three tested News correction files on a clean release branch
+        working-directory: source
+        run: |
+          git add public_index.py tests/test_news_confirmed_duffy.py tests/fixtures/news_duffy_22632.json
+          git config user.name 'NinkoSports News validation'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix(news): correct one source-proven role and club-name error without changing article dates or holds'
+          git push origin HEAD:refs/heads/audit/news-football-editorial-final-20261002
+          git rev-parse HEAD > ../copy-evidence/tested-commit.txt
+          git show --stat --oneline HEAD > ../copy-evidence/commit.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: football-news-confirmed-copy-release-20261002
+          path: copy-evidence/
+          retention-days: 7
