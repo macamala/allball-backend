@@ -1,0 +1,169 @@
+name: Football News source and data verification 20261002
+on:
+  push:
+    branches: [audit/news-football-20261002]
+    paths: [.github/workflows/news-football-source-map-20261002.yml]
+permissions:
+  contents: read
+jobs:
+  sources:
+    runs-on: ubuntu-latest
+    timeout-minutes: 14
+    env:
+      DATABASE_URL: 'sqlite:///:memory:'
+      NINKO_SKIP_STARTUP_INDEX: '1'
+      NINKO_SKIP_INTEGRITY_BACKFILL: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: pip install -q -r requirements.txt
+      - name: Audit explicit public sources with existing robots-aware transport
+        run: |
+          mkdir -p source-verification
+          python - <<'PY'
+          import json, pathlib, re, logging, urllib.request, urllib.parse
+          from collections import Counter, defaultdict
+          from concurrent.futures import ThreadPoolExecutor
+          from datetime import datetime, timezone
+          from html.parser import HTMLParser
+          from urllib.parse import urljoin, urlsplit
+          import feedparser
+          from bot.news_feed_http import read_news_feed
+          from bot.extract import parse_feed_datetime, page_published_at_from_html, page_title_from_html, article_text_from_html, collect_page_image_candidates
+          from bot.news_policy import news_freshness_reason
+          from bot.news_official_indexes import _hydrate
+          logging.basicConfig(level=logging.WARNING)
+          root=pathlib.Path('source-verification'); raw=root/'pages';raw.mkdir(exist_ok=True)
+          base='https://allball-backend-production.up.railway.app'
+          def get(path):
+              try:
+                  with urllib.request.urlopen(urllib.request.Request(base+path, headers={'User-Agent':'NinkoSports-News-ReadAudit/1.0'}),timeout=35) as r: return json.loads(r.read(6000000))
+              except Exception as e: return {'audit_error':type(e).__name__}
+          registry=get('/sports-data/competitions?sport=football');(root/'competitions.json').write_text(json.dumps(registry,ensure_ascii=False))
+          aliases={'japan-j1-league':'japan-j1','south-korea-k-league-1':'korea-k-league-1','australia-a-league-men':'australia-a-league','usa-mls':'mls','argentina-liga-profesional':'argentina-primera','hungary-nb-1':'hungary-nb-i','romania-liga-1':'romania-superliga','conmebol-libertadores':'copa-libertadores','conmebol-sudamericana':'copa-sudamericana','afc-champions-league-elite':'afc-champions-league','england-womens-super-league':'womens-super-league'}
+          catalog=json.loads(pathlib.Path('bot/news_football_leagues.json').read_text())
+          def table(row):
+              key=aliases.get(row['league'],row['league'])
+              if key.startswith('football-'): return row['league'],{'topic':True}
+              result=get('/sports-data/standings?league='+urllib.parse.quote(key))
+              return row['league'],{'data_key':key,'payload':result}
+          with ThreadPoolExecutor(max_workers=2) as pool: tables=dict(pool.map(table,catalog))
+          (root/'tables.json').write_text(json.dumps(tables,ensure_ascii=False))
+          paths=['spain-la-liga',*aliases.values()]
+          with ThreadPoolExecutor(max_workers=2) as pool: hubs=dict(pool.map(lambda key:(key,get('/sports-data/competitions/'+key+'/hub')),paths))
+          (root/'hubs.json').write_text(json.dumps(hubs,ensure_ascii=False))
+          candidates=[
+            ('efl','EFL','https://www.efl.com/news/'),
+            ('serbia-superliga','Superliga','https://www.superliga.rs/vesti/'),
+            ('serbia-prvaliga','Prva Liga','https://www.prvaliga.rs/vesti'),
+            ('laliga','LaLiga','https://www.laliga.com/noticias'),
+            ('legab','Lega B','https://www.legab.it/news/'),
+            ('portugal','Liga Portugal','https://www.ligaportugal.pt/noticias'),
+            ('belgium','Pro League','https://www.proleague.be/news'),
+            ('turkey','TRT Spor','https://www.trtspor.com.tr/futbol'),
+            ('greece','Super League Greece','https://www.slgr.gr/en/news/'),
+            ('greece2','Super League 2','https://sl2.gr/'),
+            ('scotland','SPFL','https://spfl.co.uk/news'),
+            ('switzerland','SFL','https://sfl.ch/de/articles'),
+            ('croatia','HNL','https://hnl.hr/vijesti/'),
+            ('croatia2','Prva NL','https://prva-nl.hr/'),
+            ('poland','Ekstraklasa','https://www.ekstraklasa.org/aktualnosci'),
+            ('poland2','I Liga','https://www.1liga.org/aktualnosci'),
+            ('czech','Chance Liga','https://www.chanceliga.cz/novinky'),
+            ('czech2','Chance Narodni Liga','https://www.fnliga.cz/clanky'),
+            ('austria','Bundesliga Austria','https://www.bundesliga.at/de/redaktion/news/'),
+            ('austria2','2 Liga','https://www.2liga.at/de/redaktion/news/'),
+            ('denmark','Superliga','https://superliga.dk/nyheder'),
+            ('norway','Eliteserien','https://www.eliteserien.no/nyheter'),
+            ('norway2','OBOS Ligaen','https://www.obos-ligaen.no/nyheter'),
+            ('sweden','Allsvenskan','https://allsvenskan.se/nyheter/'),
+            ('sweden2','Superettan','https://superettan.se/nyheter/'),
+            ('finland','Veikkausliiga','https://www.veikkausliiga.com/uutiset/'),
+            ('romania','LPF','https://lpf.ro/noutati'),
+            ('romania2','FRF','https://www.frf.ro/feed/'),
+            ('bulgaria','Sportal','https://sportal.bg/uploads/tinymce/sport/home/rss.xml'),
+            ('hungary','MLSZ','https://www.mlsz.hu/hirek'),
+            ('usl','USL Championship','https://www.uslchampionship.com/news'),
+            ('brazil','CBF','https://www.cbf.com.br/futebol-brasileiro/noticias'),
+            ('argentina','Liga Profesional','https://www.ligaprofesional.ar/feed/'),
+            ('argentina2','AFA','https://www.afa.com.ar/es/posts'),
+            ('mexico','Liga MX','https://ligamx.net/cancha/noticias'),
+            ('japan','JLeague','https://www.jleague.jp/en/j1/news/'),
+            ('japan2','JLeague','https://www.jleague.jp/en/j2/news/'),
+            ('korea','K League United','https://www.kleagueunited.com/feeds/posts/default?alt=rss'),
+            ('saudi','Saudi Pro League','https://www.spl.com.sa/en/news'),
+            ('conmebol','CONMEBOL','https://www.conmebol.com/feed/'),
+            ('caf','CAF','https://www.cafonline.com/news/'),
+            ('afc','AFC','https://www.the-afc.com/en/club/afc_champions_league_elite/news.html'),
+            ('nwsl','NWSL','https://www.nwslsoccer.com/news'),
+            ('soccernews','SoccerNews','https://www.soccernews.com/feed/'),
+            ('football365','Football365','https://www.football365.com/feed/'),
+            ('netherlands2','Keuken Kampioen Divisie','https://keukenkampioendivisie.nl/feed/'),
+          ]
+          class Links(HTMLParser):
+              def __init__(self): super().__init__();self.links=[];self.rss=[];self.url=None;self.text=[]
+              def handle_starttag(self,tag,attrs):
+                  a=dict(attrs)
+                  if tag=='a': self.url=a.get('href');self.text=[]
+                  if tag=='link' and ('rss' in a.get('type','') or 'atom' in a.get('type','')): self.rss.append(a.get('href',''))
+              def handle_data(self,data):
+                  if self.url: self.text.append(data)
+              def handle_endtag(self,tag):
+                  if tag=='a' and self.url: self.links.append((self.url,' '.join(self.text).strip()));self.url=None
+          def probe(row):
+              sid,publisher,url=row;result={'id':sid,'publisher':publisher,'url':url,'checked_at':datetime.now(timezone.utc).isoformat()}
+              try:
+                  body=read_news_feed(url); html=body.decode('utf-8','replace'); (raw/(sid+'.html')).write_text(html)
+                  result['bytes']=len(body);parsed=feedparser.parse(body);p=Links();p.feed(html)
+                  urls=[url] if parsed.version else [urljoin(url,v) for v in p.rss[:2] if urlsplit(urljoin(url,v)).hostname==urlsplit(url).hostname]
+                  feedrows=[];articlelinks=[]
+                  for feedurl in urls:
+                      try:
+                          f=parsed if feedurl==url else feedparser.parse(read_news_feed(feedurl));entries=[]
+                          for e in f.entries[:12]:
+                              stamp=parse_feed_datetime(e.get('published',''))
+                              item={'title':e.get('title',''),'url':e.get('link',''),'published_at':stamp.isoformat() if stamp else None,'fresh':news_freshness_reason(stamp,datetime.now(timezone.utc)) is None if stamp else False,'content_words':len(re.sub('<[^>]+>',' ',e.get('summary','')+' '.join(x.get('value','') for x in e.get('content',[]))).split())}
+                              entries.append(item)
+                              if item['fresh']: articlelinks.append((item['url'],item['title'],stamp))
+                          feedrows.append({'url':feedurl,'format':f.version,'entries':entries})
+                      except Exception as e: feedrows.append({'url':feedurl,'error':str(e)[:100]})
+                  result['feeds']=feedrows
+                  if not articlelinks:
+                      for link,title in p.links:
+                          target=urljoin(url,link);parts=urlsplit(target)
+                          if parts.scheme!='https' or parts.hostname!=urlsplit(url).hostname or not title or len(title.split())<4: continue
+                          if target.rstrip('/')==url.rstrip('/') or re.search(r'/(?:tag|category|video|foto|gallery|live|match|team|club|player|search|login|privacy)(?:/|$)',parts.path):continue
+                          if re.search(r'/(?:news|nieuws|noticias|novosti|vesti|vijesti|nyheter|nyheder|uutiset|notizia|notizie|aktualnosci|novinky|clanky|articles|posts|noticia|article|noutati|hirek)/[^/]+',parts.path) or re.search(r'/20\d{2}/\d{2}/',parts.path): articlelinks.append((target,title,None))
+                  seen=set();samples=[]
+                  for target,title,stamp in articlelinks:
+                      if target in seen or urlsplit(target).hostname!=urlsplit(url).hostname: continue
+                      seen.add(target)
+                      if len(samples)>=3:break
+                      cfg={'id':sid,'publisher':publisher,'url':url,'host':urlsplit(url).hostname,'sport':'football'};reasons=Counter()
+                      article=_hydrate(cfg,target,title,diagnostics=reasons,sitemap_published_at=stamp)
+                      sample={'url':target,'reasons':dict(reasons),'hydrated':bool(article)}
+                      if article: sample.update({k:article.get(k) for k in ('title','published_at','_extracted','image','image_candidates')})
+                      samples.append(sample)
+                  result['samples']=samples
+              except Exception as e: result['error']=str(e)[:150];result['error_type']=type(e).__name__
+              (root/(sid+'.json')).write_text(json.dumps(result,default=str,ensure_ascii=False,indent=2))
+              print(sid, result.get('error'), 'feeds',len(result.get('feeds',[])),'hydrated',sum(s.get('hydrated',False) for s in result.get('samples',[])),flush=True)
+              return result
+          grouped=defaultdict(list)
+          for row in candidates:grouped[urlsplit(row[2]).hostname].append(row)
+          def hostprobe(rows):return [probe(row) for row in rows]
+          with ThreadPoolExecutor(max_workers=4) as pool: results=[r for batch in pool.map(hostprobe,grouped.values()) for r in batch]
+          (root/'sources.json').write_text(json.dumps(results,ensure_ascii=False,default=str))
+          summary={'tables_with_rows':sum(bool(r.get('payload',{}).get('rows')) for r in tables.values()),'sources_probed':len(results),'sources_hydrated':sum(any(s.get('hydrated') for s in r.get('samples',[])) for r in results),'source_read_errors':{r['id']:r['error'] for r in results if r.get('error')}}
+          (root/'summary.json').write_text(json.dumps(summary,indent=2));print(json.dumps(summary,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: football-news-source-map-20261002
+          path: source-verification/
+          retention-days: 3
