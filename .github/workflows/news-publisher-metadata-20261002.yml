@@ -1,0 +1,55 @@
+name: Football first-party metadata verification 20261002
+on:
+  push:
+    branches: [audit/news-football-20261002]
+    paths: [.github/workflows/news-publisher-metadata-20261002.yml]
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      DATABASE_URL: 'sqlite:///:memory:'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 7855346a2ad44dc19c74be026a866311be83eda9
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: pip install -q -r requirements.txt
+      - name: Exact article metadata reads using existing source transport only
+        run: |
+          mkdir -p metadata-evidence
+          python - <<'PY'
+          import json,pathlib,feedparser
+          from concurrent.futures import ThreadPoolExecutor
+          from bot.news_feed_http import read_news_feed
+          from bot.extract import page_published_at_from_html,page_title_from_html,article_text_from_html
+          root=pathlib.Path('metadata-evidence')
+          urls=[('portugal-nations','https://www.ligaportugal.pt/news/28778/terceira-vitoria-consecutiva-de-portugal-na-liga-das-nacoes'),('portugal-protocol','https://www.ligaportugal.pt/news/28776/protocolo-estabelecido-com-a-universidade-de-coimbra'),('portugal-cup','https://www.ligaportugal.pt/news/28770/leiria-volta-a-receber-final-four-da-allianz-cup'),('norway','https://www.eliteserien.no/rss-nyheter'),('norway2','https://www.obos-ligaen.no/rss-nyheter')]
+          def inspect(pair):
+              sid,url=pair;out={'url':url}
+              try:
+                  raw=read_news_feed(url);(root/(sid+'.html')).write_bytes(raw)
+                  text=raw.decode('utf8','replace');f=feedparser.parse(raw)
+                  out.update({'rss_format':f.version,'published':str(page_published_at_from_html(text)),'title':page_title_from_html(text),'body':article_text_from_html(text)})
+                  if f.version:
+                      out['entries']=[{k:e.get(k) for k in ['title','link','published','updated','summary','content']} for e in f.entries[:6]]
+                      for n,e in enumerate(f.entries[:2]):
+                          try:
+                              article=read_news_feed(e['link']);(root/f'{sid}-article-{n}.html').write_bytes(article)
+                          except Exception as exc:out.setdefault('article_errors',[]).append(str(exc))
+              except Exception as exc:out['error']=str(exc)[:200]
+              (root/(sid+'.json')).write_text(json.dumps(out,ensure_ascii=False,default=str,indent=2))
+              print(sid,out.get('published'),out.get('rss_format'),out.get('error'))
+          with ThreadPoolExecutor(max_workers=2) as pool:list(pool.map(inspect,urls))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: football-first-party-metadata-20261002
+          path: metadata-evidence/
+          retention-days: 7
