@@ -1,0 +1,82 @@
+--- a/bot/news_official_indexes.py
++++ b/bot/news_official_indexes.py
+@@ -719,7 +719,13 @@
+         r'\bid\s*=\s*["\']vue-gallery-list["\']', html, re.I
+     ):
+         return reject("non_article_photo_gallery")
+-    published_at = page_published_at_from_html(html)
++    first_party = None
++    if cfg['id'] == 'ligaportugal-official-news':
++        from .news_ligaportugal import read_ligaportugal_article
++        first_party = read_ligaportugal_article(html, url)
++        if first_party is None:
++            return reject('unverified_same_article_payload')
++    published_at = first_party['published_at'] if first_party else page_published_at_from_html(html)
+     if cfg["id"] == "chelsea-football-news":
+         components = public_components(html, ("ArticleHeader", "ArticleLoginOverlay"))
+         if components.get("ArticleLoginOverlay", {}).get("requiresLogin") is not False:
+@@ -754,8 +760,8 @@
+     reason = news_freshness_reason(published_at, now)
+     if reason:
+         return reject(reason)
+-    title = page_title_from_html(html) or fallback_title
+-    body = article_text_from_html(html)
++    title = first_party["title"] if first_party else page_title_from_html(html) or fallback_title
++    body = first_party["body"] if first_party else article_text_from_html(html)
+     if not title or not body:
+         return reject("missing_title" if not title else "missing_article_body")
+     if cfg['id'] == 'chelsea-football-news':
+@@ -778,7 +784,7 @@
+     try:
+         from .news_image_http import pick_news_article_image
+ 
+-        for candidate in collect_page_image_candidates(html):
++        for candidate in (first_party["image_candidates"] if first_party else collect_page_image_candidates(html)):
+             if not isinstance(candidate, dict):
+                 continue
+             raw_url = str(candidate.get("url") or "").strip()
+--- a/bot/news_football_sources.py
++++ b/bot/news_football_sources.py
+@@ -4,6 +4,9 @@
+ writing, factual and same-article image gates. No paid API is added here.
+ """
+ HTML_INDEXES = (
++    {'id':'ligaportugal-official-news', 'sport':'football', 'publisher':'Liga Portugal',
++     'url':'https://www.ligaportugal.pt/noticias', 'host':'www.ligaportugal.pt',
++     'paths':('/news/',), 'article_path_re':r'^/news/\d+/[^/]+/?$'},
+     {'id':'laliga-official-news', 'sport':'football', 'publisher':'LALIGA',
+      'url':'https://www.laliga.com/noticias', 'host':'www.laliga.com',
+      'paths':('/noticias/',), 'article_path_re':r'^/noticias/[^/]+/?$',
+@@ -73,6 +76,7 @@
+ # This is only a source-association map for monitoring gaps, not evidence that
+ # any source has written a current article for every associated competition.
+ SOURCE_DESKS = {
++    'Liga Portugal': ['portugal-primeira-liga','portugal-liga-2'],
+     'LALIGA': ['spain-la-liga','spain-la-liga-2'],
+     'Lega B': ['italy-serie-b'],
+     'Ekstraklasa': ['poland-ekstraklasa'],
+--- a/bot/news_policy.py
++++ b/bot/news_policy.py
+@@ -396,6 +396,14 @@
+ 
+     body = str((item or {}).get("body") or (item or {}).get("summary") or "")
+     copy = '\n'.join(str((item or {}).get(key) or '') for key in ('title', 'summary', 'body'))
++    # A transfer wishlist is an opinion product, not a report of a deal.
++    # The observed The72 format was consuming scarce writer/validator slots.
++    # Match the full proposal structure; actual signings remain eligible.
++    if host in {'the72.co.uk', 'www.the72.co.uk'} and re.search(
++            r'^\s*(?:[2-9]|[1-9]\d|two|three|four|five|six|seven|eight|nine|ten)\s+'
++            r'(?:free[ -]agent\s+)?(?:players|midfielders|defenders|strikers|forwards|goalkeepers|wingers)\s+'
++            r'for\s+[^.!?]{2,80}?\s+to\s+(?:consider|target|sign)\b', title):
++        return 'non_article_transfer_wishlist'
+     # UEFA refreshes these reference pages with today's date. Their scorer
+     # tables/record collections are not a new report. Keep this bounded to
+     # the publisher's article-title formats, preserving actual record-breaking
+--- a/tests/test_news_football_sources_20261002.py
++++ b/tests/test_news_football_sources_20261002.py
+@@ -42,4 +42,4 @@
+     for source in HTML_INDEXES:
+         assert source['sport']=='football' and not source.get('league')
+         assert source['url'].startswith('https://'+source['host'])
+-    assert len(HTML_INDEXES)==6
++    assert len(HTML_INDEXES)==7
