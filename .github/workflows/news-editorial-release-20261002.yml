@@ -1,0 +1,95 @@
+name: Football News first-party editorial release 20261002
+on:
+  push:
+    branches: [audit/news-football-20261002]
+    paths: [.github/workflows/news-editorial-release-20261002.yml]
+permissions:
+  contents: write
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    env:
+      DATABASE_URL: 'sqlite:///:memory:'
+      NINKO_SKIP_STARTUP_INDEX: '1'
+      NINKO_SKIP_INTEGRITY_BACKFILL: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: bundle
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ops/news-free-probe-20260926
+          path: source
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Apply only checksum-verified changes on the deployed News parent
+        working-directory: source
+        run: |
+          test "$(git rev-parse HEAD)" = '7855346a2ad44dc19c74be026a866311be83eda9'
+          mkdir -p ../editorial-evidence
+          cp ../bundle/audit/news_ligaportugal_20261002.py bot/news_ligaportugal.py
+          cp ../bundle/audit/test_news_ligaportugal_20261002.py tests/test_news_ligaportugal.py
+          git apply --check ../bundle/audit/news_editorial_20261002.patch
+          git apply ../bundle/audit/news_editorial_20261002.patch
+          python - <<'PY'
+          import json,pathlib,hashlib,subprocess
+          expected={'bot/news_ligaportugal.py':'f1a68bb01872249788c3d446ffbea34a7e5d71c63c5b7b2dc12585d36e0a7182','bot/news_official_indexes.py':'ea2dc2d1487276787d2c2e4f520be9caf297dda5e9b995d81f0de714a86fa811','bot/news_football_sources.py':'cde0c969229ce729a4fe8de840b08b90b5903c1879084574160021788888cdd4','bot/news_policy.py':'ec499ff75fbe4e1d6039106b7df3a507f32e6d82cdb6cb545e49b070b8665ae2','tests/test_news_ligaportugal.py':'681697274eaf7f66214b2e8bcd0293abdf8c81076da318bf054d4eee744552f1','tests/test_news_football_sources_20261002.py':'a76122f946d92d3fff87f404809d4001106fab6a4cadb5e8da805b471bfcf9f2'}
+          actual={p:hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest() for p in expected}
+          pathlib.Path('../editorial-evidence/hashes.json').write_text(json.dumps(actual,indent=2))
+          assert actual==expected,actual
+          changed=set(subprocess.check_output(['git','diff','--name-only'],text=True).splitlines())|set(subprocess.check_output(['git','ls-files','--others','--exclude-standard'],text=True).splitlines())
+          assert changed==set(expected),changed
+          PY
+      - name: Retained News regression suite
+        working-directory: source
+        run: |
+          pip install -q -r requirements.txt
+          python -m pytest -q tests/test_news* --junitxml=../editorial-evidence/tests.xml > ../editorial-evidence/tests.txt 2>&1 || { tail -80 ../editorial-evidence/tests.txt; exit 1; }
+          tail -4 ../editorial-evidence/tests.txt
+          python -m compileall -q bot
+      - name: Actual first-party article, original time and reachable same-article photo
+        working-directory: source
+        run: |
+          python - <<'PY'
+          import json,pathlib
+          from collections import Counter
+          from bot.news_football_sources import HTML_INDEXES
+          from bot.news_official_indexes import _hydrate,_anchor_candidates
+          from bot.news_image_http import pick_news_article_image
+          from bot.fetch_sources import _pick_reachable_article_image
+          from bot.quality import enough_for_brief,quality_check
+          cfg=next(c for c in HTML_INDEXES if c['id']=='ligaportugal-official-news')
+          candidates=_anchor_candidates(cfg)
+          exact='https://www.ligaportugal.pt/news/28778/terceira-vitoria-consecutiva-de-portugal-na-liga-das-nacoes'
+          assert any(url==exact for url,title in candidates),candidates[:8]
+          diagnostics=Counter();article=_hydrate(cfg,exact,'',diagnostics=diagnostics)
+          assert article,dict(diagnostics)
+          hero=_pick_reachable_article_image(article['image_candidates'])
+          assert hero
+          assert article['published_at'].isoformat()=='2026-10-01T20:55:36.077000+00:00'
+          assert enough_for_brief(article['title'],article['_extracted'])
+          assert quality_check(article['title'],article['_extracted'],'football',require_english=False)[0]
+          proof={'url':article['url'],'title':article['title'],'source_published_at':article['published_at'].isoformat(),'body_words':len(article['_extracted'].split()),'image':hero,'discovered_by_existing_index':True,'AI_requests':0,'articles_published_in_test':0}
+          pathlib.Path('../editorial-evidence/first-party-proof.json').write_text(json.dumps(proof,ensure_ascii=False,indent=2));print(json.dumps(proof,ensure_ascii=False,indent=2))
+          PY
+      - name: Preserve tested six-file clean release
+        working-directory: source
+        run: |
+          git add bot/news_ligaportugal.py bot/news_official_indexes.py bot/news_football_sources.py bot/news_policy.py tests/test_news_ligaportugal.py tests/test_news_football_sources_20261002.py
+          test "$(git diff --cached --name-only | wc -l)" = '6'
+          git config user.name 'NinkoSports News validation'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix(news): admit exact Portugal article payloads and reject speculative transfer lists before writing'
+          git push origin HEAD:refs/heads/audit/news-football-editorial-release-20261002
+          git rev-parse HEAD > ../editorial-evidence/tested-commit.txt
+          git show --stat --oneline HEAD > ../editorial-evidence/commit.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: football-news-editorial-release-20261002
+          path: editorial-evidence/
+          retention-days: 7
