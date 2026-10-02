@@ -1,0 +1,85 @@
+--- a/bot/extract.py
++++ b/bot/extract.py
+@@ -353,6 +353,10 @@
+     # Yonhap uses <article> for unrelated recommendation cards too. Limit
+     # body images to its actual story container; metadata remains same-page.
+     canonical = _og(html or '', 'og:url') or _metadata(html or '', 'canonical') or ''
++    if urlsplit(canonical).hostname in {'www.index.hr', 'index.hr', 'nb1.hu', 'www.nb1.hu', 'www.goal.pl', 'goal.pl'}:
++        # Their related cards sit inside the article/main tree. Only this
++        # page's explicit social hero may be used, never a neighbouring card.
++        return [row for row in candidates if row.get('source') in {'og', 'twitter'}]
+     scoped_photo_classes = {'aleagues.com.au': 'entry-content', 'ge.globo.com': 'mc-article-body',
+                             'www.mlssoccer.com': 'oc-c-article__body',
+                             'eredivisie.nl': 'news-grid-main__content',
+@@ -438,8 +442,9 @@
+ 
+ 
+ class _ArticleExtractor(HTMLParser):
+-    def __init__(self):
++    def __init__(self, *, extra_chrome_classes=()):
+         super().__init__(convert_charrefs=True)
++        self.extra_chrome_classes = frozenset(extra_chrome_classes)
+         self.ignore = 0
+         self.in_p = 0
+         self.in_main = 0
+@@ -458,7 +463,8 @@
+             if tag not in VOID_TAGS:
+                 self.ignore += 1
+             return
+-        if _is_chrome_open(tag, attrs):
++        if (_is_chrome_open(tag, attrs)
++                or self.extra_chrome_classes.intersection(dict(attrs).get('class', '').split())):
+             self.ignore = 0 if tag in VOID_TAGS else 1
+             return
+         attrs_map = _attr_map(attrs)
+@@ -519,8 +525,8 @@
+     return True
+ 
+ 
+-def paragraphs_from_html(html: str) -> str:
+-    parser = _ArticleExtractor()
++def paragraphs_from_html(html: str, *, extra_chrome_classes=()) -> str:
++    parser = _ArticleExtractor(extra_chrome_classes=extra_chrome_classes)
+     try:
+         parser.feed(html or "")
+         parser.close()
+@@ -675,6 +681,18 @@
+         publisher_host = urlsplit(canonical).hostname
+     except ValueError:
+         publisher_host = None
++    # Verified regional football article containers. These publishers place
++    # unrelated recommendations inside <main>; never use that whole page.
++    extra_chrome_classes = ()
++    if publisher_host in {'www.index.hr', 'index.hr'}:
++        body_class, body_tag = 'text', 'section'
++        extra_chrome_classes = ('js-slot-container',)
++    if publisher_host in {'nb1.hu', 'www.nb1.hu'}:
++        body_class, body_id = None, 'content-post'
++        extra_chrome_classes = ('wp-embedded-content',)
++    if publisher_host in {'www.goal.pl', 'goal.pl'}:
++        body_class = 'entry-content'
++        extra_chrome_classes = ('related-post-container',)
+     if publisher_host == 'www.mozzartsport.com':
+         body_class = 'news-content'
+     if publisher_host == 'fss.rs':
+@@ -757,7 +775,7 @@
+         if not prose.finished:
+             return ''
+         html = ''.join(prose.parts)
+-    text = paragraphs_from_html(html or "")
++    text = paragraphs_from_html(html or "", extra_chrome_classes=extra_chrome_classes)
+     if publisher_host == 'football-italia.net':
+         text = '\n\n'.join(p for p in text.split('\n\n')
+                           if not re.match(r'(?i)^Find out more .+\bvideo below\b', p))
+--- a/bot/fetch_sources.py
++++ b/bot/fetch_sources.py
+@@ -623,6 +623,9 @@
+     extracted_image = item.get("_extracted_image")
+     if not extracted:
+         extracted, extracted_image = extract_from_url(source_url)
++    if (item.get('feed') or {}).get('article_body_required') and not extracted:
++        logger.info('[fetch_sources] skip missing verified article container: %s', item['title'][:80])
++        return None, False
+     facts, origin = source_article_facts(extracted, rss_text, source_url)
+     if item.get("_source_body_origin") == "verified-full-rss" and facts:
+         origin = "verified-full-rss"
