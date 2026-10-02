@@ -1,0 +1,46 @@
+--- a/public_index.py
++++ b/public_index.py
+@@ -799,7 +799,20 @@
+ 
+ def _correct_confirmed_football_prose(article: Article) -> dict:
+     """Exact, source-compared corrections; preserve row identity and archive."""
++    if article.id == 22632:
++        # Compare-and-set: never overwrite a subsequently edited article.
++        # Southport's own resignation notice names Neil Danns, not Duffy.
++        # Tranmere's official player reporting supplies the correct club name.
++        import hashlib
++        if (article.title != 'Mark Duffy named Southport manager after interim spell'
++                or article.sport != 'football'
++                or any(not isinstance(getattr(article, field, None), str)
++                       or hashlib.sha256(getattr(article, field).encode()).hexdigest()
++                       != '5ba9557f0b365ab09093c42e62adba28fffd04485da01bca4b5643820228aea1'
++                       for field in ('content', 'ai_content'))):
++            return {}
+     sources = {
++        22632: 'https://the72.co.uk/2026/10/02/sheffield-united-mark-duffy-new-managerial-job/',
+         22204: 'https://fss.rs/aleksandar-stankovic-prva-utakmica-na-marakani-u-dresu-a-tima-ostvarenje-jednog-od-mojih-snova/',
+         22206: 'https://www.footmercato.net/a2290739679306661964-un-ancien-prodige-du-real-madrid-evoque-un-eventuel-retour',
+         22207: 'https://fss.rs/dusan-tadic-pokazali-smo-zajednistvo-i-borbenost-to-je-put-kojim-treba-da-idemo/',
+@@ -850,6 +863,10 @@
+                 'Andy Diouf played on the left side of defence for the first time and said the position was unfamiliar to him.')
+             new = new.replace('Lucas Da Cunha, a Côme player with only three caps,',
+                 'Lucas Da Cunha, a Côme player,')
++        elif article.id == 22632 and field in ('content', 'ai_content'):
++            new = new.replace('Duffy had been Southport’s assistant manager to Neil Danns, but stood down from those duties earlier this month before taking the top job.',
++                'Duffy had been Southport’s assistant manager to Neil Danns before taking the top job.')
++            new = new.replace('Tranmere Town', 'Tranmere Rovers')
+         if new != old:
+             setattr(article, field, new)
+             changes[field] = {'before': old, 'after': new}
+@@ -961,7 +978,10 @@
+                 article_id=article.id, source_url=article.source_url, sport='football',
+                 phase='postpublish', status='auto_corrected', writer_provider='news-audit',
+                 writer_model='deterministic', details={'changes': prose_changes,
+-                    'evidence': 'Compared with exact source: stadium appearance is not an international debut; rebound contribution is not a credited assist; captaincy requires explicit source evidence; playing together does not establish shared childhood; remove literal formatting, author bio, newspaper ratings and unsourced given names'})
++                    'primary_evidence': (['https://southportfc.net/neil-danns-stands-down/',
++                        'https://www.tranmererovers.co.uk/news/2021/september/tranmere-4-1-leeds-united-u21s/']
++                        if article.id == 22632 else []),
++                    'evidence': 'Compared with exact source; for 22632, primary club notices confirm Danns resigned and Duffy played for Tranmere Rovers:  stadium appearance is not an international debut; rebound contribution is not a credited assist; captaincy requires explicit source evidence; playing together does not establish shared childhood; remove literal formatting, author bio, newspaper ratings and unsourced given names'})
+             corrected += 1
+             logger.info('[public_index] corrected confirmed football prose article=%s', article.id)
+         if not tax.public_ok and article.id in {22202, 22204, 22205, 22207}:
