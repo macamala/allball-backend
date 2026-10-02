@@ -1,0 +1,75 @@
+name: Football News checkpoint publication evidence 20261002
+on:
+  push:
+    branches: [audit/news-football-20261002]
+    paths: [.github/workflows/news-checkpoint-proof-20261002.yml]
+permissions:
+  contents: read
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 254cb7d95455e3217bb2494e2d3ce48fec4ccb09
+          persist-credentials: false
+      - name: Actual public records, no production credentials, database writes or AI
+        run: |
+          mkdir -p checkpoint-proof
+          python - <<'PY'
+          import hashlib,json,pathlib,time,urllib.request,urllib.parse
+          from concurrent.futures import ThreadPoolExecutor
+          from datetime import datetime,timezone
+          root=pathlib.Path('checkpoint-proof');base='https://allball-backend-production.up.railway.app'
+          def get(path):
+              for attempt in range(2):
+                  try:
+                      req=urllib.request.Request(base+path,headers={'User-Agent':'NinkoSports-News-Checkpoint/1.0','Cache-Control':'no-cache'})
+                      with urllib.request.urlopen(req,timeout=20) as response:return json.loads(response.read(4000000))
+                  except Exception:
+                      if attempt:raise
+                      time.sleep(1)
+          slug='mark-duffy-named-southport-manager-after-interim-spell';observations=[];corrected=False
+          expected='8642b95115a95d990c904f91b841c11702576bde004b4bad6c0f595b48c8cf8b'
+          for attempt in range(9):
+              try:
+                  article=get('/articles/'+slug)
+                  digest=hashlib.sha256(article['content'].encode()).hexdigest()
+                  observations.append({'checked_at':datetime.now(timezone.utc).isoformat(),'id':article['id'],'body_sha256':digest,'published_at':article['published_at']})
+                  (root/'corrected-article.json').write_text(json.dumps(article,ensure_ascii=False,indent=2))
+                  if article['id']==22632 and digest==expected and article['published_at']=='2026-10-02T07:37:31':corrected=True;break
+              except Exception as exc:observations.append({'error':str(exc)[:150]})
+              if attempt<8:time.sleep(25)
+          (root/'correction-observations.json').write_text(json.dumps(observations,indent=2))
+          korean=get('/articles/daejeon-hana-citizen-players-target-afc-champions-league-qualification-following-recent-fo')
+          (root/'korean-article.json').write_text(json.dumps(korean,ensure_ascii=False,indent=2))
+          catalog=json.loads(pathlib.Path('bot/news_football_leagues.json').read_text())
+          def check(row):
+              out={'league':row['league'],'label':row['label']}
+              try:
+                  articles=get('/articles?'+urllib.parse.urlencode({'sport':'football','league':row['league'],'limit':3}))
+                  if not isinstance(articles,list):raise TypeError('Article list expected')
+                  out['articles']=[{k:a.get(k) for k in ['id','slug','title','league','sport','published_at','created_at','image','image_url']} for a in articles]
+                  def stamp(value):
+                      parsed=datetime.fromisoformat(value.replace('Z','+00:00'));return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed
+                  now=datetime.now(timezone.utc)
+                  out['recent']=sum(0<=(now-stamp(a['published_at'])).total_seconds()<86400 for a in articles if a.get('published_at'))
+              except Exception as exc:out['error']=type(exc).__name__+': '+str(exc)[:150]
+              return out
+          with ThreadPoolExecutor(max_workers=2) as pool:coverage=list(pool.map(check,catalog))
+          (root/'coverage.json').write_text(json.dumps(coverage,ensure_ascii=False,indent=2))
+          latest=get('/articles?sport=football&limit=30')
+          (root/'latest-football.json').write_text(json.dumps([{k:a.get(k) for k in ['id','title','league','published_at','created_at','image','image_url']} for a in latest],ensure_ascii=False,indent=2))
+          summary={'checked_at':datetime.now(timezone.utc).isoformat(),'news_commit':'254cb7d95455e3217bb2494e2d3ce48fec4ccb09','menus':len(coverage),'nonempty':sum(bool(r.get('articles')) for r in coverage),'recent_24h':sum(bool(r.get('recent')) for r in coverage),'empty_menus':[r['league'] for r in coverage if r.get('articles')==[]],'unknown_queries':[{'league':r['league'],'error':r['error']} for r in coverage if r.get('error')],'cross_league_rows':sum(a.get('league')!=r['league'] for r in coverage for a in r.get('articles',[])),'article_22632_corrected':corrected,'article_22632_original_date_preserved':bool(observations and observations[-1].get('published_at')=='2026-10-02T07:37:31'),'article_22617_korean_scope_correct':korean.get('id')==22617 and korean.get('league')=='south-korea-k-league-1','source_discovery_is_not_publication_coverage':True,'paid_requests':0,'production_writes':0}
+          (root/'summary.json').write_text(json.dumps(summary,ensure_ascii=False,indent=2));print(json.dumps(summary,ensure_ascii=False,indent=2))
+          assert corrected,'Correction not yet observed in actual public article'
+          assert summary['article_22617_korean_scope_correct']
+          assert not summary['unknown_queries'] and summary['cross_league_rows']==0
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: football-news-checkpoint-publication-proof-20261002
+          path: checkpoint-proof/
+          retention-days: 14
