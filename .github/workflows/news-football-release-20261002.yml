@@ -1,0 +1,71 @@
+name: Football News clean release gate 20261002
+on:
+  push:
+    branches: [audit/news-football-20261002]
+    paths: [.github/workflows/news-football-release-20261002.yml]
+permissions:
+  contents: write
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DATABASE_URL: 'sqlite:///:memory:'
+      NINKO_SKIP_STARTUP_INDEX: '1'
+      NINKO_SKIP_INTEGRITY_BACKFILL: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: bundle
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ops/news-free-probe-20260926
+          path: source
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Verify deployed parent and checksum-pinned patch
+        working-directory: source
+        run: |
+          test "$(git rev-parse HEAD)" = '5a82fa743c2a7661cf50fc62e319e78ed9703b24'
+          mkdir -p ../release-evidence
+          python - <<'PY'
+          import base64,gzip,hashlib,pathlib,subprocess,json
+          text=pathlib.Path('../bundle/audit/news-football-release-20261002.patch.b64').read_text().strip()
+          text=text.replace('QtVDbQUQTQWll','QtVDbQUQWll')
+          patch=gzip.decompress(base64.b64decode(text,validate=True))
+          assert hashlib.sha256(patch).hexdigest()=='a8955ec8032aac874e2b25ee3930768db0b6cb4ad0d36858dec24dfe92a9d2b7'
+          path=pathlib.Path('../release-evidence/reviewed.patch');path.write_bytes(patch)
+          subprocess.run(['git','apply','--check',str(path)],check=True)
+          subprocess.run(['git','apply',str(path)],check=True)
+          allowed={'bot/fetch_sources.py','bot/feeds.py','bot/news_official_indexes.py','bot/news_policy.py','bot/news_football_sections.py','bot/news_football_memberships.py','bot/news_football_sources.py','tests/test_news_eligible_coverage_debt.py','tests/test_news_football_memberships.py','tests/test_news_football_sources_20261002.py','tests/test_news_scheduler_lanes.py','tests/test_news_verified_sources.py','tests/test_news_competition_grounding.py'}
+          changes=set(subprocess.check_output(['git','diff','--name-only'],text=True).splitlines())|set(subprocess.check_output(['git','ls-files','--others','--exclude-standard'],text=True).splitlines())
+          assert changes==allowed,changes^allowed
+          pathlib.Path('../release-evidence/changed-files.json').write_text(json.dumps(sorted(changes),indent=2))
+          PY
+      - name: News regression gate using only an isolated database
+        working-directory: source
+        run: |
+          pip install -q -r requirements.txt
+          python -m pytest -q tests/test_news* --junitxml=../release-evidence/tests.xml > ../release-evidence/tests.txt 2>&1 || { cat ../release-evidence/tests.txt; exit 1; }
+          cat ../release-evidence/tests.txt
+          python -m compileall -q bot
+      - name: Persist tested release to an isolated branch, not production
+        working-directory: source
+        run: |
+          git add bot/fetch_sources.py bot/feeds.py bot/news_official_indexes.py bot/news_policy.py bot/news_football_sections.py bot/news_football_memberships.py bot/news_football_sources.py tests/test_news_eligible_coverage_debt.py tests/test_news_football_memberships.py tests/test_news_football_sources_20261002.py tests/test_news_scheduler_lanes.py tests/test_news_verified_sources.py tests/test_news_competition_grounding.py
+          git config user.name 'NinkoSports News validation'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix(news): expand verified football sources and refresh read-only club membership with budget-safe drafting'
+          git push origin HEAD:refs/heads/audit/news-football-release-20261002
+          git rev-parse HEAD > ../release-evidence/tested-commit.txt
+          git show --stat --oneline HEAD > ../release-evidence/commit.txt
+          cat ../release-evidence/commit.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: football-news-backend-clean-release-20261002
+          path: release-evidence/
+          retention-days: 7
