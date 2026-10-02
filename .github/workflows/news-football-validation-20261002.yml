@@ -1,0 +1,72 @@
+name: Football News validation 20261002
+on:
+  push:
+    branches: [audit/news-football-20261002]
+    paths: [.github/workflows/news-football-validation-20261002.yml]
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      DATABASE_URL: sqlite:///:memory:
+      NINKO_SKIP_STARTUP_INDEX: '1'
+      NINKO_SKIP_INTEGRITY_BACKFILL: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Prepare offline test dependencies
+        run: |
+          mkdir -p validation/wheels
+          pip wheel -q -r requirements.txt -w validation/wheels
+          pip install -q --no-index --find-links validation/wheels -r requirements.txt
+      - name: News regressions against an isolated in-memory database
+        run: |
+          python -m pytest -q tests/test_news_football* tests/test_news_openai* tests/test_news_priority* tests/test_news_source_coverage_20260929.py --junitxml=validation/tests.xml > validation/tests.txt 2>&1 || { cat validation/tests.txt; exit 1; }
+          cat validation/tests.txt
+      - name: Read public football coverage without production credentials
+        if: always()
+        run: |
+          python - <<'PY'
+          import json, pathlib, urllib.request, urllib.parse
+          from concurrent.futures import ThreadPoolExecutor
+          from datetime import datetime, timezone
+          root = pathlib.Path('validation'); root.mkdir(exist_ok=True)
+          catalog = json.loads(pathlib.Path('bot/news_football_leagues.json').read_text())
+          base = 'https://allball-backend-production.up.railway.app'
+          def get(path):
+              try:
+                  req = urllib.request.Request(base + path, headers={'User-Agent': 'NinkoSports-News-ReadAudit/1.0'})
+                  with urllib.request.urlopen(req, timeout=45) as response:
+                      return json.loads(response.read(6000000))
+              except Exception as exc:
+                  return {'audit_error': type(exc).__name__}
+          registry = get('/registry/competitions?sport=football')
+          (root/'registry.json').write_text(json.dumps(registry, ensure_ascii=False))
+          def articles(row):
+              key = row['league']
+              rows = get('/articles?' + urllib.parse.urlencode({'sport':'football','league':key,'limit':3}))
+              return key, rows
+          with ThreadPoolExecutor(max_workers=3) as pool:
+              news = dict(pool.map(articles, catalog))
+          (root/'news-coverage.json').write_text(json.dumps(news,ensure_ascii=False))
+          keys = ['england-premier-league','spain-la-liga','italy-serie-a','germany-bundesliga','france-ligue-1','serbia-superliga','uefa-champions-league','uefa-nations-league','japan-j1-league','spain-la-liga-2','australia-a-league-men','football-england-premier-league']
+          def data(key):
+              return key, {'hub': get('/sports-data/competitions/'+urllib.parse.quote(key)+'/hub'), 'standings':get('/sports-data/standings?league='+urllib.parse.quote(key))}
+          with ThreadPoolExecutor(max_workers=2) as pool:
+              boards = dict(pool.map(data,keys))
+          (root/'boards.json').write_text(json.dumps(boards,ensure_ascii=False))
+          summary = {'checked_at':datetime.now(timezone.utc).isoformat(), 'news_catalog':len(catalog),'news_nonempty':sum(isinstance(v,list) and bool(v) for v in news.values()), 'news_errors':{k:v for k,v in news.items() if not isinstance(v,list)}, 'data':{k:{'hub_available':v['hub'].get('available'),'hub_events':len(v['hub'].get('events',[])),'table_rows':len(v['standings'].get('rows',[])), 'hub_error':v['hub'].get('audit_error'),'table_error':v['standings'].get('audit_error')} for k,v in boards.items()}}
+          (root/'summary.json').write_text(json.dumps(summary,indent=2)); print(json.dumps(summary,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: football-news-validation-20261002
+          path: validation/
+          retention-days: 3
