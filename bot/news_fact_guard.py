@@ -14,6 +14,7 @@ from typing import Optional
 
 from entities import extract_entities
 from .news_policy import original_draft_reason
+from .news_competition_scope import conflicting_competition_qualifier
 
 MONTHS_DAYS = {
     "january","february","march","april","may","june","july","august",
@@ -158,10 +159,13 @@ def competition_in_source(competition: str, text: str) -> bool:
     """A club-name inference is not evidence of its men's league in this story."""
     from .taxonomy import COMPETITIONS
     meta = COMPETITIONS.get(competition) or {}
-    if any(re.search(r'(?<!\w)' + r'\s+'.join(re.escape(part) for part in alias.strip().split()) + r'(?!\w)',
-                         text or '', re.I)
-               for alias in meta.get('aliases', []) if alias.strip()):
-        return True
+    for alias in meta.get('aliases', []):
+        if not alias.strip():
+            continue
+        pattern = r'(?<!\w)' + r'\s+'.join(re.escape(part) for part in alias.strip().split()) + r'(?!\w)'
+        for match in re.finditer(pattern, text or '', re.I):
+            if not conflicting_competition_qualifier(competition, text or '', match.start(), match.end()):
+                return True
     # Exact language equivalents seen in football sources. These establish
     # only a competition name; the independent validator still checks claims.
     local = {
@@ -177,6 +181,8 @@ def competition_in_source(competition: str, text: str) -> bool:
     for match in re.finditer(r'(?<!\w)' + local + r'(?!\w)', text or '', re.I):
         # A qualified women's/youth/club tournament is not its men's senior
         # counterpart. Never discard a qualifier while translating the label.
+        if conflicting_competition_qualifier(competition, text or '', match.start(), match.end()):
+            continue
         before = (text or '')[max(0, match.start()-25):match.start()]
         after = (text or '')[match.end():match.end()+45]
         if re.search(r'(?:žensk\w*|женск\w*|omladinsk\w*|омладинск\w*)\s*$', before, re.I):
@@ -443,6 +449,9 @@ def fact_lock_reason(
             # but it cannot conflict with an unspecified source competition.
             and expected_league not in set(BROAD_LEAGUE.values()) | {f"{expected_sport}-international"}
             and classified.league
+            # "football-international" means no concrete league was found,
+            # not positive evidence that the draft describes another event.
+            and classified.league not in set(BROAD_LEAGUE.values()) | {f"{expected_sport}-international"}
             and classified.confidence in {"high", "medium"}
             and classified.league != expected_league
         ):

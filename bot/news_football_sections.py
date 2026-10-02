@@ -14,6 +14,7 @@ from urllib.parse import urlsplit
 from editorial import sanitize_body, sanitize_summary, sanitize_title
 from .taxonomy import COMPETITIONS
 from .news_football_memberships import memberships_for_news
+from .news_competition_scope import conflicting_competition_qualifier
 
 _ROOT = Path(__file__).parent
 _CATALOG = json.loads((_ROOT / 'news_football_leagues.json').read_text())
@@ -110,6 +111,8 @@ def _explicit(text, women=False, youth=False):
             continue
         for alias in aliases:
             for match in re.finditer(r'(?<!\w)' + re.escape(alias) + r'(?!\w)', text):
+                if conflicting_competition_qualifier(key, text, match.start(), match.end()):
+                    continue
                 before = text[max(0, match.start()-65):match.start()]
                 after = text[match.end():match.end()+35]
                 # Incidental history and promotion ambitions are not today's
