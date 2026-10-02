@@ -1,0 +1,61 @@
+name: Regional News body boundary audit 20261002
+on:
+  push:
+    branches: [audit/news-football-20261002]
+    paths: [.github/workflows/news-regional-body-boundaries-20261002.yml]
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      DATABASE_URL: 'sqlite:///:memory:'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: b519a62d3d9b45d544d4ccba524eb2f210269428
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: pip install -q -r requirements.txt
+      - name: Read article HTML and full-feed evidence, no writers or publication
+        run: |
+          mkdir -p body-evidence
+          python - <<'PY'
+          import json,pathlib,feedparser
+          from concurrent.futures import ThreadPoolExecutor
+          from bot.news_feed_http import read_news_feed
+          from bot.extract import paragraphs_from_html,article_text_from_html,page_title_from_html,_metadata
+          from bot.fetch_sources import _fetch_feed_entries,_pick_reachable_article_image
+          from bot.quality import enough_for_brief
+          root=pathlib.Path('body-evidence')
+          sources=[('index','https://www.index.hr/rss/sport-nogomet'),('nb1','https://nb1.hu/feed/'),('goal','https://www.goal.pl/feed/'),('the72','https://the72.co.uk/feed/')]
+          def inspect(pair):
+              sid,url=pair;out={'id':sid,'url':url,'items':[]}
+              try:
+                  raw=read_news_feed(url);(root/(sid+'.xml')).write_bytes(raw)
+                  parsed=feedparser.parse(raw)
+                  for index,e in enumerate(parsed.entries[:3]):
+                      target=e.get('link');item={'url':target,'title':e.get('title'),'published':e.get('published')}
+                      content=[v.get('value','') for v in e.get('content',[]) if isinstance(v,dict)]
+                      item['feed_content']=[paragraphs_from_html(c) for c in content]
+                      try:
+                          page=read_news_feed(target).decode('utf8','replace');(root/f'{sid}-{index}.html').write_text(page)
+                          item['page_title']=page_title_from_html(page);item['canonical']=_metadata(page,'canonical');item['og_url']=_metadata(page,'og:url');item['old_body']=article_text_from_html(page)
+                      except Exception as exc:item['page_error']=str(exc)
+                      out['items'].append(item)
+                  if sid=='the72':
+                      cfg={'url':url,'kind':'league','sport':'football','publisher':'The72','verified_body_field':'content','verified_body_min_words':150,'article_path_re':r'^/20\d{2}/\d{2}/\d{2}/[^/]+/?$'}
+                      items=_fetch_feed_entries(cfg,3);out['full_feed_candidates']=[{'title':v['title'],'url':v['url'],'body_words':len(v['_extracted'].split()),'origin':v.get('_source_body_origin'),'enough':enough_for_brief(v['title'],v['_extracted']),'hero':_pick_reachable_article_image(v['image_candidates'])} for v in items]
+              except Exception as exc:out['error']=str(exc)
+              (root/(sid+'.json')).write_text(json.dumps(out,ensure_ascii=False,indent=2));print(sid,out.get('error'),len(out['items']))
+          with ThreadPoolExecutor(max_workers=3) as pool:list(pool.map(inspect,sources))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: regional-news-body-boundaries-20261002
+          path: body-evidence/
+          retention-days: 7
