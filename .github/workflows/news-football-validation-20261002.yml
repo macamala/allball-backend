@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 12
     env:
-      DATABASE_URL: sqlite:///:memory:
+      DATABASE_URL: 'sqlite:///:memory:'
       NINKO_SKIP_STARTUP_INDEX: '1'
       NINKO_SKIP_INTEGRITY_BACKFILL: '1'
     steps:
