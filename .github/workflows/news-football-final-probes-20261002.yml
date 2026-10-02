@@ -1,0 +1,80 @@
+name: Football News final source probes 20261002
+on:
+  push:
+    branches: [audit/news-football-20261002]
+    paths: [.github/workflows/news-football-final-probes-20261002.yml]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DATABASE_URL: 'sqlite:///:memory:'
+      NINKO_SKIP_STARTUP_INDEX: '1'
+      NINKO_SKIP_INTEGRITY_BACKFILL: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: pip install -q -r requirements.txt
+      - name: Public GET probes only, no AI, credentials or database writes
+        run: |
+          mkdir -p final-probes
+          python - <<'PY'
+          import json,pathlib,urllib.request,urllib.parse,logging
+          from concurrent.futures import ThreadPoolExecutor
+          from collections import Counter
+          from datetime import datetime,timedelta,timezone
+          from urllib.parse import urlsplit
+          import feedparser
+          from bot.news_feed_http import read_news_feed
+          from bot.extract import parse_feed_datetime
+          from bot.news_official_indexes import _hydrate,_anchor_candidates
+          logging.basicConfig(level=logging.WARNING)
+          root=pathlib.Path('final-probes');now=datetime.now(timezone.utc)
+          feeds=[('frf','FRF','https://www.frf.ro/feed/'),('argentina','Liga Profesional','https://www.ligaprofesional.ar/feed/'),('korea','K League United','https://www.kleagueunited.com/feeds/posts/default?alt=rss'),('conmebol','CONMEBOL','https://www.conmebol.com/feed/'),('soccernews','SoccerNews','https://www.soccernews.com/feed/'),('norway2','OBOS Ligaen','https://www.obos-ligaen.no/rss-nyheter'),('serbia','Superliga','https://www.superliga.rs/feed/'),('serbia2','Prva Liga','https://www.prvaliga.rs/feed/')]
+          html=[('czech','Chance Liga','https://www.chanceliga.cz/novinky',('/clanek/',)),('greece2','Super League 2','https://sl2.gr/',('/eidiseis/',)),('hungary','MLSZ','https://www.mlsz.hu/hirek',('/hir/',)),('afc','AFC','https://www.the-afc.com/en/club/afc_champions_league_elite/news.html',('/en/club/afc_champions_league_elite.html/news/',)),('croatia','HNL','https://hnl.hr/vijesti/',('/vijesti/',)),('scotland','SPFL','https://spfl.co.uk/news',('/news/',)),('romania','LPF','https://lpf.ro/noutati',('/noutati/',))]
+          def probe(item,is_feed):
+              sid,publisher,url,*paths=item;result={'id':sid,'publisher':publisher,'url':url,'samples':[]}
+              try:
+                  cfg={'id':sid,'publisher':publisher,'url':url,'host':urlsplit(url).hostname,'sport':'football'}
+                  if is_feed:
+                      raw=read_news_feed(url);(root/(sid+'.xml')).write_bytes(raw);f=feedparser.parse(raw)
+                      result['format']=f.version;result['entries']=len(f.entries)
+                      entries=[(e.get('link'),e.get('title'),parse_feed_datetime(e)) for e in f.entries[:18]]
+                      result['dates']=[{'url':u,'title':t,'published_at':str(d)} for u,t,d in entries]
+                      entries=[(u,t,d) for u,t,d in entries if d and timedelta(0)<=now-d<timedelta(hours=24)]
+                  else:
+                      cfg['paths']=paths[0];entries=[(u,t,None) for u,t in _anchor_candidates(cfg)]
+                  for u,t,d in entries[:3]:
+                      if urlsplit(u).hostname!=cfg['host']:continue
+                      reasons=Counter();article=_hydrate(cfg,u,t,diagnostics=reasons,sitemap_published_at=d)
+                      sample={'url':u,'hydrated':bool(article),'reasons':dict(reasons)}
+                      if article:sample['article']=article
+                      result['samples'].append(sample)
+              except Exception as e:result['error']=str(e)[:150]
+              (root/(sid+'.json')).write_text(json.dumps(result,default=str,ensure_ascii=False,indent=2));print(sid,result.get('error'),sum(s['hydrated'] for s in result['samples']),flush=True)
+          with ThreadPoolExecutor(max_workers=4) as pool:list(pool.map(lambda i:probe(i,True),feeds))
+          with ThreadPoolExecutor(max_workers=4) as pool:list(pool.map(lambda i:probe(i,False),html))
+          keys=['spain-la-liga','korea-k-league-1','football-ita-serie-b','football-fra-ligue-2','football-ned-eerste-divisie','football-bel-first-division-b','football-sco-championship','football-por-liga-portugal-2','football-tur-1-lig','football-gre-super-league-2','football-sui-challenge-league','football-pol-i-liga','football-cze-fnl','football-aut-2-liga','football-den-1-division','football-nor-1-divisjon','football-swe-superettan','football-fin-ykk-sliiga','football-rou-liga-ii','football-bul-second-professional-league','football-hun-nb-ii','football-bra-s-rie-b','football-arg-primera-nacional','football-jpn-j-league-2','football-kor-k-league-2','football-ksa-saudi-first-division','football-tur-super-lig','football-gre-super-league']
+          base='https://allball-backend-production.up.railway.app'
+          def get(path):
+              try:
+                  with urllib.request.urlopen(urllib.request.Request(base+path,headers={'User-Agent':'NinkoSports-News-ReadAudit/1.0'}),timeout=15) as r:return json.loads(r.read(6000000))
+              except Exception as e:return {'audit_error':type(e).__name__}
+          def data(key):
+              query=urllib.parse.urlencode({'sport':'football','competition':key,'date_from':(now-timedelta(days=60)).date().isoformat(),'date_to':(now+timedelta(days=90)).date().isoformat()})
+              row={'events':get('/sports-data/events?'+query),'standings':get('/sports-data/standings?league='+key)}
+              (root/(key+'.json')).write_text(json.dumps(row,ensure_ascii=False));print(key,'events',len(row['events'].get('events',[])),'table',len(row['standings'].get('rows',[])),flush=True)
+          with ThreadPoolExecutor(max_workers=2) as pool:list(pool.map(data,keys))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: football-news-final-probes-20261002
+          path: final-probes/
+          retention-days: 3
