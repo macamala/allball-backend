@@ -623,6 +623,9 @@ def _ingest_item(
     extracted_image = item.get("_extracted_image")
     if not extracted:
         extracted, extracted_image = extract_from_url(source_url)
+    if (item.get('feed') or {}).get('article_body_required') and not extracted:
+        logger.info('[fetch_sources] skip missing verified article container: %s', item['title'][:80])
+        return None, False
     facts, origin = source_article_facts(extracted, rss_text, source_url)
     if item.get("_source_body_origin") == "verified-full-rss" and facts:
         origin = "verified-full-rss"

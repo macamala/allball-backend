@@ -353,6 +353,10 @@ def collect_page_image_candidates(html: str) -> List[dict]:
     # Yonhap uses <article> for unrelated recommendation cards too. Limit
     # body images to its actual story container; metadata remains same-page.
     canonical = _og(html or '', 'og:url') or _metadata(html or '', 'canonical') or ''
+    if urlsplit(canonical).hostname in {'www.index.hr', 'index.hr', 'nb1.hu', 'www.nb1.hu', 'www.goal.pl', 'goal.pl'}:
+        # Their related cards sit inside the article/main tree. Only this
+        # page's explicit social hero may be used, never a neighbouring card.
+        return [row for row in candidates if row.get('source') in {'og', 'twitter'}]
     scoped_photo_classes = {'aleagues.com.au': 'entry-content', 'ge.globo.com': 'mc-article-body',
                             'www.mlssoccer.com': 'oc-c-article__body',
                             'eredivisie.nl': 'news-grid-main__content',
@@ -438,8 +442,9 @@ def _is_chrome_open(tag: str, attrs) -> bool:
 
 
 class _ArticleExtractor(HTMLParser):
-    def __init__(self):
+    def __init__(self, *, extra_chrome_classes=()):
         super().__init__(convert_charrefs=True)
+        self.extra_chrome_classes = frozenset(extra_chrome_classes)
         self.ignore = 0
         self.in_p = 0
         self.in_main = 0
@@ -458,7 +463,8 @@ class _ArticleExtractor(HTMLParser):
             if tag not in VOID_TAGS:
                 self.ignore += 1
             return
-        if _is_chrome_open(tag, attrs):
+        if (_is_chrome_open(tag, attrs)
+                or self.extra_chrome_classes.intersection(dict(attrs).get('class', '').split())):
             self.ignore = 0 if tag in VOID_TAGS else 1
             return
         attrs_map = _attr_map(attrs)
@@ -519,8 +525,8 @@ def _keep_paragraph(text: str) -> bool:
     return True
 
 
-def paragraphs_from_html(html: str) -> str:
-    parser = _ArticleExtractor()
+def paragraphs_from_html(html: str, *, extra_chrome_classes=()) -> str:
+    parser = _ArticleExtractor(extra_chrome_classes=extra_chrome_classes)
     try:
         parser.feed(html or "")
         parser.close()
@@ -675,6 +681,18 @@ def article_text_from_html(html: str) -> str:
         publisher_host = urlsplit(canonical).hostname
     except ValueError:
         publisher_host = None
+    # Verified regional football article containers. These publishers place
+    # unrelated recommendations inside <main>; never use that whole page.
+    extra_chrome_classes = ()
+    if publisher_host in {'www.index.hr', 'index.hr'}:
+        body_class, body_tag = 'text', 'section'
+        extra_chrome_classes = ('js-slot-container',)
+    if publisher_host in {'nb1.hu', 'www.nb1.hu'}:
+        body_class, body_id = None, 'content-post'
+        extra_chrome_classes = ('wp-embedded-content',)
+    if publisher_host in {'www.goal.pl', 'goal.pl'}:
+        body_class = 'entry-content'
+        extra_chrome_classes = ('related-post-container',)
     if publisher_host == 'www.mozzartsport.com':
         body_class = 'news-content'
     if publisher_host == 'fss.rs':
@@ -757,7 +775,7 @@ def article_text_from_html(html: str) -> str:
         if not prose.finished:
             return ''
         html = ''.join(prose.parts)
-    text = paragraphs_from_html(html or "")
+    text = paragraphs_from_html(html or "", extra_chrome_classes=extra_chrome_classes)
     if publisher_host == 'football-italia.net':
         text = '\n\n'.join(p for p in text.split('\n\n')
                           if not re.match(r'(?i)^Find out more .+\bvideo below\b', p))
