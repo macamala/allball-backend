@@ -306,6 +306,18 @@ def freshness_reason(stamp, now, max_age_hours=72):
     return None
 
 
+def eligible_news_coverage_debt(candidate_sports, inventory):
+    """Only eligible supply can reserve a writer/validator attempt this cycle.
+
+    Disabled sports and sports without a fresh candidate must not suppress
+    correction retries in a dedicated football worker. This changes ordering,
+    not the durable request ledger, paid caps, or factual admission rules.
+    """
+    return sum(1 for sport in set(candidate_sports or ()) if sport
+               and int((inventory or {}).get(sport, 0) or 0)
+               < {"football": 12, "basketball": 8}.get(sport, 6))
+
+
 def news_freshness_reason(stamp, now):
     """Global ingestion window; a reader's midnight never expires a source.
 

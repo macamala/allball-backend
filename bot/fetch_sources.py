@@ -17,7 +17,7 @@ from database import SessionLocal
 from models import Article
 from editorial import looks_non_english, news_image_is_publishable, pick_article_image
 
-from .news_policy import NEWS_FRESHNESS_HOURS, news_freshness_reason, fair_news_queue, non_article_news_reason, numeric_tokens, original_draft_reason, source_path_sport_hint
+from .news_policy import eligible_news_coverage_debt, NEWS_FRESHNESS_HOURS, news_freshness_reason, fair_news_queue, non_article_news_reason, numeric_tokens, original_draft_reason, source_path_sport_hint
 from .news_football_priority import football_editorial_priority
 from .news_fact_guard import competition_in_source, fact_lock_reason
 from .news_learning import (
@@ -454,6 +454,21 @@ def _fetch_feed_entries(feed_cfg: Dict, max_articles: int) -> List[Dict]:
                 link = urlunsplit(("https", parts.hostname, parts.path, parts.query, parts.fragment))
             except ValueError:
                 continue
+        verified_body = None
+        body_field = feed_cfg.get('verified_body_field')
+        if body_field:
+            # Only explicitly configured, observed full-post fields. A long
+            # teaser, a recommended card and a page footer are not the article.
+            if urlsplit(link).hostname != urlsplit(feed_cfg['url']).hostname:
+                continue
+            raw_bodies = content_values if body_field == 'content' else [raw_summary] if body_field == 'summary' else []
+            bodies = [strip_truncation_markers(paragraphs_from_html(value)) for value in raw_bodies]
+            verified_body = max(bodies, key=len) if bodies else ''
+            if word_count(verified_body) < max(120, int(feed_cfg.get('verified_body_min_words', 150))):
+                continue
+            if is_site_chrome_text(verified_body):
+                continue
+            summary = verified_body
         if not link or not title or looks_like_garbage(title):
             continue
         allowed_paths = feed_cfg.get('allowed_article_paths') or ()
@@ -478,6 +493,7 @@ def _fetch_feed_entries(feed_cfg: Dict, max_articles: int) -> List[Dict]:
                 "image_candidates": _extract_image_candidates(entry),
                 "published_at": _rss_publication_time(entry, feed_cfg),
                 "_publication_evidence": "rss-published",
+                **({"_extracted": verified_body, "_classification_text": verified_body, "_source_body_origin": "verified-full-rss"} if verified_body else {}),
                 "feed": feed_cfg,
             }
         )
@@ -608,6 +624,8 @@ def _ingest_item(
     if not extracted:
         extracted, extracted_image = extract_from_url(source_url)
     facts, origin = source_article_facts(extracted, rss_text, source_url)
+    if item.get("_source_body_origin") == "verified-full-rss" and facts:
+        origin = "verified-full-rss"
     if origin == 'non-article-source':
         from .extract import non_article_document_reason
         _hold_ai_source(source_url, non_article_document_reason(source_url))
@@ -648,6 +666,10 @@ def _ingest_item(
         # article before holding it. No AI requests are spent on this repair.
         from .extract import extract_image_candidates_from_url
         alternatives = extract_image_candidates_from_url(source_url)
+        if item.get('_source_body_origin') == 'verified-full-rss':
+            # When the full feed has no photograph, only this article's own
+            # social hero may be used; unrelated page cards are not its media.
+            alternatives = [row for row in alternatives if row.get('source') in {'og', 'twitter'}]
         image_url = _pick_reachable_article_image([
             row for row in alternatives
             if 0 < len(str(row.get("url") or "")) <= 500
@@ -1191,6 +1213,8 @@ def _fetch_and_store_all_articles(
         after_images = time.monotonic()
         mislabels = repair_recent_sport_mislabels(db, limit=600, max_age_hours=168)
         from .news_league_index import repair_football_league_menus, recent_public_football_inventory
+        from .news_football_memberships import refresh_football_news_memberships
+        refresh_football_news_memberships()
         mislabels += repair_football_league_menus(db)
         after_mislabels = time.monotonic()
         repaired = repair_recent_unresolved(db, limit=24)
@@ -1244,8 +1268,7 @@ def _fetch_and_store_all_articles(
         cycle_budget = active_ai_budget()
 
         def update_coverage_debt():
-            debt = sum(1 for sport in candidate_sports
-                if sport_inventory.get(sport, 0) < {"football": 12, "basketball": 8}.get(sport, 6))
+            debt = eligible_news_coverage_debt(candidate_sports, sport_inventory)
             if cycle_budget is not None:
                 cycle_budget.english_coverage_debt = debt
             return debt
@@ -1268,16 +1291,8 @@ def _fetch_and_store_all_articles(
         logger.info('[fetch_sources] football_league_inventory=%s queue_sections=%s',
             football_inventory, [candidate_football_section(item, _classify_candidate(item))
                                  for item in queued[:8]])
-        active_news_sports = [
-            row["id"]
-            for row in SPORTS
-            if row["active"] and row["supports_news"]
-        ]
-        coverage_debt = sum(
-            1 for sport in active_news_sports
-            if int(sport_inventory.get(sport, 0) or 0) < 6
-        )
-        prefer_breadth = coverage_debt > 1
+        # A football-only cycle has no other-sport candidate to reserve for.
+        prefer_breadth = update_coverage_debt() > 1
         for item in queued:
             if ai_budget <= 0 or openai_rate_limited() or ai_budget_exhausted():
                 break

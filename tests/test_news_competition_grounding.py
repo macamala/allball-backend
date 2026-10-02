@@ -82,7 +82,10 @@ def test_full_repair_restores_only_after_all_public_gates(monkeypatch, photo_ok,
         db.add_all([article, tax, incident]); db.commit()
         assert repair_recent_gossip_news(db) == 1
         assert article.title == "McCabe praises Walsh after Chelsea Women's victory over Arsenal"
-        assert tax.public_ok is expected_public and tax.resolved_competition is None
+        assert tax.public_ok is expected_public
+        # The current verified club catalogue may tag an admitted women's
+        # story, but a held article must not acquire a public league.
+        assert tax.resolved_competition == ('england-womens-super-league' if expected_public else None)
         assert article.slug == 'stable-url'
         assert incident.status == ('open' if confirmed_hold else 'auto_corrected')
         assert repair_recent_gossip_news(db) == 0

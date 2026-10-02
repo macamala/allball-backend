@@ -96,6 +96,8 @@ def enabled_feeds() -> List[Feed]:
     if os.getenv("NEWS_EXPANDED_FEEDS_ENABLED") == "1":
         from .news_verified_feeds import VERIFIED_RSS
         rows += [dict(feed) for feed in VERIFIED_RSS]
+    from .news_football_sources import RSS_FEEDS
+    rows += [dict(feed) for feed in RSS_FEEDS]
     if os.getenv("NEWS_FOOTBALL_ONLY") == "1":
         # Retain mixed publishers: final article classification, not the feed
         # name, decides whether a candidate is soccer. Existing rows stay intact.

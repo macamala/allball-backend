@@ -33,12 +33,13 @@ def test_removed_result_news_lane_never_imports_or_runs(monkeypatch, tmp_path):
     assert scheduler._run_cycle() == 0
 
 
-@pytest.mark.parametrize('debt,football_only,deepl_on,exhaust,expected', [
-    (0, False, False,False, ['english','translations']), (3,False,False,False,['english']),
-    (None,False,False,False,['english']), (0,True,False,False,['english']),
-    (3,True,True,False,['english','translations']), (3,True,True,True,['english']),
+@pytest.mark.parametrize('debt,football_only,deepl_on,exhaust', [
+    (0, False, False, False), (3, False, False, False),
+    (None, False, False, False), (0, True, False, False),
+    (3, True, True, False), (3, True, True, True),
 ])
-def test_translation_lane_runs_after_english_with_separate_deepl_allowance(monkeypatch, tmp_path, debt, football_only, deepl_on, exhaust, expected):
+def test_enabled_translation_slice_precedes_english_with_shared_allowance(monkeypatch, tmp_path, debt, football_only, deepl_on, exhaust):
+    expected = ['translations', 'english']
     _base_env(monkeypatch, tmp_path, max_articles="1", translations="1")
     monkeypatch.setenv('NEWS_FOOTBALL_ONLY', '1' if football_only else '0')
     monkeypatch.setenv('NEWS_DEEPL_FREE_ENABLED', '1' if deepl_on else '0')

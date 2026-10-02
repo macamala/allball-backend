@@ -9,12 +9,14 @@ def test_expanded_catalog_contains_new_free_sources(monkeypatch):
     assert len(urls)==len(set(urls))
     expected={
         'https://www.afl.com.au/rss',
-        'https://feeds.bbci.co.uk/sport/badminton/rss.xml',
-        'https://feeds.bbci.co.uk/sport/hockey/rss.xml',
-        'https://feeds.bbci.co.uk/sport/table-tennis/rss.xml',
-        'https://feeds.bbci.co.uk/sport/water-polo/rss.xml',
+        'https://pbsi.id/feed/',
+        'https://www.tabletennisengland.co.uk/feed',
+        'https://total-waterpolo.com/feed/',
+        'https://www.kleagueunited.com/feeds/posts/default?alt=rss',
     }
     assert expected <= set(urls)
+    from bot.feeds import news_source_is_excluded
+    assert not any(news_source_is_excluded(url) for url in urls)
 
 
 def test_new_source_sports_classify_from_article_evidence():

@@ -406,6 +406,9 @@ HTML_INDEXES = (
     },
 )
 
+from .news_football_sources import HTML_INDEXES as FOOTBALL_HTML_INDEXES
+HTML_INDEXES = HTML_INDEXES + FOOTBALL_HTML_INDEXES
+
 SITEMAPS = (
     {
         "id": "uefa-football-competitions", "sport": "football", "publisher": "UEFA",
@@ -850,9 +853,14 @@ def fetch_official_index_entries(max_per_source: int = 3) -> List[Dict]:
     if football_only:
         active_html = [cfg for cfg in active_html if not cfg.get('sport') or cfg.get('sport') == 'football']
     if active_html:
-        workers = min(4, len(active_html))
+        hosts = {}
+        for cfg in active_html:
+            hosts.setdefault(cfg['host'], []).append(cfg)
+        def hydrate_host(configs):
+            return [entry for cfg in configs for entry in _hydrate_source(cfg, limit)]
+        workers = min(4, len(hosts))
         with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="news-official") as pool:
-            for rows in pool.map(lambda cfg: _hydrate_source(cfg, limit), active_html):
+            for rows in pool.map(hydrate_host, hosts.values()):
                 items.extend(rows)
 
     active_sitemaps = [cfg for cfg in SITEMAPS if cfg.get("enabled", True) is not False]

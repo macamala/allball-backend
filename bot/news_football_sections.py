@@ -13,6 +13,7 @@ from urllib.parse import urlsplit
 
 from editorial import sanitize_body, sanitize_summary, sanitize_title
 from .taxonomy import COMPETITIONS
+from .news_football_memberships import memberships_for_news
 
 _ROOT = Path(__file__).parent
 _CATALOG = json.loads((_ROOT / 'news_football_leagues.json').read_text())
@@ -57,15 +58,27 @@ def _club_section(title, summary, article, women, today):
     elif hasattr(stamp, 'date'):
         stamp = stamp.date()
     stamp = stamp or today
-    if not (_CLUBS['valid_from'] <= stamp.isoformat() <= _CLUBS['valid_until']
-            and today.isoformat() <= _CLUBS['valid_until']):
-        return None
+    static_current = (_CLUBS['valid_from'] <= stamp.isoformat() <= _CLUBS['valid_until']
+                      and today.isoformat() <= _CLUBS['valid_until'])
+    live = memberships_for_news()
+    catalogue = dict(_CLUBS['leagues']) if static_current else {}
+    for league, entry in live.items():
+        if entry['valid_from'] <= stamp.isoformat() <= entry['valid_until']:
+            # Keep a short static alias only when it unambiguously belongs to
+            # one of the current verified full names; never keep relegated clubs.
+            clubs = list(entry['clubs'])
+            names = [_norm(name) for name in clubs]
+            for alias in catalogue.get(league, {}).get('clubs', []):
+                normalized = _norm(alias)
+                if sum(_has(name, normalized) or _has(normalized, name) for name in names) == 1:
+                    clubs.append(alias)
+            catalogue[league] = {**entry, 'clubs': clubs}
     past_title = bool(re.search(r'\b(?:rules out|rejects|former|international goal|international match)\b', title))
     for text in (title, summary):
         if text == title and past_title:
             continue
         candidates = []
-        for league, entry in _CLUBS['leagues'].items():
+        for league, entry in catalogue.items():
             if (league in _WOMEN_KEYS) != women:
                 continue
             if entry.get('valid_until', _CLUBS['valid_until']) < today.isoformat():
