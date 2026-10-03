@@ -446,7 +446,8 @@ def non_article_news_reason(item):
         return "non_article_service_guide"
     if re.search(r"\b(?:talking points|silver linings|most intriguing|season buzz|news and intel)\b", title):
         return "non_article_analysis"
-    if re.match(r'\s*analysis\s*:', title):
+    if (re.match(r'\s*(?:analysis|opinion)\s*:', title)
+            or re.search(r'(?:[:|–—]|\s-\s)\s*opinion\s*$', title)):
         return 'non_article_analysis'
     if re.search(r'\bis a welcome example of\b', title):
         return 'non_article_analysis'

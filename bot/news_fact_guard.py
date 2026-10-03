@@ -413,7 +413,10 @@ def fact_lock_reason(
             src_acronyms.add(canonical)
     # Portuguese article headings use Fifa / Uefa. Case is formatting, not a
     # different organisation. Restrict this to explicit federation tokens.
-    for canonical in ('FIFA', 'UEFA', 'CIES'):
+    # Concacaf/Conmebol casing occurs in verified football source prose.
+    # Exact source token required; a tournament name alone adds no federation.
+    football_acronyms = ('CONCACAF', 'CONMEBOL') if expected_sport == 'football' else ()
+    for canonical in ('FIFA', 'UEFA', 'CIES') + football_acronyms:
         if re.search(r'(?<!\w)' + canonical + r'(?!\w)', source, re.I):
             src_acronyms.add(canonical)
     # Country explicitly named in the audited German report; no ownership,

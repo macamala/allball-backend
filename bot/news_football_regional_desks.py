@@ -102,7 +102,7 @@ class _Markers(HTMLParser):
 
     def handle_starttag(self, tag, attrs):
         values = dict(attrs)
-        classes = values.get('class', '').split()
+        classes = str(values.get('class') or '').split()
         if _BLOCKED_CLASSES.intersection(classes):
             self.blocked = True
         if tag == 'article':

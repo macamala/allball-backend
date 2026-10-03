@@ -468,7 +468,7 @@ class _ArticleExtractor(HTMLParser):
                 self.ignore += 1
             return
         if (_is_chrome_open(tag, attrs)
-                or self.extra_chrome_classes.intersection(dict(attrs).get('class', '').split())):
+                or self.extra_chrome_classes.intersection(_attr_map(attrs).get('class', '').split())):
             self.ignore = 0 if tag in VOID_TAGS else 1
             return
         attrs_map = _attr_map(attrs)
@@ -630,7 +630,9 @@ class _ScopedNewsBody(HTMLParser):
         if not self.depth:
             if self.body_tag and tag != self.body_tag:
                 return
-            values = dict(attrs)
+            # HTMLParser represents an empty/boolean attribute as None.
+            # Normalize attributes without treating absent classes as a match.
+            values = _attr_map(attrs)
             if ((self.body_id and values.get('id') == self.body_id)
                     or (self.body_tag and not self.body_class and not self.body_id)
                     or (not self.body_id and self.body_class and set(self.body_class.split()) <= set(values.get('class', '').split()))):

@@ -18,10 +18,23 @@ def candidate_football_section(item, tags, *, today=None):
         return None
     from .news_football_sections import football_news_section
     body = item.get('_classification_text') or item.get('_extracted') or ''
-    source = SimpleNamespace(title=item.get('title') or '',
-        summary=item.get('summary') or str(body)[:500], content=body,
+    # RSS may contain the full post. Only its first complete paragraph is
+    # a lead; historical references in later paragraphs are not the event.
+    lead = re.split(r'\n\s*\n', str(item.get('summary') or body).strip(), maxsplit=1)[0]
+    if len(lead) > 650:
+        sentence = re.split(r'(?<=[.!?])\s+', lead, maxsplit=1)[0]
+        lead = sentence if len(sentence) <= 650 else ''
+    source = SimpleNamespace(title=item.get('title') or '', 
+        summary=lead, content=body,
         published_at=item.get('published_at'), source_url=item.get('url'))
-    return football_news_section(source, today=today) or getattr(tags, 'league', None)
+    key = football_news_section(source, today=today)
+    if key:
+        return key
+    # A full-body classifier hint alone must not invent missing-league
+    # debt. Actual article writing and publication classification are unchanged.
+    from .news_fact_guard import competition_in_source
+    league = getattr(tags, 'league', None)
+    return league if league and competition_in_source(league, source.title + '\n' + lead) else None
 
 
 def spread_football_leagues(items, inventory, *, section, priority):
