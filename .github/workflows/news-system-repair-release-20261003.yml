@@ -1,0 +1,118 @@
+name: News grouped repair release 20261003
+on:
+  push:
+    branches: [audit/news-system-repair-20261003]
+    paths: [.github/workflows/news-system-repair-release-20261003.yml]
+permissions:
+  contents: write
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      DATABASE_URL: 'sqlite:///:memory:'
+      NINKO_SKIP_STARTUP_INDEX: '1'
+      NINKO_SKIP_INTEGRITY_BACKFILL: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: bundle
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ops/news-free-probe-20260926
+          path: source
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Exact parent, patch checksum and News-only file boundary
+        working-directory: source
+        run: |
+          test "$(git rev-parse HEAD)" = '8f474371ac8001ecfeb0438f5020f79312f19339'
+          mkdir -p ../repair-evidence
+          python - <<'PY'
+          import base64,gzip,hashlib,pathlib,subprocess,json
+          data=pathlib.Path('../bundle/audit/news-system-repair.patch.b64').read_text().strip()
+          pathlib.Path('../repair-evidence/received.b64').write_text(data)
+          patch=gzip.decompress(base64.b64decode(data,validate=True))
+          assert hashlib.sha256(patch).hexdigest()=='78843a7cf7401dd4014d47edc3837cd4068449764c0fb936c708c84a2e92c920'
+          path=pathlib.Path('../repair-evidence/reviewed.patch');path.write_bytes(patch)
+          subprocess.run(['git','apply','--check',str(path)],check=True)
+          subprocess.run(['git','apply',str(path)],check=True)
+          allowed={'bot/news_source_lexemes.py','bot/news_fact_guard.py','bot/news_policy.py','bot/news_football_sections.py','bot/news_football_source_context.py','bot/news_source_holds.py','tests/test_news_source_lexemes.py','tests/test_news_ticket_and_junior_scope.py','tests/test_news_source_menu_integrity.py','tests/test_news_cjk_cooldown_repair.py'}
+          changed=set(subprocess.check_output(['git','diff','--name-only'],text=True).splitlines())|set(subprocess.check_output(['git','ls-files','--others','--exclude-standard'],text=True).splitlines())
+          assert changed==allowed,changed^allowed
+          pathlib.Path('../repair-evidence/files.json').write_text(json.dumps({p:hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest() for p in sorted(allowed)},indent=2))
+          PY
+      - name: Complete News and text utility regressions
+        working-directory: source
+        run: |
+          pip install -q -r requirements.txt
+          python -m pytest -q tests/test_news* tests/test_textutil.py --junitxml=../repair-evidence/tests.xml > ../repair-evidence/tests.txt 2>&1 || { tail -100 ../repair-evidence/tests.txt; exit 1; }
+          tail -5 ../repair-evidence/tests.txt
+          python -m compileall -q bot
+      - name: Live source facts and existing-public correction proof without writers
+        working-directory: source
+        run: |
+          python - <<'PY'
+          import json,pathlib,urllib.request,logging
+          from datetime import datetime,timezone
+          from types import SimpleNamespace
+          from bot.news_jleague_native import parse_jleague_article
+          from bot.news_feed_http import read_news_feed
+          from bot.news_policy import numeric_tokens,non_article_news_reason
+          from bot.news_source_lexemes import source_cjk_acronyms
+          from bot.news_football_sections import football_news_section
+          from bot.news_football_source_context import source_menu_association
+          from bot.news_official_indexes import _hydrate_source
+          from bot.news_football_sources import HTML_INDEXES
+          logging.basicConfig(level=logging.WARNING)
+          root=pathlib.Path('../repair-evidence');proof=[]
+          # Replay the exact normal native source intake; retain the full source
+          # article text in private run artifacts, not in application logs.
+          for cfg in [c for c in HTML_INDEXES if c['id'] in {'jleague-native-j1','jleague-native-j2'}]:
+              for item in _hydrate_source(cfg,3):
+                  body=item.get('_extracted') or ''
+                  row={'url':item['url'],'title':item['title'],'source_published_at':str(item['published_at']),'numeric_tokens':sorted(numeric_tokens(body,include_spelled=True)),'cjk_acronyms':sorted(source_cjk_acronyms(body))}
+                  (root/(item['url'].rstrip('/').split('/')[-1]+'.txt')).write_text(body)
+                  proof.append(row)
+          indexed={p['url']:p for p in proof}
+          url=lambda n:f'https://www.jleague.jp/news/article/{n}/'
+          assert '2026/27' in indexed[url(35031)]['numeric_tokens']
+          assert '12' in indexed[url(35030)]['numeric_tokens']
+          assert 'FC' in indexed[url(35032)]['cjk_acronyms']
+          base='https://allball-backend-production.up.railway.app'
+          def get(slug):
+              with urllib.request.urlopen(base+'/articles/'+slug,timeout=20) as r:return json.loads(r.read(1000000))
+          youth=get('crvena-zvezdas-2018-football-team-wins-ilija-panteli-trophy')
+          route=football_news_section(SimpleNamespace(**youth))
+          assert route=='football-youth'
+          ticket_url='https://www.chelseafc.com/en/news/article/ticket-news-chelsea-fc-legends-vs-tottenham-hotspur-legends'
+          ticket=get('chelsea-fc-legends-to-host-tottenham-hotspur-legends-at-stamford-bridge')
+          hold=non_article_news_reason({'title':ticket['title'],'summary':ticket['summary'],'body':ticket['content'],'url':ticket_url})
+          assert hold=='non_article_ticket_promotion'
+          summary={'checked_at':datetime.now(timezone.utc).isoformat(),'source_proof':proof,'youth_id':youth['id'],'youth_current_menu':youth['league'],'youth_repaired_menu':route,'ticket_id':ticket['id'],'ticket_rejection':hold,'AI_requests':0,'production_writes':0,'publication_after_fix_not_yet_proven':True}
+          (root/'live-proof.json').write_text(json.dumps(summary,ensure_ascii=False,indent=2));print(json.dumps(summary,ensure_ascii=False,indent=2))
+          PY
+      - name: Preserve tested code on isolated clean release branch
+        working-directory: source
+        run: |
+          python - <<'PY'
+          import json,pathlib,subprocess
+          files=json.loads(pathlib.Path('../repair-evidence/files.json').read_text())
+          subprocess.run(['git','add',*files],check=True)
+          assert len(subprocess.check_output(['git','diff','--cached','--name-only'],text=True).splitlines())==10
+          PY
+          git config user.name 'NinkoSports News validation'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix(news): recognise literal Japanese facts and repair youth sales and league classification'
+          git push origin HEAD:refs/heads/audit/news-system-repair-release-20261003
+          git rev-parse HEAD > ../repair-evidence/tested-commit.txt
+          git show --stat --oneline HEAD > ../repair-evidence/commit.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: news-system-repair-release-20261003
+          path: repair-evidence/
+          retention-days: 7
