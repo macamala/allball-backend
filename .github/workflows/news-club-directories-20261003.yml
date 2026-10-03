@@ -1,0 +1,82 @@
+name: News club source directories 20261003
+on:
+  push:
+    branches: [audit/news-club-coverage-20261003]
+    paths: [.github/workflows/news-club-directories-20261003.yml]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    env:
+      DATABASE_URL: 'sqlite:///:memory:'
+      NINKO_SKIP_STARTUP_INDEX: '1'
+      NINKO_SKIP_INTEGRITY_BACKFILL: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 2e1a2d8bf72879953403ec9ff989a17839ba8764
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: pip install -q -r requirements.txt
+      - name: Read bounded feed directories and public club articles without AI
+        run: |
+          mkdir -p evidence
+          python - <<'PY'
+          import json,pathlib,re,logging
+          from html.parser import HTMLParser
+          from urllib.parse import urljoin,urlsplit
+          import feedparser
+          from bot.news_feed_http import read_news_feed
+          from bot.feeds import news_source_is_excluded
+          from bot.fetch_sources import _fetch_feed_entries,_classify_item,_pick_reachable_article_image
+          from bot.extract import extract_from_url,extract_image_candidates_from_url
+          from bot.quality import quality_check
+          from bot.news_policy import non_article_news_reason
+          root=pathlib.Path('evidence');logging.basicConfig(level=logging.WARNING)
+          class Links(HTMLParser):
+              def __init__(self):super().__init__();self.url=None;self.parts=[];self.links=[]
+              def handle_starttag(self,t,attrs):
+                  if t=='a':self.url=dict(attrs).get('href');self.parts=[]
+              def handle_data(self,d):
+                  if self.url:self.parts.append(d)
+              def handle_endtag(self,t):
+                  if t=='a' and self.url:self.links.append((self.url,' '.join(self.parts).strip()));self.url=None
+          sources=[]
+          for name,url in [('sky-directory','https://www.skysports.com/rss'),('sky-teams','https://www.skysports.com/football/teams')]:
+              out={'name':name,'url':url}
+              try:
+                  raw=read_news_feed(url).decode('utf-8','replace');(root/(name+'.html')).write_text(raw);p=Links();p.feed(raw)
+                  out['links']=[(urljoin(url,u),t) for u,t in p.links if '/rss/' in u or ('sky-teams'==name and re.search(r'^[A-Za-z0-9 .&\-]+$',t))]
+                  if name=='sky-directory':sources += [(t,urljoin(url,u)) for u,t in p.links if re.search(r'/rss/\d+$',u)][:75]
+              except Exception as e:out['error']=str(e)[:150]
+              (root/(name+'.json')).write_text(json.dumps(out,indent=2))
+          sources += [('Vojvodina','https://www.fkvojvodina.rs/feed/'),('Radnicki1923','https://www.fkradnicki.com/feed/'),('RadnickiNis','https://fkradnickinis.rs/feed/'),('Cukaricki','https://www.fkcukaricki.com/feed/'),('NoviPazar','https://fknovipazar.rs/feed/'),('OFKBeograd','https://ofkbeograd.co.rs/feed/'),('Zemun','https://fkzemun.rs/feed/')]
+          if not any('skysports' in url for _,url in sources):sources += [('Sky Arsenal','https://www.skysports.com/rss/11670'),('Sky Everton','https://www.skysports.com/rss/11671'),('Sky Fulham','https://www.skysports.com/rss/11681')]
+          results=[]
+          for name,url in dict((u,n) for n,u in sources).items():
+              name,url=url,name
+              out={'label':name,'url':url,'items':[]}
+              try:
+                  if news_source_is_excluded(url):raise ValueError('publisher_excluded')
+                  raw=read_news_feed(url);f=feedparser.parse(raw);out.update(title=f.feed.get('title'),link=f.feed.get('link'),format=f.version,entries=len(f.entries))
+                  out['metadata']=[{'title':e.get('title'),'url':e.get('link'),'published':e.get('published')} for e in f.entries[:3]]
+                  cfg={'url':url,'publisher':name,'kind':'mixed','article_body_required':True,'rss_timezone_aliases':{'BST':'+0100'}}
+                  for item in _fetch_feed_entries(cfg,1):
+                      body,_=extract_from_url(item['url']);tags=_classify_item(item,body)
+                      photos=extract_image_candidates_from_url(item['url']);photo=_pick_reachable_article_image(photos,max_checks=2)
+                      ok,why=quality_check(item['title'],body,tags.sport,require_english=False)
+                      out['items'].append({'title':item['title'],'url':item['url'],'published_at':str(item['published_at']),'words':len(body.split()),'body':body[:10000],'sport':tags.sport,'photo':photo,'quality':why,'product':non_article_news_reason({**item,'body':body}),'ready':bool(ok and photo and tags.sport=='football' and not non_article_news_reason({**item,'body':body}))})
+              except Exception as e:out['error']=type(e).__name__+': '+str(e)[:160]
+              results.append(out);print(name,out.get('title'),len(out['items']),out.get('error'),flush=True)
+          (root/'sources.json').write_text(json.dumps(results,ensure_ascii=False,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: news-club-directories-20261003
+          path: evidence/
+          retention-days: 7
