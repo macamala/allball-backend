@@ -1,0 +1,88 @@
+name: Football News regional HTML proof 20261003
+on:
+  push:
+    branches: [audit/news-football-20261003]
+    paths: [.github/workflows/news-football-regional-html-20261003.yml]
+permissions:
+  contents: read
+jobs:
+  sources:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    env:
+      DATABASE_URL: 'sqlite:///:memory:'
+      NINKO_SKIP_STARTUP_INDEX: '1'
+      NINKO_SKIP_INTEGRITY_BACKFILL: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: e39f63eeb1d21044ee4cf19764f0fe0012a57cc9
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: pip install -q -r requirements.txt
+      - name: Same-host article discovery and visible body structure only
+        run: |
+          mkdir -p html-evidence
+          python - <<'PY'
+          import json,pathlib,re,logging
+          from html.parser import HTMLParser
+          from concurrent.futures import ThreadPoolExecutor
+          from bot.news_feed_http import read_news_feed
+          from bot.news_official_indexes import _anchor_candidates
+          from bot.extract import _ScopedNewsBody,paragraphs_from_html,article_text_from_html,page_published_at_from_html,page_title_from_html,collect_page_image_candidates,_metadata
+          from bot.fetch_sources import _pick_reachable_article_image
+          from bot.news_policy import news_freshness_reason
+          from datetime import datetime,timezone
+          logging.basicConfig(level=logging.WARNING)
+          root=pathlib.Path('html-evidence')
+          configs=[
+            {'id':'laola-austria-1','url':'https://www.laola1.at/de/','host':'www.laola1.at','paths':('/de/red/fussball/bundesliga/news/',)},
+            {'id':'laola-austria-2','url':'https://www.laola1.at/de/','host':'www.laola1.at','paths':('/de/red/fussball/2--liga/news/',)},
+            {'id':'gazzetta-greece-1','url':'https://www.gazzetta.gr/football/superleague','host':'www.gazzetta.gr','paths':('/football/superleague/',),'article_path_re':r'^/football/superleague/\d+/[^/]+/?$'},
+            {'id':'gazzetta-greece-2','url':'https://www.gazzetta.gr/football/superleague-2','host':'www.gazzetta.gr','paths':('/football/superleague-2/',),'article_path_re':r'^/football/superleague-2/\d+/[^/]+/?$'},
+            {'id':'sportschau-women-proof','url':'https://www.sportschau.de/fussball/frauen-bundesliga','host':'www.sportschau.de','paths':('/fussball/frauen-bundesliga/',)},
+          ]
+          class Structure(HTMLParser):
+              def __init__(self):super().__init__();self.stack=[];self.found=[]
+              def handle_starttag(self,tag,attrs):
+                  a=dict(attrs)
+                  if tag in {'p','h2'}:self.found.append(self.stack[-5:])
+                  if tag not in {'area','base','br','col','embed','hr','img','input','link','meta','param','source','track','wbr'}:self.stack.append([tag,{k:a[k] for k in ['id','class','itemprop'] if k in a}])
+              def handle_endtag(self,tag):
+                  for i in range(len(self.stack)-1,-1,-1):
+                      if self.stack[i][0]==tag:self.stack=self.stack[:i];break
+          def probe(cfg):
+              out={'config':cfg,'articles':[]}
+              try:
+                  links=_anchor_candidates(cfg);out['links']=links[:12]
+                  if cfg['id']=='sportschau-women-proof':links=[p for p in links if 'bremen' in p[0] or 'leverkusen' in p[0]][:2]
+                  for url,title in links[:3]:
+                      row={'url':url,'anchor_title':title}
+                      try:
+                          text=read_news_feed(url).decode('utf-8','replace');parser=Structure();parser.feed(text)
+                          stamp=page_published_at_from_html(text);row.update(title=page_title_from_html(text),published_at=str(stamp),fresh=bool(stamp and news_freshness_reason(stamp,datetime.now(timezone.utc)) is None),canonical=_metadata(text,'canonical') or _metadata(text,'og:url'))
+                          row['ancestors']=[json.loads(p) for p in sorted({json.dumps(p,ensure_ascii=False) for p in parser.found})][:70]
+                          row['text']=article_text_from_html(text)[:5000]
+                          photos=[c for c in collect_page_image_candidates(text) if c.get('source') in {'og','twitter'}]
+                          row['hero']=_pick_reachable_article_image(photos,max_checks=2)
+                          row['body_options']=[]
+                          for cls in ['article-content','article-body','article__body','article-text','article__content','entry-content','story__content','field--name-body','field--name-field-body','node__content','redactor','content-body','text','articleBody']:
+                              s=_ScopedNewsBody(cls);s.feed(text)
+                              if s.finished:
+                                  body=paragraphs_from_html(''.join(s.parts))
+                                  if len(body.split())>=80:row['body_options'].append({'class':cls,'words':len(body.split()),'first':body[:600],'last':body[-600:]})
+                      except Exception as e:row['error']=type(e).__name__+': '+str(e)[:120]
+                      out['articles'].append(row)
+              except Exception as e:out['error']=type(e).__name__+': '+str(e)[:120]
+              (root/(cfg['id']+'.json')).write_text(json.dumps(out,ensure_ascii=False,indent=2));print(cfg['id'],out.get('error'),len(out['articles']),flush=True)
+          # Same-host indexes are sequential so the existing host backoff is respected.
+          for cfg in configs:probe(cfg)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: football-news-regional-html-20261003
+          path: html-evidence/
+          retention-days: 7
