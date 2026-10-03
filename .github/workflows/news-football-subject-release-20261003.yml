@@ -1,0 +1,126 @@
+name: Football News primary subject gate 20261003
+on:
+  push:
+    branches: [audit/news-football-20261003]
+    paths: [.github/workflows/news-football-subject-release-20261003.yml]
+permissions:
+  contents: write
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env:
+      DATABASE_URL: 'sqlite:///:memory:'
+      NINKO_SKIP_STARTUP_INDEX: '1'
+      NINKO_SKIP_INTEGRITY_BACKFILL: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 254cb7d95455e3217bb2494e2d3ce48fec4ccb09
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Apply bounded News-only subject correction
+        run: |
+          mkdir -p subject-evidence
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('bot/news_football_sections.py');s=p.read_text()
+          old='women|womens|woman|wsl|uwcl|uswnt|lionesses|keira walsh|alexia putellas'
+          new=old+'|frauen|damen|feminin|feminine|feminines|femenina|femeninas|femenino|femeninos|feminino|feminina|femminile|femminili|zenski|zenska|zenske'
+          assert s.count(old)==1;s=s.replace(old,new)
+          old='(?:17|18|19|20|21)s?'
+          assert s.count(old)==2;s=s.replace(old,'(?:16|17|18|19|20|21|23)s?')
+          old="    if women:\n        national_women = bool(_NATIONAL.search(lead))"
+          new="""    # A headline/lead identifying a regional national-team event must not
+              # inherit an incidental World Cup/club competition from biography.
+              # This is menu association only: no sporting fact or date is added.
+              regional_national_event = re.search(
+                  r'\\b(?:asian games|asiad|olympic games|olympic football|olympic soccer|'
+                  r'africa cup of nations|african cup of nations|afcon|concacaf gold cup|'
+                  r'copa america|afc asian cup|asian cup)\\b', lead)
+              if regional_national_event:
+                  return 'football-women' if women else 'football-youth' if youth else 'football-national-teams'
+          
+              if women:
+                  national_women = bool(_NATIONAL.search(lead))"""
+          assert s.count(old)==1;s=s.replace(old,new)
+          p.write_text(s)
+          Path('tests/test_news_football_subject_20261003.py').write_text('''from datetime import date
+          from types import SimpleNamespace
+          import pytest
+          from bot.news_football_sections import football_news_section, assign_public_football_section
+          
+          def story(title,summary='',content=''):
+              return SimpleNamespace(title=title,summary=summary,content=content,
+                  published_at='2026-10-02T13:00:00',ai_generated=True,league='germany-bundesliga')
+          
+          @pytest.mark.parametrize('marker',['Frauen','Damen','Feminine','Féminines','Femenina','Femenino','Femminile','Ženska'])
+          def test_womens_marker_cannot_populate_a_mens_domestic_menu(marker):
+              a=story(f'Eintracht Frankfurt {marker} host Bayern in Bundesliga football')
+              assert football_news_section(a,today=date(2026,10,3))=='football-women'
+          
+          @pytest.mark.parametrize('event',['Asian Games','Asiad','Olympic Games','AFC Asian Cup','Copa America','Africa Cup of Nations','CONCACAF Gold Cup'])
+          def test_womens_current_event_beats_incidental_body_world_cup(event):
+              a=story(f'South Korea women defeat China to win bronze at {event}',
+                  'The team won their bronze-medal football match.',
+                  "The coach remembered the FIFA Women's World Cup. Players also discussed the Women's Champions League.")
+              assert football_news_section(a,today=date(2026,10,3))=='football-women'
+          
+          @pytest.mark.parametrize('age',['U16','U17','U19','U20','U21','U23','Under-23'])
+          def test_youth_regional_events_do_not_inherit_senior_world_cup(age):
+              a=story(f'South Korea {age} win at Asian Games',content='The squad discussed the FIFA World Cup.')
+              assert football_news_section(a,today=date(2026,10,3))=='football-youth'
+          
+          def test_senior_regional_event_uses_national_topic_not_world_cup():
+              a=story('Japan wins Asian Cup match',content='The manager previously coached in the World Cup.')
+              assert football_news_section(a,today=date(2026,10,3))=='football-national-teams'
+          
+          @pytest.mark.parametrize('title,expected',[
+              ('Bayern win Bundesliga football match','germany-bundesliga'),
+              ('AFC Champions League Elite draw confirmed','afc-champions-league-elite'),
+              ("Chelsea win UEFA Women's Champions League match",'uefa-womens-champions-league'),
+              ('England women select World Cup playoff squad','fifa-womens-world-cup'),
+              ('England wins UEFA Nations League match','uefa-nations-league'),
+          ])
+          def test_known_competition_routes_are_retained(title,expected):
+              assert football_news_section(story(title),today=date(2026,10,3))==expected
+          
+          def test_published_frauen_incident_is_repaired_without_copy_or_date_mutation():
+              a=story('Eintracht Frankfurt Frauen host unbeaten FC Bayern in Bundesliga football',content='Original football reporting.')
+              before=dict(vars(a));tax=SimpleNamespace(public_ok=True,resolved_sport='football',resolved_competition='germany-bundesliga')
+              assert assign_public_football_section(a,tax)
+              assert a.league==tax.resolved_competition=='football-women'
+              for key in ('title','summary','content','published_at'):assert getattr(a,key)==before[key]
+              assert tax.public_ok and not assign_public_football_section(a,tax)
+          
+          @pytest.mark.parametrize('public,sport,ai',[(False,'football',True),(True,'basketball',True),(True,'football',False)])
+          def test_menu_repair_cannot_admit_held_or_nonfootball_content(public,sport,ai):
+              a=story('Eintracht Frankfurt Frauen host Bayern in Bundesliga football');a.ai_generated=ai
+              tax=SimpleNamespace(public_ok=public,resolved_sport=sport,resolved_competition=a.league)
+              assert not assign_public_football_section(a,tax)
+              assert a.league=='germany-bundesliga'
+          ''')
+          PY
+      - name: Run all existing and new News regression gates
+        run: |
+          pip install -q -r requirements.txt
+          python -m pytest -q tests/test_news* --junitxml=subject-evidence/tests.xml > subject-evidence/tests.txt 2>&1 || { tail -100 subject-evidence/tests.txt; exit 1; }
+          tail -3 subject-evidence/tests.txt
+          python -m compileall -q bot
+      - name: Preserve tested News-only correction on a clean release branch
+        run: |
+          git add bot/news_football_sections.py tests/test_news_football_subject_20261003.py
+          test "$(git diff --cached --name-only | wc -l)" = '2'
+          git config user.name 'NinkoSports News validation'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix(news): separate multilingual womens and regional national-team reporting from mens league menus'
+          git push origin HEAD:refs/heads/audit/news-football-subject-release-20261003
+          git rev-parse HEAD > subject-evidence/tested-commit.txt
+          git diff HEAD^ --name-only > subject-evidence/changed-files.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: football-news-subject-release-20261003
+          path: subject-evidence/
+          retention-days: 7
