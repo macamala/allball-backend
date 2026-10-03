@@ -100,3 +100,8 @@ SOURCE_DESKS.update({
 from .news_football_regional_desks import RSS_FEEDS as REGIONAL_RSS, SOURCE_DESKS as REGIONAL_DESKS
 RSS_FEEDS = RSS_FEEDS + REGIONAL_RSS
 SOURCE_DESKS = {**SOURCE_DESKS, **REGIONAL_DESKS}
+
+from .news_football_source_context import HTML_INDEXES as REGIONAL_HTML_INDEXES
+HTML_INDEXES = HTML_INDEXES + REGIONAL_HTML_INDEXES
+SOURCE_DESKS.update({'Gazzetta': ['greece-super-league','greece-super-league-2'],
+                     'LAOLA1': ['austria-bundesliga','austria-second-league']})

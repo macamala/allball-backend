@@ -64,6 +64,8 @@ SOURCE_DESKS = {
 }
 
 _PROFILES = {
+    'www.gazzetta.gr': {'body_class': 'content is-relative', 'body_tag': 'div', 'path_prefix': '/football/'},
+    'www.laola1.at': {'body_class': 'editor-text', 'body_tag': 'div', 'path_prefix': '/de/red/fussball/'},
     'www.football-espana.net': {'body_id': 'article-body'},
     'www.getfootballnewsgermany.com': {'body_class': 'entry-content'},
     'fotbolldirekt.se': {'body_class': 'entry-content', 'require_free': True},

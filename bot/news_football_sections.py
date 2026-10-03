@@ -15,6 +15,7 @@ from editorial import sanitize_body, sanitize_summary, sanitize_title
 from .taxonomy import COMPETITIONS
 from .news_football_memberships import memberships_for_news
 from .news_competition_scope import conflicting_competition_qualifier
+from .news_football_source_context import audited_women_article, source_menu_association
 
 _ROOT = Path(__file__).parent
 _CATALOG = json.loads((_ROOT / 'news_football_leagues.json').read_text())
@@ -146,6 +147,8 @@ def football_news_section(article, *, today=None):
         source = urlsplit(getattr(article, 'source_url', None) or getattr(article, 'external_id', '') or '')
     except ValueError:
         source = None
+    if audited_women_article(article):
+        return 'football-women'
     if (source and source.scheme in {'http', 'https'}
             and (source.hostname or '').removeprefix('www.') == 'crvenazvezdafk.com'
             and source.path.rstrip('/') == '/vesti/boaci-protiv-kopenhagena-ocekujem-pravu-zvezdasku-atmosferu'):
@@ -235,7 +238,8 @@ def football_news_section(article, *, today=None):
     # An uncovered cup cannot be silently relabelled as a domestic league.
     if re.search(r'\b(?:cup|pokal|coppa|copa del rey)\b', title):
         return None
-    return _club_section(title, summary, article, False, today)
+    return (_club_section(title, summary, article, False, today)
+            or source_menu_association(getattr(article, 'source_url', None) or getattr(article, 'external_id', None)))
 
 
 def assign_public_football_section(article, tax):

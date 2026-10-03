@@ -20,7 +20,7 @@ def candidate_football_section(item, tags, *, today=None):
     body = item.get('_classification_text') or item.get('_extracted') or ''
     source = SimpleNamespace(title=item.get('title') or '',
         summary=item.get('summary') or str(body)[:500], content=body,
-        published_at=item.get('published_at'))
+        published_at=item.get('published_at'), source_url=item.get('url'))
     return football_news_section(source, today=today) or getattr(tags, 'league', None)
 
 

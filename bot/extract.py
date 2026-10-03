@@ -16,6 +16,7 @@ from .site_chrome import is_site_chrome_text, strip_site_chrome
 from .textutil import clean_text, word_count
 from .feeds import news_source_is_excluded
 from .news_football_regional_desks import regional_article_profile, regional_hero_scope
+from .news_football_source_context import WOMEN_CONTEXT, verified_women_article_category
 
 logger = logging.getLogger(__name__)
 
@@ -632,7 +633,7 @@ class _ScopedNewsBody(HTMLParser):
             values = dict(attrs)
             if ((self.body_id and values.get('id') == self.body_id)
                     or (self.body_tag and not self.body_class and not self.body_id)
-                    or (not self.body_id and self.body_class in values.get('class', '').split())):
+                    or (not self.body_id and self.body_class and set(self.body_class.split()) <= set(values.get('class', '').split()))):
                 self.root_tag = tag
                 self.root_attrs = values
                 self.depth = 1
@@ -684,6 +685,8 @@ def article_text_from_html(html: str) -> str:
         publisher_host = urlsplit(canonical).hostname
     except ValueError:
         publisher_host = None
+    if verified_women_article_category(html, canonical):
+        source_category = WOMEN_CONTEXT
     # Verified regional football article containers. These publishers place
     # unrelated recommendations inside <main>; never use that whole page.
     extra_chrome_classes = ()
@@ -806,7 +809,7 @@ def article_text_from_html(html: str) -> str:
     text = strip_site_chrome(text) or text
     if is_site_chrome_text(text):
         text = ""
-    if not is_substantial_source(text):
+    if not is_substantial_source(text) and not regional and publisher_host != "www.sportschau.de":
         ld_body = _json_ld_article_body(html or "")
         if word_count(ld_body) > word_count(text):
             text = ld_body
