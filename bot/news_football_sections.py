@@ -87,6 +87,14 @@ def _club_section(title, summary, article, women, today):
                 continue
             for club in entry['clubs']:
                 alias = _norm(club)
+                # The current catalogue contains a club named Start. The
+                # ordinary English word in 'excellent start' is not identity.
+                # Require an explicit club form or possessive sporting role;
+                # do not infer nationality or change the shared entity registry.
+                if alias == 'start' and not re.search(
+                    r'\b(?:ik start|start fc|start s (?:coach|manager|goalkeeper|'
+                    r'defender|midfielder|striker|forward))\b', text):
+                    continue
                 if _has(text, alias):
                     # Summary-only association requires current club ownership
                     # or a club role, not a historical/opponent name in passing.
