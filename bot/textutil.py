@@ -26,7 +26,7 @@ def strip_truncation_markers(text: str) -> str:
     if not text:
         return ""
     text = TRUNCATION_RE.sub(" ", text)
-    text = re.sub(r"\s*[.…]+\s*$", "", text)
+    text = re.sub(r"\s*(?:\.{2,}|…+)\s*$", "", text)
     return text.strip()
 
 

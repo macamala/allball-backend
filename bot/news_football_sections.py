@@ -13,7 +13,7 @@ from urllib.parse import urlsplit
 
 from editorial import sanitize_body, sanitize_summary, sanitize_title
 from .taxonomy import COMPETITIONS
-from .news_football_memberships import memberships_for_news
+from .news_football_memberships import memberships_for_news, verified_name_aliases
 from .news_competition_scope import conflicting_competition_qualifier
 from .news_football_source_context import audited_women_article, source_menu_association
 
@@ -74,6 +74,7 @@ def _club_section(title, summary, article, women, today):
                 normalized = _norm(alias)
                 if sum(_has(name, normalized) or _has(normalized, name) for name in names) == 1:
                     clubs.append(alias)
+            clubs = verified_name_aliases(clubs)
             catalogue[league] = {**entry, 'clubs': clubs}
     past_title = bool(re.search(r'\b(?:rules out|rejects|former|international goal|international match)\b', title))
     for text in (title, summary):
