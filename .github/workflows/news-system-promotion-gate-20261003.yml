@@ -1,0 +1,96 @@
+name: Football News final promotion gate 20261003
+on:
+  push:
+    branches: [audit/news-system-20261003]
+    paths: [.github/workflows/news-system-promotion-gate-20261003.yml]
+permissions:
+  contents: write
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DATABASE_URL: 'sqlite:///:memory:'
+      NINKO_SKIP_STARTUP_INDEX: '1'
+      NINKO_SKIP_INTEGRITY_BACKFILL: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: b971c2a7ea56cc674a53954fa322afb6d8d117f6
+          path: bundle
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 494e7f81b51cb664165a5e104cbc805e4ab5a04e
+          path: source
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -q PyYAML
+      - name: Verify exact reviewed source bytes and all production file boundaries
+        working-directory: source
+        run: |
+          mkdir -p ../system-evidence
+          python - <<'PY'
+          import pathlib,base64,gzip,hashlib,subprocess,json
+          root=pathlib.Path('../system-evidence')
+          text=pathlib.Path('../bundle/audit/news-primary-fixture-final-20261003.patch.b64').read_text().strip()
+          patch=gzip.decompress(base64.b64decode(text,validate=True))
+          assert hashlib.sha256(patch).hexdigest()=='46b491b9f82e8e17ffa8502c87fc18d30a65c24c5bbeaff39b447ada98d64b27'
+          path=root/'final-reviewed.patch';path.write_bytes(patch)
+          subprocess.run(['git','apply','--check',str(path)],check=True)
+          subprocess.run(['git','apply',str(path)],check=True)
+          changed={'bot/news_competition_vocabulary.py','bot/news_football_priority.py','bot/news_football_sections.py','tests/test_news_domestic_category_discovery.py'}
+          assert set(subprocess.check_output(['git','diff','--name-only'],text=True).splitlines())==changed
+          files=set(subprocess.check_output(['git','show','--pretty=format:','--name-only','HEAD'],text=True).splitlines())|{'bot/news_football_priority.py'}
+          files.discard('')
+          hashes={f:hashlib.sha256(pathlib.Path(f).read_bytes()).hexdigest() for f in files}
+          assert len(hashes)==23,len(hashes)
+          assert hashlib.sha256(json.dumps(hashes,sort_keys=True,separators=(',',':')).encode()).hexdigest()=='f6bf48ff4f9b6e1f7d3004c25a407a80b17630004c6307c37ad874043c929a78'
+          (root/'files.json').write_text(json.dumps(hashes,sort_keys=True,indent=2))
+          (root/'last-changed-files.json').write_text(json.dumps(sorted(changed)))
+          PY
+      - name: All News regression tests and actual source replay
+        run: |
+          python - <<'PY'
+          import pathlib,subprocess,yaml
+          w=yaml.safe_load(pathlib.Path('bundle/.github/workflows/news-system-release-20261003.yml').read_text())
+          steps=[s for s in w['jobs']['gate']['steps'] if 'run' in s]
+          for index in (1,2,3):
+              script=steps[index]['run']
+              if index==2:
+                  old="if out['id']=='brazil-serie-b-category':assert menu!='italy-serie-b',row"
+                  new="if out['id']=='brazil-serie-b-category':assert menu!='italy-serie-b',row\n            if item['title']=='Hatgólos meccsen „szakította meg” a Kisvárda Feczkó Tamás sorozatát':assert menu!='hungary-nb-2',row"
+                  assert script.count(old)==1;script=script.replace(old,new)
+                  script=script.replace("out['items'].append(row)","out['items'].append(row)\n            (root/('source-item-'+str(abs(hash(item['url'])))+'.json')).write_text(json.dumps(row,ensure_ascii=False,indent=2))")
+              subprocess.run(['bash','-e','-c',script],cwd='source',check=True)
+          PY
+      - name: Commit and verify the complete tested source before pushing the clean release
+        working-directory: source
+        run: |
+          python - <<'PY'
+          import pathlib,json,subprocess,hashlib
+          root=pathlib.Path('../system-evidence');files=json.loads((root/'files.json').read_text())
+          for f,sha in files.items():assert hashlib.sha256(pathlib.Path(f).read_bytes()).hexdigest()==sha,f
+          changed=json.loads((root/'last-changed-files.json').read_text())
+          subprocess.run(['git','add',*changed],check=True)
+          assert set(subprocess.check_output(['git','diff','--cached','--name-only'],text=True).splitlines())==set(changed)
+          PY
+          git config user.name 'NinkoSports News validation'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix(news): preserve primary friendly club and include complete tested regional queue guards'
+          test -z "$(git status --porcelain)"
+          python - <<'PY'
+          import pathlib,json,subprocess,hashlib
+          files=json.loads(pathlib.Path('../system-evidence/files.json').read_text())
+          for f,sha in files.items():assert hashlib.sha256(subprocess.check_output(['git','show','HEAD:'+f])).hexdigest()==sha,f
+          PY
+          git push origin HEAD:refs/heads/audit/news-system-release-20261003
+          git rev-parse HEAD > ../system-evidence/tested-commit.txt
+          git show --stat --oneline HEAD > ../system-evidence/commit.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: news-system-promotion-gate-20261003
+          path: system-evidence/
+          retention-days: 7
