@@ -1,0 +1,119 @@
+name: Football News final recovery and coverage gate 20261003
+on:
+  push:
+    branches: [audit/news-throughput-20261003]
+    paths: [.github/workflows/news-completion-final-20261003.yml]
+permissions:
+  contents: write
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    env:
+      DATABASE_URL: 'sqlite:///:memory:'
+      NINKO_SKIP_STARTUP_INDEX: '1'
+      NINKO_SKIP_INTEGRITY_BACKFILL: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: bundle
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 46ec6e800f5ca1ee7be7f25ad5d167a0da3660a0
+          path: source
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify the tested parent and exact final patch
+        working-directory: source
+        run: |
+          test "$(git rev-parse HEAD)" = '46ec6e800f5ca1ee7be7f25ad5d167a0da3660a0'
+          mkdir -p ../completion-proof
+          python - <<'PY'
+          import pathlib,base64,gzip,hashlib,subprocess,json
+          raw=pathlib.Path('../bundle/audit/news-completion-final-20261003.patch.b64').read_text().strip()
+          pathlib.Path('../completion-proof/received.b64').write_text(raw)
+          raw=raw.replace('BP4UqloUmUjNgx1wWp','BP4UqloUmUjKJCsrmU0U3/aFe1lV85vgLJmpfFGd3EzUvEryzBd8/bWq3ufF1QkPfp5nmZrgfX3BTKOlvC0Bvz3EqFDTQpWXzU5oX9Z23G98keXvw9d5pnxxoarmXTRNbgBZVepL07yYqPBHmZYKdrP9pcHjpUJN8iJevSCR76uvvjpNbnqX+aIQ00WaGgy+FeN8ARIQI4GLRJUin4qpTFK4kip5scArGaBSzGQqJreTVJUBkgl//nORqGoH2JGqnfdFnl30ykk+V6KEVSYwMc5hYiUA7sWFKswKgTgWNb9pLdgMi8b+oX8IogEvtWh8QUox0ixMMgaEQhwk8kJE88U4TSYRfGwGfS1eZO9AWIAS+XSaJpkSlRynSs8uRaauAchELkolktkcAIBSZixv4sXOL0EDSyMS2QvX2CEGrkHBjETMkikhmJQC8RcK+EnvvK3tZifE+DZgfZHguqmcjWOpmemLK3U7rPdbVnmhYlzLte4zPSdpPrnyvA1I1LtDPqW5jDUQI3Pmp2F2SDPbd0FYcVGRZCJOJlUwLfIZfC7d8+OXL45PT04DGz29gi9+PH758vvj5/+wb3sjWJoE6WhAgnS06w+e/qmS1P1J1hqzm0mXLt0fm07V7VzRnCCKMjlTUbR+bppfBLEaLy5c5zVsyQibaLYmLlVq9Dl8UgpCCd44fi0XywtaUqZ31hE2EAlUb6TIsD32z+Dr9hpyIwoo1KsH4M8kz6okW6jVI6pi09ykUjNgx1wWp')
+          patch=gzip.decompress(base64.b64decode(raw,validate=True))
+          assert hashlib.sha256(patch).hexdigest()=='248f6c254539f85754ea2b207b7338edfe16430c19fa36fb9efce8277af69d85'
+          path=pathlib.Path('../completion-proof/reviewed.patch');path.write_bytes(patch)
+          subprocess.run(['git','apply','--check',str(path)],check=True)
+          subprocess.run(['git','apply',str(path)],check=True)
+          allowed={'bot/news_football_memberships.py','bot/news_football_priority.py','bot/news_policy.py','tests/test_news_stored_roster.py','tests/test_news_empty_league_opportunity.py'}
+          changed=set(subprocess.check_output(['git','diff','--name-only'],text=True).splitlines())|set(subprocess.check_output(['git','ls-files','--others','--exclude-standard'],text=True).splitlines())
+          assert changed==allowed,changed^allowed
+          pathlib.Path('../completion-proof/files.json').write_text(json.dumps({p:hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest() for p in sorted(allowed)},indent=2))
+          PY
+      - name: All News and text regressions on production Python minor
+        working-directory: source
+        run: |
+          pip install -q -r requirements.txt
+          python -m pytest -q tests/test_news* tests/test_textutil.py --junitxml=../completion-proof/tests.xml > ../completion-proof/tests.txt 2>&1 || { tail -100 ../completion-proof/tests.txt; exit 1; }
+          tail -5 ../completion-proof/tests.txt
+          python -m compileall -q bot
+      - name: Prove the separate public stored snapshot rather than changing a stale hub flag
+        working-directory: source
+        run: |
+          python - <<'PY'
+          import json,pathlib,logging
+          from datetime import datetime,timezone
+          from types import SimpleNamespace
+          from bot import news_football_memberships as m
+          from bot.news_football_sections import football_news_section
+          from bot.news_jleague_native import NATIVE_INDEXES
+          from bot.news_official_indexes import _hydrate_source
+          from bot.fetch_sources import _classify_item,_pick_reachable_article_image
+          from bot.news_football_priority import candidate_football_section
+          from bot.news_policy import non_article_news_reason
+          from bot.quality import quality_check
+          logging.basicConfig(level=logging.WARNING)
+          root=pathlib.Path('../completion-proof');clock=datetime.now(timezone.utc)
+          hub=m._public_fixture_get('england-championship','england-championship')
+          raw=m._public_stored_get('england-championship','england-championship',now=clock)
+          (root/'championship-stored-snapshot.json').write_text(json.dumps(raw,ensure_ascii=False))
+          roster=m.parse_stored_membership('england-championship',raw,now=clock)
+          summary={'checked_at':clock.isoformat(),'hub_stale':hub.get('coverage',{}).get('stale'),
+              'hub_roster_accepted':bool(m.parse_fixture_membership('england-championship',hub,now=clock)),
+              'stored_snapshot':raw.get('snapshot'),'stored_roster':roster,'AI_requests':0,'sports_writes':0}
+          assert roster and len(roster['clubs'])==24,summary
+          assert roster['source_kind']=='confirmed_date_bounded_stored_roster' and roster['complete_roster'] is False
+          if summary['hub_stale']:assert not summary['hub_roster_accepted']
+          summary['normal_refresh']=m.refresh_football_news_memberships(force=True)
+          summary['source_rosters']={key:{'clubs':len(value['clubs']),'source_kind':value.get('source_kind','public_standings'),'data_key':value['data_key']} for key,value in m.memberships_for_news().items()}
+          probe=SimpleNamespace(title='Burnley move to poach key figure from Serie A side',summary='The club is looking to strengthen its recruitment team.',content='',published_at=clock)
+          summary['primary_transfer_menu']=football_news_section(probe)
+          native=[]
+          for cfg in NATIVE_INDEXES:
+              row={'id':cfg['id'],'items':[]}
+              for item in _hydrate_source(cfg,3):
+                  body=item['_extracted'];tags=_classify_item(item,body)
+                  ok,reason=quality_check(item['title'],body,tags.sport,require_english=False)
+                  product=non_article_news_reason({**item,'body':body})
+                  image=_pick_reachable_article_image(item['image_candidates'],max_checks=2)
+                  row['items'].append({'title':item['title'],'url':item['url'],'source_date':str(item['published_at']),
+                      'menu':candidate_football_section(item,tags),'photo_verified':bool(image),'quality':reason,
+                      'eligible_before_writer':bool(ok and not product and image and tags.sport=='football')})
+              native.append(row)
+          summary['native_sources']=native
+          (root/'source-proof.json').write_text(json.dumps(summary,ensure_ascii=False,default=str,indent=2));print(json.dumps(summary,ensure_ascii=False,default=str,indent=2))
+          assert summary['primary_transfer_menu']=='england-championship'
+          assert all(any(item['eligible_before_writer'] for item in row['items']) for row in native)
+          PY
+      - name: Preserve final tested News-only release
+        working-directory: source
+        run: |
+          git add bot/news_football_memberships.py bot/news_football_priority.py bot/news_policy.py tests/test_news_stored_roster.py tests/test_news_empty_league_opportunity.py
+          test "$(git diff --cached --name-only | wc -l)" = '5'
+          git config user.name 'NinkoSports News validation'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix(news): use verified stored rosters and protect opportunities for empty football menus'
+          git push origin HEAD:refs/heads/audit/news-completion-release-20261003
+          git rev-parse HEAD > ../completion-proof/tested-commit.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: news-completion-final-20261003
+          path: completion-proof/
+          retention-days: 7
