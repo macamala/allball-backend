@@ -1,0 +1,71 @@
+name: Football News completion source 20261003
+on:
+  push:
+    branches: [audit/news-throughput-20261003]
+    paths: [.github/workflows/news-completion-source-20261003.yml]
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env:
+      DATABASE_URL: 'sqlite:///:memory:'
+      NINKO_SKIP_STARTUP_INDEX: '1'
+      NINKO_SKIP_INTEGRITY_BACKFILL: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 6e975006a52aff1f45db2a047a233faed28de907
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: |
+          mkdir -p completion-evidence
+          git archive HEAD | gzip > completion-evidence/source.tar.gz
+          pip install -q -r requirements.txt
+      - name: Read exact current membership evidence and public football source metadata
+        run: |
+          python - <<'PY'
+          import json,pathlib,logging,urllib.request,urllib.parse
+          from datetime import datetime,timezone
+          from concurrent.futures import ThreadPoolExecutor
+          from bot.news_football_memberships import refresh_football_news_memberships,memberships_for_news
+          from bot.feeds import enabled_feeds
+          from bot.fetch_sources import _fetch_feed_entries,_classify_candidate
+          from bot.news_football_priority import candidate_football_section
+          from bot.news_policy import non_article_news_reason
+          logging.basicConfig(level=logging.WARNING)
+          root=pathlib.Path('completion-evidence');base='https://allball-backend-production.up.railway.app'
+          refresh=refresh_football_news_memberships();members=memberships_for_news()
+          (root/'memberships.json').write_text(json.dumps({'refresh':refresh,'members':members},ensure_ascii=False,default=str,indent=2))
+          selected={'The72','FotbollDirekt','SuomiFutis','Liga2 ProSport','Gong','STV Sport','K League United','Get German Football News','Football Espana'}
+          configs=[f for f in enabled_feeds() if f.get('publisher') in selected]
+          def probe(cfg):
+              out={'config':cfg,'items':[]}
+              try:
+                  for item in _fetch_feed_entries(cfg,4):
+                      tags=_classify_candidate(item)
+                      out['items'].append({**{k:item.get(k) for k in ('title','summary','url','published_at','_extracted','_source_body_origin')},'sport':tags.sport,'tag_league':tags.league,'queue_menu':candidate_football_section(item,tags),'rejection':non_article_news_reason(item)})
+              except Exception as e:out['error']=type(e).__name__+': '+str(e)[:100]
+              return out
+          with ThreadPoolExecutor(max_workers=3) as pool:rows=list(pool.map(probe,configs))
+          (root/'candidates.json').write_text(json.dumps(rows,ensure_ascii=False,default=str,indent=2))
+          catalog=json.loads(pathlib.Path('bot/news_football_leagues.json').read_text())
+          def get(path):
+              with urllib.request.urlopen(base+path,timeout=20) as r:return json.loads(r.read(5000000))
+          def menu(row):
+              try:return row['league'],get('/articles?'+urllib.parse.urlencode({'sport':'football','league':row['league'],'limit':3}))
+              except Exception as e:return row['league'],{'error':type(e).__name__}
+          with ThreadPoolExecutor(max_workers=3) as pool:coverage=dict(pool.map(menu,catalog))
+          (root/'coverage.json').write_text(json.dumps(coverage,ensure_ascii=False,indent=2))
+          (root/'latest.json').write_text(json.dumps(get('/articles?sport=football&limit=60'),ensure_ascii=False))
+          (root/'summary.json').write_text(json.dumps({'checked_at':datetime.now(timezone.utc).isoformat(),'menus':len(coverage),'populated':sum(isinstance(v,list) and bool(v) for v in coverage.values()),'membership_leagues':len(members),'AI_requests':0,'sports_writes':0},indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: news-completion-source-20261003
+          path: completion-evidence/
+          retention-days: 7
