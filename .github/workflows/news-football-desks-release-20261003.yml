@@ -1,0 +1,130 @@
+name: Football News regional desks release 20261003
+on:
+  push:
+    branches: [audit/news-football-20261003]
+    paths: [.github/workflows/news-football-desks-release-20261003.yml]
+permissions:
+  contents: write
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DATABASE_URL: 'sqlite:///:memory:'
+      NINKO_SKIP_STARTUP_INDEX: '1'
+      NINKO_SKIP_INTEGRITY_BACKFILL: '1'
+      NEWS_FOOTBALL_ONLY: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: bundle
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ops/news-free-probe-20260926
+          path: source
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Apply exact News-only integration on reviewed parent
+        working-directory: source
+        run: |
+          test "$(git rev-parse HEAD)" = '4b21bf7eb5f22e7646b9347dd367db445f4b1775'
+          mkdir -p ../desk-evidence
+          python - <<'PY'
+          from pathlib import Path
+          import shutil
+          module=Path('../bundle/audit/news_football_regional_desks.py').read_text()
+          module=module.replace("'exclude_article_paths':", "'excluded_article_paths':")
+          module=module.replace("_ARTICLE_TYPES.intersection(kinds)", "_ARTICLE_TYPES.intersection(k for k in kinds if isinstance(k, str))")
+          Path('bot/news_football_regional_desks.py').write_text(module)
+          tests=Path('../bundle/audit/test_news_football_regional_desks.py').read_text()
+          tests=tests.replace('    from bot.news_football_leagues import __name__ as unused\n','')
+          Path('tests/test_news_football_regional_desks.py').write_text(tests)
+          def edit(path,old,new):
+              p=Path(path);s=p.read_text();assert s.count(old)==1,(path,s.count(old),old);p.write_text(s.replace(old,new))
+          p=Path('bot/news_football_sources.py');p.write_text(p.read_text()+'''\n# Reviewed regional desks join the existing RSS intake, never a second writer.\nfrom .news_football_regional_desks import RSS_FEEDS as REGIONAL_RSS, SOURCE_DESKS as REGIONAL_DESKS\nRSS_FEEDS = RSS_FEEDS + REGIONAL_RSS\nSOURCE_DESKS = {**SOURCE_DESKS, **REGIONAL_DESKS}\n''')
+          edit('bot/extract.py','from .feeds import news_source_is_excluded', 'from .feeds import news_source_is_excluded\nfrom .news_football_regional_desks import regional_article_profile, regional_hero_scope')
+          edit('bot/extract.py', "    if urlsplit(canonical).hostname in {'www.index.hr',", "    if regional_hero_scope(canonical):\n        return [row for row in candidates if row.get('source') in {'og', 'twitter'}]\n    if urlsplit(canonical).hostname in {'www.index.hr',")
+          edit('bot/extract.py','    extra_chrome_classes = ()\n', '''    extra_chrome_classes = ()
+              regional = regional_article_profile(html, canonical)
+              if regional:
+                  if regional.get('blocked'):
+                      return ''
+                  body_class = regional.get('body_class')
+                  body_id = regional.get('body_id')
+                  body_tag = regional.get('body_tag')
+                  extra_chrome_classes = regional.get('extra_chrome_classes', ())
+          ''')
+          edit('bot/fetch_sources.py','    items = []\n    for entry in entries[:100]:', '    items = []\n    from .news_football_regional_desks import excluded_feed_entry\n    for entry in entries[:100]:\n        if excluded_feed_entry(feed_cfg, entry):\n            continue')
+          edit('bot/news_policy.py','_SOURCE_PATH_SPORTS = (', '_SOURCE_PATH_SPORTS = (\n    ("gong.bg", "/football-sviat/", "football"),\n    ("gong.bg", "/bg-football/", "football"),')
+          PY
+      - name: All News regression tests and syntax gates
+        working-directory: source
+        run: |
+          pip install -q -r requirements.txt
+          python -m pytest -q tests/test_news* --junitxml=../desk-evidence/tests.xml > ../desk-evidence/tests.txt 2>&1 || { tail -100 ../desk-evidence/tests.txt; exit 1; }
+          tail -3 ../desk-evidence/tests.txt
+          python -m compileall -q bot
+      - name: Verify actual source intake without any AI requests or production writes
+        working-directory: source
+        run: |
+          python - <<'PY'
+          import json,pathlib,logging
+          from concurrent.futures import ThreadPoolExecutor
+          from datetime import datetime,timezone
+          from bot.news_football_regional_desks import RSS_FEEDS
+          from bot.fetch_sources import _fetch_feed_entries,_classify_item,_pick_reachable_article_image
+          from bot.extract import extract_from_url,extract_image_candidates_from_url
+          from bot.news_feed_http import read_news_feed
+          from bot.quality import quality_check
+          from bot.news_policy import non_article_news_reason
+          logging.basicConfig(level=logging.WARNING)
+          root=pathlib.Path('../desk-evidence')
+          def probe(cfg):
+              out={'publisher':cfg['publisher'],'url':cfg['url'],'candidates':[]}
+              try:
+                  for item in _fetch_feed_entries(cfg,2):
+                      row={'title':item['title'],'url':item['url'],'published_at':str(item['published_at'])}
+                      try:
+                          read_news_feed(item['url'])
+                          text,image=extract_from_url(item['url'])
+                          photos=[r for r in extract_image_candidates_from_url(item['url']) if r.get('source') in {'og','twitter'}]
+                          hero=_pick_reachable_article_image(photos,max_checks=2)
+                          tags=_classify_item(item,text or '')
+                          ok,reason=quality_check(item['title'],text or '',tags.sport,require_english=False)
+                          product=non_article_news_reason({**item,'body':text or ''})
+                          row.update(words=len((text or '').split()),sport=tags.sport,hero=hero,quality=reason,product=product,eligible_before_writer=bool(text and hero and ok and not product and tags.sport=='football'))
+                      except Exception as exc:row['error']=type(exc).__name__
+                      out['candidates'].append(row)
+              except Exception as exc:out['error']=type(exc).__name__
+              return out
+          with ThreadPoolExecutor(max_workers=3) as pool:rows=list(pool.map(probe,RSS_FEEDS))
+          (root/'live-sources.json').write_text(json.dumps(rows,ensure_ascii=False,indent=2))
+          summary={'checked_at':datetime.now(timezone.utc).isoformat(),'desks':len(rows),'desks_with_fresh_eligible_candidates':sum(any(a.get('eligible_before_writer') for a in r['candidates']) for r in rows),'fresh_eligible_candidates':sum(a.get('eligible_before_writer',False) for r in rows for a in r['candidates']),'AI_requests':0,'published':0,'note':'Quiet, paid or unavailable articles remain held. Source verification does not claim published league coverage.'}
+          (root/'source-summary.json').write_text(json.dumps(summary,indent=2));print(json.dumps(summary,indent=2))
+          assert summary['desks_with_fresh_eligible_candidates']>=4,summary
+          PY
+      - name: Persist clean tested News changes only
+        working-directory: source
+        run: |
+          python - <<'PY'
+          import subprocess,json,pathlib,hashlib
+          allowed={'bot/news_football_regional_desks.py','bot/news_football_sources.py','bot/extract.py','bot/fetch_sources.py','bot/news_policy.py','tests/test_news_football_regional_desks.py'}
+          changes=set(subprocess.check_output(['git','diff','--name-only'],text=True).splitlines())|set(subprocess.check_output(['git','ls-files','--others','--exclude-standard'],text=True).splitlines())
+          assert changes==allowed,changes^allowed
+          pathlib.Path('../desk-evidence/files.json').write_text(json.dumps({f:hashlib.sha256(pathlib.Path(f).read_bytes()).hexdigest() for f in sorted(allowed)},indent=2))
+          subprocess.run(['git','add',*sorted(allowed)],check=True)
+          PY
+          git config user.name 'NinkoSports News validation'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'feat(news): connect nine reviewed regional football desks with public-body and image safeguards'
+          git push origin HEAD:refs/heads/audit/news-football-desks-release-20261003
+          git rev-parse HEAD > ../desk-evidence/tested-commit.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: football-news-desks-release-20261003
+          path: desk-evidence/
+          retention-days: 7
