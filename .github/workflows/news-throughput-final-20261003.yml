@@ -125,10 +125,39 @@ jobs:
           edit('bot/news_policy.py',"    if re.match(r'\\s*analysis\\s*:', title):", "    if (re.match(r'\\s*(?:analysis|opinion)\\s*:', title)\n            or re.search(r'(?:[:|–—]|\\s-\\s)\\s*opinion\\s*$', title)):")
           subprocess.run(['bash','-e','-c',steps[3]['run']],cwd='source',check=True)
           save=steps[4]['run']
-          save=save.replace("'tests/test_news_throughput_regressions.py'}", "'tests/test_news_throughput_regressions.py','tests/test_news_candidate_lead_regressions.py','bot/news_football_regional_desks.py','bot/news_football_priority.py','bot/news_policy.py'}")
           save=save.replace("allowed-{'tests/test_news_throughput_regressions.py'}", "{p for p in allowed if not p.startswith('tests/')}")
+          save=save.replace("'tests/test_news_throughput_regressions.py'}", "'tests/test_news_throughput_regressions.py','tests/test_news_candidate_lead_regressions.py','bot/news_football_regional_desks.py','bot/news_football_priority.py','bot/news_policy.py'}",1)
           save=save.replace('preserve complete article text and accept exact confederation casing','preserve complete source text and prevent false acronym and editorial queue rejections')
           subprocess.run(['bash','-e','-c',save],cwd='source',check=True)
+          PY
+      - name: Check actual public source bodies and queue classification without AI
+        working-directory: source
+        run: |
+          python - <<'PY'
+          import json,pathlib,logging,re
+          from datetime import datetime,timezone
+          from bot.news_feed_http import read_news_feed
+          from bot.extract import article_text_from_html
+          from bot.fetch_sources import _fetch_feed_entries,_classify_candidate
+          from bot.feeds import enabled_feeds
+          from bot.news_football_priority import candidate_football_section
+          from bot.news_football_memberships import refresh_football_news_memberships
+          from bot.news_policy import non_article_news_reason
+          logging.basicConfig(level=logging.WARNING)
+          root=pathlib.Path('throughput-release');rows=[]
+          url='https://www.gazzetta.gr/football/superleague/2574013/i-proti-enimerosi-toy-panathinaikoy-gia-libai-poy-entopizetai-problima'
+          body=article_text_from_html(read_news_feed(url).decode('utf-8','replace'))
+          greek={'source_url':url,'visible_words':len(body.split()),'exact_concacaf_token':bool(re.search(r'(?<!\w)Concacaf(?!\w)',body))}
+          refresh_football_news_memberships()
+          cfg=next(f for f in enabled_feeds() if f.get('publisher')=='The72')
+          for item in _fetch_feed_entries(cfg,5):
+              tags=_classify_candidate(item)
+              rows.append({'title':item['title'],'url':item['url'],'source_words':len(str(item.get('_extracted') or '').split()),'classifier_hint':tags.league,'queue_menu':candidate_football_section(item,tags),'rejection':non_article_news_reason(item)})
+          result={'checked_at':datetime.now(timezone.utc).isoformat(),'greek_source':greek,'english_feed':rows,'AI_requests':0,'production_writes':0}
+          (root/'live-sources.json').write_text(json.dumps(result,ensure_ascii=False,indent=2));print(json.dumps(result,ensure_ascii=False,indent=2))
+          assert greek['visible_words']>=100 and greek['exact_concacaf_token']
+          for row in rows:
+              if re.search(r':\s*Opinion\s*$',row['title'],re.I):assert row['rejection']=='non_article_analysis',row
           PY
       - uses: actions/upload-artifact@v4
         if: always()
