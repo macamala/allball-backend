@@ -1208,6 +1208,8 @@ def repair_recent_duplicate_news(
     from bot.dedupe import (titles_are_near_duplicate, confirmed_interview_key,
                            confirmed_football_report_key, same_report_window)
 
+    from bot.news_report_similarity import draw_report_signature, same_draw_report
+
     cutoff = datetime.utcnow() - timedelta(hours=max(1, int(max_age_hours)))
     rows = (
         db.query(
@@ -1238,6 +1240,7 @@ def repair_recent_duplicate_news(
     kept_titles: dict[str, dict[int, str]] = {}
     kept_interviews: dict[str, dict[str, int]] = {}
     kept_reports: dict[str, dict[int, tuple[str, Optional[datetime]]]] = {}
+    kept_draws: dict[int, tuple[object, Optional[datetime]]] = {}
     token_index: dict[str, dict[str, set[int]]] = {}
     hidden = 0
     for tax, article_id, article_title, article_body, published_at in rows:
@@ -1252,9 +1255,13 @@ def repair_recent_duplicate_news(
         sport_interviews = kept_interviews.setdefault(sport, {})
         report_key = confirmed_football_report_key(title, article_body) if sport == 'football' else None
         sport_reports = kept_reports.setdefault(sport, {})
+        draw_report = draw_report_signature(title, article_body) if sport == 'football' else None
 
         def outside_report_window(kept_id):
             prior = sport_reports.get(kept_id)
+            existing_draw = kept_draws.get(kept_id)
+            if draw_report and existing_draw and not same_draw_report(draw_report, existing_draw[0], published_at, existing_draw[1]):
+                return True
             return bool(report_key and prior and not same_report_window(prior[1], published_at))
 
         candidate_ids: set[int] = set()
@@ -1272,6 +1279,9 @@ def repair_recent_duplicate_news(
         if duplicate_id is None and report_key:
             duplicate_id = next((kept_id for kept_id, (key, stamp) in sport_reports.items()
                                  if key == report_key and same_report_window(stamp, published_at)), None)
+        if duplicate_id is None and draw_report:
+            duplicate_id = next((kept_id for kept_id, (identity, stamp) in kept_draws.items()
+                                 if same_draw_report(draw_report, identity, published_at, stamp)), None)
         for candidate_id in candidate_ids:
             if outside_report_window(candidate_id):
                 continue
@@ -1299,7 +1309,7 @@ def repair_recent_duplicate_news(
                 writer_provider='news-audit', writer_model='deterministic',
                 draft={'title': title, 'body': article_body or ''},
                 details={'kept_article_id': duplicate_id,
-                         'evidence': interview_key or report_key or 'strict_headline_duplicate'})
+                         'evidence': interview_key or report_key or ('same_participants_draw_scorers_window' if draw_report and duplicate_id in kept_draws else 'strict_headline_duplicate')})
             logger.info('[public_index] held duplicate article=%s kept_article=%s', article_id, duplicate_id)
             hidden += 1
             continue
@@ -1309,6 +1319,8 @@ def repair_recent_duplicate_news(
             sport_interviews[interview_key] = int(article_id)
         if report_key:
             sport_reports[int(article_id)] = (report_key, published_at)
+        if draw_report:
+            kept_draws[int(article_id)] = (draw_report, published_at)
         for token in tokens:
             sport_index.setdefault(token, set()).add(int(article_id))
     if hidden:

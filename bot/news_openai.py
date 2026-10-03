@@ -110,9 +110,26 @@ def verified_source(item, tags, facts):
         evidence_hash=hashlib.sha256((str(item.get('title') or '') + '\n' + facts).encode()).hexdigest())
 
 
+def _paid_slot_reserved(config, context):
+    """Reserve, never add, one existing paid slot for a waiting empty league."""
+    if config.get('phase') != 'production' or context.get('priority', 0) >= 2:
+        return False
+    from .news_football_capacity import reserve_paid_for_waiting_football
+    if not reserve_paid_for_waiting_football():
+        return False
+    from .news_budget import active_ai_budget
+    budget = active_ai_budget()
+    if budget is None:
+        return False
+    remaining = config['cycle_limit'] - getattr(budget, 'openai_attempts', 0)
+    return 0 < remaining <= 1
+
+
 def prefer_paid(*, quality_retry=False):
     context, config = _context.get(), settings()
     if not context or not config or not context['verified']:
+        return False
+    if _paid_slot_reserved(config, context):
         return False
     return bool(context['force_paid'] or config['phase'] == 'dry_run'
                 or (not context['paid_returned'] and (context['priority'] > 0 or quality_retry)))
@@ -228,6 +245,9 @@ def complete(system, prompt, *, purpose='write', language='', max_tokens=1800,
             or budget.max_requests - budget.attempts < 2
             or getattr(budget, 'openai_attempts', 0) >= config['cycle_limit']):
         _last_status.set('cycle_allowance_exhausted')
+        return None
+    if purpose == 'write' and _paid_slot_reserved(config, context):
+        _last_status.set('reserved_for_waiting_football')
         return None
     max_tokens = max(128, min(int(max_tokens), 1800 if purpose != 'translate' else 2200))
     if purpose == 'write':

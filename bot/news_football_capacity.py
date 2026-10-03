@@ -14,6 +14,7 @@ _CATALOG = json.loads((Path(__file__).parent / 'news_football_leagues.json').rea
 _TOPICS = {'football-international','football-women','football-youth','football-national-teams'}
 _KNOWN = frozenset(row['league'] for row in _CATALOG) - _TOPICS
 _YIELD_REPAIRS = ContextVar('news_football_yield_repairs', default=False)
+_RESERVE_PAID = ContextVar('news_football_reserve_paid', default=False)
 
 
 def _count(value):
@@ -36,12 +37,22 @@ def underfilled_football_pending(pending, inventory, current=None, *, floor=2):
 
 @contextmanager
 def football_breadth_scope(pending, inventory, current=None, *, enabled=False):
-    token = _YIELD_REPAIRS.set(bool(enabled and underfilled_football_pending(pending, inventory, current)))
+    waiting = underfilled_football_pending(pending, inventory, current)
+    token = _YIELD_REPAIRS.set(bool(enabled and waiting))
+    # A source from a genuinely underfilled competition may use the last paid
+    # opportunity itself. Full/unknown menus leave one for another queued league.
+    current_underfilled = current in _KNOWN and _count((inventory or {}).get(current)) < 2
+    paid_token = _RESERVE_PAID.set(bool(enabled and waiting and not current_underfilled))
     try:
         yield
     finally:
+        _RESERVE_PAID.reset(paid_token)
         _YIELD_REPAIRS.reset(token)
 
 
 def yield_football_repairs():
     return _YIELD_REPAIRS.get()
+
+
+def reserve_paid_for_waiting_football():
+    return _RESERVE_PAID.get()

@@ -109,3 +109,9 @@ SOURCE_DESKS.update({'Gazzetta': ['greece-super-league','greece-super-league-2']
 # Native reports are read from their own visible article header, not navicode.
 from .news_jleague_native import NATIVE_INDEXES
 HTML_INDEXES = HTML_INDEXES + NATIVE_INDEXES
+
+# Domestic listings supplement, not replace, the existing discovery pipeline.
+from .news_domestic_categories import RSS_FEEDS as DOMESTIC_RSS, HTML_INDEXES as DOMESTIC_HTML, SOURCE_DESKS as DOMESTIC_DESKS
+RSS_FEEDS = RSS_FEEDS + DOMESTIC_RSS
+HTML_INDEXES = HTML_INDEXES + DOMESTIC_HTML
+SOURCE_DESKS.update(DOMESTIC_DESKS)

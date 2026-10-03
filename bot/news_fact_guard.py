@@ -159,7 +159,8 @@ def competition_in_source(competition: str, text: str) -> bool:
     """A club-name inference is not evidence of its men's league in this story."""
     from .taxonomy import COMPETITIONS
     meta = COMPETITIONS.get(competition) or {}
-    for alias in meta.get('aliases', []):
+    from .news_competition_vocabulary import LITERAL_COMPETITION_ALIASES
+    for alias in [*meta.get('aliases', []), *LITERAL_COMPETITION_ALIASES.get(competition, ())]:
         if not alias.strip():
             continue
         pattern = r'(?<!\w)' + r'\s+'.join(re.escape(part) for part in alias.strip().split()) + r'(?!\w)'
@@ -297,6 +298,36 @@ def _football_player_binding_reason(source: str, output: str) -> Optional[str]:
     return None
 
 
+def source_attested_acronyms(source: str, expected_sport: str | None = None) -> set[str]:
+    """The same literal spelling evidence used by the deterministic fact gate.
+
+    Shared with the writer contract to avoid asking for terms the gate rejects.
+    No federation, club or nationality is inferred from a taxonomy key.
+    """
+    src_acronyms = _acronyms(source)
+    if expected_sport == 'football':
+        from .news_source_lexemes import source_cjk_acronyms
+        src_acronyms.update(source_cjk_acronyms(source))
+    # Source-grounded Serbian spellings of the same organisation, not new
+    # organisations inferred from context. Semantic claim validation still runs.
+    for local, canonical in {'ЦИЕС': 'CIES', 'ФИФА': 'FIFA', 'УЕФА': 'UEFA'}.items():
+        if re.search(r'(?<!\w)' + local + r'(?!\w)', source, re.I):
+            src_acronyms.add(canonical)
+    # Portuguese article headings use Fifa / Uefa. Case is formatting, not a
+    # different organisation. Restrict this to explicit federation tokens.
+    # Concacaf/Conmebol casing occurs in verified football source prose.
+    # Exact source token required; a tournament name alone adds no federation.
+    football_acronyms = ('CONCACAF', 'CONMEBOL') if expected_sport == 'football' else ()
+    for canonical in ('FIFA', 'UEFA', 'CIES') + football_acronyms:
+        if re.search(r'(?<!\w)' + canonical + r'(?!\w)', source, re.I):
+            src_acronyms.add(canonical)
+    # Country explicitly named in the audited German report; no ownership,
+    # nationality or other claim may be inferred merely from this equivalence.
+    if re.search(r'(?<!\w)(?:United Arab Emirates|Vereinigte(?:n)? Arabische(?:n)? Emirate(?:n)?)(?!\w)', source, re.I):
+        src_acronyms.add('UAE')
+    return src_acronyms
+
+
 def fact_lock_reason(
     draft: dict,
     source_title: str,
@@ -405,27 +436,7 @@ def fact_lock_reason(
     # (for example "Luke Humphries. Humphries" or "England's ODI").
     # Changed/invented names remain fail-closed in the semantic validator,
     # while known entity IDs and acronym checks below stay deterministic.
-    src_acronyms = _acronyms(source)
-    if expected_sport == 'football':
-        from .news_source_lexemes import source_cjk_acronyms
-        src_acronyms.update(source_cjk_acronyms(source))
-    # Source-grounded Serbian spellings of the same organisation, not new
-    # organisations inferred from context. Semantic claim validation still runs.
-    for local, canonical in {'ЦИЕС': 'CIES', 'ФИФА': 'FIFA', 'УЕФА': 'UEFA'}.items():
-        if re.search(r'(?<!\w)' + local + r'(?!\w)', source, re.I):
-            src_acronyms.add(canonical)
-    # Portuguese article headings use Fifa / Uefa. Case is formatting, not a
-    # different organisation. Restrict this to explicit federation tokens.
-    # Concacaf/Conmebol casing occurs in verified football source prose.
-    # Exact source token required; a tournament name alone adds no federation.
-    football_acronyms = ('CONCACAF', 'CONMEBOL') if expected_sport == 'football' else ()
-    for canonical in ('FIFA', 'UEFA', 'CIES') + football_acronyms:
-        if re.search(r'(?<!\w)' + canonical + r'(?!\w)', source, re.I):
-            src_acronyms.add(canonical)
-    # Country explicitly named in the audited German report; no ownership,
-    # nationality or other claim may be inferred merely from this equivalence.
-    if re.search(r'(?<!\w)(?:United Arab Emirates|Vereinigte(?:n)? Arabische(?:n)? Emirate(?:n)?)(?!\w)', source, re.I):
-        src_acronyms.add('UAE')
+    src_acronyms = source_attested_acronyms(source, expected_sport)
     extra_acronyms = sorted(_acronyms(output) - src_acronyms)
     if extra_acronyms:
         return "unsupported_acronym:" + extra_acronyms[0]
@@ -453,18 +464,22 @@ def fact_lock_reason(
         # already established it. Reject only a positive contradictory sport.
         if classified.sport and classified.sport != expected_sport:
             return "draft_sport_mismatch:" + str(classified.sport)[:50]
+        classified_league = classified.league
+        if expected_sport == 'football':
+            from .news_competition_vocabulary import corrected_qualified_football_league
+            classified_league = corrected_qualified_football_league(classified_league, output)
         if (
             expected_league
             # A broad sport bucket is not a verified competition. A concrete
             # league in a multilingual draft still needs semantic source proof,
             # but it cannot conflict with an unspecified source competition.
             and expected_league not in set(BROAD_LEAGUE.values()) | {f"{expected_sport}-international"}
-            and classified.league
+            and classified_league
             # "football-international" means no concrete league was found,
             # not positive evidence that the draft describes another event.
-            and classified.league not in set(BROAD_LEAGUE.values()) | {f"{expected_sport}-international"}
+            and classified_league not in set(BROAD_LEAGUE.values()) | {f"{expected_sport}-international"}
             and classified.confidence in {"high", "medium"}
-            and classified.league != expected_league
+            and classified_league != expected_league
         ):
-            return "draft_competition_mismatch:" + str(classified.league)[:100]
+            return "draft_competition_mismatch:" + str(classified_league)[:100]
     return None

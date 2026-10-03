@@ -67,9 +67,12 @@ def test_regional_feeds_are_unique_and_never_stamp_a_domestic_league(monkeypatch
     feeds=enabled_feeds()
     for publisher in ['Index.hr','NB1.hu','Goal.pl','The72']:
         rows=[f for f in feeds if f.get('publisher')==publisher]
-        assert len(rows)==1
-        assert rows[0]['kind']=='league' and rows[0]['sport']=='football'
-        assert not rows[0].get('league') and rows[0]['verified_official'] is False
+        assert len(rows)==(2 if publisher=='NB1.hu' else 1)
+        if publisher=='NB1.hu':
+            assert {row['url'] for row in rows}=={'https://nb1.hu/feed/','https://nb1.hu/category/nb2/feed/'}
+        for row in rows:
+            assert row['kind']=='league' and row['sport']=='football'
+            assert not row.get('league') and row['verified_official'] is False
     assert len({f['url'] for f in feeds})==len(feeds)
 
 

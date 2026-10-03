@@ -16,6 +16,8 @@ from .taxonomy import COMPETITIONS
 from .news_football_memberships import memberships_for_news, verified_name_aliases
 from .news_competition_scope import conflicting_competition_qualifier
 from .news_football_source_context import audited_women_article, source_menu_association
+from .news_football_subjects import headline_national_fixture
+from .news_competition_vocabulary import LITERAL_COMPETITION_ALIASES, conflicting_regional_serie_alias
 
 _ROOT = Path(__file__).parent
 _CATALOG = json.loads((_ROOT / 'news_football_leagues.json').read_text())
@@ -39,7 +41,8 @@ _ALIASES = {}
 for _row in _CATALOG:
     _key = _row['league']
     _ALIASES[_key] = {_norm(a) for a in [*_row['aliases'],
-        *COMPETITIONS.get(_key, {}).get('aliases', [])] if a.strip()}
+        *COMPETITIONS.get(_key, {}).get('aliases', []),
+        *LITERAL_COMPETITION_ALIASES.get(_key, ())] if a.strip()}
 
 _WOMEN = re.compile(r'\b(?:women|womens|woman|wsl|uwcl|uswnt|lionesses|keira walsh|alexia putellas|frauen|damen|feminin|feminine|feminines|femenina|femeninas|femenino|femeninos|feminino|feminina|femminile|femminili|zenski|zenska|zenske)\b')
 _YOUTH = re.compile(r'\b(?:u\s?(?:[6-9]|1[0-9]|2[0-3])s?|under (?:[6-9]|1[0-9]|2[0-3])s?|u twenty one|youth team)\b')
@@ -189,7 +192,7 @@ def football_news_section(article, *, today=None):
     today = today or date.today()
     # An age-limited player study is not a youth-team competition. Preserve
     # true U6-U23 squad labels, without turning under-22 rankings into fixtures.
-    age_team = any(not re.match(r' (?:study|studies|ranking|rankings|research|analysis|list)\b', lead[m.end():])
+    age_team = any(not re.match(r' (?:study|studies|ranking|rankings|research|analysis|list|kolu|kola|minuti|minutu|minuta|satu|sata|sati)\b', lead[m.end():])
                    for m in _YOUTH.finditer(lead))
     youth = bool(age_team or re.search(r'\bacademy\b', title))
     # A named birth-year COHORT is a team identity, not a senior team's title
@@ -213,8 +216,9 @@ def football_news_section(article, *, today=None):
     if regional_national_event:
         return 'football-women' if women else 'football-youth' if youth else 'football-national-teams'
 
+    country_fixture = headline_national_fixture(getattr(article, 'title', ''))
     if women:
-        national_women = bool(_NATIONAL.search(lead))
+        national_women = bool(_NATIONAL.search(lead) or country_fixture)
         key = _explicit(title, women=True) or _explicit(summary, women=True)
         if national_women and key not in {'fifa-womens-world-cup', 'uefa-womens-nations-league'}:
             key = None
@@ -239,10 +243,14 @@ def football_news_section(article, *, today=None):
         return 'football-youth'
 
     key = _explicit(title) or _explicit(summary)
-    if key:
+    if conflicting_regional_serie_alias(key, source.geturl() if source else None, lead):
+        key = None
+    # A leading Canada-v-Peru fixture cannot inherit CF Montreal's MLS tag
+    # from its captain's club biography in the source introduction.
+    if key and not (country_fixture and COMPETITIONS.get(key, {}).get('country') not in {None, 'international'}):
         return key
     headline_club = _club_section(title, '', article, False, today)
-    national = (bool(_NATIONAL.search(title)) or
+    national = country_fixture or (bool(_NATIONAL.search(title)) or
                 (bool(_NATIONAL.search(summary)) and not headline_club)) or (
         any(_has(lead, country) for country in _COUNTRIES)
         and (re.search(r'\b(?:national anthem|senior .{0,25}debut|(?:serbia|italy|england|france|netherlands|dutch) (?:a )?(?:squad|team|debut))\b', lead)

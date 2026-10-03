@@ -22,6 +22,10 @@ def conflicting_competition_qualifier(competition, text, start, end):
     before = _normalized(text[max(0, start-70):start])
     after = _normalized(text[end:end+60])
     label = _normalized(text[start:end])
+    if competition in {'italy-serie-a', 'italy-serie-b'} and label in {'serie a', 'serie b'}:
+        if (re.search(r'\b(?:brazilian|brasileiro|brasileirao)$', before)
+                or re.match(r'^(?:do |de )?(?:campeonato )?brasileiro\b', after)):
+            return True
     if competition.startswith('uefa-'):
         if re.search(r'\b(?:afc|caf|concacaf|ofc|asian|african|oceania)(?: women s| womens)?$', before):
             return True

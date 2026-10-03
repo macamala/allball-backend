@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session, load_only
 from models import Article
 from .textutil import normalize_title
 from .news_policy import news_source_identity
+from .news_report_similarity import draw_report_signature, same_draw_report
 
 
 def unprocessed_source_items(db: Session, items: list) -> list:
@@ -222,6 +223,7 @@ def existing_near_duplicate(
     published_at: Optional[datetime],
     *,
     body: Optional[str] = None,
+    sport: Optional[str] = None,
 ) -> Optional[Article]:
     key = normalize_title(title)
     if not key or len(key) < 16:
@@ -233,9 +235,10 @@ def existing_near_duplicate(
 
     interview_key = confirmed_interview_key(body) if body else None
     report_key = confirmed_football_report_key(title, body) if body else None
+    draw_report = draw_report_signature(title, body) if body and sport == 'football' else None
     columns = [Article.id, Article.title, Article.created_at]
-    if interview_key or report_key:
-        columns.extend((Article.ai_content, Article.content, Article.published_at))
+    if interview_key or report_key or draw_report:
+        columns.extend((Article.ai_content, Article.content, Article.published_at, Article.sport))
     query = db.query(Article).options(load_only(*columns))
     if window_start:
         query = query.filter(Article.created_at >= window_start - timedelta(days=2))
@@ -248,6 +251,12 @@ def existing_near_duplicate(
             if report_key == existing_report and same_report_window(published_at, article.published_at):
                 return article
             # Fuzzy or exact headlines cannot undo the source-date boundary.
+            continue
+        existing_draw = draw_report_signature(existing, article.ai_content or article.content) if draw_report and article.sport == 'football' else None
+        if draw_report and existing_draw:
+            if same_draw_report(draw_report, existing_draw, published_at, article.published_at):
+                return article
+            # Different scores/competition/age/date cannot be undone by fuzzy titles.
             continue
         if normalize_title(existing) == key or titles_are_near_duplicate(existing, title):
             return article

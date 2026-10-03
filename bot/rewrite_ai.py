@@ -294,9 +294,11 @@ def write_ninkosports_story(
     if len(facts) > 8000:
         facts = facts[:8000]
     numeric_source = f"{title}\n{facts}"
-    from .news_fact_guard import source_name_spellings
+    from .news_fact_guard import source_name_spellings, source_attested_acronyms
     source_spellings = source_name_spellings(numeric_source)
     allowed_numeric_tokens = sorted(numeric_tokens(numeric_source, include_spelled=True))
+    allowed_acronyms = sorted(source_attested_acronyms(numeric_source, sport))
+    acronym_contract = ', '.join(allowed_acronyms) if allowed_acronyms else 'NONE — use ordinary sentence case'
     numeric_contract = (
         ", ".join(allowed_numeric_tokens)
         if allowed_numeric_tokens
@@ -311,6 +313,10 @@ def write_ninkosports_story(
         "- Serbian gostovanje / гостовање means an away visit, never a home fixture. Preserve the source's host and visitor.\n"
         f"- ALLOWED NUMERIC TOKENS: {numeric_contract}\n"
         "- Any numeric token not listed above is forbidden. Do not calculate or reformat numbers.\n"
+        f"- ALLOWED SOURCE ACRONYMS: {acronym_contract}\n"
+        "- Use an acronym only when it is listed above and its source meaning is preserved. Do not expand a competition label by adding a federation absent from the source.\n"
+        "- Use sentence case. Never print format labels or all-capital section headings such as CONTRACT, HEADLINE, SUMMARY or BODY.\n"
+        "- SPORT and COMPETITION below are editorial routing metadata, not additional source facts, names, seasons or permission to add acronyms.\n"
         f"- TAXONOMY LOCK: the exact article sport is {sport}. Keep it in that sport; do not relabel it as a related sport. Mention the sport naturally once in the headline or opening paragraph so shared club and tournament names remain unambiguous.\n\n"
         f"SPORT: {sport}\n"
         f"COMPETITION: {league or 'unspecified'}\n\n"

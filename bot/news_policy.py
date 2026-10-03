@@ -406,6 +406,12 @@ def non_article_news_reason(item):
     if (host in {'www.chelseafc.com', 'chelseafc.com'}
             and re.match(r'^/en/news/article/ticket-(?:news|information)-[^/]+/?$', path)):
         return 'non_article_ticket_promotion'
+    # Explicit reader-rating requests and ticket instructions are products,
+    # not match reporting. A sold-out crowd or pricing controversy may be news.
+    if re.search(r'\bd[eê] suas? notas?\b|\bd[eê] sua nota\b', title):
+        return 'non_article_fan_poll'
+    if re.search(r'\bobjavio informacije o ulaznicama\b', title):
+        return 'non_article_ticket_promotion'
     # A transfer wishlist is an opinion product, not a report of a deal.
     # The observed The72 format was consuming scarce writer/validator slots.
     # Match the full proposal structure; actual signings remain eligible.

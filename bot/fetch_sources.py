@@ -928,7 +928,7 @@ def _ingest_item(
     # Cross-language source titles cannot reliably match our English archive.
     # Recheck the actual publishable headline after writing and sanitization,
     # before allocating a slug or inserting any Article row.
-    duplicate = existing_near_duplicate(db, story_title, published_at, body=story_body)
+    duplicate = existing_near_duplicate(db, story_title, published_at, body=story_body, sport=stamp_sport)
     if duplicate is not None:
         _hold_ai_source(source_url, 'duplicate_english_draft')
         logger.info('[fetch_sources] hold duplicate English draft existing_id=%s title=%s',
@@ -1032,6 +1032,11 @@ def _classify_item(item, evidence):
     )
     if getattr(tags, "reason", "") == "unsupported-news-sport":
         return tags
+    if tags.sport == 'football':
+        from .news_competition_vocabulary import corrected_qualified_football_league
+        qualified = corrected_qualified_football_league(tags.league, str(item.get('title') or '') + '\n' + str(evidence or '')[:650])
+        if qualified != tags.league:
+            tags = Classification(tags.sport, qualified, 'brazil', tags.confidence, 'explicit-qualified-competition')
     from .news_policy import explicit_headline_sport
     explicit = explicit_headline_sport(item.get('title'))
     if explicit and tags.sport != explicit:
