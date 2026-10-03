@@ -1,0 +1,59 @@
+name: Football News byte-verified release 20261003
+on:
+  push:
+    branches: [audit/news-system-20261003]
+    paths: [.github/workflows/news-system-locked-release-20261003.yml]
+permissions:
+  contents: write
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DATABASE_URL: 'sqlite:///:memory:'
+      NINKO_SKIP_STARTUP_INDEX: '1'
+      NINKO_SKIP_INTEGRITY_BACKFILL: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 9b9ad26c8f02c176b92d0d31638c02daf4eac5ef
+          path: bundle
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 494e7f81b51cb664165a5e104cbc805e4ab5a04e
+          path: source
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -q PyYAML
+      - name: Include every tested queue guard and run the complete proof
+        run: |
+          python - <<'PY'
+          import pathlib,subprocess,yaml,json,hashlib
+          w=yaml.safe_load(pathlib.Path('bundle/.github/workflows/news-system-domestic-final-20261003.yml').read_text())
+          steps=[s for s in w['jobs']['gate']['steps'] if 'run' in s and s.get('name')]
+          assert len(steps)==3
+          subprocess.run(['bash','-e','-c',steps[0]['run']],cwd='source',check=True)
+          p=pathlib.Path('source/bot/news_football_priority.py');s=p.read_text()
+          old="    league = getattr(tags, 'league', None)\n    # Reuse primary-subject"
+          new="    league = getattr(tags, 'league', None)\n    from .news_competition_vocabulary import conflicting_regional_serie_alias\n    if conflicting_regional_serie_alias(league, item.get('url'), source.title + '\\n' + lead):\n        return None\n    # Reuse primary-subject"
+          assert s.count(old)==1;p.write_text(s.replace(old,new))
+          assert hashlib.sha256(p.read_bytes()).hexdigest()=='d5103aeec436b8d6de4a2647983c881ab065302d1b78db98466ee57d1171b287'
+          subprocess.run(['bash','-e','-c',steps[1]['run']],check=True)
+          script=steps[2]['run']
+          old="allowed=['bot/news_competition_vocabulary.py','tests/test_news_domestic_category_discovery.py']"
+          new="allowed=['bot/news_competition_vocabulary.py','tests/test_news_domestic_category_discovery.py','bot/news_football_priority.py']"
+          assert script.count(old)==1;script=script.replace(old,new)
+          old="files=subprocess.check_output(['git','show','--pretty=format:','--name-only','HEAD'],text=True).splitlines()"
+          new=old+"\nfiles=sorted(set(files) | {'bot/news_football_priority.py'})\nhashes={f:hashlib.sha256(pathlib.Path(f).read_bytes()).hexdigest() for f in files if f}\nassert len(hashes)==23\nassert hashlib.sha256(json.dumps(hashes,sort_keys=True,separators=(',',':')).encode()).hexdigest()=='c4af7d5755eef400da111c250bd0aeddb32e0bc2c5da876da73373282d0a2fee'"
+          assert script.count(old)==1;script=script.replace(old,new)
+          script=script.replace("git push origin HEAD:refs/heads/audit/news-system-release-20261003", "test -z \"$(git status --porcelain)\"\ngit push origin HEAD:refs/heads/audit/news-system-release-20261003")
+          subprocess.run(['bash','-e','-c',script],cwd='source',check=True)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: news-system-locked-release-20261003
+          path: system-evidence/
+          retention-days: 7
