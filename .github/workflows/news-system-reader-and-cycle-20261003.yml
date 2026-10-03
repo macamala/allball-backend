@@ -1,0 +1,114 @@
+name: Football News reader and normal cycle evidence 20261003
+on:
+  push:
+    branches: [audit/news-system-20261003]
+    paths: [.github/workflows/news-system-reader-and-cycle-20261003.yml]
+permissions:
+  contents: read
+jobs:
+  observe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 2e1a2d8bf72879953403ec9ff989a17839ba8764
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -q playwright && python -m playwright install --with-deps chromium
+      - name: Decode actual related article photos after scrolling each card into view
+        run: |
+          mkdir -p reader-cycle
+          python - <<'PY'
+          import json,pathlib,urllib.request
+          from playwright.sync_api import sync_playwright
+          root=pathlib.Path('reader-cycle');rows=[];failures=[];article_cache={}
+          slug='france-and-italy-draw-as-olises-goal-is-cancelled-out-in-nations-league'
+          def reference(path):
+              if path not in article_cache:
+                  with urllib.request.urlopen('https://allball-backend-production.up.railway.app/articles/'+path,timeout=20) as r:article_cache[path]=json.loads(r.read(2000000))
+              return article_cache[path]
+          with sync_playwright() as p:
+              browser=p.chromium.launch()
+              for width in [1440,390]:
+                  page=browser.new_page(viewport={'width':width,'height':900},timezone_id='Australia/Sydney')
+                  errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
+                  page.goto('https://ninkosports.com/article/'+slug,wait_until='domcontentloaded',timeout=45000)
+                  page.wait_for_selector('.article-page .article-body',timeout=25000)
+                  cards=page.locator('.article-page a[href^="/article/"]').filter(has=page.locator('img'))
+                  count=cards.count()
+                  assert count>0,'Expected real related story image cards'
+                  visited=set()
+                  for index in range(count):
+                      card=cards.nth(index);href=card.get_attribute('href')
+                      if href in visited:continue
+                      visited.add(href);img=card.locator('img').first
+                      row={'width':width,'href':href}
+                      try:
+                          img.scroll_into_view_if_needed(timeout=5000)
+                          page.wait_for_function('(img)=>img.complete&&img.naturalWidth>=100',arg=img.element_handle(),timeout=15000)
+                          data=reference(href.split('/article/',1)[1])
+                          row['image']=img.evaluate('(i)=>({url:i.currentSrc,width:i.naturalWidth,height:i.naturalHeight})')
+                          row['expected']=data.get('image_url');row['id']=data.get('id')
+                          assert row['expected'] and row['expected'] in row['image']['url'],row
+                          row['passed']=True
+                      except Exception as exc:
+                          row['error']=str(exc)[:350]
+                          try:row['html']=img.evaluate('(i)=>i.outerHTML')[:1600]
+                          except Exception:pass
+                          failures.append(row)
+                      rows.append(row)
+                      if len(visited)>=8:break
+                  page.screenshot(path=str(root/f'related-loaded-{width}.png'),full_page=True)
+                  if errors:failures.append({'width':width,'page_errors':errors})
+                  page.close()
+              browser.close()
+          result={'checked':rows,'failures':failures,'mocked_responses':False,'writes':0}
+          (root/'related-photos.json').write_text(json.dumps(result,ensure_ascii=False,indent=2));print(json.dumps(result,ensure_ascii=False,indent=2))
+          assert not failures,failures
+          PY
+      - name: Observe existing automatic writer output only through public GETs
+        if: always()
+        run: |
+          python - <<'PY'
+          import json,pathlib,urllib.request,urllib.parse,time
+          from datetime import datetime,timezone
+          from concurrent.futures import ThreadPoolExecutor
+          root=pathlib.Path('reader-cycle');root.mkdir(exist_ok=True);base='https://allball-backend-production.up.railway.app'
+          targets=['brazil-serie-b','croatia-hnl','hungary-nb-2','sweden-allsvenskan','japan-j1-league','greece-super-league','scotland-premiership']
+          def menu(key,limit=3):
+              out={'league':key}
+              try:
+                  with urllib.request.urlopen(base+'/articles?'+urllib.parse.urlencode({'sport':'football','league':key,'limit':limit}),timeout=18) as r:items=json.loads(r.read(4000000))
+                  assert isinstance(items,list)
+                  out['articles']=[{k:a.get(k) for k in ['id','title','slug','league','sport','published_at','created_at','image_url']} for a in items]
+              except Exception as e:out['error']=type(e).__name__
+              return out
+          observations=[]
+          for attempt in range(13):
+              with ThreadPoolExecutor(max_workers=3) as pool:rows=list(pool.map(menu,targets))
+              observations.append({'at':datetime.now(timezone.utc).isoformat(),'menus':rows})
+              (root/'normal-cycle-observations.json').write_text(json.dumps(observations,ensure_ascii=False,indent=2))
+              if any(r.get('articles') for r in rows):break
+              if attempt<12:time.sleep(25)
+          catalog=json.loads(pathlib.Path('bot/news_football_leagues.json').read_text())
+          with ThreadPoolExecutor(max_workers=3) as pool:rows=list(pool.map(lambda r:menu(r['league'],5),catalog))
+          (root/'final-menus.json').write_text(json.dumps(rows,ensure_ascii=False,indent=2))
+          now=datetime.now(timezone.utc)
+          def fresh(a):
+              try:
+                  stamp=datetime.fromisoformat(a['published_at'].replace('Z','+00:00'));stamp=stamp.replace(tzinfo=timezone.utc) if stamp.tzinfo is None else stamp.astimezone(timezone.utc)
+                  return 0<=(now-stamp).total_seconds()<86400
+              except Exception:return False
+          summary={'checked_at':now.isoformat(),'menus':len(rows),'populated':sum(bool(r.get('articles')) for r in rows),'fresh_menus':sum(any(fresh(a) for a in r.get('articles',[])) for r in rows),'empty_menus':[r['league'] for r in rows if r.get('articles')==[]],'errors':[r for r in rows if r.get('error')],'wrong_fields':sum(a.get('league')!=r['league'] or a.get('sport')!='football' for r in rows for a in r.get('articles',[])),'missing_image_urls':sum(not a.get('image_url') for r in rows for a in r.get('articles',[])),'observed_new_target_menus':[r['league'] for r in observations[-1]['menus'] if r.get('articles')],'AI_requests':0,'production_writes':0,'all_news_complete':False}
+          (root/'final-summary.json').write_text(json.dumps(summary,ensure_ascii=False,indent=2));print(json.dumps(summary,ensure_ascii=False,indent=2))
+          assert len(rows)==86 and not summary['errors'] and not summary['wrong_fields'],summary
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: news-system-reader-cycle-20261003
+          path: reader-cycle/
+          retention-days: 7
