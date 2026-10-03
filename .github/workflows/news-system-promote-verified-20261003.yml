@@ -1,0 +1,50 @@
+name: Football News verified production candidate 20261003
+on:
+  push:
+    branches: [audit/news-system-20261003]
+    paths: [.github/workflows/news-system-promote-verified-20261003.yml]
+permissions:
+  contents: write
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DATABASE_URL: 'sqlite:///:memory:'
+      NINKO_SKIP_STARTUP_INDEX: '1'
+      NINKO_SKIP_INTEGRITY_BACKFILL: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: c84ecc43d8d8e38a7f8a40aafc793b6b841e2b55
+          path: bundle
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 494e7f81b51cb664165a5e104cbc805e4ab5a04e
+          fetch-depth: 2
+          path: source
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -q PyYAML
+      - name: Verify all 23 files, regressions, actual articles and clean committed source
+        run: |
+          python - <<'PY'
+          import yaml,pathlib,subprocess
+          w=yaml.safe_load(pathlib.Path('bundle/.github/workflows/news-system-promotion-gate-20261003.yml').read_text())
+          steps=[s for s in w['jobs']['gate']['steps'] if 'run' in s and s.get('name')]
+          assert len(steps)==3
+          # A depth-one checkout makes git show treat its boundary as a root
+          # and list the entire repository. Keep the real parent, not a relaxed
+          # allowlist or changed checksum. Every source/test gate is unchanged.
+          assert subprocess.check_output(['git','rev-parse','HEAD^'],cwd='source',text=True).strip()=='f22e5b603317a12839e123e62b487dbee740fbd5'
+          for index,step in enumerate(steps):
+              subprocess.run(['bash','-e','-c',step['run']],cwd='source' if index in (0,2) else None,check=True)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: news-system-promote-verified-20261003
+          path: system-evidence/
+          retention-days: 7
