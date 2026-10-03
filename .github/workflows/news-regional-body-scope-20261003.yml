@@ -1,0 +1,73 @@
+name: News regional article scope 20261003
+on:
+  push:
+    branches: [audit/news-system-repair-20261003]
+    paths: [.github/workflows/news-regional-body-scope-20261003.yml]
+permissions:
+  contents: read
+jobs:
+  scope:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      DATABASE_URL: 'sqlite:///:memory:'
+      NINKO_SKIP_STARTUP_INDEX: '1'
+      NINKO_SKIP_INTEGRITY_BACKFILL: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: f22e5b603317a12839e123e62b487dbee740fbd5
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -q -r requirements.txt
+      - name: Read bounded visible structure, no hidden body or writer access
+        run: |
+          mkdir -p regional-scope
+          python - <<'PY'
+          import json,pathlib,re
+          from html.parser import HTMLParser
+          from bot.news_feed_http import read_news_feed
+          from bot.extract import _json_ld_blocks,_metadata,_ScopedNewsBody,paragraphs_from_html,collect_page_image_candidates
+          from bot.news_image_http import pick_news_article_image
+          from bot.fetch_sources import _pick_reachable_article_image
+          root=pathlib.Path('regional-scope')
+          class Structure(HTMLParser):
+              def __init__(self):super().__init__();self.stack=[];self.paths=[];self.canon=[];self.times=[]
+              def handle_starttag(self,t,attrs):
+                  a={k:v or '' for k,v in attrs}
+                  if t=='p':self.paths.append(self.stack[-7:])
+                  if t=='time':self.times.append(a)
+                  if t=='link' and a.get('rel')=='canonical':self.canon.append(a.get('href'))
+                  if t not in {'meta','link','br','hr','img','input','source','wbr','area','embed','param','col','base','track'}:self.stack.append([t,{k:a[k] for k in ['id','class','itemprop'] if k in a}])
+              def handle_endtag(self,t):
+                  for i in range(len(self.stack)-1,-1,-1):
+                      if self.stack[i][0]==t:self.stack=self.stack[:i];break
+          pairs=[('pianeta-cesena','https://www.pianetaserieb.it/news/488748518918/comunicato-cesena-presidente-john-aiello-serie-b'),('pianeta-cremonese','https://www.pianetaserieb.it/news/194811694598/cremonese-pecchia'),('liga-zwei','https://www.liga-zwei.de/hertha-bsc-chancen-auf-verbleib-von-linus-gechter-nur-bei-aufstieg/')]
+          for name,url in pairs:
+              out={'url':url}
+              try:
+                  raw=read_news_feed(url);html=raw.decode('utf-8','replace');p=Structure();p.feed(html)
+                  (root/(name+'.html')).write_text(html)
+                  out['ancestors']=[json.loads(s) for s in sorted({json.dumps(p,ensure_ascii=False) for p in p.paths})][:60]
+                  out['canonical']=p.canon;out['times']=p.times;out['og_url']=_metadata(html,'og:url')
+                  nodes=[]
+                  for b in _json_ld_blocks(html):
+                      try:
+                          d=json.loads(b);items=d if isinstance(d,list) else d.get('@graph',[d])
+                          nodes += [{k:o.get(k) for k in ['@type','mainEntityOfPage','url','headline','datePublished','isAccessibleForFree','articleSection','keywords']} for o in items if isinstance(o,dict)]
+                      except Exception:pass
+                  out['jsonld_identity']=nodes
+                  photos=[p for p in collect_page_image_candidates(html) if p.get('source') in {'og','twitter'}]
+                  out['hero']=_pick_reachable_article_image(photos,max_checks=2)
+              except Exception as e:out['error']=type(e).__name__+': '+str(e)[:180]
+              (root/(name+'.json')).write_text(json.dumps(out,ensure_ascii=False,indent=2))
+              print(name,out.get('error'),out.get('canonical'),out.get('hero'))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: news-regional-body-scope-20261003
+          path: regional-scope/
+          retention-days: 7
