@@ -1,0 +1,146 @@
+name: News throughput source identity gate 20261003
+on:
+  push:
+    branches: [audit/news-throughput-20261003]
+    paths: [.github/workflows/news-throughput-identity-20261003.yml]
+permissions:
+  contents: write
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    env:
+      DATABASE_URL: 'sqlite:///:memory:'
+      NINKO_SKIP_STARTUP_INDEX: '1'
+      NINKO_SKIP_INTEGRITY_BACKFILL: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 998c290289ba5ef22afbd7c424a1e2145edba747
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -q -r requirements.txt
+      - name: Protect current verified club identities from common-word matches
+        run: |
+          mkdir -p identity-evidence
+          cat > tests/test_news_start_club_collision.py <<'PY'
+          from datetime import date
+          from types import SimpleNamespace
+          import pytest
+          from bot import news_football_sections as sections
+          from bot.news_football_priority import candidate_football_section
+
+          @pytest.fixture
+          def catalogue(monkeypatch):
+              period={'valid_from':'2026-10-01','valid_until':'2026-10-05'}
+              rows={'norway-eliteserien':{**period,'clubs':['Start','Brann','Viking','Molde']},
+                    'england-premier-league':{**period,'clubs':['Chelsea','Arsenal','Liverpool','Everton']}}
+              monkeypatch.setattr(sections,'memberships_for_news',lambda:rows)
+              monkeypatch.setattr(sections,'_CLUBS',{'valid_from':'2026-10-01','valid_until':'2026-12-31','leagues':{}})
+
+          def club(title,summary=''):
+              a=SimpleNamespace(published_at='2026-10-03T01:00:00')
+              return sections._club_section(sections._norm(title),sections._norm(summary),a,False,date(2026,10,3))
+
+          @pytest.mark.parametrize('title',[
+              'Blackburn Rovers star has excellent start to the season',
+              'Doncaster Rovers winger looks for improvement after tough start',
+              'Club confirms start of training programme',
+              'The club start preparations for the new season',
+              'A fresh start for the midfielder',
+              'Players start football club training today',
+          ])
+          def test_common_start_does_not_select_a_norwegian_team(catalogue,title):
+              assert club(title) is None
+
+          @pytest.mark.parametrize('title',[
+              'IK Start confirm signing',
+              'Start FC confirms training programme',
+              "Start's manager confirms preparations",
+              'Start’s goalkeeper returns to training',
+          ])
+          def test_explicit_club_identity_still_uses_verified_membership(catalogue,title):
+              assert club(title)=='norway-eliteserien'
+
+          def test_a_real_other_club_wins_instead_of_a_passing_start(catalogue):
+              assert club('A new start for Chelsea midfielder')=='england-premier-league'
+              assert club('Brann confirms preparations')=='norway-eliteserien'
+
+          def test_historical_body_and_ambiguous_start_cannot_create_queue_debt(catalogue):
+              item={'title':'Blackburn Rovers player makes an excellent start','summary':'The winger discusses his current form.','_extracted':'He previously played in the 2. Bundesliga.','published_at':'2026-10-03'}
+              before=dict(item)
+              assert candidate_football_section(item,SimpleNamespace(sport='football',league='germany-2-bundesliga'),today=date(2026,10,3)) is None
+              assert item==before
+          PY
+          python -m pytest -q tests/test_news_start_club_collision.py --junitxml=identity-evidence/before.xml > identity-evidence/before.txt 2>&1 || true
+          python - <<'PY'
+          import pathlib,xml.etree.ElementTree as E
+          cases=list(E.parse('identity-evidence/before.xml').iter('testcase'))
+          assert any(c.find('failure') is not None and 'common_start' in c.attrib['name'] for c in cases)
+          p=pathlib.Path('bot/news_football_sections.py');s=p.read_text()
+          old="                alias = _norm(club)\n                if _has(text, alias):"
+          assert s.count(old)==1
+          new="""                alias = _norm(club)
+                          # The current catalogue contains a club named Start. The
+                          # ordinary English word in 'excellent start' is not identity.
+                          # Require an explicit club form or possessive sporting role;
+                          # do not infer nationality or change the shared entity registry.
+                          if alias == 'start' and not re.search(
+                              r'\\b(?:ik start|start fc|start s (?:coach|manager|goalkeeper|'
+                              r'defender|midfielder|striker|forward))\\b', text):
+                              continue
+                          if _has(text, alias):"""
+          p.write_text(s.replace(old,new))
+          PY
+      - name: Run all News regressions under the production Python minor version
+        run: |
+          python -m pytest -q tests/test_news* --junitxml=identity-evidence/after.xml > identity-evidence/after.txt 2>&1 || { tail -100 identity-evidence/after.txt; exit 1; }
+          tail -4 identity-evidence/after.txt
+          python -m compileall -q bot
+      - name: Replay actual full-feed articles without AI or publication
+        run: |
+          python - <<'PY'
+          import json,pathlib,re,logging
+          from datetime import datetime,timezone
+          from bot.feeds import enabled_feeds
+          from bot.fetch_sources import _fetch_feed_entries,_classify_candidate
+          from bot.news_football_priority import candidate_football_section
+          from bot.news_football_memberships import refresh_football_news_memberships
+          from bot.news_policy import non_article_news_reason
+          logging.basicConfig(level=logging.WARNING)
+          refresh_football_news_memberships()
+          cfg=next(f for f in enabled_feeds() if f.get('publisher')=='The72')
+          rows=[]
+          for item in _fetch_feed_entries(cfg,5):
+              tags=_classify_candidate(item)
+              row={'title':item['title'],'url':item['url'],'queue_menu':candidate_football_section(item,tags),'reason':non_article_news_reason(item)}
+              if 'start' in row['title'].lower() and re.search(r'Blackburn Rovers|Doncaster Rovers',row['title']):
+                  assert row['queue_menu'] not in {'norway-eliteserien','germany-2-bundesliga'},row
+              if re.search(r':\s*Opinion\s*$',row['title'],re.I):assert row['reason']=='non_article_analysis',row
+              rows.append(row)
+          result={'checked_at':datetime.now(timezone.utc).isoformat(),'rows':rows,'AI_requests':0,'production_writes':0}
+          pathlib.Path('identity-evidence/replay.json').write_text(json.dumps(result,ensure_ascii=False,indent=2));print(json.dumps(result,ensure_ascii=False,indent=2))
+          assert rows
+          PY
+      - name: Preserve only reviewed News correction and regressions
+        run: |
+          python - <<'PY'
+          import subprocess,pathlib,json,hashlib
+          allowed=['bot/news_football_sections.py','tests/test_news_start_club_collision.py']
+          assert subprocess.check_output(['git','diff','--name-only'],text=True).splitlines()==[allowed[0]]
+          subprocess.run(['git','add',*allowed],check=True)
+          paths=['bot/extract.py','bot/news_fact_guard.py','bot/news_football_priority.py','bot/news_policy.py','bot/news_football_regional_desks.py',*allowed]
+          pathlib.Path('identity-evidence/sha256.json').write_text(json.dumps({p:hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest() for p in paths},indent=2))
+          PY
+          git config user.name 'NinkoSports News validation'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix(news): require explicit club identity for ambiguous Start alias'
+          git push origin HEAD:refs/heads/audit/news-throughput-release-20261003
+          git rev-parse HEAD > identity-evidence/tested-commit.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: news-throughput-identity-20261003
+          path: identity-evidence/
+          retention-days: 7
