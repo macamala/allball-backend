@@ -720,6 +720,12 @@ def _hydrate(cfg: Dict, url: str, fallback_title: str, *, diagnostics=None, site
     ):
         return reject("non_article_photo_gallery")
     first_party = None
+    if cfg['id'] in {'jleague-native-j1', 'jleague-native-j2'}:
+        from .news_jleague_native import read_jleague_article
+        first_party = read_jleague_article(html, url, expected_tier=int(cfg['id'][-1]))
+        if first_party is None:
+            return reject('unverified_native_article')
+        url = first_party['url']
     if cfg['id'] == 'ligaportugal-official-news':
         from .news_ligaportugal import read_ligaportugal_article
         first_party = read_ligaportugal_article(html, url)

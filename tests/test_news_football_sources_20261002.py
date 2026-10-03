@@ -42,5 +42,5 @@ def test_football_extension_retains_publisher_and_sport_guards(monkeypatch):
     for source in HTML_INDEXES:
         assert source['sport']=='football' and not source.get('league')
         assert source['url'].startswith('https://'+source['host'])
-    assert len(HTML_INDEXES)==11
-    assert len({source["id"] for source in HTML_INDEXES})==11
+    assert len(HTML_INDEXES)==13
+    assert len({source["id"] for source in HTML_INDEXES})==13

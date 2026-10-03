@@ -32,9 +32,10 @@ def candidate_football_section(item, tags, *, today=None):
         return key
     # A full-body classifier hint alone must not invent missing-league
     # debt. Actual article writing and publication classification are unchanged.
-    from .news_fact_guard import competition_in_source
+    from .news_football_sections import _explicit, _norm
     league = getattr(tags, 'league', None)
-    return league if league and competition_in_source(league, source.title + '\n' + lead) else None
+    # Reuse primary-subject exclusions, not a context-free fact-token match.
+    return league if league and _explicit(_norm(source.title + '\n' + lead)) == league else None
 
 
 def spread_football_leagues(items, inventory, *, section, priority):

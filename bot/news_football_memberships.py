@@ -49,6 +49,9 @@ FALLBACKS = {
 _LOCK = threading.Lock()
 _ENTRIES = {}
 _LAST_REFRESH = float('-inf')
+_RETRY_PENDING = {}
+RETRY_SECONDS = 600
+MAX_TRANSIENT_RETRIES = 3
 TTL_SECONDS = 6 * 3600
 MAX_AGE = timedelta(hours=72)
 
@@ -107,9 +110,21 @@ def _public_get(league, key):
         return response.json()
 
 
+def _transient_read_error(error):
+    """Retry network errors, 429 and server failures, never invalid identities."""
+    if isinstance(error, httpx.HTTPStatusError):
+        return error.response.status_code == 429 or error.response.status_code >= 500
+    return isinstance(error, (httpx.TimeoutException, httpx.NetworkError, ConnectionError, TimeoutError))
+
+
 def refresh_football_news_memberships(*, now=None, get=None, get_fixtures=None, force=False):
-    """Called by the existing News cycle, at most once every six hours."""
-    global _ENTRIES, _LAST_REFRESH
+    """Six-hour full refresh; bounded retries of failed leagues on normal cycles.
+
+    Quiet/stale/wrong-scope sources do not trigger retries. A transient failure
+    retries only the failed league (at 10, 20, 40 minute delays), up to three
+    times before the next full refresh. Good current evidence remains intact.
+    """
+    global _ENTRIES, _LAST_REFRESH, _RETRY_PENDING
     clock = now or datetime.now(timezone.utc)
     if clock.tzinfo is None:
         raise ValueError('Membership refresh requires a timezone-aware clock')
@@ -117,21 +132,32 @@ def refresh_football_news_memberships(*, now=None, get=None, get_fixtures=None, 
         return {'status': 'already_refreshing'}
     try:
         tick = time.monotonic()
-        if not force and tick-_LAST_REFRESH < TTL_SECONDS:
-            return {'status': 'cached', 'leagues': len(memberships_for_news(clock))}
-        _LAST_REFRESH = tick
+        full = force or tick-_LAST_REFRESH >= TTL_SECONDS
+        if full:
+            targets = list(DOMESTIC)
+            _LAST_REFRESH = tick
+            _RETRY_PENDING = {}
+        else:
+            targets = [league for league, retry in _RETRY_PENDING.items()
+                       if league in DOMESTIC and retry['due'] <= tick]
+            if not targets:
+                return {'status': 'cached', 'leagues': len(memberships_for_news(clock)),
+                        'retry_pending': sorted(_RETRY_PENDING)}
         reader = get or _public_get
         # Injected offline table readers never cause implicit network I/O.
         fixture_reader = get_fixtures or (_public_fixture_get if get is None else None)
         def load(league):
+            transient = None
             for key in dict.fromkeys([ALIASES.get(league, league), FALLBACKS.get(league)]):
                 if not key:
                     continue
                 try:
                     item = parse_membership(league, reader(league, key), now=clock)
                     if item:
-                        return league, item
+                        return league, item, None
                 except Exception as exc:
+                    if _transient_read_error(exc):
+                        transient = type(exc).__name__
                     log.debug('News membership read held league=%s error=%s', league, type(exc).__name__)
             if fixture_reader is not None:
                 for key in dict.fromkeys([ALIASES.get(league, league), FALLBACKS.get(league)]):
@@ -140,17 +166,36 @@ def refresh_football_news_memberships(*, now=None, get=None, get_fixtures=None, 
                     try:
                         item = parse_fixture_membership(league, fixture_reader(league, key), now=clock)
                         if item:
-                            return league, item
+                            return league, item, None
                     except Exception as exc:
+                        if _transient_read_error(exc):
+                            transient = type(exc).__name__
                         log.debug('News fixture membership held league=%s error=%s', league, type(exc).__name__)
-            return league, None
+            return league, None, transient
         with ThreadPoolExecutor(max_workers=3, thread_name_prefix='news-membership') as pool:
-            fresh = {league: entry for league, entry in pool.map(load, DOMESTIC) if entry}
-        # A brief outage preserves still-current evidence, not unlimited stale data.
+            loaded = list(pool.map(load, targets))
+        fresh, failures = {}, []
+        for league, entry, transient in loaded:
+            previous = _RETRY_PENDING.pop(league, None)
+            if entry:
+                fresh[league] = entry
+                continue
+            if transient:
+                attempts = 0 if full else int((previous or {}).get('attempts', 0)) + 1
+                if attempts < MAX_TRANSIENT_RETRIES:
+                    _RETRY_PENDING[league] = {'attempts': attempts,
+                                             'due': tick + RETRY_SECONDS * (2 ** attempts)}
+                failures.append({'league': league, 'error': transient,
+                                 'retry_scheduled': league in _RETRY_PENDING})
+        # A brief outage preserves still-current evidence, never an unlimited stale roster.
         _ENTRIES = {**memberships_for_news(clock), **fresh}
-        result = {'status': 'refreshed', 'leagues': len(_ENTRIES), 'fresh': len(fresh),
+        result = {'status': 'refreshed' if full else 'retried',
+                  'leagues': len(_ENTRIES), 'fresh': len(fresh),
                   'clubs': sum(len(e['clubs']) for e in _ENTRIES.values()),
-                  'fixture_rosters': sum(e.get('source_kind') == 'confirmed_recent_fixture_roster' for e in _ENTRIES.values())}
+                  'fixture_rosters': sum(e.get('source_kind') == 'confirmed_recent_fixture_roster' for e in _ENTRIES.values()),
+                  'fixture_roster_leagues': sorted(k for k, v in _ENTRIES.items()
+                                                  if v.get('source_kind') == 'confirmed_recent_fixture_roster'),
+                  'retry_pending': sorted(_RETRY_PENDING), 'read_failures': failures}
         log.info('News read-only football membership %s', result)
         return result
     finally:

@@ -105,3 +105,7 @@ from .news_football_source_context import HTML_INDEXES as REGIONAL_HTML_INDEXES
 HTML_INDEXES = HTML_INDEXES + REGIONAL_HTML_INDEXES
 SOURCE_DESKS.update({'Gazzetta': ['greece-super-league','greece-super-league-2'],
                      'LAOLA1': ['austria-bundesliga','austria-second-league']})
+
+# Native reports are read from their own visible article header, not navicode.
+from .news_jleague_native import NATIVE_INDEXES
+HTML_INDEXES = HTML_INDEXES + NATIVE_INDEXES

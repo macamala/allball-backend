@@ -130,6 +130,11 @@ def _explicit(text, women=False, youth=False):
                 # former World Cup trophy, or Bari by a hoped-for Serie B return.
                 if re.search(r'(?:return(?:ing)? to|back to|promot\w* to|relegated from|former|defending)\s+(?:the\s+)?$', before):
                     continue
+                # A move 'from Serie A side ...' describes the other club.
+                if (COMPETITIONS.get(key, {}).get('country') not in {None, 'international'}
+                        and re.search(r'\bfrom (?:a |an |the )?$', before)
+                        and re.match(r'\s+(?:side|club|team)\b', after)):
+                    continue
                 if key == 'fifa-world-cup' and re.match(r'\s+(?:champion|roster|squad)', after):
                     continue
                 hits.append((key, alias, match.start(), match.end()))
