@@ -1,0 +1,81 @@
+name: Football News body scope evidence 20261003
+on:
+  push:
+    branches: [audit/news-football-20261003]
+    paths: [.github/workflows/news-football-final-body-proof-20261003.yml]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      DATABASE_URL: 'sqlite:///:memory:'
+      NINKO_SKIP_STARTUP_INDEX: '1'
+      NINKO_SKIP_INTEGRITY_BACKFILL: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: e39f63eeb1d21044ee4cf19764f0fe0012a57cc9
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: pip install -q -r requirements.txt
+      - name: Inspect only the selected public stories
+        run: |
+          mkdir -p body-proof
+          python - <<'PY'
+          import json,pathlib,re
+          from urllib.parse import urljoin,urlsplit
+          from html.parser import HTMLParser
+          from bot.news_feed_http import read_news_feed
+          from bot.extract import _ScopedNewsBody,_json_ld_blocks,_metadata,paragraphs_from_html,article_text_from_html,page_published_at_from_html,page_title_from_html
+          root=pathlib.Path('body-proof')
+          class Anchors(HTMLParser):
+              def __init__(self):super().__init__();self.url=None;self.parts=[];self.links=[]
+              def handle_starttag(self,tag,attrs):
+                  if tag=='a':self.url=dict(attrs).get('href');self.parts=[]
+              def handle_data(self,text):
+                  if self.url:self.parts.append(text)
+              def handle_endtag(self,tag):
+                  if tag=='a' and self.url:self.links.append((self.url,' '.join(self.parts)));self.url=None
+          class ExactBody(_ScopedNewsBody):
+              def handle_starttag(self,tag,attrs):
+                  a=dict(attrs)
+                  if not self.depth and {'content','is-relative'} <= set(a.get('class','').split()):
+                      attrs=[(k,'exact-reviewed-body' if k=='class' else v) for k,v in attrs]
+                  super().handle_starttag(tag,attrs)
+          base='https://www.sportschau.de/fussball/frauen-bundesliga'
+          index=read_news_feed(base).decode('utf-8','replace');links=Anchors();links.feed(index)
+          matches=[(urljoin(base,u),t) for u,t in links.links if 'leverkusen' in (u+' '+t).lower() and 'bremen' in (u+' '+t).lower()]
+          (root/'women-links.json').write_text(json.dumps(matches,ensure_ascii=False,indent=2))
+          for n,(url,title) in enumerate(matches[:2]):
+              if urlsplit(url).hostname!='www.sportschau.de':continue
+              raw=read_news_feed(url).decode('utf-8','replace')
+              metadata=[]
+              for block in _json_ld_blocks(raw):
+                  try:
+                      obj=json.loads(block);metadata.append(obj)
+                  except Exception:pass
+              out={'url':url,'title':page_title_from_html(raw),'stamp':str(page_published_at_from_html(raw)),'body':article_text_from_html(raw),'jsonld':metadata,'category_fragments':re.findall(r'.{0,100}(?:Frauen|frauen|Spielerinnen|spielerinnen|kicker|breadcrumb).{0,150}',raw)[:40]}
+              (root/f'women-article-{n}.json').write_text(json.dumps(out,ensure_ascii=False,indent=2))
+          samples=[
+            ('greece1','https://www.gazzetta.gr/football/superleague/2574013/i-proti-enimerosi-toy-panathinaikoy-gia-libai-poy-entopizetai-problima'),
+            ('greece2','https://www.gazzetta.gr/football/superleague-2/2573985/ael-novibet-programma-fotia-me-tessera-megala-ntermpi'),
+            ('austria2','https://www.laola1.at/de/red/fussball/2--liga/news/nach-umbruch--hertha-wels-zieht-anwaltskanzlei-bei/'),
+          ]
+          for name,url in samples:
+              raw=read_news_feed(url).decode('utf-8','replace')
+              parser=ExactBody('exact-reviewed-body',body_tag='div') if name.startswith('greece') else _ScopedNewsBody('editor-text',body_tag='div')
+              parser.feed(raw);body=paragraphs_from_html(''.join(parser.parts))
+              out={'url':url,'title':page_title_from_html(raw),'stamp':str(page_published_at_from_html(raw)),'body':body,'word_count':len(body.split()),'body_found':parser.finished,'root_attrs':parser.root_attrs,'canonical':_metadata(raw,'canonical') or _metadata(raw,'og:url'),'paywall_indicators':re.findall(r'.{0,55}(?:isAccessibleForFree|paywall|subscriber-only|membership-required).{0,75}',raw,re.I)[:10]}
+              (root/(name+'.json')).write_text(json.dumps(out,ensure_ascii=False,indent=2))
+              print(name,len(body.split()),parser.finished,flush=True)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: football-news-final-body-proof-20261003
+          path: body-proof/
+          retention-days: 7
