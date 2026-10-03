@@ -141,3 +141,63 @@ def test_only_reviewed_regional_article_identity_can_block_the_bare_default(sour
 def test_explicit_brazilian_label_is_not_suppressed_by_the_regional_guard():
     from bot.news_competition_vocabulary import conflicting_regional_serie_alias
     assert not conflicting_regional_serie_alias('brazil-serie-b',REGIONAL_URL,'Brazilian Serie B')
+
+
+@pytest.mark.parametrize('phrase',['NB I-es hazai csapat','Az NB I tabellája','Hungarian NB I'])
+def test_native_hungarian_first_tier_is_not_hidden_by_second_tier_vocabulary(phrase):
+    assert _explicit(_norm(phrase))=='hungary-nb-1'
+    assert competition_in_source('hungary-nb-1',phrase)
+    assert not competition_in_source('hungary-nb-2',phrase)
+
+
+def test_mixed_hungarian_friendly_lead_preserves_headline_club_not_opponents_division(monkeypatch):
+    from bot import news_football_sections as sections
+    from bot.news_football_priority import candidate_football_section
+    monkeypatch.setattr(sections,'_club_section',lambda title,*args:'hungary-nb-1' if 'kisvarda' in title else None)
+    lead='A Kisvárda fogadta az NB II-es Diósgyőrt. Az NB I tabelláján nyolcadik hazai csapat nyert.'
+    assert _explicit(_norm(lead)) is None
+    a=SimpleNamespace(title='Hatgólos meccsen a Kisvárda nyert',summary=lead,content='',published_at='2026-10-02')
+    assert football_news_section(a,today=date(2026,10,3))=='hungary-nb-1'
+    assert candidate_football_section({'title':a.title,'summary':lead,'published_at':a.published_at},SimpleNamespace(sport='football',league='hungary-nb-2'),today=date(2026,10,3))=='hungary-nb-1'
+
+
+@pytest.mark.parametrize('body',[
+    'A felkészülési találkozón a Diósgyőr kétszer is betalált.',
+    'The sides met in a club friendly.',
+    'The two clubs played a friendly match during the break.',
+])
+@pytest.mark.parametrize('known',[True,False])
+def test_a_friendly_opponents_division_cannot_override_headline_club_or_unknown(monkeypatch,body,known):
+    from bot import news_football_sections as sections
+    from bot.news_football_priority import candidate_football_section
+    monkeypatch.setattr(sections,'_club_section',lambda title,*args:'hungary-nb-1' if known and 'kisvarda' in title else None)
+    a=SimpleNamespace(title='Kisvárda wins preparation game',summary='The club hosted NB II side Diósgyőr.',content=body,published_at='2026-10-02')
+    expected='hungary-nb-1' if known else None
+    assert football_news_section(a,today=date(2026,10,3))==expected
+    item={'title':a.title,'summary':a.summary,'_classification_text':body,'published_at':a.published_at}
+    assert candidate_football_section(item,SimpleNamespace(sport='football',league='hungary-nb-2'),today=date(2026,10,3))==expected
+
+
+def test_reported_competitive_and_headline_divisions_still_survive(monkeypatch):
+    from bot import news_football_sections as sections
+    monkeypatch.setattr(sections,'_club_section',lambda *args:'hungary-nb-1')
+    competitive=SimpleNamespace(title='Club prepares for its next match',summary='The club will play its next NB II league fixture.',content='A competitive league match.',published_at='2026-10-02')
+    assert football_news_section(competitive,today=date(2026,10,3))=='hungary-nb-2'
+    explicit=SimpleNamespace(title='NB II club wins a friendly match',summary='',content='A friendly game.',published_at='2026-10-02')
+    assert football_news_section(explicit,today=date(2026,10,3))=='hungary-nb-2'
+
+
+def test_exact_native_friendly_source_and_truncated_rss_lead_remain_in_primary_club_menu(monkeypatch):
+    from bot import news_football_sections as sections
+    from bot.news_football_priority import candidate_football_section
+    monkeypatch.setattr(sections,'_club_section',lambda title,*args:'hungary-nb-1' if 'kisvarda' in title else None)
+    body='A felkészülési találkozón a Diósgyőr kétszer is betalált, de ez kevés volt a Kisvárda ellen.\n\nA háromhetes bajnoki szünetben sem maradt mérkőzés nélkül a Kisvárda, amely pénteken felkészülési találkozón fogadta az NB II-es Diósgyőrt. Az NB I tabelláján nyolcadik helyen álló hazai csapat 4–2-re nyert.\n\nA Kisvárdánál a még nem teljesen egészséges Gyurkó Máté mellett a megbetegedő Szikszai Hennagyij és Babják Miroszlav sem léphetett pályára, Oláh Bálint eltiltása pedig erre a mérkőzésre is vonatkozott – jelezte a Kisvárda.\n\nA hazaiak Marko Matanovics szabadrúgásgóljával szerezték meg a vezetést, majd bő negyedórával később Jasmin Mesanovic pörgetett belsővel a bal alsó sarokba, így kétgólos előnnyel vonulhatott szünetre a Kisvárda.\n\nA fordulásra szinte teljes sort cserélt a hazai csapat, a kezdők közül csak a két legfrissebb szerzemény, Amos Youga és Besim Sebecic maradt a pályán. Az NB II-es Diósgyőr büntetőből szépített, majd a korábban nagy helyzetet hibázó Pascal Okoronkwo is betalált.\n\nA hajrában még egyszer-egyszer megzörrent a háló: a vendégek újabb gólja után Martin Chlumecky fejese alakította ki a 4–2-es végeredményt.\n\nA Diósgyőr nemrég edzőváltáson esett át, Feczkó Tamás irányításával azonban jól kezdett a csapat: előbb a Vidi elleni kupameccset, majd a Gyirmót elleni bajnokit is megnyerte. Ezt a sorozatot „szakította meg” most az NB I nyolcadik helyén álló Kisvárda.\n\nKISVÁRDA. 1. félidő: Papp Zs. – Nagy K., Lippai, Serbecic, Soltész D. – Melnik, Youga – Matanovics, Ch. Herc, Ésik Á. – Mesanovic. 2. félidő: Kovács M. – Osztrovka, Serbecic, Chlumecky, Körmendi – Mbock, Youga (Szőr) – Novothny, Bíró B., T. Balogun – Okoronkwo\n\nDIÓSGYŐR: Gróf (Megyeri G.) – Szekszárdi M. (Tóth B.), Szatmári Cs. (Kecskés Á.), Bárdos (Ádám L.) – Révész M (Sáreczki), Gálfi (Vass L.), Holdampf )Khier Bek), Bokros Sz. (Váradi S.) – Galántai (Kiss L.), Borvető (Nagy M.), Medgyes Z. (Gombás)\n\nGólszerző: Matanovics (1–0) a 15., Mesanovic (2–0) a 33., Borveto (11-esből, 2–1) az 54., Okoronkwo (3–1) a 75., Nagy M. (3–2) a 87., Chlumecky (4–2) a 89. percben'
+    title='Hatgólos meccsen „szakította meg” a Kisvárda Feczkó Tamás sorozatát'
+    # RSS can omit the native source's first paragraph and truncate before
+    # its NBI label. Its opponent descriptor cannot become the event identity.
+    summary='A háromhetes bajnoki szünetben sem maradt mérkőzés nélkül a Kisvárda, amely pénteken felkészülési találkozón fogadta az NB II-es Diósgyőrt.'
+    for lead in [summary,'Az NB II-es Diósgyőr ellen nyert a Kisvárda.']:
+        item={'title':title,'summary':lead,'_classification_text':body,'published_at':'2026-10-02'}
+        before=dict(item)
+        assert candidate_football_section(item,SimpleNamespace(sport='football',league='hungary-nb-2'),today=date(2026,10,3))=='hungary-nb-1'
+        assert item==before

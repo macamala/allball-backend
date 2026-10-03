@@ -34,6 +34,19 @@ def candidate_football_section(item, tags, *, today=None):
     # debt. Actual article writing and publication classification are unchanged.
     from .news_football_sections import _explicit, _norm
     league = getattr(tags, 'league', None)
+    from .news_competition_vocabulary import conflicting_regional_serie_alias
+    if conflicting_regional_serie_alias(league, item.get('url'), source.title + '\n' + lead):
+        return None
+    # A source-body-confirmed friendly must not regain an opponent's domestic
+    # division from a summary after the primary-subject resolver rejected it.
+    friendly_context = re.search(
+        r'\b(?:club friendl(?:y|ies)|friendly (?:match|game)|pre season friendly|'
+        r'felkeszulesi (?:talalkozo\w*|merkozes\w*)|edzomeccs\w*)\b',
+        _norm(source.title + '\n' + lead + '\n' + str(body)[:650]))
+    if friendly_context and not _explicit(_norm(source.title)):
+        from .taxonomy import COMPETITIONS
+        if COMPETITIONS.get(league, {}).get('country') not in {None, 'international'}:
+            return None
     # Reuse primary-subject exclusions, not a context-free fact-token match.
     return league if league and _explicit(_norm(source.title + '\n' + lead)) == league else None
 

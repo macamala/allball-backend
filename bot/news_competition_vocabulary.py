@@ -9,6 +9,7 @@ LITERAL_COMPETITION_ALIASES = {
         'campeonato brasileiro série b', 'brasileirão série b',
         'serie b do campeonato brasileiro', 'serie b do brasileiro', 'campeonato brasileiro serie b',
     ),
+    'hungary-nb-1': ('NB I',),
     'hungary-nb-2': ('NB II',),
 }
 

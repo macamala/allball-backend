@@ -242,7 +242,19 @@ def football_news_section(article, *, today=None):
             return 'uefa-under-21-euro'
         return 'football-youth'
 
-    key = _explicit(title) or _explicit(summary)
+    title_key = _explicit(title)
+    key = title_key or _explicit(summary)
+    # In a club friendly, a division attached to the opponent is not the
+    # competition being played. Prefer only the verified headline club when
+    # the summary supplies a domestic label; an explicit headline stays intact.
+    # The bounded source introduction can DISPROVE a competitive fixture, not
+    # invent a replacement club, league, score or publication permission.
+    friendly_context = bool(re.search(
+        r'\b(?:club friendl(?:y|ies)|friendly (?:match|game)|pre season friendly|'
+        r'felkeszulesi (?:talalkozo\w*|merkozes\w*)|edzomeccs\w*)\b', lead + ' ' + body[:650]))
+    if (not title_key and friendly_context and key
+            and COMPETITIONS.get(key, {}).get('country') not in {None, 'international'}):
+        key = _club_section(title, '', article, False, today)
     if conflicting_regional_serie_alias(key, source.geturl() if source else None, lead):
         key = None
     # A leading Canada-v-Peru fixture cannot inherit CF Montreal's MLS tag
