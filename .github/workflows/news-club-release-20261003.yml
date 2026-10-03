@@ -1,0 +1,137 @@
+name: Football News club coverage release 20261003
+on:
+  push:
+    branches: [audit/news-club-coverage-20261003]
+    paths: [.github/workflows/news-club-release-20261003.yml]
+permissions:
+  contents: write
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      DATABASE_URL: 'sqlite:///:memory:'
+      NINKO_SKIP_STARTUP_INDEX: '1'
+      NINKO_SKIP_INTEGRITY_BACKFILL: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: f8ed8e81a3ba29dbaf3e35b7e2c908c549f49c17
+          path: bundle
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ops/news-free-probe-20260926
+          path: source
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply only reviewed UTF-8 source modules and exact News integration
+        working-directory: source
+        run: |
+          test "$(git rev-parse HEAD)" = '2e1a2d8bf72879953403ec9ff989a17839ba8764'
+          mkdir -p ../club-evidence
+          python - <<'PY'
+          from pathlib import Path
+          import shutil
+          for name in ['news_club_coverage.py','news_official_club_desks.py']:
+              shutil.copyfile('../bundle/audit/'+name,'bot/'+name)
+          for name in ['test_news_club_coverage.py','test_news_official_club_desks.py']:
+              shutil.copyfile('../bundle/audit/'+name,'tests/'+name)
+          def edit(path,old,new):
+              p=Path(path);s=p.read_text();assert s.count(old)==1,(path,s.count(old),old);p.write_text(s.replace(old,new))
+          p=Path('bot/news_football_sources.py');p.write_text(p.read_text()+'''\n# Club desks are discovery inputs, not assumed current league membership.\nfrom .news_official_club_desks import RSS_FEEDS as OFFICIAL_CLUB_RSS\nRSS_FEEDS = RSS_FEEDS + OFFICIAL_CLUB_RSS\n''')
+          edit('bot/news_football_regional_desks.py','_PROFILES = {','from .news_official_club_desks import CLUB_PROFILES\n\n_PROFILES = {\n    **CLUB_PROFILES,')
+          edit('bot/extract.py','    if verified_women_article_category(html, canonical):\n        source_category = WOMEN_CONTEXT','    if verified_women_article_category(html, canonical):\n        source_category = WOMEN_CONTEXT\n    from .news_official_club_desks import explicit_women_club_headline\n    if explicit_women_club_headline(canonical, page_title_from_html(html)):\n        source_category = WOMEN_CONTEXT')
+          edit('bot/news_football_sections.py','femminile|femminili|zenski|zenska|zenske)','femminile|femminili|zenski|zenska|zenske|zfk|жфк|женски|женска|женске)')
+          edit('bot/fetch_sources.py','        queued = _collect_rss_entries(enabled_feeds(), max(per_feed, 20))',"        # Same RSS downloads; inspect additional smaller-club headlines.\n        queued = _collect_rss_entries(enabled_feeds(), max(per_feed,\n            60 if os.getenv('NEWS_FOOTBALL_ONLY') == '1' else 20))")
+          edit('bot/fetch_sources.py','        queued, admission = fair_news_queue(',"        club_coverage = None\n        if os.getenv('NEWS_FOOTBALL_ONLY') == '1':\n            from .news_club_coverage import load_club_coverage\n            club_coverage = load_club_coverage(db)\n        queued, admission = fair_news_queue(")
+          edit('bot/fetch_sources.py','            football_inventory=football_inventory,','            football_inventory=football_inventory,\n            football_club_coverage=club_coverage,')
+          edit('bot/fetch_sources.py','        pending_football = Counter(queue_sections.values())',"""        if club_coverage is not None:
+                      report = club_coverage.report(queued, section=lambda item: queue_sections.get(id(item)))
+                      logger.info('[fetch_sources] club_coverage=%s', {k:v for k,v in report.items() if k != 'rows'})
+                      logger.info('[fetch_sources] club_queue_front=%s', [
+                          {'league': queue_sections.get(id(item)),
+                           'clubs': club_coverage.subjects(item, queue_sections.get(id(item))),
+                           'title': item['title'][:100]} for item in queued[:12]])
+                  pending_football = Counter(queue_sections.values())""")
+          edit('bot/news_policy.py','    football_inventory=None,','    football_inventory=None,\n    football_club_coverage=None,')
+          edit('bot/news_policy.py',"        queues['football'] = deque(spread_football_leagues(","""        if football_club_coverage is not None:
+                      priorities = football_club_coverage.bounded_priorities(
+                          list(queues['football']), priorities,
+                          identity=lambda item: news_source_identity(item.get('url')),
+                          section=lambda item: sections.get(news_source_identity(item.get('url'))))
+                  queues['football'] = deque(spread_football_leagues(""")
+          edit('bot/news_policy.py',"    if prioritize_major_sports:\n        # Editorial priority:","""    if football_club_coverage is not None and 'football' in queues:
+                  queues['football'] = deque(football_club_coverage.balance(
+                      list(queues['football']),
+                      section=lambda item: sections.get(news_source_identity(item.get('url'))),
+                      priority=lambda item: priorities.get(news_source_identity(item.get('url')), 0)))
+              if prioritize_major_sports:
+                  # Editorial priority:""")
+          PY
+      - name: Full News and text regressions with isolated database, no provider keys
+        working-directory: source
+        run: |
+          pip install -q -r requirements.txt
+          python -m pytest -q tests/test_news* tests/test_textutil.py --junitxml=../club-evidence/tests.xml > ../club-evidence/tests.txt 2>&1 || { tail -100 ../club-evidence/tests.txt; exit 1; }
+          tail -5 ../club-evidence/tests.txt
+          python -m compileall -q bot
+          git diff --check
+      - name: Verify visible official club sources without a writer or publication
+        working-directory: source
+        run: |
+          python - <<'PY'
+          import json,pathlib,logging
+          from datetime import datetime,timezone
+          from bot.news_official_club_desks import RSS_FEEDS
+          from bot.news_feed_http import read_news_feed
+          from bot.extract import article_text_from_html,collect_page_image_candidates,page_title_from_html
+          from bot.fetch_sources import _fetch_feed_entries,_pick_reachable_article_image
+          from bot.news_football_source_context import WOMEN_CONTEXT
+          logging.basicConfig(level=logging.WARNING)
+          root=pathlib.Path('../club-evidence');rows=[]
+          paths=[
+            'https://www.fkvojvodina.rs/marija-djurovic-dodjite-na-jedan-mec-zfk-vojvodina-i-vraticete-se-ponovo/',
+            'https://www.fkradnicki.com/dudic-nakon-spektakla-ovakve-utakmice-su-najbolja-promocija-lige/',
+            'https://fkradnickinis.rs/djordje-petrovic-u-mladoj-reprezentaciji/',
+          ]
+          for cfg,url in zip(RSS_FEEDS,paths):
+              raw=read_news_feed(url).decode('utf-8','replace')
+              body=article_text_from_html(raw)
+              photos=[p for p in collect_page_image_candidates(raw) if p.get('source') in {'og','twitter'}]
+              hero=_pick_reachable_article_image(photos,max_checks=2)
+              fresh=_fetch_feed_entries(cfg,60)
+              rows.append({'publisher':cfg['publisher'],'url':url,'title':page_title_from_html(raw),
+                  'visible_words':len(body.split()),'photo_verified':bool(hero),'hero':hero,
+                  'women_qualifier':body.startswith(WOMEN_CONTEXT),'fresh_candidate_count':len(fresh),
+                  'fresh_source_dates':[str(i['published_at']) for i in fresh],'published_by_this_check':0})
+          (root/'official-club-sources.json').write_text(json.dumps(rows,ensure_ascii=False,indent=2))
+          print(json.dumps(rows,ensure_ascii=False,indent=2))
+          assert all(r['visible_words']>100 and r['photo_verified'] for r in rows)
+          assert rows[0]['women_qualifier']
+          PY
+      - name: Persist the tested News-only release and proof of exact changes
+        working-directory: source
+        run: |
+          python - <<'PY'
+          import subprocess,pathlib,json,hashlib
+          allowed={'bot/news_club_coverage.py','bot/news_official_club_desks.py','bot/news_policy.py','bot/fetch_sources.py','bot/extract.py','bot/news_football_regional_desks.py','bot/news_football_sections.py','bot/news_football_sources.py','tests/test_news_club_coverage.py','tests/test_news_official_club_desks.py'}
+          changes=set(subprocess.check_output(['git','diff','--name-only'],text=True).splitlines())|set(subprocess.check_output(['git','ls-files','--others','--exclude-standard'],text=True).splitlines())
+          assert changes==allowed,changes^allowed
+          pathlib.Path('../club-evidence/files.json').write_text(json.dumps({p:hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest() for p in sorted(allowed)},indent=2))
+          subprocess.run(['git','add',*sorted(allowed)],check=True)
+          PY
+          git config user.name 'NinkoSports News validation'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'feat(news): balance football coverage by club and connect reviewed official club desks'
+          git push origin HEAD:refs/heads/audit/news-club-release-20261003
+          git rev-parse HEAD > ../club-evidence/tested-commit.txt
+          git show --stat --oneline HEAD > ../club-evidence/commit.txt
+          git archive --format=tar HEAD > ../club-evidence/backend.tar
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: news-club-release-20261003
+          path: club-evidence/
+          retention-days: 7
