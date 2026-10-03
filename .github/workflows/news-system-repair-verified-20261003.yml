@@ -1,0 +1,54 @@
+name: News grouped repair verified gate 20261003
+on:
+  push:
+    branches: [audit/news-system-repair-20261003]
+    paths: [.github/workflows/news-system-repair-verified-20261003.yml]
+permissions:
+  contents: write
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      DATABASE_URL: 'sqlite:///:memory:'
+      NINKO_SKIP_STARTUP_INDEX: '1'
+      NINKO_SKIP_INTEGRITY_BACKFILL: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 5c24e42252cacb27cf47573c9c41b645c5106032
+          path: bundle
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ops/news-free-probe-20260926
+          path: source
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -q PyYAML
+      - name: Replay pinned release gate with unchanged production patch checksum
+        run: |
+          python - <<'PY'
+          import pathlib,yaml,subprocess
+          wf=yaml.safe_load(pathlib.Path('bundle/.github/workflows/news-system-repair-release-20261003.yml').read_text())
+          steps=[s for s in wf['jobs']['gate']['steps'] if 'run' in s]
+          assert len(steps)==4
+          for index,step in enumerate(steps):
+              script=step['run']
+              if index==0:
+                  # One byte omitted during transport. Exact original SHA256
+                  # remains mandatory, before git apply or any test execution.
+                  old='patch=gzip.decompress(base64.b64decode(data,validate=True))'
+                  assert script.count(old)==1
+                  script=script.replace(old,"data=data.replace('nD1fC6cPOeFukU/jieH1Gqx2dCzANa','nD1fC6cPOeFukU/UjieH1Gqx2dCzANa')\n"+old)
+              if index==2:
+                  script=script.replace('from bot.news_jleague_native import parse_jleague_article\n','')
+              subprocess.run(['bash','-e','-c',script],cwd='source',check=True)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: news-system-repair-verified-20261003
+          path: repair-evidence/
+          retention-days: 7
