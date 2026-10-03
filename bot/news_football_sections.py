@@ -40,8 +40,8 @@ for _row in _CATALOG:
     _ALIASES[_key] = {_norm(a) for a in [*_row['aliases'],
         *COMPETITIONS.get(_key, {}).get('aliases', [])] if a.strip()}
 
-_WOMEN = re.compile(r'\b(?:women|womens|woman|wsl|uwcl|uswnt|lionesses|keira walsh|alexia putellas)\b')
-_YOUTH = re.compile(r'\b(?:u\s?(?:17|18|19|20|21)s?|under (?:17|18|19|20|21)s?|u twenty one|youth team)\b')
+_WOMEN = re.compile(r'\b(?:women|womens|woman|wsl|uwcl|uswnt|lionesses|keira walsh|alexia putellas|frauen|damen|feminin|feminine|feminines|femenina|femeninas|femenino|femeninos|feminino|feminina|femminile|femminili|zenski|zenska|zenske)\b')
+_YOUTH = re.compile(r'\b(?:u\s?(?:16|17|18|19|20|21|23)s?|under (?:16|17|18|19|20|21|23)s?|u twenty one|youth team)\b')
 _NATIONAL = re.compile(r'\b(?:national (?:football )?(?:team|squad)|usmnt|uswnt|international (?:football fixtures|friendly|friendlies|goal)|reprezentacij\w*)\b')
 _COUNTRIES = ('england', 'spain', 'croatia', 'italy', 'france', 'serbia', 'portugal',
               'germany', 'czech republic', 'czechia', 'bulgaria', 'netherlands', 'honduras',
@@ -169,6 +169,16 @@ def football_news_section(article, *, today=None):
     # football European Championship with the senior UEFA competition.
     if re.search(r'\b(?:blind football|amputee football|deaf football|futsal|beach soccer)\b', lead):
         return None
+
+    # A headline/lead identifying a regional national-team event must not
+    # inherit an incidental World Cup/club competition from biography.
+    # This is menu association only: no sporting fact or date is added.
+    regional_national_event = re.search(
+        r'\b(?:asian games|asiad|olympic games|olympic football|olympic soccer|'
+        r'africa cup of nations|african cup of nations|afcon|concacaf gold cup|'
+        r'copa america|afc asian cup|asian cup)\b', lead)
+    if regional_national_event:
+        return 'football-women' if women else 'football-youth' if youth else 'football-national-teams'
 
     if women:
         national_women = bool(_NATIONAL.search(lead))
