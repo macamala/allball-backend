@@ -1,0 +1,102 @@
+name: Football News public club coverage proof 20261003
+on:
+  push:
+    branches: [audit/news-club-coverage-20261003]
+    paths: [.github/workflows/news-club-public-proof-20261003.yml]
+permissions:
+  contents: read
+jobs:
+  coverage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      DATABASE_URL: 'sqlite:///:memory:'
+      NINKO_SKIP_STARTUP_INDEX: '1'
+      NINKO_SKIP_INTEGRITY_BACKFILL: '1'
+      NEWS_FOOTBALL_ONLY: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: c3bb1a871d6e769944545886864e9fc6826e8111
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -q -r requirements.txt
+      - name: Read all public menus and build dated club-level evidence
+        run: |
+          mkdir -p club-public
+          python - <<'PY'
+          import json,pathlib,urllib.request,urllib.parse,logging,time
+          from datetime import datetime,timezone
+          from concurrent.futures import ThreadPoolExecutor
+          from collections import Counter
+          from bot.news_football_memberships import refresh_football_news_memberships,memberships_for_news
+          from bot.news_club_coverage import ClubCoverage
+          from bot.fetch_sources import _collect_rss_entries,_classify_candidate
+          from bot.feeds import enabled_feeds
+          from bot.news_policy import fair_news_queue,news_source_identity
+          from bot.news_football_priority import candidate_football_section
+          logging.basicConfig(level=logging.WARNING)
+          root=pathlib.Path('club-public');base='https://allball-backend-production.up.railway.app'
+          catalog=json.loads(pathlib.Path('bot/news_football_leagues.json').read_text())
+          now=datetime.now(timezone.utc)
+          def get(path):
+              with urllib.request.urlopen(urllib.request.Request(base+path,headers={'User-Agent':'NinkoSports-Club-News-Audit/1.0'}),timeout=25) as r:return json.loads(r.read(8000000))
+          def read(menu):
+              out={'league':menu['league'],'label':menu['label']}
+              try:
+                  rows=get('/articles?'+urllib.parse.urlencode({'sport':'football','league':menu['league'],'limit':100}))
+                  assert isinstance(rows,list)
+                  out['articles']=[{k:r.get(k) for k in ['id','title','summary','slug','sport','league','published_at','created_at','image_url']} for r in rows]
+                  out['wrong_fields']=sum(r.get('sport')!='football' or r.get('league')!=menu['league'] for r in rows)
+                  out['missing_image_url']=sum(not r.get('image_url') for r in rows)
+              except Exception as e:out['error']=type(e).__name__+': '+str(e)[:100]
+              return out
+          with ThreadPoolExecutor(max_workers=3) as pool:menus=list(pool.map(read,catalog))
+          (root/'menus.json').write_text(json.dumps(menus,ensure_ascii=False,indent=2))
+          def recent(a):
+              try:
+                  d=datetime.fromisoformat(a['published_at'].replace('Z','+00:00'))
+                  d=d.replace(tzinfo=timezone.utc) if d.tzinfo is None else d.astimezone(timezone.utc)
+                  return 0<=(now-d).total_seconds()<86400
+              except Exception:return False
+          inventory={r['league']:sum(recent(a) for a in r.get('articles',[])) for r in menus}
+          refresh=refresh_football_news_memberships()
+          rosters=memberships_for_news();coverage=ClubCoverage(rosters,now=now)
+          for menu in menus:
+              for article in menu.get('articles',[]):coverage.observe(article,menu['league'])
+          (root/'rosters.json').write_text(json.dumps(rosters,ensure_ascii=False,indent=2))
+          configs=enabled_feeds()
+          # Same bounded RSS transport as the worker; 60 items from each feed
+          # rather than another family of providers or any AI calls.
+          candidates=_collect_rss_entries(configs,60)
+          tags={id(item):_classify_candidate(item) for item in candidates}
+          classify=lambda item:tags[id(item)]
+          options={'now':now,'max_age_hours':24,'football_inventory':inventory,'allowed_sports':{'football'},'spread_publishers':True}
+          before,rejected=fair_news_queue(candidates,classify,**options)
+          after,_=fair_news_queue(candidates,classify,football_club_coverage=coverage,**options)
+          sections={id(item):candidate_football_section(item,classify(item),today=now.date()) for item in after}
+          section=lambda item:sections.get(id(item))
+          assert Counter(news_source_identity(i['url']) for i in before)==Counter(news_source_identity(i['url']) for i in after)
+          report=coverage.report(after,section=section)
+          (root/'club-coverage.json').write_text(json.dumps(report,ensure_ascii=False,indent=2))
+          def brief(items):
+              return [{'title':i['title'],'url':i['url'],'league':section(i),'clubs':coverage.subjects(i,section(i)),'source_date':str(i['published_at'])} for i in items]
+          (root/'queue-replay.json').write_text(json.dumps({'before':brief(before),'after':brief(after),'rejected':rejected,'database_holds_applied':False,'note':'Source queue replay, not a published-article count or a prediction of writer acceptance.'},ensure_ascii=False,indent=2))
+          league_rows=[]
+          for league in coverage.clubs:
+              rows=[r for r in report['rows'] if r['league']==league]
+              league_rows.append({'league':league,'roster_clubs':len(rows),'with_news_24h':sum(r['articles_24h']>0 for r in rows),'with_news_7d':sum(r['articles_7d']>0 for r in rows),'with_source_candidates':sum(r['candidate_count']>0 for r in rows)})
+          (root/'league-club-summary.json').write_text(json.dumps(league_rows,ensure_ascii=False,indent=2))
+          summary={'checked_at':datetime.now(timezone.utc).isoformat(),'publication_snapshot_at':now.isoformat(),'menus':len(menus),'populated_menus':sum(bool(m.get('articles')) for m in menus),'fresh_menus':sum(v>0 for v in inventory.values()),'empty_menus':[m['league'] for m in menus if m.get('articles')==[]],'public_errors':[m for m in menus if m.get('error')],'wrong_fields':sum(m.get('wrong_fields',0) for m in menus),'missing_image_urls_in_sample':sum(m.get('missing_image_url',0) for m in menus),'clubs':{k:v for k,v in report.items() if k!='rows'},'membership_refresh':refresh,'rss_sources':len(configs),'rss_candidates':len(candidates),'admitted_candidate_replay':len(after),'AI_requests':0,'sports_writes':0,'news_writes':0,'all_clubs_populated':False,'all_football_news_complete':False}
+          (root/'summary.json').write_text(json.dumps(summary,indent=2));print(json.dumps(summary,indent=2))
+          assert len(menus)==86 and not summary['public_errors'] and not summary['wrong_fields']
+          assert report['roster_leagues']>=45 and report['roster_clubs']>=750
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: news-club-public-proof-20261003
+          path: club-public/
+          retention-days: 7
