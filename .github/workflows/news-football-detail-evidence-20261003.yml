@@ -1,0 +1,45 @@
+name: Football News detail evidence 20261003
+on:
+  push:
+    branches: [audit/news-football-20261003]
+    paths: [.github/workflows/news-football-detail-evidence-20261003.yml]
+permissions:
+  contents: read
+jobs:
+  read:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Bounded public article and competition reads
+        run: |
+          mkdir -p detail-evidence
+          python - <<'PY'
+          import json,pathlib,urllib.request,urllib.parse
+          from datetime import datetime,timezone,timedelta
+          from concurrent.futures import ThreadPoolExecutor
+          root=pathlib.Path('detail-evidence');base='https://allball-backend-production.up.railway.app'
+          def get(path):
+              try:
+                  with urllib.request.urlopen(urllib.request.Request(base+path,headers={'User-Agent':'NinkoSports-News-ReadAudit/1.0'}),timeout=20) as response:return json.loads(response.read(5000000))
+              except Exception as e:return {'error':type(e).__name__+': '+str(e)[:100]}
+          (root/'competitions.json').write_text(json.dumps(get('/sports-data/competitions?sport=football'),ensure_ascii=False))
+          recent=get('/articles?sport=football&limit=100');(root/'recent.json').write_text(json.dumps(recent,ensure_ascii=False))
+          slugs=['uefa-to-assess-real-madrid-documents-in-barcelona-football-case','real-madrid-urges-uefa-to-expedite-negreira-investigation','bayer-leverkusen-overcomes-two-goal-deficit-to-defeat-werder-bremen-in-football']
+          def story(slug):return slug,get('/articles/'+slug)
+          with ThreadPoolExecutor(max_workers=2) as pool:stories=dict(pool.map(story,slugs))
+          (root/'articles.json').write_text(json.dumps(stories,ensure_ascii=False))
+          keys=['football-mex-liga-de-expansion-mx-apertura','football-women-s-champions-league','football-usa-usl-championship','football-usl-championship','england-championship','spain-la-liga-2','serbia-prva-liga','japan-j1','uefa-womens-champions-league']
+          now=datetime.now(timezone.utc)
+          def data(key):
+              query=urllib.parse.urlencode({'sport':'football','competition':key,'date_from':(now-timedelta(days=60)).date().isoformat(),'date_to':(now+timedelta(days=90)).date().isoformat()})
+              out={'hub':get('/sports-data/competitions/'+key+'/hub'),'table':get('/sports-data/standings?league='+key),'records':get('/sports-data/events?'+query)}
+              (root/(key+'.json')).write_text(json.dumps(out,ensure_ascii=False))
+          with ThreadPoolExecutor(max_workers=2) as pool:list(pool.map(data,keys))
+          (root/'checked.json').write_text(json.dumps({'at':datetime.now(timezone.utc).isoformat(),'writes':0,'AI_requests':0}))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: football-news-detail-evidence-20261003
+          path: detail-evidence/
+          retention-days: 7
