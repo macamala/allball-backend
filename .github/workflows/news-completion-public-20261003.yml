@@ -1,0 +1,117 @@
+name: Football News completion public verification 20261003
+on:
+  push:
+    branches: [audit/news-throughput-20261003]
+    paths: [.github/workflows/news-completion-public-20261003.yml]
+permissions:
+  contents: read
+jobs:
+  public:
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 8f474371ac8001ecfeb0438f5020f79312f19339
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Read every football menu and actual new article content
+        run: |
+          mkdir -p public-proof
+          cat > /tmp/news_public_check.py <<'PY'
+          import json,pathlib,urllib.request,urllib.parse,re
+          from datetime import datetime,timezone
+          from concurrent.futures import ThreadPoolExecutor
+          root=pathlib.Path('public-proof');base='https://allball-backend-production.up.railway.app'
+          def get(path):
+              request=urllib.request.Request(base+path,headers={'User-Agent':'NinkoSports-News-Public-ReadAudit/1.0'})
+              with urllib.request.urlopen(request,timeout=20) as response:return json.loads(response.read(4000000))
+          now=datetime.now(timezone.utc)
+          def date(value):
+              d=datetime.fromisoformat(str(value).replace('Z','+00:00'))
+              return d.replace(tzinfo=timezone.utc) if d.tzinfo is None else d.astimezone(timezone.utc)
+          catalog=json.loads(pathlib.Path('bot/news_football_leagues.json').read_text())
+          def read(menu):
+              result={'league':menu['league'],'label':menu['label']}
+              try:
+                  rows=get('/articles?'+urllib.parse.urlencode({'sport':'football','league':menu['league'],'limit':3}))
+                  assert isinstance(rows,list)
+                  result['articles']=[{k:a.get(k) for k in ['id','slug','title','league','sport','published_at','created_at','image_url']} for a in rows]
+                  result['fresh_count']=sum(0<=(now-date(a['published_at'])).total_seconds()<86400 for a in rows)
+                  result['wrong_scope']=sum(a.get('sport')!='football' or a.get('league')!=menu['league'] for a in rows)
+                  result['missing_image_url']=sum(not a.get('image_url') for a in rows)
+              except Exception as exc:result['error']=type(exc).__name__+': '+str(exc)[:150]
+              return result
+          with ThreadPoolExecutor(max_workers=3) as pool:menus=list(pool.map(read,catalog))
+          (root/'menus.json').write_text(json.dumps(menus,ensure_ascii=False,indent=2))
+          summary={'checked_at':datetime.now(timezone.utc).isoformat(),'menus':len(menus),
+              'populated':sum(bool(m.get('articles')) for m in menus),'fresh_menus':sum(m.get('fresh_count',0)>0 for m in menus),
+              'empty':[m['league'] for m in menus if m.get('articles')==[]],
+              'wrong_scope_fields':sum(m.get('wrong_scope',0) for m in menus),'missing_image_urls':sum(m.get('missing_image_url',0) for m in menus),
+              'errors':[m for m in menus if m.get('error')],'source_commit':'8f474371ac8001ecfeb0438f5020f79312f19339',
+              'AI_requests':0,'sports_write_requests':0,'all_football_news_complete':False}
+          summary['target_menus']=[m for m in menus if m['league'] in ['england-championship','japan-j1-league','japan-j2-league','austria-second-league','greece-super-league','serbia-superliga']]
+          (root/'coverage-summary.json').write_text(json.dumps(summary,ensure_ascii=False,indent=2));print(json.dumps(summary,ensure_ascii=False,indent=2))
+          article=get('/articles/raphinha-named-septembers-la-liga-football-player-of-the-month')
+          ref={k:article.get(k) for k in ['id','slug','title','league','sport','published_at','created_at','image_url','content']}
+          body=' '.join((article.get('content') or '').split())
+          paragraphs=[p.strip() for p in re.split(r'\n\s*\n',article.get('content') or '') if p.strip()]
+          ref.update(body_text=body,body_words=len(body.split()),paragraph_endings=[p[-3:] for p in paragraphs],all_paragraphs_have_terminal_punctuation=all(re.search(r'[.!?]["”’\)\]]?$',p) for p in paragraphs))
+          (root/'reader-reference.json').write_text(json.dumps(ref,ensure_ascii=False,indent=2));print('Reader:',ref['id'],'words',ref['body_words'],'terminal punctuation',ref['all_paragraphs_have_terminal_punctuation'])
+          assert len(menus)==86 and not summary['errors'] and not summary['wrong_scope_fields']
+          assert ref['id']==22740 and ref['league']=='spain-la-liga' and ref['sport']=='football'
+          assert body and ref['image_url']
+          assert ref['all_paragraphs_have_terminal_punctuation']
+          PY
+          python /tmp/news_public_check.py
+      - run: pip install -q playwright && python -m playwright install --with-deps chromium
+      - name: Real desktop and mobile article rendering, with no intercepted API data
+        run: |
+          python - <<'PY'
+          import json,pathlib
+          from playwright.sync_api import sync_playwright
+          root=pathlib.Path('public-proof');ref=json.loads((root/'reader-reference.json').read_text());checks=[];failures=[]
+          with sync_playwright() as p:
+              browser=p.chromium.launch()
+              for width in [1440,390,320]:
+                  page=browser.new_page(viewport={'width':width,'height':900},timezone_id='Australia/Sydney')
+                  errors=[];writes=[]
+                  page.on('pageerror',lambda exc:errors.append(str(exc)))
+                  page.on('request',lambda request:writes.append(request.url) if '/sports-data/' in request.url and request.method not in {'GET','HEAD','OPTIONS'} else None)
+                  row={'width':width,'article_id':ref['id']}
+                  try:
+                      page.goto('https://ninkosports.com/article/'+ref['slug'],wait_until='domcontentloaded',timeout=45000)
+                      page.wait_for_function("title=>document.querySelector('.article-page h1')?.textContent.trim()===title",arg=ref['title'],timeout=25000)
+                      page.wait_for_function("body=>[...document.querySelectorAll('.article-page .article-body')].some(el=>el.innerText.replace(/\\s+/g,' ').includes(body))",arg=ref['body_text'],timeout=25000)
+                      hero=page.locator('.article-page img').first;hero.wait_for();hero.scroll_into_view_if_needed()
+                      page.wait_for_function("()=>{const i=document.querySelector('.article-page img');return i&&i.complete&&i.naturalWidth>=200}",timeout=25000)
+                      row['image']=hero.evaluate('(i)=>({url:i.currentSrc,width:i.naturalWidth,height:i.naturalHeight})')
+                      row['words']=max(len(text.split()) for text in page.locator('.article-page .article-body').all_inner_texts())
+                      row['dimensions']=page.evaluate('({body:document.documentElement.scrollWidth,viewport:innerWidth})')
+                      assert ref['image_url'] in row['image']['url']
+                      assert row['words']>=ref['body_words']
+                      assert row['dimensions']['body']<=width+3,row['dimensions']
+                      assert not errors and not writes,(errors,writes)
+                      row['passed']=True;page.screenshot(path=str(root/f'article-{width}.png'),full_page=True)
+                  except Exception as exc:
+                      row['error']=str(exc)[:600];failures.append(row)
+                      try:page.screenshot(path=str(root/f'error-{width}.png'),full_page=True)
+                      except Exception:pass
+                  checks.append(row);page.close()
+              browser.close()
+          summary={'checks':checks,'failures':failures,'mocked_requests':False,'actual_public_origin':True}
+          (root/'browser-summary.json').write_text(json.dumps(summary,indent=2));print(json.dumps(summary,indent=2));assert not failures,failures
+          PY
+      - name: Re-read public coverage after browser checks
+        if: always()
+        run: |
+          if [ -f public-proof/coverage-summary.json ]; then cp public-proof/coverage-summary.json public-proof/coverage-before-browser.json; fi
+          python /tmp/news_public_check.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: news-completion-public-20261003
+          path: public-proof/
+          retention-days: 7
