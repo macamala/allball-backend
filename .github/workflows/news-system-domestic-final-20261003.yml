@@ -1,0 +1,97 @@
+name: Football News complete domestic release gate 20261003
+on:
+  push:
+    branches: [audit/news-system-20261003]
+    paths: [.github/workflows/news-system-domestic-final-20261003.yml]
+permissions:
+  contents: write
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DATABASE_URL: 'sqlite:///:memory:'
+      NINKO_SKIP_STARTUP_INDEX: '1'
+      NINKO_SKIP_INTEGRITY_BACKFILL: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: e722701ec2e8f0ee4b7c2ead7deba69a28523033
+          path: bundle
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 494e7f81b51cb664165a5e104cbc805e4ab5a04e
+          path: source
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -q PyYAML
+      - name: Apply exact first-tier vocabulary and primary-subject regression
+        working-directory: source
+        run: |
+          mkdir -p ../system-evidence
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib
+          p=Path('bot/news_competition_vocabulary.py');s=p.read_text();old="    'hungary-nb-2': ('NB II',),";assert s.count(old)==1
+          p.write_text(s.replace(old,"    'hungary-nb-1': ('NB I',),\n"+old))
+          p=Path('tests/test_news_domestic_category_discovery.py');s=p.read_text();s+='''
+
+          @pytest.mark.parametrize('phrase',['NB I-es hazai csapat','Az NB I tabellája','Hungarian NB I'])
+          def test_native_hungarian_first_tier_is_not_hidden_by_second_tier_vocabulary(phrase):
+              assert _explicit(_norm(phrase))=='hungary-nb-1'
+              assert competition_in_source('hungary-nb-1',phrase)
+              assert not competition_in_source('hungary-nb-2',phrase)
+
+
+          def test_mixed_hungarian_friendly_lead_preserves_headline_club_not_opponents_division(monkeypatch):
+              from bot import news_football_sections as sections
+              from bot.news_football_priority import candidate_football_section
+              monkeypatch.setattr(sections,'_club_section',lambda title,*args:'hungary-nb-1' if 'kisvarda' in title else None)
+              lead='A Kisvárda fogadta az NB II-es Diósgyőrt. Az NB I tabelláján nyolcadik hazai csapat nyert.'
+              assert _explicit(_norm(lead)) is None
+              a=SimpleNamespace(title='Hatgólos meccsen a Kisvárda nyert',summary=lead,content='',published_at='2026-10-02')
+              assert football_news_section(a,today=date(2026,10,3))=='hungary-nb-1'
+              assert candidate_football_section({'title':a.title,'summary':lead,'published_at':a.published_at},SimpleNamespace(sport='football',league='hungary-nb-2'),today=date(2026,10,3))=='hungary-nb-1'
+          ''';p.write_text(s)
+          expected={'bot/news_competition_vocabulary.py':'a662ae984e8d789f0048f300bd64f82632c87529bafbd22d198535a5fb04b5c3','tests/test_news_domestic_category_discovery.py':'2d61f79cda7b24cbd5ac7645c24d8237452950436ef437415e89a8126bb14cb0'}
+          for f,sha in expected.items():assert hashlib.sha256(Path(f).read_bytes()).hexdigest()==sha,f
+          PY
+      - name: Full News regressions and live public-source replay
+        run: |
+          python - <<'PY'
+          import pathlib,subprocess,yaml
+          w=yaml.safe_load(pathlib.Path('bundle/.github/workflows/news-system-release-20261003.yml').read_text())
+          steps=[s for s in w['jobs']['gate']['steps'] if 'run' in s]
+          for index in (1,2,3):
+              script=steps[index]['run']
+              if index==2:
+                  old="if out['id']=='brazil-serie-b-category':assert menu!='italy-serie-b',row"
+                  new="if out['id']=='brazil-serie-b-category':assert menu!='italy-serie-b',row\n            if item['title']=='Hatgólos meccsen „szakította meg” a Kisvárda Feczkó Tamás sorozatát':assert menu!='hungary-nb-2',row"
+                  assert script.count(old)==1;script=script.replace(old,new)
+              subprocess.run(['bash','-e','-c',script],cwd='source',check=True)
+          PY
+      - name: Preserve only the tested final correction and combined hashes
+        working-directory: source
+        run: |
+          python - <<'PY'
+          import subprocess,pathlib,json,hashlib
+          allowed=['bot/news_competition_vocabulary.py','tests/test_news_domestic_category_discovery.py']
+          assert set(subprocess.check_output(['git','diff','--name-only'],text=True).splitlines())==set(allowed)
+          subprocess.run(['git','add',*allowed],check=True)
+          files=subprocess.check_output(['git','show','--pretty=format:','--name-only','HEAD'],text=True).splitlines()
+          pathlib.Path('../system-evidence/files.json').write_text(json.dumps({f:hashlib.sha256(pathlib.Path(f).read_bytes()).hexdigest() for f in files if f},indent=2))
+          PY
+          git config user.name 'NinkoSports News validation'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix(news): preserve primary club when both Hungarian divisions appear in a friendly report'
+          git push origin HEAD:refs/heads/audit/news-system-release-20261003
+          git rev-parse HEAD > ../system-evidence/tested-commit.txt
+          git show --stat --oneline HEAD > ../system-evidence/commit.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: news-system-domestic-final-20261003
+          path: system-evidence/
+          retention-days: 7
