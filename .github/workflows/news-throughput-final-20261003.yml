@@ -1,0 +1,138 @@
+name: News throughput final gate 20261003
+on:
+  push:
+    branches: [audit/news-throughput-20261003]
+    paths: [.github/workflows/news-throughput-final-20261003.yml]
+permissions:
+  contents: write
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      DATABASE_URL: 'sqlite:///:memory:'
+      NINKO_SKIP_STARTUP_INDEX: '1'
+      NINKO_SKIP_INTEGRITY_BACKFILL: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 5370353d3c36005e9ca6cf4bda9acbbc9eb2d897
+          path: bundle
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 8a541d8f7f32d7241a5ecff4a862af86e1b05ea0
+          path: source
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: pip install -q PyYAML
+      - name: Apply pinned reproduced fixes and additional queue regressions
+        run: |
+          python - <<'PY'
+          import pathlib,subprocess,yaml
+          workflow=yaml.safe_load(pathlib.Path('bundle/.github/workflows/news-throughput-release-20261003.yml').read_text())
+          steps=[s for s in workflow['jobs']['gate']['steps'] if 'run' in s]
+          assert len(steps)==5
+          for step in steps[:3]:subprocess.run(['bash','-e','-c',step['run']],cwd='source',check=True)
+          p=pathlib.Path('source/bot/news_football_regional_desks.py');s=p.read_text()
+          old="        classes = values.get('class', '').split()";assert s.count(old)==1
+          p.write_text(s.replace(old,"        classes = str(values.get('class') or '').split()"))
+          pathlib.Path('source/tests/test_news_candidate_lead_regressions.py').write_text('''from types import SimpleNamespace
+          from datetime import date
+          import pytest
+          from bot.news_football_priority import candidate_football_section
+          from bot.news_policy import non_article_news_reason
+          from bot import news_football_sections as sections
+
+          @pytest.mark.parametrize('title',[
+              'Watford missed a midfield addition: Opinion',
+              'Opinion: Watford missed a midfield addition',
+              'Watford missed a midfield addition | OPINION',
+              'Watford missed a midfield addition — Opinion',
+              'Watford missed a midfield addition - Opinion',
+          ])
+          def test_labelled_opinion_is_not_original_news_input(title):
+              assert non_article_news_reason({'title':title})=='non_article_analysis'
+
+          @pytest.mark.parametrize('title',[
+              'Doctor gives second opinion after winger injury',
+              'Club confirms its position after public opinion survey',
+              'Coach says players are entitled to an opinion',
+          ])
+          def test_ordinary_reporting_can_mention_an_opinion(title):
+              assert non_article_news_reason({'title':title}) is None
+
+          def test_full_rss_body_is_not_promoted_to_a_source_lead(monkeypatch):
+              seen=[]
+              monkeypatch.setattr(sections,'football_news_section',lambda article,**kwargs:seen.append(article) or 'england-championship')
+              lead='The club confirmed its new signing following the completed agreement.'
+              body=lead+'\\n\\n'+'He previously played in the 2. Bundesliga. '*15
+              item={'title':'Blackburn Rovers confirm signing','summary':body,'_extracted':body,'_source_body_origin':'verified-full-rss','published_at':'2026-10-03','url':'https://the72.co.uk/2026/10/03/example/'}
+              before=dict(item)
+              assert candidate_football_section(item,SimpleNamespace(sport='football',league='germany-2-bundesliga'))=='england-championship'
+              assert seen[0].summary==lead and seen[0].content==body
+              assert item==before
+
+          def test_old_club_league_in_rss_tail_does_not_steal_headline_club_queue(monkeypatch):
+              monkeypatch.setattr(sections,'_club_section',lambda title,*args:'england-championship' if 'blackburn rovers' in title else None)
+              body='The winger completed his move and will train with the current squad.\\n\\nHe previously played in the 2. Bundesliga.'
+              item={'title':'Blackburn Rovers confirm signing','summary':body,'_extracted':body,'published_at':'2026-10-03'}
+              assert candidate_football_section(item,SimpleNamespace(sport='football',league='germany-2-bundesliga'),today=date(2026,10,3))=='england-championship'
+
+          def test_unsupported_classifier_hint_does_not_invent_competition_debt(monkeypatch):
+              monkeypatch.setattr(sections,'football_news_section',lambda *args,**kwargs:None)
+              item={'title':'Club confirms preparations','summary':'The current squad will train together.\\n\\nHistorical reference to the 2. Bundesliga.'}
+              assert candidate_football_section(item,SimpleNamespace(sport='football',league='germany-2-bundesliga')) is None
+
+          def test_explicit_current_lead_competition_survives(monkeypatch):
+              monkeypatch.setattr(sections,'football_news_section',lambda *args,**kwargs:None)
+              item={'title':'Club confirms preparations','summary':'The team prepares for its UEFA Champions League match.'}
+              assert candidate_football_section(item,SimpleNamespace(sport='football',league='uefa-champions-league'))=='uefa-champions-league'
+
+          @pytest.mark.parametrize('body',[
+              'This is a complete first sentence. '+'More available source detail '*50,
+              'A very long source statement '*60,
+          ])
+          def test_overlong_unseparated_summary_does_not_cut_a_competition_qualifier(monkeypatch,body):
+              seen=[];monkeypatch.setattr(sections,'football_news_section',lambda a,**kwargs:seen.append(a) or 'football-international')
+              candidate_football_section({'title':'Club update','summary':body,'_extracted':body},SimpleNamespace(sport='football',league=None))
+              assert seen[0].summary in {'','This is a complete first sentence.'}
+              assert seen[0].content==body
+
+          def test_nonfootball_candidates_never_enter_football_queue():
+              assert candidate_football_section({'title':'UEFA Champions League'},SimpleNamespace(sport='basketball',league='uefa-champions-league')) is None
+          ''')
+          subprocess.run(['bash','-c','python -m pytest -q tests/test_news_candidate_lead_regressions.py --junitxml=throughput-release/queue-before.xml > throughput-release/queue-before.txt 2>&1'],cwd='source')
+          def edit(path,old,new):
+              p=pathlib.Path('source')/path;s=p.read_text();assert s.count(old)==1,(path,s.count(old));p.write_text(s.replace(old,new))
+          edit('bot/news_football_priority.py',"    source = SimpleNamespace(title=item.get('title') or '',",'''    # RSS may contain the full post. Only its first complete paragraph is
+              # a lead; historical references in later paragraphs are not the event.
+              lead = re.split(r'\\n\\s*\\n', str(item.get('summary') or body).strip(), maxsplit=1)[0]
+              if len(lead) > 650:
+                  sentence = re.split(r'(?<=[.!?])\\s+', lead, maxsplit=1)[0]
+                  lead = sentence if len(sentence) <= 650 else ''
+              source = SimpleNamespace(title=item.get('title') or '', ''')
+          edit('bot/news_football_priority.py',"summary=item.get('summary') or str(body)[:500], content=body,","summary=lead, content=body,")
+          edit('bot/news_football_priority.py',"    return football_news_section(source, today=today) or getattr(tags, 'league', None)",'''    key = football_news_section(source, today=today)
+              if key:
+                  return key
+              # A full-body classifier hint alone must not invent missing-league
+              # debt. Actual article writing and publication classification are unchanged.
+              from .news_fact_guard import competition_in_source
+              league = getattr(tags, 'league', None)
+              return league if league and competition_in_source(league, source.title + '\\n' + lead) else None''')
+          edit('bot/news_policy.py',"    if re.match(r'\\s*analysis\\s*:', title):", "    if (re.match(r'\\s*(?:analysis|opinion)\\s*:', title)\n            or re.search(r'(?:[:|–—]|\\s-\\s)\\s*opinion\\s*$', title)):")
+          subprocess.run(['bash','-e','-c',steps[3]['run']],cwd='source',check=True)
+          save=steps[4]['run']
+          save=save.replace("'tests/test_news_throughput_regressions.py'}", "'tests/test_news_throughput_regressions.py','tests/test_news_candidate_lead_regressions.py','bot/news_football_regional_desks.py','bot/news_football_priority.py','bot/news_policy.py'}")
+          save=save.replace("allowed-{'tests/test_news_throughput_regressions.py'}", "{p for p in allowed if not p.startswith('tests/')}")
+          save=save.replace('preserve complete article text and accept exact confederation casing','preserve complete source text and prevent false acronym and editorial queue rejections')
+          subprocess.run(['bash','-e','-c',save],cwd='source',check=True)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: news-throughput-final-20261003
+          path: source/throughput-release/
+          retention-days: 7
