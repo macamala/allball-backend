@@ -15,6 +15,7 @@ from .quality import is_substantial_source
 from .site_chrome import is_site_chrome_text, strip_site_chrome
 from .textutil import clean_text, word_count
 from .feeds import news_source_is_excluded
+from .news_football_regional_desks import regional_article_profile, regional_hero_scope
 
 logger = logging.getLogger(__name__)
 
@@ -353,6 +354,8 @@ def collect_page_image_candidates(html: str) -> List[dict]:
     # Yonhap uses <article> for unrelated recommendation cards too. Limit
     # body images to its actual story container; metadata remains same-page.
     canonical = _og(html or '', 'og:url') or _metadata(html or '', 'canonical') or ''
+    if regional_hero_scope(canonical):
+        return [row for row in candidates if row.get('source') in {'og', 'twitter'}]
     if urlsplit(canonical).hostname in {'www.index.hr', 'index.hr', 'nb1.hu', 'www.nb1.hu', 'www.goal.pl', 'goal.pl'}:
         # Their related cards sit inside the article/main tree. Only this
         # page's explicit social hero may be used, never a neighbouring card.
@@ -684,6 +687,14 @@ def article_text_from_html(html: str) -> str:
     # Verified regional football article containers. These publishers place
     # unrelated recommendations inside <main>; never use that whole page.
     extra_chrome_classes = ()
+    regional = regional_article_profile(html, canonical)
+    if regional:
+        if regional.get('blocked'):
+            return ''
+        body_class = regional.get('body_class')
+        body_id = regional.get('body_id')
+        body_tag = regional.get('body_tag')
+        extra_chrome_classes = regional.get('extra_chrome_classes', ())
     if publisher_host in {'www.index.hr', 'index.hr'}:
         body_class, body_tag = 'text', 'section'
         extra_chrome_classes = ('js-slot-container',)

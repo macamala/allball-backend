@@ -421,7 +421,10 @@ def _fetch_feed_entries(feed_cfg: Dict, max_articles: int) -> List[Dict]:
         )
 
     items = []
+    from .news_football_regional_desks import excluded_feed_entry
     for entry in entries[:100]:
+        if excluded_feed_entry(feed_cfg, entry):
+            continue
         title = strip_truncation_markers(clean_text(entry.get("title") or ""))
         raw_summary = entry.get("summary") or entry.get("description") or ""
         feed_content = entry.get("content") or []

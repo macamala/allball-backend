@@ -159,6 +159,8 @@ def canonical_news_url(value):
 
 
 _SOURCE_PATH_SPORTS = (
+    ("gong.bg", "/football-sviat/", "football"),
+    ("gong.bg", "/bg-football/", "football"),
     ("www.mlssoccer.com", "/news/", "football"),
     ("eredivisie.nl", "/nieuws/", "football"),
     ("www.bundesliga.com", "/de/bundesliga/news/", "football"),

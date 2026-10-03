@@ -95,3 +95,8 @@ SOURCE_DESKS.update({
     'Goal.pl': ['poland-ekstraklasa','poland-first-league'],
     'The72': ['england-championship','england-league-one','england-league-two'],
 })
+
+# Reviewed regional desks join the existing RSS intake, never a second writer.
+from .news_football_regional_desks import RSS_FEEDS as REGIONAL_RSS, SOURCE_DESKS as REGIONAL_DESKS
+RSS_FEEDS = RSS_FEEDS + REGIONAL_RSS
+SOURCE_DESKS = {**SOURCE_DESKS, **REGIONAL_DESKS}
