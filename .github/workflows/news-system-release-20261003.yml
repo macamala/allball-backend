@@ -1,0 +1,151 @@
+name: Football News combined system release 20261003
+on:
+  push:
+    branches: [audit/news-system-20261003]
+    paths: [.github/workflows/news-system-release-20261003.yml]
+permissions:
+  contents: write
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      DATABASE_URL: 'sqlite:///:memory:'
+      NINKO_SKIP_STARTUP_INDEX: '1'
+      NINKO_SKIP_INTEGRITY_BACKFILL: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: bundle
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: f22e5b603317a12839e123e62b487dbee740fbd5
+          path: source
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify exact tested patch and strict News file boundary
+        working-directory: source
+        run: |
+          mkdir -p ../system-evidence
+          python - <<'PY'
+          import pathlib,base64,gzip,hashlib,json,subprocess
+          root=pathlib.Path('../system-evidence')
+          text=''.join(pathlib.Path(f'../bundle/audit/news-system-release-20261003.part{i}.b64').read_text().strip() for i in range(4))
+          patch=gzip.decompress(base64.b64decode(text,validate=True))
+          assert hashlib.sha256(patch).hexdigest()=='576f4c273cb725a15d6bb3a5f67e36afa2d11a7ac91fefa554ba2f0d8bd47aee'
+          path=root/'reviewed.patch';path.write_bytes(patch)
+          subprocess.run(['git','apply','--check',str(path)],check=True)
+          subprocess.run(['git','apply',str(path)],check=True)
+          allowed={'bot/dedupe.py','bot/fetch_sources.py','bot/news_competition_scope.py','bot/news_competition_vocabulary.py','bot/news_domestic_categories.py','bot/news_fact_guard.py','bot/news_football_capacity.py','bot/news_football_sections.py','bot/news_football_sources.py','bot/news_football_subjects.py','bot/news_openai.py','bot/news_policy.py','bot/news_report_similarity.py','bot/rewrite_ai.py','public_index.py','tests/test_news_domestic_category_discovery.py','tests/test_news_draw_report_identity.py','tests/test_news_football_sources_20261002.py','tests/test_news_national_fixture_subject.py','tests/test_news_paid_coverage_reservation.py','tests/test_news_regional_sources.py','tests/test_news_source_acronym_contract.py'}
+          changed=set(subprocess.check_output(['git','diff','--name-only'],text=True).splitlines())|set(subprocess.check_output(['git','ls-files','--others','--exclude-standard'],text=True).splitlines())
+          assert changed==allowed,changed^allowed
+          (root/'files.json').write_text(json.dumps({f:hashlib.sha256(pathlib.Path(f).read_bytes()).hexdigest() for f in sorted(allowed)},indent=2))
+          PY
+      - name: Full News text and deduplication regressions
+        working-directory: source
+        run: |
+          pip install -q -r requirements.txt
+          python -m pytest -q tests/test_news* tests/test_textutil* tests/test_dedupe* --junitxml=../system-evidence/tests.xml > ../system-evidence/tests.txt 2>&1 || { tail -100 ../system-evidence/tests.txt; exit 1; }
+          tail -5 ../system-evidence/tests.txt
+          python -m compileall -q bot public_index.py
+      - name: Actual domestic source admission without model calls or publication
+        working-directory: source
+        run: |
+          python - <<'PY'
+          import json,pathlib,logging
+          from datetime import datetime,timezone
+          from concurrent.futures import ThreadPoolExecutor
+          from collections import defaultdict
+          from urllib.parse import urlsplit
+          from bot.news_domestic_categories import HTML_INDEXES,RSS_FEEDS
+          from bot.news_official_indexes import _hydrate_source
+          from bot.fetch_sources import _fetch_feed_entries,_classify_item,_pick_reachable_article_image
+          from bot.extract import extract_from_url,extract_image_candidates_from_url
+          from bot.news_football_memberships import refresh_football_news_memberships
+          from bot.news_football_priority import candidate_football_section
+          from bot.news_policy import non_article_news_reason
+          from bot.quality import quality_check
+          logging.basicConfig(level=logging.WARNING)
+          root=pathlib.Path('../system-evidence');membership=refresh_football_news_memberships()
+          def probe(pair):
+              kind,cfg=pair;out={'kind':kind,'id':cfg.get('id',cfg['publisher']),'url':cfg['url'],'items':[]}
+              try:
+                  items=_fetch_feed_entries(cfg,4) if kind=='rss' else _hydrate_source(cfg,3)
+                  for item in items:
+                      body=item.get('_extracted') or extract_from_url(item['url'])[0]
+                      tags=_classify_item(item,body or '')
+                      menu=candidate_football_section({**item,'_classification_text':body},tags)
+                      pics=item.get('image_candidates') or extract_image_candidates_from_url(item['url'])
+                      hero=_pick_reachable_article_image(pics,max_checks=2)
+                      ok,reason=quality_check(item['title'],body or '',tags.sport,require_english=False)
+                      product=non_article_news_reason({**item,'body':body})
+                      row={'title':item['title'],'url':item['url'],'published_at':str(item['published_at']),'words':len((body or '').split()),'sport':tags.sport,'menu':menu,'classifier':tags.league,'image_verified':bool(hero),'quality':reason,'product_hold':product,'eligible_before_writer':bool(ok and hero and not product and tags.sport=='football')}
+                      out['items'].append(row)
+                      if out['id']=='brazil-serie-b-category':assert menu!='italy-serie-b',row
+              except Exception as exc:
+                  if isinstance(exc,AssertionError):raise
+                  out['error']=type(exc).__name__+': '+str(exc)[:120]
+              return out
+          grouped=defaultdict(list)
+          for kind,configs in [('html',HTML_INDEXES),('rss',RSS_FEEDS)]:
+              for cfg in configs:grouped[urlsplit(cfg['url']).hostname].append((kind,cfg))
+          with ThreadPoolExecutor(max_workers=3) as pool:rows=[r for batch in pool.map(lambda items:[probe(i) for i in items],grouped.values()) for r in batch]
+          eligible=[i for r in rows for i in r['items'] if i['eligible_before_writer']]
+          proof={'checked_at':datetime.now(timezone.utc).isoformat(),'membership':membership,'sources':rows,'eligible_before_writer':len(eligible),'eligible_menus':sorted({i['menu'] for i in eligible if i['menu']}),'AI_requests':0,'production_writes':0}
+          (root/'source-proof.json').write_text(json.dumps(proof,ensure_ascii=False,indent=2));print(json.dumps(proof,ensure_ascii=False,indent=2))
+          assert len(eligible)>=3,proof
+          assert any(i['menu']=='brazil-serie-b' for i in eligible),proof
+          PY
+      - name: Replay real archived report identities and preserve reactions
+        working-directory: source
+        run: |
+          python - <<'PY'
+          import json,pathlib,urllib.request,urllib.parse,itertools
+          from datetime import datetime,timezone
+          from concurrent.futures import ThreadPoolExecutor
+          from bot.news_report_similarity import draw_report_signature,same_draw_report
+          root=pathlib.Path('../system-evidence');base='https://allball-backend-production.up.railway.app'
+          def get(path):
+              with urllib.request.urlopen(base+path,timeout=20) as r:return json.loads(r.read(4000000))
+          articles=get('/articles?sport=football&limit=100')
+          with ThreadPoolExecutor(max_workers=3) as pool:details=list(pool.map(lambda a:get('/articles/'+urllib.parse.quote(a['slug'])),articles[:60]))
+          keys=[]
+          for a in details:
+              sig=draw_report_signature(a['title'],a.get('content') or '')
+              if sig:keys.append((a,sig))
+          pairs=[]
+          for (a,left),(b,right) in itertools.combinations(keys,2):
+              if same_draw_report(left,right,datetime.fromisoformat(a['published_at']),datetime.fromisoformat(b['published_at'])):
+                  pairs.append({'ids':[a['id'],b['id']],'titles':[a['title'],b['title']]})
+          (root/'public-replay.json').write_text(json.dumps({'checked_at':datetime.now(timezone.utc).isoformat(),'articles':len(details),'signature_ids':[a['id'] for a,_ in keys],'draw_pairs':pairs,'AI_requests':0,'production_writes':0},ensure_ascii=False,indent=2))
+          print(json.dumps(pairs,ensure_ascii=False,indent=2))
+          # Reviewed against the exact 60-article snapshot. New unfamiliar pairs
+          # require inspection; do not silently widen automatic cleanup scope.
+          assert all(set(p['ids'])=={22751,22770} for p in pairs),pairs
+          protected={22759,22710,22731,22714}
+          assert not protected.intersection(a['id'] for a,_ in keys)
+          PY
+      - name: Preserve tested production code only on isolated release branch
+        working-directory: source
+        run: |
+          python - <<'PY'
+          import json,pathlib,subprocess
+          files=json.loads(pathlib.Path('../system-evidence/files.json').read_text())
+          subprocess.run(['git','add',*files],check=True)
+          assert set(subprocess.check_output(['git','diff','--cached','--name-only'],text=True).splitlines())==set(files)
+          PY
+          git config user.name 'NinkoSports News validation'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix(news): expand domestic discovery and preserve factual report identity with budget-safe coverage'
+          git push origin HEAD:refs/heads/audit/news-system-release-20261003
+          git rev-parse HEAD > ../system-evidence/tested-commit.txt
+          git show --stat --oneline HEAD > ../system-evidence/commit.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: news-system-release-20261003
+          path: system-evidence/
+          retention-days: 7
