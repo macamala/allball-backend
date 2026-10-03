@@ -1,0 +1,121 @@
+name: Football News capacity release 20261003
+on:
+  push:
+    branches: [audit/news-football-20261003]
+    paths: [.github/workflows/news-football-capacity-release-20261003.yml]
+permissions:
+  contents: write
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env:
+      DATABASE_URL: 'sqlite:///:memory:'
+      NINKO_SKIP_STARTUP_INDEX: '1'
+      NINKO_SKIP_INTEGRITY_BACKFILL: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: bundle
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: e2ec42546e4b415639e4c754221a08bc55b1e29b
+          path: source
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Preserve existing writer limits and validation gates
+        working-directory: source
+        run: |
+          mkdir -p ../capacity-evidence
+          python - <<'PY'
+          from pathlib import Path
+          import shutil,textwrap
+          shutil.copyfile('../bundle/audit/news_football_capacity.py','bot/news_football_capacity.py')
+          shutil.copyfile('../bundle/audit/test_news_football_capacity.py','tests/test_news_football_capacity.py')
+          p=Path('bot/fetch_sources.py');s=p.read_text()
+          def edit(old,new):
+              global s
+              assert s.count(old)==1,(s.count(old),old)
+              s=s.replace(old,new)
+          edit('    """Conservatively preserve one request for translations when that lane is on."""\n    budget = active_ai_budget()', '''    """Preserve the existing allowance for waiting leagues and translations."""
+              from .news_football_capacity import yield_football_repairs
+              if yield_football_repairs():
+                  return False
+              budget = active_ai_budget()''')
+          edit("        if last_writer_identity()[0] == 'openai':", "        from .news_football_capacity import yield_football_repairs\n        if last_writer_identity()[0] == 'openai' or yield_football_repairs():")
+          edit("[fetch_sources] paid draft too short source_words=", "[fetch_sources] draft too short; repeated length repair deferred source_words=")
+          edit('        prefer_breadth = update_coverage_debt() > 1\n        for item in queued:', '''        prefer_breadth = update_coverage_debt() > 1
+                  from collections import Counter
+                  from .news_football_capacity import football_breadth_scope, underfilled_football_pending
+                  football_only = os.getenv('NEWS_FOOTBALL_ONLY') == '1'
+                  queue_sections = {}
+                  if football_only:
+                      for candidate in queued:
+                          try:
+                              queue_sections[id(candidate)] = candidate_football_section(candidate, _classify_candidate(candidate))
+                          except Exception:
+                              queue_sections[id(candidate)] = None
+                  pending_football = Counter(queue_sections.values())
+                  logger.info('[fetch_sources] underfilled football competitions with queued sources=%s',
+                              underfilled_football_pending(pending_football, football_inventory))
+                  for item in queued:''')
+          old='            try:\n                article, used_ai = _ingest_item('
+          assert s.count(old)==1
+          start=s.index('                article, used_ai = _ingest_item(',s.index(old))
+          end=s.index('\n            except Exception as e:',start)
+          block=s[start:end]
+          s=s[:start]+'''                current_section = queue_sections.get(id(item))
+                          if current_section is not None:
+                              pending_football[current_section] -= 1
+                          with football_breadth_scope(pending_football, football_inventory, current_section, enabled=football_only):
+          '''+textwrap.indent(block,'    ')+s[end:]
+          edit('                sport_inventory[article.sport] = sport_inventory.get(article.sport, 0) + 1', '''                sport_inventory[article.sport] = sport_inventory.get(article.sport, 0) + 1
+                          if article.sport == 'football' and getattr(article, 'league', None):
+                              football_inventory[article.league] = football_inventory.get(article.league, 0) + 1''')
+          p.write_text(s)
+          p=Path('bot/rewrite_ai.py');s=p.read_text()
+          old='    if learned_instructions:\n        prompt = ('
+          assert s.count(old)==1
+          new='''    if sport == 'football':
+                  prompt += (
+                      "\\nDELIVERABLE LENGTH: The body is the text AFTER the separate headline and summary. "
+                      "For a substantial source, write 180-260 body words EXCLUDING the headline and summary, "
+                      "in at least three short factual paragraphs. Do not add facts or padding to reach a length. "
+                      "For a genuinely brief source, stay within its available facts and preserve the central news.\\n"
+                  )
+              if learned_instructions:
+                  prompt = ('''
+          p.write_text(s.replace(old,new))
+          PY
+      - name: All existing and new News regressions
+        working-directory: source
+        run: |
+          pip install -q -r requirements.txt
+          python -m pytest -q tests/test_news* --junitxml=../capacity-evidence/tests.xml > ../capacity-evidence/tests.txt 2>&1 || { tail -100 ../capacity-evidence/tests.txt; exit 1; }
+          tail -3 ../capacity-evidence/tests.txt
+          python -m compileall -q bot
+      - name: Persist only tested News capacity changes
+        working-directory: source
+        run: |
+          python - <<'PY'
+          import subprocess,json,pathlib,hashlib
+          allowed={'bot/news_football_capacity.py','bot/fetch_sources.py','bot/rewrite_ai.py','tests/test_news_football_capacity.py'}
+          changes=set(subprocess.check_output(['git','diff','--name-only'],text=True).splitlines())|set(subprocess.check_output(['git','ls-files','--others','--exclude-standard'],text=True).splitlines())
+          assert changes==allowed,changes^allowed
+          pathlib.Path('../capacity-evidence/files.json').write_text(json.dumps({f:hashlib.sha256(pathlib.Path(f).read_bytes()).hexdigest() for f in sorted(allowed)},indent=2))
+          subprocess.run(['git','add',*sorted(allowed)],check=True)
+          PY
+          git config user.name 'NinkoSports News validation'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix(news): share existing writer allowance across queued underfilled football leagues'
+          git push origin HEAD:refs/heads/audit/news-football-capacity-release-20261003
+          git rev-parse HEAD > ../capacity-evidence/tested-commit.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: football-news-capacity-release-20261003
+          path: capacity-evidence/
+          retention-days: 7
