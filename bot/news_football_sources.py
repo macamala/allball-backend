@@ -115,3 +115,7 @@ from .news_domestic_categories import RSS_FEEDS as DOMESTIC_RSS, HTML_INDEXES as
 RSS_FEEDS = RSS_FEEDS + DOMESTIC_RSS
 HTML_INDEXES = HTML_INDEXES + DOMESTIC_HTML
 SOURCE_DESKS.update(DOMESTIC_DESKS)
+
+# Club desks are discovery inputs, not assumed current league membership.
+from .news_official_club_desks import RSS_FEEDS as OFFICIAL_CLUB_RSS
+RSS_FEEDS = RSS_FEEDS + OFFICIAL_CLUB_RSS

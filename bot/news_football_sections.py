@@ -44,7 +44,7 @@ for _row in _CATALOG:
         *COMPETITIONS.get(_key, {}).get('aliases', []),
         *LITERAL_COMPETITION_ALIASES.get(_key, ())] if a.strip()}
 
-_WOMEN = re.compile(r'\b(?:women|womens|woman|wsl|uwcl|uswnt|lionesses|keira walsh|alexia putellas|frauen|damen|feminin|feminine|feminines|femenina|femeninas|femenino|femeninos|feminino|feminina|femminile|femminili|zenski|zenska|zenske)\b')
+_WOMEN = re.compile(r'\b(?:women|womens|woman|wsl|uwcl|uswnt|lionesses|keira walsh|alexia putellas|frauen|damen|feminin|feminine|feminines|femenina|femeninas|femenino|femeninos|feminino|feminina|femminile|femminili|zenski|zenska|zenske|zfk|жфк|женски|женска|женске)\b')
 _YOUTH = re.compile(r'\b(?:u\s?(?:[6-9]|1[0-9]|2[0-3])s?|under (?:[6-9]|1[0-9]|2[0-3])s?|u twenty one|youth team)\b')
 _NATIONAL = re.compile(r'\b(?:national (?:football )?(?:team|squad)|usmnt|uswnt|international (?:football fixtures|friendly|friendlies|goal)|reprezentacij\w*)\b')
 _COUNTRIES = ('england', 'spain', 'croatia', 'italy', 'france', 'serbia', 'portugal',

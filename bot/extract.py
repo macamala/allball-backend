@@ -689,6 +689,9 @@ def article_text_from_html(html: str) -> str:
         publisher_host = None
     if verified_women_article_category(html, canonical):
         source_category = WOMEN_CONTEXT
+    from .news_official_club_desks import explicit_women_club_headline
+    if explicit_women_club_headline(canonical, page_title_from_html(html)):
+        source_category = WOMEN_CONTEXT
     # Verified regional football article containers. These publishers place
     # unrelated recommendations inside <main>; never use that whole page.
     extra_chrome_classes = ()

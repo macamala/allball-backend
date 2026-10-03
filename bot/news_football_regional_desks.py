@@ -63,7 +63,10 @@ SOURCE_DESKS = {
     'Equalizer Soccer': ('usa-nwsl', 'football-women'),
 }
 
+from .news_official_club_desks import CLUB_PROFILES
+
 _PROFILES = {
+    **CLUB_PROFILES,
     'www.gazzetta.gr': {'body_class': 'content is-relative', 'body_tag': 'div', 'path_prefix': '/football/'},
     'www.laola1.at': {'body_class': 'editor-text', 'body_tag': 'div', 'path_prefix': '/de/red/fussball/'},
     'www.football-espana.net': {'body_id': 'article-body'},

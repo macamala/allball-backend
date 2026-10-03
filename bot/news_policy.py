@@ -915,6 +915,7 @@ def fair_news_queue(
     sport_order=(),
     sport_inventory=None,
     football_inventory=None,
+    football_club_coverage=None,
     coverage_floor=6,
     same_day_timezone=None,
     prioritize_major_sports=False,
@@ -1056,11 +1057,21 @@ def fair_news_queue(
                   for sport, pending in queues.items()}
     if football_inventory is not None and 'football' in queues:
         from .news_football_priority import spread_football_leagues
+        if football_club_coverage is not None:
+            priorities = football_club_coverage.bounded_priorities(
+                list(queues['football']), priorities,
+                identity=lambda item: news_source_identity(item.get('url')),
+                section=lambda item: sections.get(news_source_identity(item.get('url'))))
         queues['football'] = deque(spread_football_leagues(
             list(queues['football']), football_inventory,
             section=lambda item: sections.get(news_source_identity(item.get('url'))),
             priority=lambda item: priorities.get(news_source_identity(item.get('url')), 0),
             coverage_first=int(now.timestamp() // 600) % 3 == 1))
+    if football_club_coverage is not None and 'football' in queues:
+        queues['football'] = deque(football_club_coverage.balance(
+            list(queues['football']),
+            section=lambda item: sections.get(news_source_identity(item.get('url'))),
+            priority=lambda item: priorities.get(news_source_identity(item.get('url')), 0)))
     if prioritize_major_sports:
         # Editorial priority: Football, Basketball, another major sport, then
         # a protected coverage lane. All candidates already passed the same

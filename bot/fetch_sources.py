@@ -1126,7 +1126,9 @@ def _fetch_and_store_all_articles(
         per_feed = max(1, max_per_league)
         # Scan deeper in each downloaded feed, without serially waiting on
         # unrelated publishers. AI and publication limits are unchanged.
-        queued = _collect_rss_entries(enabled_feeds(), max(per_feed, 20))
+        # Same RSS downloads; inspect additional smaller-club headlines.
+        queued = _collect_rss_entries(enabled_feeds(), max(per_feed,
+            60 if os.getenv('NEWS_FOOTBALL_ONLY') == '1' else 20))
         if os.getenv("NEWS_EXPANDED_FEEDS_ENABLED") == "1":
             try:
                 from .news_official_indexes import fetch_official_index_entries
@@ -1256,6 +1258,10 @@ def _fetch_and_store_all_articles(
             after_dedupe - after_gossip,
             time.monotonic() - after_dedupe,
         )
+        club_coverage = None
+        if os.getenv('NEWS_FOOTBALL_ONLY') == '1':
+            from .news_club_coverage import load_club_coverage
+            club_coverage = load_club_coverage(db)
         queued, admission = fair_news_queue(
             queued,
             _classify_candidate,
@@ -1267,6 +1273,7 @@ def _fetch_and_store_all_articles(
             ],
             sport_inventory=sport_inventory,
             football_inventory=football_inventory,
+            football_club_coverage=club_coverage,
             coverage_floor=6,
             prioritize_major_sports=True,
             allowed_sports={'football'} if os.getenv('NEWS_FOOTBALL_ONLY') == '1' else None,
@@ -1318,6 +1325,13 @@ def _fetch_and_store_all_articles(
                     queue_sections[id(candidate)] = candidate_football_section(candidate, _classify_candidate(candidate))
                 except Exception:
                     queue_sections[id(candidate)] = None
+        if club_coverage is not None:
+            report = club_coverage.report(queued, section=lambda item: queue_sections.get(id(item)))
+            logger.info('[fetch_sources] club_coverage=%s', {k:v for k,v in report.items() if k != 'rows'})
+            logger.info('[fetch_sources] club_queue_front=%s', [
+                {'league': queue_sections.get(id(item)),
+                 'clubs': club_coverage.subjects(item, queue_sections.get(id(item))),
+                 'title': item['title'][:100]} for item in queued[:12]])
         pending_football = Counter(queue_sections.values())
         logger.info('[fetch_sources] underfilled football competitions with queued sources=%s',
                     underfilled_football_pending(pending_football, football_inventory))
