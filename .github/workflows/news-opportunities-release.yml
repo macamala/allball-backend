@@ -1,0 +1,130 @@
+name: News distinct league publication opportunities
+on:
+  push:
+    branches: [audit/news-opportunities-20261003]
+    paths: [.github/workflows/news-opportunities-release.yml]
+permissions:
+  contents: write
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env:
+      DATABASE_URL: 'sqlite:///:memory:'
+      NINKO_SKIP_STARTUP_INDEX: '1'
+      NINKO_SKIP_INTEGRITY_BACKFILL: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ops/news-free-probe-20260926
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply bounded changes to News ordering only
+        run: |
+          test "$(git rev-parse HEAD)" = '54b945d5d8527ef376832e59c7213aeb734613be'
+          mkdir -p evidence
+          python - <<'PY'
+          from pathlib import Path
+          def edit(path,old,new):
+              p=Path(path);s=p.read_text();assert s.count(old)==1,(path,s.count(old));p.write_text(s.replace(old,new))
+          edit('bot/news_football_priority.py','def spread_football_leagues(items, inventory, *, section, priority, coverage_first=False):','def spread_football_leagues(items, inventory, *, section, priority, coverage_first=False, distinct_first=False):')
+          old='''        key = min(pending, key=lambda k: (
+                      max(0, int(inventory.get(k, 0) or 0)) + scheduled[k] if k else 2 + scheduled[k],
+                  ))'''
+          new='''        def coverage_rank(key):
+                      count = max(0, int(inventory.get(key, 0) or 0)) if key else 2
+                      if distinct_first:
+                          # Give each waiting league one opportunity before repeats,
+                          # retaining the existing major/other lanes and AI limits.
+                          broad = key is None or str(key).startswith('football-')
+                          return (scheduled[key], int(broad), count)
+                      return (count + scheduled[key],)
+                  key = min(pending, key=coverage_rank)'''
+          edit('bot/news_football_priority.py',old,new)
+          edit('bot/news_policy.py','coverage_first=int(now.timestamp() // 600) % 3 == 1))','coverage_first=int(now.timestamp() // 600) % 3 == 1,\n            distinct_first=football_club_coverage is not None))')
+          old='    # Explicit Spanish ticket purchase instructions, not price/refund reporting.'
+          edit('bot/news_policy.py',old,"    # Require both explicit live-page markers; ordinary reporting survives.\n    if re.search(r'\\ben directo\\s*[|:]', title) and re.search(r'\\b(?:en vivo|ultima hora|última hora)\\b', title):\n        return 'non_article_rolling_tracker'\n"+old)
+          PY
+          cat > tests/test_news_visible_opportunities.py <<'PY'
+          from collections import Counter
+          from copy import deepcopy
+          import inspect
+          import random
+          import pytest
+          from bot.news_football_priority import spread_football_leagues
+          from bot.news_policy import non_article_news_reason, fair_news_queue
+          MAJOR=['england-premier-league','spain-la-liga','italy-serie-a','germany-bundesliga','france-ligue-1']
+          OTHER=['usa-mls','sweden-allsvenskan','brazil-serie-b']
+          def arrange(rows,inventory,**kwargs):
+              return spread_football_leagues(rows,inventory,section=lambda r:r['league'],priority=lambda r:r['tier'],**kwargs)
+          def story(league,n,tier=1):
+              return {'league':league,'id':f'{league}-{n}','tier':tier,'title':f'Confirmed story {n}','url':f'https://news.example/{league}/{n}'}
+          def test_finite_writer_window_reaches_other_major_leagues_before_repeating_one():
+              rows=[story(key,n) for key in MAJOR for n in range(5)]
+              inventory={key:i*50 for i,key in enumerate(MAJOR)}
+              before=arrange(rows,inventory)
+              assert len({r['league'] for r in before[:5]})==1
+              after=arrange(rows,inventory,distinct_first=True)
+              assert {r['league'] for r in after[:5]}==set(MAJOR)
+              assert Counter(r['id'] for r in after)==Counter(r['id'] for r in rows)
+          def test_zvezda_and_existing_major_other_weighted_slots_remain_intact():
+              rows=[story('serbia-superliga',0,2)]+[story(key,n) for key in MAJOR for n in range(4)]+[story(key,n,0) for key in OTHER for n in range(4)]
+              before=deepcopy(rows);result=arrange(rows,{},distinct_first=True)
+              assert result[0]['league']=='serbia-superliga' and result[0]['tier']==2
+              assert [r['tier'] for r in result[1:9]]==[1,1,1,0,1,1,1,0]
+              assert rows==before
+          def test_unknown_subject_never_creates_a_first_slot_debt_ahead_of_known_leagues():
+              rows=[story(None,0),story(MAJOR[0],0),story(MAJOR[1],0)]
+              out=arrange(rows,{MAJOR[0]:99,MAJOR[1]:120},distinct_first=True)
+              assert out[-1]['league'] is None and len(out)==3
+          def test_single_source_supply_is_not_removed_and_no_articles_are_invented():
+              rows=[story(MAJOR[0],i) for i in range(5)]
+              assert arrange(rows,{},distinct_first=True)==rows
+              assert arrange([],{},distinct_first=True)==[]
+          @pytest.mark.parametrize('seed',range(12))
+          def test_schedule_is_stable_lossless_and_preserves_in_league_order(seed):
+              rng=random.Random(seed);rows=[story(rng.choice(MAJOR+OTHER),i,rng.choice([0,1])) for i in range(80)]
+              original=deepcopy(rows);out=arrange(rows,{key:rng.randint(0,200) for key in MAJOR+OTHER},distinct_first=True)
+              assert Counter(r['id'] for r in out)==Counter(r['id'] for r in rows)
+              for key in MAJOR+OTHER:
+                  for tier in [0,1]:
+                      assert [r['id'] for r in out if r['league']==key and r['tier']==tier]==[r['id'] for r in rows if r['league']==key and r['tier']==tier]
+              assert rows==original
+          @pytest.mark.parametrize('title',['Albacete - Eibar en directo | Última hora de LALIGA Hypermotion en vivo hoy','Partido en directo: ultima hora en vivo'])
+          def test_explicit_live_ticker_is_rejected_before_writer(title):
+              assert non_article_news_reason({'title':title})=='non_article_rolling_tracker'
+          @pytest.mark.parametrize('title',['El entrenador habló en directo sobre la lesión del delantero','Albacete confirma su nuevo entrenador','La liga confirma cambios de horario de última hora'])
+          def test_actual_reporting_remains_eligible(title):
+              assert non_article_news_reason({'title':title}) is None
+          def test_new_cycle_order_is_only_enabled_with_the_existing_club_coverage_path():
+              assert 'distinct_first=football_club_coverage is not None' in inspect.getsource(fair_news_queue)
+          PY
+      - name: Retain all News and text regression gates without production credentials
+        run: |
+          pip install -q -r requirements.txt
+          python -m pytest -q tests/test_news* tests/test_textutil.py --junitxml=evidence/tests.xml > evidence/tests.txt 2>&1 || { tail -100 evidence/tests.txt; exit 1; }
+          tail -4 evidence/tests.txt
+          python -m compileall -q bot
+          git diff --check
+      - name: Save only the tested three-file News release
+        run: |
+          python - <<'PY'
+          import subprocess,pathlib,json,hashlib
+          allowed={'bot/news_football_priority.py','bot/news_policy.py','tests/test_news_visible_opportunities.py'}
+          changed=set(subprocess.check_output(['git','diff','--name-only'],text=True).splitlines())
+          assert changed==allowed-{'tests/test_news_visible_opportunities.py'},changed
+          subprocess.run(['git','add',*sorted(allowed)],check=True)
+          pathlib.Path('evidence/files.json').write_text(json.dumps({f:hashlib.sha256(pathlib.Path(f).read_bytes()).hexdigest() for f in sorted(allowed)},indent=2))
+          PY
+          git config user.name 'NinkoSports News validation'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix(news): rotate distinct waiting leagues before repeating publication opportunities'
+          git push origin HEAD:refs/heads/release/news-opportunities-20261003
+          git rev-parse HEAD > evidence/tested-commit.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: news-opportunities-release
+          path: evidence/
+          retention-days: 7
