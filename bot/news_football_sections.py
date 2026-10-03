@@ -17,6 +17,7 @@ from .news_football_memberships import memberships_for_news, verified_name_alias
 from .news_competition_scope import conflicting_competition_qualifier
 from .news_football_source_context import audited_women_article, source_menu_association
 from .news_football_subjects import headline_national_fixture
+from .news_club_identity import ambiguous_club_has_evidence
 from .news_competition_vocabulary import LITERAL_COMPETITION_ALIASES, conflicting_regional_serie_alias
 
 _ROOT = Path(__file__).parent
@@ -91,6 +92,8 @@ def _club_section(title, summary, article, women, today):
                 continue
             for club in entry['clubs']:
                 alias = _norm(club)
+                if not ambiguous_club_has_evidence(alias, text):
+                    continue
                 # The current catalogue contains a club named Start. The
                 # ordinary English word in 'excellent start' is not identity.
                 # Require an explicit club form or possessive sporting role;

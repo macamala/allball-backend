@@ -412,6 +412,9 @@ def non_article_news_reason(item):
         return 'non_article_fan_poll'
     if re.search(r'\bobjavio informacije o ulaznicama\b', title):
         return 'non_article_ticket_promotion'
+    # Explicit Spanish ticket purchase instructions, not price/refund reporting.
+    if re.match(r'^\s*(?:compra|comprar|consigue|adquiere|reserva)\s+(?:ya\s+)?(?:tus|las|sus)\s+(?:entradas|boletos)\b', title):
+        return 'non_article_ticket_promotion'
     # A transfer wishlist is an opinion product, not a report of a deal.
     # The observed The72 format was consuming scarce writer/validator slots.
     # Match the full proposal structure; actual signings remain eligible.

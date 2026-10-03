@@ -11,6 +11,7 @@ import json
 from pathlib import Path
 import re
 from text_unidecode import unidecode
+from .news_club_identity import ambiguous_club_has_evidence
 
 UTC = timezone.utc
 HORIZON = timedelta(days=7)
@@ -118,6 +119,8 @@ class ClubCoverage:
         for text, summary_only in ((title, False), (lead, True)):
             matches = []
             for alias, key in self.aliases[league].items():
+                if not ambiguous_club_has_evidence(alias, text):
+                    continue
                 for hit in re.finditer(r'(?<!\w)' + re.escape(alias) + r'(?!\w)', text):
                     before, after = text[max(0, hit.start()-50):hit.start()], text[hit.end():]
                     if re.search(r'\b(?:former|ex|previously (?:at|with)|used to play for)\s*$', before):
