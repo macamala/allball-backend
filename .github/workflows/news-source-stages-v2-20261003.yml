@@ -1,0 +1,44 @@
+name: News source stage matrix verified 20261003
+on:
+  push:
+    branches: [audit/news-system-20261003]
+    paths: [.github/workflows/news-source-stages-v2-20261003.yml]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      DATABASE_URL: 'sqlite:///:memory:'
+      NINKO_SKIP_STARTUP_INDEX: '1'
+      NINKO_SKIP_INTEGRITY_BACKFILL: '1'
+      NEWS_FOOTBALL_ONLY: '1'
+      NEWS_EXPANDED_FEEDS_ENABLED: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 7afb404aa7959a1d71d85b5542a6c9ee41898b13
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -q -r requirements.txt PyYAML
+      - name: Run pinned public source diagnostics without any writer calls
+        run: |
+          python - <<'PY'
+          import yaml,pathlib,subprocess
+          w=yaml.safe_load(pathlib.Path('.github/workflows/news-source-stages-20261003.yml').read_text())
+          script=next(s['run'] for s in w['jobs']['probe']['steps'] if s.get('name','').startswith('Verify existing'))
+          script=script.replace('SITEMAP_SOURCES','SITEMAPS')
+          script=script.replace("(*HTML_INDEXES,*SITEMAPS)","HTML_INDEXES")
+          script=script.replace("def probe(pair):", "jobs += [('sitemap',cfg) for cfg in SITEMAPS if cfg.get('enabled',True) and cfg.get('sport')=='football']\ndef probe(pair):")
+          script=script.replace("else _hydrate_source(cfg,2)", "else _hydrate_source(cfg,2,sitemap=kind=='sitemap')")
+          subprocess.run(['bash','-e','-c',script],check=True)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: news-source-stages-verified-20261003
+          path: stage-evidence/
+          retention-days: 7
