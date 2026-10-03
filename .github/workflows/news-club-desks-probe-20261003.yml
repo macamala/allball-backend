@@ -1,0 +1,61 @@
+name: Football News club desk probes 20261003
+on:
+  push:
+    branches: [audit/news-club-coverage-20261003]
+    paths: [.github/workflows/news-club-desks-probe-20261003.yml]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    env:
+      DATABASE_URL: 'sqlite:///:memory:'
+      NINKO_SKIP_STARTUP_INDEX: '1'
+      NINKO_SKIP_INTEGRITY_BACKFILL: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 2e1a2d8bf72879953403ec9ff989a17839ba8764
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: pip install -q -r requirements.txt
+      - name: Read BBC team feeds through the current robots-aware source transport
+        run: |
+          mkdir -p evidence
+          python - <<'PY'
+          import json,pathlib,logging
+          from datetime import datetime,timezone
+          import feedparser
+          from bot.news_feed_http import read_news_feed
+          from bot.fetch_sources import _fetch_feed_entries,_classify_item,_pick_reachable_article_image
+          from bot.extract import extract_from_url,extract_image_candidates_from_url
+          from bot.news_policy import non_article_news_reason
+          from bot.quality import quality_check
+          root=pathlib.Path('evidence');logging.basicConfig(level=logging.WARNING)
+          results=[]
+          slugs=['everton','fulham','brentford','bournemouth','crystal-palace','nottingham-forest','leeds-united','sunderland','burnley','blackburn-rovers','derby-county','celtic','rangers','hearts','aberdeen','real-madrid','barcelona','atletico-madrid','real-betis','juventus','napoli','roma','inter-milan','ac-milan','bayern-munich','borussia-dortmund','paris-saint-germain','lyon','marseille']
+          for slug in slugs:
+              url='https://feeds.bbci.co.uk/sport/football/teams/'+slug+'/rss.xml';out={'slug':slug,'url':url,'items':[]}
+              try:
+                  raw=read_news_feed(url);f=feedparser.parse(raw)
+                  out.update(title=f.feed.get('title'),link=f.feed.get('link'),format=f.version,entries=len(f.entries))
+                  cfg={'url':url,'publisher':'BBC Sport','kind':'league','sport':'football','article_body_required':True}
+                  for item in _fetch_feed_entries(cfg,2):
+                      body,image=extract_from_url(item['url']);tags=_classify_item(item,body)
+                      photo=_pick_reachable_article_image(extract_image_candidates_from_url(item['url']),max_checks=2)
+                      ok,why=quality_check(item['title'],body,tags.sport,require_english=False)
+                      out['items'].append({'title':item['title'],'url':item['url'],'published_at':str(item['published_at']),'source_words':len(body.split()),'sport':tags.sport,'photo':photo,'product':non_article_news_reason({**item,'body':body}),'quality':why,'eligible_before_writer':bool(ok and photo and tags.sport=='football' and not non_article_news_reason({**item,'body':body}))})
+              except Exception as e:out['error']=type(e).__name__+': '+str(e)[:160]
+              results.append(out);print(slug,out.get('title'),len(out['items']),out.get('error'),flush=True)
+          (root/'team-feeds.json').write_text(json.dumps(results,ensure_ascii=False,indent=2))
+          (root/'summary.json').write_text(json.dumps({'checked_at':datetime.now(timezone.utc).isoformat(),'probed':len(results),'valid_rss':sum(bool(r.get('format')) for r in results),'useful_desks':sum(any(i.get('eligible_before_writer') for i in r['items']) for r in results),'AI_requests':0,'sports_writes':0},indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: news-club-desks-probe-20261003
+          path: evidence/
+          retention-days: 7
