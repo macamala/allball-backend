@@ -117,7 +117,7 @@ def _transient_read_error(error):
     return isinstance(error, (httpx.TimeoutException, httpx.NetworkError, ConnectionError, TimeoutError))
 
 
-def refresh_football_news_memberships(*, now=None, get=None, get_fixtures=None, force=False):
+def refresh_football_news_memberships(*, now=None, get=None, get_fixtures=None, get_records=None, force=False):
     """Six-hour full refresh; bounded retries of failed leagues on normal cycles.
 
     Quiet/stale/wrong-scope sources do not trigger retries. A transient failure
@@ -146,6 +146,7 @@ def refresh_football_news_memberships(*, now=None, get=None, get_fixtures=None, 
         reader = get or _public_get
         # Injected offline table readers never cause implicit network I/O.
         fixture_reader = get_fixtures or (_public_fixture_get if get is None else None)
+        records_reader = get_records or ((lambda league, key: _public_stored_get(league, key, now=clock)) if get is None else None)
         def load(league):
             transient = None
             for key in dict.fromkeys([ALIASES.get(league, league), FALLBACKS.get(league)]):
@@ -171,6 +172,18 @@ def refresh_football_news_memberships(*, now=None, get=None, get_fixtures=None, 
                         if _transient_read_error(exc):
                             transient = type(exc).__name__
                         log.debug('News fixture membership held league=%s error=%s', league, type(exc).__name__)
+            if records_reader is not None:
+                for key in dict.fromkeys([ALIASES.get(league, league), FALLBACKS.get(league)]):
+                    if not key:
+                        continue
+                    try:
+                        item = parse_stored_membership(league, records_reader(league, key), now=clock)
+                        if item:
+                            return league, item, None
+                    except Exception as exc:
+                        if _transient_read_error(exc):
+                            transient = type(exc).__name__
+                        log.debug('News stored membership held league=%s error=%s', league, type(exc).__name__)
             return league, None, transient
         with ThreadPoolExecutor(max_workers=3, thread_name_prefix='news-membership') as pool:
             loaded = list(pool.map(load, targets))
@@ -192,9 +205,9 @@ def refresh_football_news_memberships(*, now=None, get=None, get_fixtures=None, 
         result = {'status': 'refreshed' if full else 'retried',
                   'leagues': len(_ENTRIES), 'fresh': len(fresh),
                   'clubs': sum(len(e['clubs']) for e in _ENTRIES.values()),
-                  'fixture_rosters': sum(e.get('source_kind') == 'confirmed_recent_fixture_roster' for e in _ENTRIES.values()),
+                  'fixture_rosters': sum(e.get('source_kind') in {'confirmed_recent_fixture_roster', 'confirmed_date_bounded_stored_roster'} for e in _ENTRIES.values()),
                   'fixture_roster_leagues': sorted(k for k, v in _ENTRIES.items()
-                                                  if v.get('source_kind') == 'confirmed_recent_fixture_roster'),
+                                                  if v.get('source_kind') in {'confirmed_recent_fixture_roster', 'confirmed_date_bounded_stored_roster'}),
                   'retry_pending': sorted(_RETRY_PENDING), 'read_failures': failures}
         log.info('News read-only football membership %s', result)
         return result
@@ -260,13 +273,20 @@ def parse_fixture_membership(league, data, *, now=None):
     checked = _aware_stamp(data.get('checked_at'))
     if checked is None or not -timedelta(minutes=5) <= clock-checked <= timedelta(hours=1):
         return None
-    rows = data.get('events')
+    return _recent_roster(league, meta['id'], data.get('events'), clock,
+        source_kind='confirmed_recent_fixture_roster',
+        source_url=PUBLIC_API + '/sports-data/competitions/' + meta['id'] + '/hub')
+
+
+def _recent_roster(league, competition_key, rows, clock, *, source_kind, source_url):
+    # Shared per-record verification; callers independently validate their
+    # actual response envelopes. A stale hub is never relabelled as fresh.
     if not isinstance(rows, list) or len(rows) > 2500:
         return None
     women = league in {'england-womens-super-league', 'australia-a-league-women', 'usa-nwsl'}
     names, stamps, keys, seasons = set(), [], set(), set()
     for event in rows:
-        if not isinstance(event, dict) or event.get('sport') != 'football' or event.get('competition_key') != meta['id']:
+        if not isinstance(event, dict) or event.get('sport') != 'football' or event.get('competition_key') != competition_key:
             continue
         key = event.get('key') or event.get('id')
         if not isinstance(key, str) or not key or key in keys:
@@ -311,12 +331,12 @@ def parse_fixture_membership(league, data, *, now=None):
         return None
     observed = min(stamps)
     return {'clubs': sorted(names), 'season': next(iter(seasons)) if len(seasons) == 1 else None,
-            'data_key': meta['id'], 'source_kind': 'confirmed_recent_fixture_roster',
+            'data_key': competition_key, 'source_kind': source_kind,
             'observed_at': observed.isoformat(),
             'valid_from': (observed-timedelta(days=1)).date().isoformat(),
             'valid_until': (observed+MAX_AGE).date().isoformat(),
             'evidence_matches': len(keys), 'complete_roster': False,
-            'source': PUBLIC_API + '/sports-data/competitions/' + meta['id'] + '/hub'}
+            'source': source_url}
 
 
 def _public_fixture_get(league, key):
@@ -360,3 +380,62 @@ def verified_name_aliases(names):
         if len(owners) == 1 and sum(canonical == name for name in normalized) == 0:
             output.append(matches[0][1])
     return list(dict.fromkeys(output))
+
+
+def _record_bounds(clock):
+    return ((clock-timedelta(days=21)).strftime('%Y-%m-%dT00:00:00Z'),
+            (clock+timedelta(days=35)).strftime('%Y-%m-%dT23:59:59Z'))
+
+
+def parse_stored_membership(league, data, *, now=None):
+    """A separate public DB snapshot, not a freshness override for a hub.
+
+    The hub stale flag describes its external schedule supplement. Stored
+    records have their own exact scope and updated_at. This reader requires
+    an explicitly complete, date-bounded public snapshot and checks every
+    record's own recency, identity, competition and nearby kickoff.
+    """
+    clock = now or datetime.now(timezone.utc)
+    if clock.tzinfo is None:
+        raise ValueError('Stored membership requires a timezone-aware clock')
+    clock = clock.astimezone(timezone.utc)
+    if league not in DOMESTIC or not isinstance(data, dict):
+        return None
+    valid_keys = {league, ALIASES.get(league), FALLBACKS.get(league)} - {None}
+    key, snapshot, events = data.get('competition'), data.get('snapshot'), data.get('events')
+    if (not isinstance(key, str) or key not in valid_keys or data.get('sport') != 'football'
+            or data.get('connected') is not True or data.get('status') not in (None, '')
+            or not isinstance(snapshot, dict) or snapshot.get('complete') is not True
+            or not isinstance(events, list) or len(events) > 2500
+            or type(snapshot.get('count')) is not int or snapshot['count'] != len(events)):
+        return None
+    start, end = _record_bounds(clock)
+    if snapshot.get('date_from') != start or snapshot.get('date_to') != end:
+        return None
+    # An out-of-window response is a broken contract, not permission to cherry-pick it.
+    lower, upper = _aware_stamp(start), _aware_stamp(end)
+    for event in events:
+        if not isinstance(event, dict):
+            return None
+        at = _aware_stamp(event.get('start_time'))
+        if (event.get('sport') != 'football' or event.get('competition_key') != key
+                or at is None or not lower <= at <= upper):
+            return None
+    query = urlencode({'sport': 'football', 'competition': key, 'date_from': start, 'date_to': end})
+    entry = _recent_roster(league, key, events, clock,
+        source_kind='confirmed_date_bounded_stored_roster', source_url=PUBLIC_API+'/sports-data/events?'+query)
+    if entry:
+        entry['evidence_snapshot_count'] = snapshot['count']
+    return entry
+
+
+def _public_stored_get(league, key, *, now=None):
+    start, end = _record_bounds(now or datetime.now(timezone.utc))
+    with httpx.Client(timeout=8.0, follow_redirects=False, trust_env=False) as client:
+        response = client.get(PUBLIC_API+'/sports-data/events',
+            params={'sport':'football','competition':key,'date_from':start,'date_to':end},
+            headers={'User-Agent':'NinkoSports-News-Membership/1.0'})
+        response.raise_for_status()
+        if len(response.content) > 6_000_000:
+            raise ValueError('Stored roster response exceeds bounded size')
+        return response.json()

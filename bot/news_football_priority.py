@@ -38,10 +38,12 @@ def candidate_football_section(item, tags, *, today=None):
     return league if league and _explicit(_norm(source.title + '\n' + lead)) == league else None
 
 
-def spread_football_leagues(items, inventory, *, section, priority):
+def spread_football_leagues(items, inventory, *, section, priority, coverage_first=False):
     """Keep Zvezda first, then balance known leagues with a protected other lane.
 
-    Three major slots alternate with one other-league slot. Within each lane,
+    Three major slots alternate with one other-league slot. A bounded cold-start
+    window can move the other slot first, but never ahead of Zvezda or an
+    underfilled major competition. It does not add slots or spending. Within each lane,
     the smallest public inventory wins; projected slots prevent one empty
     league from consuming the cycle. Preserve the existing publisher order
     inside each league. Unknown sections receive no invented coverage debt.
@@ -54,10 +56,16 @@ def spread_football_leagues(items, inventory, *, section, priority):
             continue
         key = section(item)
         lanes[1 if tier else 0].setdefault(key, deque()).append(item)
+    from .news_football_capacity import underfilled_football_pending
+    empty_other = underfilled_football_pending(
+        {key: len(pending) for key, pending in lanes[0].items()}, inventory, floor=1)
+    major_waiting = any(key in PRIMARY_COMPETITIONS and max(0, int(inventory.get(key, 0) or 0)) < 2
+                        for key in lanes[1])
+    pattern = (0, 1, 1, 1) if coverage_first and empty_other and not major_waiting else (1, 1, 1, 0)
     scheduled = defaultdict(int)
     slot = 0
     while lanes[1] or lanes[0]:
-        tier = 0 if slot % 4 == 3 else 1
+        tier = pattern[slot % 4]
         if not lanes[tier]:
             tier = 1 - tier
         pending = lanes[tier]

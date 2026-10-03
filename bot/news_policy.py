@@ -1045,7 +1045,8 @@ def fair_news_queue(
         queues['football'] = deque(spread_football_leagues(
             list(queues['football']), football_inventory,
             section=lambda item: sections.get(news_source_identity(item.get('url'))),
-            priority=lambda item: priorities.get(news_source_identity(item.get('url')), 0)))
+            priority=lambda item: priorities.get(news_source_identity(item.get('url')), 0),
+            coverage_first=int(now.timestamp() // 600) % 3 == 1))
     if prioritize_major_sports:
         # Editorial priority: Football, Basketball, another major sport, then
         # a protected coverage lane. All candidates already passed the same
