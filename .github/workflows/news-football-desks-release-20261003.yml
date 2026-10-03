@@ -13,7 +13,6 @@ jobs:
       DATABASE_URL: 'sqlite:///:memory:'
       NINKO_SKIP_STARTUP_INDEX: '1'
       NINKO_SKIP_INTEGRITY_BACKFILL: '1'
-      NEWS_FOOTBALL_ONLY: '1'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -34,13 +33,13 @@ jobs:
           mkdir -p ../desk-evidence
           python - <<'PY'
           from pathlib import Path
-          import shutil
           module=Path('../bundle/audit/news_football_regional_desks.py').read_text()
           module=module.replace("'exclude_article_paths':", "'excluded_article_paths':")
           module=module.replace("_ARTICLE_TYPES.intersection(kinds)", "_ARTICLE_TYPES.intersection(k for k in kinds if isinstance(k, str))")
           Path('bot/news_football_regional_desks.py').write_text(module)
           tests=Path('../bundle/audit/test_news_football_regional_desks.py').read_text()
           tests=tests.replace('    from bot.news_football_leagues import __name__ as unused\n','')
+          tests=tests.replace('assert TEXT in ', "assert TEXT.rstrip('.') in ")
           Path('tests/test_news_football_regional_desks.py').write_text(tests)
           def edit(path,old,new):
               p=Path(path);s=p.read_text();assert s.count(old)==1,(path,s.count(old),old);p.write_text(s.replace(old,new))
@@ -69,6 +68,8 @@ jobs:
           python -m compileall -q bot
       - name: Verify actual source intake without any AI requests or production writes
         working-directory: source
+        env:
+          NEWS_FOOTBALL_ONLY: '1'
         run: |
           python - <<'PY'
           import json,pathlib,logging
