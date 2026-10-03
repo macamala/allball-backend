@@ -1,0 +1,109 @@
+name: Football News article isolation checks 20261003
+on:
+  push:
+    branches: [audit/news-football-20261003]
+    paths: [.github/workflows/news-football-body-audit-20261003.yml]
+permissions:
+  contents: read
+jobs:
+  articles:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      DATABASE_URL: 'sqlite:///:memory:'
+      NINKO_SKIP_STARTUP_INDEX: '1'
+      NINKO_SKIP_INTEGRITY_BACKFILL: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: pip install -q -r requirements.txt
+      - name: Inspect bounded public article identity, body containers and paywall indicators
+        run: |
+          mkdir -p body-evidence
+          python - <<'PY'
+          import json,pathlib,re,logging
+          from concurrent.futures import ThreadPoolExecutor
+          from html.parser import HTMLParser
+          from urllib.parse import urlsplit,urljoin
+          import feedparser
+          from bot.news_feed_http import read_news_feed
+          from bot.extract import _metadata,_json_ld_blocks,_ScopedNewsBody,paragraphs_from_html,parse_feed_datetime,collect_page_image_candidates
+          from bot.fetch_sources import _classify_item,_pick_reachable_article_image
+          logging.basicConfig(level=logging.WARNING)
+          root=pathlib.Path('body-evidence')
+          candidates=[
+            ('Football Espana','https://www.football-espana.net/feed',True),
+            ('Get German Football News','https://www.getfootballnewsgermany.com/feed/',True),
+            ('FotbollDirekt','https://fotbolldirekt.se/feed',True),
+            ('SuomiFutis','https://www.suomifutis.com/feed/',True),
+            ('Liga2 ProSport','https://liga2.prosport.ro/feed',True),
+            ('Blick Football','https://www.blick.ch/sport/fussball/rss.xml',True),
+            ('STV Sport','https://news.stv.tv/section/sport/feed',False),
+            ('DSport','https://dsport.bg/rss.xml',False),
+            ('Gong','https://gong.bg/rss',False),
+            ('Equalizer Soccer','https://equalizersoccer.com/feed/',True),
+            ('VoetbalPrimeur NL','https://www.voetbalprimeur.nl/rss',True),
+            ('VoetbalPrimeur BE','https://www.voetbalprimeur.be/rss',True),
+          ]
+          class Structure(HTMLParser):
+              def __init__(self):super().__init__();self.stack=[];self.paths=[];self.categories=[]
+              def handle_starttag(self,tag,attrs):
+                  a=dict(attrs)
+                  if tag in {'p','h2','h3'}:
+                      self.paths.append(self.stack[-5:])
+                  if 'category' in a.get('class','') or a.get('itemprop') in {'articleSection','keywords'}:self.categories.append([tag,a])
+                  if tag not in {'area','base','br','col','embed','hr','img','input','link','meta','param','source','track','wbr'}:self.stack.append([tag,{k:a[k] for k in ['id','class','itemprop'] if k in a}])
+              def handle_endtag(self,tag):
+                  for i in range(len(self.stack)-1,-1,-1):
+                      if self.stack[i][0]==tag:self.stack=self.stack[:i];break
+          def probe(row):
+              name,url,dedicated=row;out={'name':name,'url':url,'dedicated':dedicated,'articles':[]}
+              try:
+                  f=feedparser.parse(read_news_feed(url));out['feed_title']=f.feed.get('title');out['feed_description']=f.feed.get('subtitle')
+                  for e in f.entries[:3]:
+                      target=e.get('link','');p=urlsplit(target)
+                      if p.hostname!=urlsplit(url).hostname:continue
+                      entry={'url':target,'title':e.get('title'),'published_at':str(parse_feed_datetime(e)),'feed_categories':[t.get('term') for t in e.get('tags',[])]}
+                      try:
+                          raw=read_news_feed(target).decode('utf-8','replace')
+                          entry['canonical']=_metadata(raw,'canonical') or _metadata(raw,'og:url')
+                          entry['og_image']=_metadata(raw,'og:image');entry['article_section']=_metadata(raw,'article:section')
+                          structure=Structure();structure.feed(raw)
+                          unique={json.dumps(p,ensure_ascii=False) for p in structure.paths};entry['paragraph_ancestors']=[json.loads(p) for p in sorted(unique)][:65]
+                          entry['categories']=structure.categories[:15]
+                          entry['paywall_indicators']=list(dict.fromkeys(re.findall(r'.{0,65}(?:isAccessibleForFree|paywall|premium-content|paid-content|subscriber-only|membership-required).{0,100}',raw,re.I)))[:15]
+                          bodies=[]
+                          for cls in ['entry-content','post-content','article-content','article-body','article__body','content-body','body-content','single','single-content','text-content','content','article-text','article__content','article-content-text','story-content']:
+                              s=_ScopedNewsBody(cls);s.feed(raw)
+                              if not s.finished:continue
+                              html=''.join(s.parts);text=paragraphs_from_html(html)
+                              if len(text.split())<80:continue
+                              bodies.append({'class':cls,'root_tag':s.root_tag,'root_attrs':s.root_attrs,'words':len(text.split()),'first':text[:850],'last':text[-850:],'html_prefix':html[:800]})
+                          for bid in ['content-main','content-body','content-area','article-body','story-body','article-content']:
+                              s=_ScopedNewsBody(None,body_id=bid);s.feed(raw)
+                              if not s.finished:continue
+                              text=paragraphs_from_html(''.join(s.parts))
+                              if len(text.split())>=80:bodies.append({'id':bid,'words':len(text.split()),'first':text[:850],'last':text[-850:]})
+                          entry['body_options']=bodies
+                          entry['jsonld_identity']=[{k:d.get(k) for k in ['@type','url','headline','isAccessibleForFree','articleSection','datePublished']} for b in _json_ld_blocks(raw) for d in ([json.loads(b)] if b.lstrip().startswith('{') else json.loads(b)) if isinstance(d,dict)]
+                          entry['images']=[{'url':i.get('url'),'source':i.get('source'),'width':i.get('width')} for i in collect_page_image_candidates(raw)[:10]]
+                          entry['hero_verified']=_pick_reachable_article_image([r for r in collect_page_image_candidates(raw) if r.get('source') in {'og','twitter'}],max_checks=2)
+                          if bodies:
+                              tags=_classify_item({'title':e.get('title'),'url':target,'summary':e.get('summary',''),'feed':{'kind':'league' if dedicated else 'mixed','sport':'football' if dedicated else None}},bodies[0]['first']+' '+bodies[0]['last'])
+                              entry['sport_with_reviewed_feed_scope']=tags.sport
+                      except Exception as exc:entry['error']=type(exc).__name__+': '+str(exc)[:120]
+                      out['articles'].append(entry)
+              except Exception as exc:out['error']=type(exc).__name__+': '+str(exc)[:120]
+              (root/(re.sub(r'[^a-z0-9]+','-',name.lower())+'.json')).write_text(json.dumps(out,ensure_ascii=False,indent=2));print(name,len(out['articles']),out.get('error'),flush=True)
+          with ThreadPoolExecutor(max_workers=3) as pool:list(pool.map(probe,candidates))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: football-news-body-audit-20261003
+          path: body-evidence/
+          retention-days: 7
