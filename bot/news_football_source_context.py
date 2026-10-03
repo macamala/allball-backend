@@ -34,6 +34,7 @@ HTML_INDEXES = (
      'article_path_re': r'^/de/red/fussball/2--liga/news/[^/]+/?$'},
 )
 _SOURCE_MENUS = (
+    ('liga2.prosport.ro', r'^/seria-1/[^/]+-\d+/?$', 'romania-liga-2'),
     ('www.gazzetta.gr', r'^/football/superleague/\d+/[^/]+/?$', 'greece-super-league'),
     ('www.gazzetta.gr', r'^/football/superleague-2/\d+/[^/]+/?$', 'greece-super-league-2'),
     ('www.laola1.at', r'^/de/red/fussball/bundesliga/news/[^/]+/?$', 'austria-bundesliga'),

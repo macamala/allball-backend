@@ -54,7 +54,8 @@ def unsupported_news_sport(title, body=""):
 
 
 def numeric_tokens(text, *, include_spelled=False):
-    tokens = set(re.findall(r'(?<!\w)\d+(?:[.,:/–-]\d+)*(?:%|\b)', text or ''))
+    from .news_source_lexemes import literal_numeric_tokens
+    tokens = literal_numeric_tokens(text)
     # Compact published money amounts are numbers too: £185m / $250bn.
     # Read the stated coefficient, never multiply it or infer a currency.
     # Apply to drafts as well so an invented £999m cannot evade this gate.
@@ -398,6 +399,13 @@ def non_article_news_reason(item):
 
     body = str((item or {}).get("body") or (item or {}).get("summary") or "")
     copy = '\n'.join(str((item or {}).get(key) or '') for key in ('title', 'summary', 'body'))
+    # Ticket bulletins are sales products, even when they mention a match.
+    # Reporting about pricing controversies, refunds or stadium safety remains.
+    if re.match(r'^\s*(?:ticket news|ticket information|ticketing information|buy tickets)\s*[:|–—-]', title):
+        return 'non_article_ticket_promotion'
+    if (host in {'www.chelseafc.com', 'chelseafc.com'}
+            and re.match(r'^/en/news/article/ticket-(?:news|information)-[^/]+/?$', path)):
+        return 'non_article_ticket_promotion'
     # A transfer wishlist is an opinion product, not a report of a deal.
     # The observed The72 format was consuming scarce writer/validator slots.
     # Match the full proposal structure; actual signings remain eligible.

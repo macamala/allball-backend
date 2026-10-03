@@ -42,7 +42,7 @@ for _row in _CATALOG:
         *COMPETITIONS.get(_key, {}).get('aliases', [])] if a.strip()}
 
 _WOMEN = re.compile(r'\b(?:women|womens|woman|wsl|uwcl|uswnt|lionesses|keira walsh|alexia putellas|frauen|damen|feminin|feminine|feminines|femenina|femeninas|femenino|femeninos|feminino|feminina|femminile|femminili|zenski|zenska|zenske)\b')
-_YOUTH = re.compile(r'\b(?:u\s?(?:16|17|18|19|20|21|23)s?|under (?:16|17|18|19|20|21|23)s?|u twenty one|youth team)\b')
+_YOUTH = re.compile(r'\b(?:u\s?(?:[6-9]|1[0-9]|2[0-3])s?|under (?:[6-9]|1[0-9]|2[0-3])s?|u twenty one|youth team)\b')
 _NATIONAL = re.compile(r'\b(?:national (?:football )?(?:team|squad)|usmnt|uswnt|international (?:football fixtures|friendly|friendlies|goal)|reprezentacij\w*)\b')
 _COUNTRIES = ('england', 'spain', 'croatia', 'italy', 'france', 'serbia', 'portugal',
               'germany', 'czech republic', 'czechia', 'bulgaria', 'netherlands', 'honduras',
@@ -96,6 +96,12 @@ def _club_section(title, summary, article, women, today):
                     r'\b(?:ik start|start fc|start s (?:coach|manager|goalkeeper|'
                     r'defender|midfielder|striker|forward))\b', text):
                     continue
+                if alias == 'kapa':
+                    raw = (getattr(article, 'title', '') if text == title else getattr(article, 'summary', '')) or ''
+                    explicit = bool(re.search(r'(?<!\w)KäPa(?!\w)', raw) or
+                                    re.search(r'\b(?:kapylan pallo|kapa (?:fc|s (?:coach|manager|goalkeeper|defender|midfielder|striker|forward)))\b', text))
+                    if not explicit:
+                        continue
                 if _has(text, alias):
                     # Summary-only association requires current club ownership
                     # or a club role, not a historical/opponent name in passing.
@@ -180,8 +186,18 @@ def football_news_section(article, *, today=None):
     # A passing mention of a women's competition in a mixed season-launch
     # article cannot turn Manchester City's financial case into WSL news.
     women = bool(_WOMEN.search(lead) or _explicit(body[:350], women=True))
-    youth = bool(_YOUTH.search(lead) or re.search(r'\bacademy\b', title))
     today = today or date.today()
+    # An age-limited player study is not a youth-team competition. Preserve
+    # true U6-U23 squad labels, without turning under-22 rankings into fixtures.
+    age_team = any(not re.match(r' (?:study|studies|ranking|rankings|research|analysis|list)\b', lead[m.end():])
+                   for m in _YOUTH.finditer(lead))
+    youth = bool(age_team or re.search(r'\bacademy\b', title))
+    # A named birth-year COHORT is a team identity, not a senior team's title
+    # in that year or an individual player's age. No new age is published.
+    for born in re.finditer(r'\b(?:team|squad|players|children) (?:of players )?born in (20\d{2})\b', lead):
+        stamp = str(getattr(article, 'published_at', None) or today)[:4]
+        if stamp.isdigit() and 4 <= int(stamp) - int(born[1]) <= 23:
+            youth = True
     # Disability tournaments have their own formats; do not confuse a blind
     # football European Championship with the senior UEFA competition.
     if re.search(r'\b(?:blind football|amputee football|deaf football|futsal|beach soccer)\b', lead):

@@ -25,6 +25,14 @@ _ZVEZDA_CIES_REPAIR_URL = 'https://www.crvenazvezdafk.com/vesti/gudelj-medju-naj
 _ZVEZDA_CLOCK_REPAIR_URL = 'https://www.crvenazvezdafk.com/vesti/boaci-protiv-kopenhagena-ocekujem-pravu-zvezdasku-atmosferu'
 _GRAFICAR_REPAIR_URL = 'https://www.crvenazvezdafk.com/vesti/zvezdini-biseri---graficar-ubedljiv-protiv-teleoptika'
 _BROWN_U17_REPAIR_URL = 'https://www.bundesliga.com/en/bundesliga/news/bayern-munich-nathaniel-brown-number-10-left-back-germany-39382'
+# Source bodies and original runtime failures verified 2026-10-03. Only
+# pre-fix lexical holds for these canonical stories are eligible for a retry.
+_CJK_REPAIR_REASONS = {
+    'https://www.jleague.jp/news/article/35031/': 'unsupported_number',
+    'https://www.jleague.jp/news/article/35030/': 'unsupported_number',
+    'https://www.jleague.jp/news/article/35032/': 'unsupported_acronym:FC',
+}
+_CJK_REPAIR_BEFORE = '2026-10-03T04:10:00Z'
 _EDITORIAL_RETRY_REASONS = {
     'direct_quote_requires_review',
     'headline_too_similar_to_source',
@@ -235,6 +243,18 @@ def held_source_urls(urls) -> set[str]:
         cursor.execute("SET LOCAL statement_timeout = '5s'")
         _ensure_schema(cursor)
         keys = [hashes[url] for url in values]
+        for url, reason in _CJK_REPAIR_REASONS.items():
+            if url not in hashes:
+                continue
+            cursor.execute(
+                "UPDATE news_ai_source_holds SET expires_at=NOW(), "
+                "reason='audited-cjk-lexical-parser-repaired', updated_at=NOW() "
+                "WHERE source_hash=%s AND expires_at > NOW() "
+                "AND reason=%s AND updated_at < %s::timestamptz",
+                (hashes[url], reason, _CJK_REPAIR_BEFORE),
+            )
+            if cursor.rowcount:
+                logger.info('[source_holds] expired audited pre-fix CJK lexical cooldown=%s', cursor.rowcount)
         if _BROWN_U17_REPAIR_URL in hashes:
             # Source explicitly says U17s; the 06:52 draft said U17. Retry
             # only that pre-fix spelling failure, never a new factual failure.

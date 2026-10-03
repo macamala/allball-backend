@@ -406,6 +406,9 @@ def fact_lock_reason(
     # Changed/invented names remain fail-closed in the semantic validator,
     # while known entity IDs and acronym checks below stay deterministic.
     src_acronyms = _acronyms(source)
+    if expected_sport == 'football':
+        from .news_source_lexemes import source_cjk_acronyms
+        src_acronyms.update(source_cjk_acronyms(source))
     # Source-grounded Serbian spellings of the same organisation, not new
     # organisations inferred from context. Semantic claim validation still runs.
     for local, canonical in {'ЦИЕС': 'CIES', 'ФИФА': 'FIFA', 'УЕФА': 'UEFA'}.items():
