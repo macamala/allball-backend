@@ -1,0 +1,108 @@
+name: Football News native-source release 20261003
+on:
+  push:
+    branches: [audit/news-throughput-20261003]
+    paths: [.github/workflows/news-native-release-20261003.yml]
+permissions:
+  contents: write
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      DATABASE_URL: 'sqlite:///:memory:'
+      NINKO_SKIP_STARTUP_INDEX: '1'
+      NINKO_SKIP_INTEGRITY_BACKFILL: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: bundle
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ops/news-free-probe-20260926
+          path: source
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify clean production parent and exact reviewed patch checksum
+        working-directory: source
+        run: |
+          test "$(git rev-parse HEAD)" = '10757cc555feba62f04cdf5dd252c857287a948c'
+          mkdir -p ../native-evidence
+          python - <<'PY'
+          import base64,gzip,hashlib,pathlib,subprocess,json
+          raw=pathlib.Path('../bundle/audit/news-native-release-20261003.patch.b64').read_text().strip()
+          pathlib.Path('../native-evidence/received.b64').write_text(raw)
+          # Correct transport transcription only; the decompressed patch must
+          # match the exact locally tested SHA256 before git apply can run.
+          for old,new in [('Rvt/GB0cjA5eB3nt','Rvt/GB0cjA5e3Bnt'),('Vok77QuOVuLJ+xW6','Vok77QuOVuL+xW6'),('3qPGv8mb93d9VxA','3qPGv8mb93dVxA')]:
+              raw=raw.replace(old,new)
+          patch=gzip.decompress(base64.b64decode(raw,validate=True))
+          assert hashlib.sha256(patch).hexdigest()=='dbc9680dc1b0c7c32e5b4a230be5b2b51bae6897e08e4e8ed7cb6432342ec227'
+          path=pathlib.Path('../native-evidence/reviewed.patch');path.write_bytes(patch)
+          subprocess.run(['git','apply','--check',str(path)],check=True)
+          subprocess.run(['git','apply',str(path)],check=True)
+          allowed={'bot/news_jleague_native.py','bot/news_official_indexes.py','bot/news_football_sources.py','bot/news_football_priority.py','bot/news_football_sections.py','tests/test_news_football_sources_20261002.py','tests/test_news_jleague_native.py','tests/test_news_transfer_primary_subject.py'}
+          changed=set(subprocess.check_output(['git','diff','--name-only'],text=True).splitlines())|set(subprocess.check_output(['git','ls-files','--others','--exclude-standard'],text=True).splitlines())
+          assert changed==allowed,changed^allowed
+          pathlib.Path('../native-evidence/files.json').write_text(json.dumps({p:hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest() for p in sorted(allowed)},indent=2))
+          PY
+      - name: Full News and text regressions on production Python minor
+        working-directory: source
+        run: |
+          pip install -q -r requirements.txt
+          python -m pytest -q tests/test_news* tests/test_textutil.py --junitxml=../native-evidence/tests.xml > ../native-evidence/tests.txt 2>&1 || { tail -100 ../native-evidence/tests.txt; exit 1; }
+          tail -5 ../native-evidence/tests.txt
+          python -m compileall -q bot
+      - name: Exact public source admission with no AI or sporting writes
+        working-directory: source
+        run: |
+          python - <<'PY'
+          import json,pathlib,logging
+          from datetime import datetime,timezone
+          from bot.news_jleague_native import NATIVE_INDEXES
+          from bot.news_official_indexes import _hydrate_source
+          from bot.fetch_sources import _classify_item,_pick_reachable_article_image
+          from bot.news_football_priority import candidate_football_section
+          from bot.news_policy import non_article_news_reason
+          from bot.quality import quality_check
+          from bot.news_football_memberships import refresh_football_news_memberships
+          logging.basicConfig(level=logging.WARNING)
+          root=pathlib.Path('../native-evidence');rows=[]
+          for config in NATIVE_INDEXES:
+              row={'id':config['id'],'url':config['url'],'candidates':[]}
+              for item in _hydrate_source(config,3):
+                  body=item['_extracted'];tags=_classify_item(item,body)
+                  ok,reason=quality_check(item['title'],body,tags.sport,require_english=False)
+                  product=non_article_news_reason({**item,'body':body})
+                  photo=_pick_reachable_article_image(item['image_candidates'],max_checks=2)
+                  row['candidates'].append({'title':item['title'],'url':item['url'],'source_published_at':str(item['published_at']),'source_characters':len(body),'sport':tags.sport,'menu':candidate_football_section(item,tags),'own_photo_verified':bool(photo),'image_url':photo,'quality':reason,'product':product,'eligible_before_writer':bool(ok and not product and photo and tags.sport=='football')})
+              rows.append(row)
+          refresh_football_news_memberships()
+          from types import SimpleNamespace
+          from bot.news_football_sections import football_news_section
+          probe=SimpleNamespace(title='Burnley move to poach key figure from Serie A side',summary='The club is looking to strengthen its recruitment team.',content='',published_at=datetime.now(timezone.utc))
+          association=football_news_section(probe)
+          result={'checked_at':datetime.now(timezone.utc).isoformat(),'sources':rows,'transfer_primary_menu':association,'AI_requests':0,'published':0,'sports_writes':0,'note':'Source admission proves a usable input, not a published English article. Existing writer, originality and independent factual validators remain required.'}
+          (root/'source-proof.json').write_text(json.dumps(result,ensure_ascii=False,indent=2));print(json.dumps(result,ensure_ascii=False,indent=2))
+          assert all(any(item['eligible_before_writer'] for item in row['candidates']) for row in rows)
+          assert association=='england-championship',association
+          PY
+      - name: Preserve only the tested News release on an isolated branch
+        working-directory: source
+        run: |
+          git add bot/news_jleague_native.py bot/news_official_indexes.py bot/news_football_sources.py bot/news_football_priority.py bot/news_football_sections.py tests/test_news_football_sources_20261002.py tests/test_news_jleague_native.py tests/test_news_transfer_primary_subject.py
+          test "$(git diff --cached --name-only | wc -l)" = '8'
+          git config user.name 'NinkoSports News validation'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'feat(news): admit verified native J1 J2 reporting and preserve primary transfer subjects'
+          git push origin HEAD:refs/heads/audit/news-native-release-20261003
+          git rev-parse HEAD > ../native-evidence/tested-commit.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: news-native-release-20261003
+          path: native-evidence/
+          retention-days: 7
