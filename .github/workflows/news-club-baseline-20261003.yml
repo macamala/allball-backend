@@ -1,0 +1,77 @@
+name: Football News club baseline 20261003
+on:
+  push:
+    branches: [audit/news-club-coverage-20261003]
+    paths: [.github/workflows/news-club-baseline-20261003.yml]
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DATABASE_URL: 'sqlite:///:memory:'
+      NINKO_SKIP_STARTUP_INDEX: '1'
+      NINKO_SKIP_INTEGRITY_BACKFILL: '1'
+      NEWS_FOOTBALL_ONLY: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 2e1a2d8bf72879953403ec9ff989a17839ba8764
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Capture exact source
+        run: |
+          mkdir -p evidence
+          git archive --format=tar HEAD > evidence/backend.tar
+          pip install -q -r requirements.txt
+      - name: Read News menus and existing source candidates
+        run: |
+          python - <<'PY'
+          import json,pathlib,urllib.request,urllib.parse,logging
+          from datetime import datetime,timezone
+          from concurrent.futures import ThreadPoolExecutor
+          from bot.news_football_memberships import refresh_football_news_memberships,memberships_for_news
+          from bot.feeds import enabled_feeds
+          from bot.fetch_sources import _fetch_feed_entries,_classify_candidate
+          from bot.news_football_priority import candidate_football_section
+          from bot.news_policy import non_article_news_reason
+          logging.basicConfig(level=logging.WARNING)
+          root=pathlib.Path('evidence');base='https://allball-backend-production.up.railway.app'
+          catalog=json.loads(pathlib.Path('bot/news_football_leagues.json').read_text())
+          def articles(menu):
+              out={'league':menu['league'],'label':menu['label']}
+              try:
+                  path='/articles?'+urllib.parse.urlencode({'sport':'football','league':menu['league'],'limit':100})
+                  with urllib.request.urlopen(base+path,timeout=25) as r:rows=json.loads(r.read(8000000))
+                  assert isinstance(rows,list)
+                  out['articles']=[{k:a.get(k) for k in ['id','title','summary','slug','sport','league','published_at','created_at','source_url','image_url']} for a in rows]
+              except Exception as e:out['error']=type(e).__name__+': '+str(e)[:120]
+              return out
+          with ThreadPoolExecutor(max_workers=3) as pool:menus=list(pool.map(articles,catalog))
+          (root/'menus.json').write_text(json.dumps(menus,ensure_ascii=False,indent=2))
+          state=refresh_football_news_memberships();members=memberships_for_news()
+          (root/'memberships.json').write_text(json.dumps(members,ensure_ascii=False,default=str,indent=2))
+          configs=enabled_feeds();(root/'feeds.json').write_text(json.dumps(configs,ensure_ascii=False,default=str,indent=2))
+          def source(cfg):
+              out={'publisher':cfg.get('publisher'),'url':cfg['url'],'items':[]}
+              try:
+                  for item in _fetch_feed_entries(cfg,12):
+                      tags=_classify_candidate(item)
+                      if tags.sport!='football':continue
+                      out['items'].append({**{k:item.get(k) for k in ['title','url','summary','published_at','_extracted','_classification_text','image','image_candidates','feed']},'candidate_league':candidate_football_section(item,tags),'pre_rejection':non_article_news_reason(item)})
+              except Exception as e:out['error']=type(e).__name__+': '+str(e)[:120]
+              return out
+          with ThreadPoolExecutor(max_workers=3) as pool:sources=list(pool.map(source,configs))
+          (root/'sources.json').write_text(json.dumps(sources,ensure_ascii=False,default=str,indent=2))
+          summary={'checked_at':datetime.now(timezone.utc).isoformat(),'menus':len(menus),'populated':sum(bool(m.get('articles')) for m in menus),'article_sample':sum(len(m.get('articles',[])) for m in menus),'rosters':state,'feeds':len(configs),'football_candidates':sum(len(s['items']) for s in sources),'AI_requests':0,'production_writes':0}
+          (root/'summary.json').write_text(json.dumps(summary,indent=2));print(json.dumps(summary,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: football-news-club-baseline-20261003
+          path: evidence/
+          retention-days: 7
