@@ -1,0 +1,50 @@
+name: Football News gap discovery feasibility 20261003
+on:
+  push:
+    branches: [audit/news-system-20261003]
+    paths: [.github/workflows/news-gap-discovery-feasibility-20261003.yml]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    env:
+      DATABASE_URL: 'sqlite:///:memory:'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: f22e5b603317a12839e123e62b487dbee740fbd5
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -q -r requirements.txt
+      - name: Four public search-feed requests using existing robots-aware transport
+        run: |
+          mkdir -p gap-feasibility
+          python - <<'PY'
+          import json,pathlib
+          from urllib.parse import urlencode
+          from datetime import datetime,timezone
+          import feedparser
+          from bot.news_feed_http import read_news_feed
+          from bot.extract import parse_feed_datetime
+          root=pathlib.Path('gap-feasibility');rows=[]
+          for label,query in [('ligue2','"Ligue 2" football'),('usl','"USL Championship" soccer')]:
+              endpoints=[('bing','https://www.bing.com/news/search?'+urlencode({'q':query,'format':'rss','qft':'interval="7"','sortby':'date'})),('google','https://news.google.com/rss/search?'+urlencode({'q':query+' when:1d','hl':'en-GB','gl':'GB','ceid':'GB:en'}))]
+              for provider,url in endpoints:
+                  out={'label':label,'provider':provider,'url':url,'checked_at':datetime.now(timezone.utc).isoformat()}
+                  try:
+                      raw=read_news_feed(url);feed=feedparser.parse(raw)
+                      out['format']=feed.version;out['items']=[{'title':e.get('title'),'url':e.get('link'),'published_at':str(parse_feed_datetime(e)),'source':dict(e.get('source') or {}),'summary':e.get('summary','')[:1000]} for e in feed.entries[:12]]
+                      if feed.version:(root/(provider+'-'+label+'.xml')).write_bytes(raw)
+                  except Exception as exc:out['error']=type(exc).__name__+': '+str(exc)[:160]
+                  rows.append(out);(root/'proof.json').write_text(json.dumps(rows,ensure_ascii=False,indent=2));print(provider,label,out.get('error'),len(out.get('items',[])),flush=True)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: news-gap-discovery-feasibility-20261003
+          path: gap-feasibility/
+          retention-days: 7
