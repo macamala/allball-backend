@@ -1,0 +1,64 @@
+name: Football News final production coverage 20261003
+on:
+  push:
+    branches: [audit/news-football-20261003]
+    paths: [.github/workflows/news-football-final-coverage-20261003.yml]
+permissions:
+  contents: read
+jobs:
+  coverage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: macamala/allball-frontend
+          ref: 5e2d799c38d22ac709644dcbc7646bfc40f3559b
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Observe the normal News repair cycle without triggering writes or bypassing publication gates
+        run: |
+          mkdir -p final-coverage
+          node --input-type=module - <<'JS'
+          import fs from 'node:fs';
+          const url='https://allball-backend-production.up.railway.app/articles/bayer-leverkusen-overcomes-two-goal-deficit-to-defeat-werder-bremen-in-football';
+          const observations=[];
+          for(let i=0;i<10;i++){
+            try{const r=await fetch(url,{signal:AbortSignal.timeout(15000)});const a=await r.json();observations.push({at:new Date().toISOString(),status:r.status,id:a.id,league:a.league,title:a.title,published_at:a.published_at});if(a.id===22719&&a.league==='football-women')break;}catch(e){observations.push({at:new Date().toISOString(),error:String(e)});}
+            if(i<9)await new Promise(resolve=>setTimeout(resolve,30000));
+          }
+          fs.writeFileSync('final-coverage/repair-observations.json',JSON.stringify(observations,null,2));
+          console.log(JSON.stringify(observations,null,2));
+          JS
+      - name: Audit all actual News menus and exact read-only data scopes
+        run: |
+          node --input-type=module - <<'JS'
+          import fs from 'node:fs';
+          import {readNewsData,FOOTBALL_NEWS_TOPICS,newsMatchBucket} from './src/lib/newsFootballData.js';
+          const catalog=JSON.parse(fs.readFileSync('src/config/newsFootballLeagues.json','utf8'));
+          const base='https://allball-backend-production.up.railway.app',output=[];
+          async function get(path,options={}){const r=await fetch(base+path,{...options,signal:options.signal||AbortSignal.timeout(18000)});if(!r.ok)throw Error('HTTP '+r.status);return r.json();}
+          async function check(row){const out={league:row.league,label:row.label,path:row.path,checked_at:new Date().toISOString()};
+            try{const articles=await get('/articles?'+new URLSearchParams({sport:'football',league:row.league,limit:'5'}));out.articles=articles.map(a=>({id:a.id,slug:a.slug,title:a.title,league:a.league,sport:a.sport,published_at:a.published_at,created_at:a.created_at,image_url:a.image_url||a.image}));out.wrong_league=articles.filter(a=>a.league!==row.league||a.sport!=='football').length;out.fresh=articles.filter(a=>Date.now()-Date.parse(a.published_at)<86400000).length;}catch(e){out.news_error=String(e);}
+            if(!FOOTBALL_NEWS_TOPICS.has(row.league)){
+              try{const d=await readNewsData(get,row.league,'standings');out.standings={competition:d.competition?.id||d.competition,rows:d.rows?.length||0,season:d.season,stale:d.stale};}catch(e){out.standings_error=String(e);}
+              try{const d=await readNewsData(get,row.league,'fixtures');const events=d.events||[];out.matches={competition:d.competition?.id||d.competition,total:events.length,fixtures:events.filter(e=>newsMatchBucket(e)==='fixtures').length,results:events.filter(e=>newsMatchBucket(e)==='results').length,unknown:events.filter(e=>newsMatchBucket(e)==='other').length,missing_team_logos:events.filter(e=>!e.home?.logo||!e.away?.logo).length,stale:d.coverage?.stale};}catch(e){out.matches_error=String(e);}
+            }
+            output.push(out);fs.writeFileSync('final-coverage/coverage.json',JSON.stringify(output,null,2));console.log(out.league,'news',out.articles?.length,'table',out.standings?.rows,'matches',out.matches?.total);}
+          const pending=[...catalog];await Promise.all(Array.from({length:2},async()=>{while(pending.length)await check(pending.shift());}));
+          const repairs=JSON.parse(fs.readFileSync('final-coverage/repair-observations.json','utf8'));
+          const summary={checked_at:new Date().toISOString(),menus:output.length,nonempty_menus:output.filter(r=>r.articles?.length).length,menus_with_fresh_articles:output.filter(r=>r.fresh>0).length,tables_with_rows:output.filter(r=>r.standings?.rows>0).length,menus_with_matches:output.filter(r=>r.matches?.total>0).length,menus_with_fixtures:output.filter(r=>r.matches?.fixtures>0).length,menus_with_results:output.filter(r=>r.matches?.results>0).length,missing_logo_match_rows:output.reduce((s,r)=>s+(r.matches?.missing_team_logos||0),0),wrong_league_fields:output.reduce((s,r)=>s+(r.wrong_league||0),0),empty_menus:output.filter(r=>r.articles?.length===0).map(r=>r.league),errors:output.filter(r=>r.news_error||r.standings_error||r.matches_error).map(r=>({league:r.league,news:r.news_error,table:r.standings_error,matches:r.matches_error})),leverkusen_menu_repair_observed:repairs.some(r=>r.id===22719&&r.league==='football-women'),all_football_news_complete:false,AI_requests:0,sports_writes:0};
+          fs.writeFileSync('final-coverage/summary.json',JSON.stringify(summary,null,2));
+          const escape=v=>'"'+String(v??'').replaceAll('"','""')+'"';
+          const csv=[['league','label','article_sample','fresh_sample','table_rows','fixtures','results','missing_logos','error'],...output.map(r=>[r.league,r.label,r.articles?.length,r.fresh,r.standings?.rows,r.matches?.fixtures,r.matches?.results,r.matches?.missing_team_logos,r.news_error||r.standings_error||r.matches_error||''])].map(row=>row.map(escape).join(',')).join('\n');
+          fs.writeFileSync('final-coverage/football-news-coverage.csv',csv);console.log(JSON.stringify(summary,null,2));
+          if(output.length!==86||summary.wrong_league_fields||summary.errors.length)throw Error('Public data scope or availability errors');
+          JS
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: football-news-final-coverage-20261003
+          path: final-coverage/
+          retention-days: 7
