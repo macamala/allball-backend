@@ -1,0 +1,104 @@
+name: Football News current roster release 20261003
+on:
+  push:
+    branches: [audit/news-throughput-20261003]
+    paths: [.github/workflows/news-roster-release-20261003.yml]
+permissions:
+  contents: write
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    env:
+      DATABASE_URL: 'sqlite:///:memory:'
+      NINKO_SKIP_STARTUP_INDEX: '1'
+      NINKO_SKIP_INTEGRITY_BACKFILL: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: bundle
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ops/news-free-probe-20260926
+          path: source
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply reviewed patch against unchanged production parent
+        working-directory: source
+        run: |
+          test "$(git rev-parse HEAD)" = '6e975006a52aff1f45db2a047a233faed28de907'
+          mkdir -p ../roster-evidence
+          python - <<'PY'
+          import base64,gzip,hashlib,pathlib,subprocess,json
+          raw=pathlib.Path('../bundle/audit/news-roster-release-20261003.patch.b64').read_text().strip()
+          patch=gzip.decompress(base64.b64decode(raw,validate=True))
+          assert hashlib.sha256(patch).hexdigest()=='9bde0334a905203482da62968b1f077030cb79c4cd784e83e612872414d60035'
+          path=pathlib.Path('../roster-evidence/reviewed.patch');path.write_bytes(patch)
+          subprocess.run(['git','apply','--check',str(path)],check=True)
+          subprocess.run(['git','apply',str(path)],check=True)
+          allowed={'bot/textutil.py','bot/news_football_memberships.py','bot/news_football_sections.py','tests/test_news_recent_fixture_memberships.py','tests/test_news_sentence_punctuation.py'}
+          changed=set(subprocess.check_output(['git','diff','--name-only'],text=True).splitlines())|set(subprocess.check_output(['git','ls-files','--others','--exclude-standard'],text=True).splitlines())
+          assert changed==allowed,changed^allowed
+          pathlib.Path('../roster-evidence/files.json').write_text(json.dumps({p:hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest() for p in sorted(allowed)},indent=2))
+          PY
+      - name: All News and text utility regressions on production Python minor
+        working-directory: source
+        run: |
+          pip install -q -r requirements.txt
+          python -m pytest -q tests/test_news* tests/test_textutil.py --junitxml=../roster-evidence/tests.xml > ../roster-evidence/tests.txt 2>&1 || { tail -100 ../roster-evidence/tests.txt; exit 1; }
+          tail -4 ../roster-evidence/tests.txt
+          python -m compileall -q bot
+      - name: Read actual existing tables and nearby fixtures, then replay original feed titles
+        working-directory: source
+        run: |
+          python - <<'PY'
+          import json,pathlib,logging
+          from datetime import datetime,timezone
+          from bot import news_football_memberships as m
+          from bot.feeds import enabled_feeds
+          from bot.fetch_sources import _fetch_feed_entries,_classify_candidate
+          from bot.news_football_priority import candidate_football_section
+          from bot.news_policy import non_article_news_reason
+          logging.basicConfig(level=logging.WARNING)
+          root=pathlib.Path('../roster-evidence');now=datetime.now(timezone.utc)
+          baseline=m.refresh_football_news_memberships(get=m._public_get,force=True)
+          before=m.memberships_for_news()
+          improved=m.refresh_football_news_memberships(force=True)
+          after=m.memberships_for_news()
+          cfg=next(f for f in enabled_feeds() if f.get('publisher')=='The72')
+          rows=[]
+          for item in _fetch_feed_entries(cfg,20):
+              tags=_classify_candidate(item)
+              rows.append({'title':item['title'],'url':item['url'],'published_at':str(item['published_at']),'menu':candidate_football_section(item,tags),'rejection':non_article_news_reason(item)})
+          championship=after.get('england-championship',{})
+          result={'checked_at':datetime.now(timezone.utc).isoformat(),'table_only':baseline,'with_fixture_fallback':improved,'newly_supported_menus':sorted(set(after)-set(before)),'championship':championship,'mexico_expansion':after.get('mexico-liga-expansion'),'feed_replay':rows,'AI_requests':0,'content_writes':0,'sports_writes':0,'note':'Partial club rosters establish News menu identity only. They are not generated standings or complete season guarantees.'}
+          (root/'production-source-proof.json').write_text(json.dumps(result,ensure_ascii=False,default=str,indent=2))
+          (root/'memberships.json').write_text(json.dumps(after,ensure_ascii=False,default=str,indent=2))
+          print(json.dumps(result,ensure_ascii=False,default=str,indent=2))
+          assert len(after)>=len(before)
+          assert championship.get('source_kind')=='confirmed_recent_fixture_roster'
+          assert len(championship.get('clubs',[]))==24
+          assert championship.get('complete_roster') is False
+          assert 'Blackburn Rovers' in m.verified_name_aliases(championship['clubs'])
+          assert any('Blackburn Rovers' in r['title'] and r['menu']=='england-championship' for r in rows)
+          assert not any('Blackburn Rovers' in r['title'] and r['menu'] in {'norway-eliteserien','germany-2-bundesliga'} for r in rows)
+          PY
+      - name: Commit tested clean release without audit workflows or unrelated changes
+        working-directory: source
+        run: |
+          git add bot/textutil.py bot/news_football_memberships.py bot/news_football_sections.py tests/test_news_recent_fixture_memberships.py tests/test_news_sentence_punctuation.py
+          test "$(git diff --cached --name-only | wc -l)" = '5'
+          git config user.name 'NinkoSports News validation'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix(news): recover current league rosters from verified existing fixtures and retain sentence punctuation'
+          git push origin HEAD:refs/heads/audit/news-roster-release-20261003
+          git rev-parse HEAD > ../roster-evidence/tested-commit.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: news-roster-release-20261003
+          path: roster-evidence/
+          retention-days: 7
