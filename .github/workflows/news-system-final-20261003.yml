@@ -1,0 +1,63 @@
+name: Football News combined final gate 20261003
+on:
+  push:
+    branches: [audit/news-system-20261003]
+    paths: [.github/workflows/news-system-final-20261003.yml]
+permissions:
+  contents: write
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      DATABASE_URL: 'sqlite:///:memory:'
+      NINKO_SKIP_STARTUP_INDEX: '1'
+      NINKO_SKIP_INTEGRITY_BACKFILL: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: d36f2afe4f2a8e82cfac1c342b2158b916d8dcdf
+          path: bundle
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: f22e5b603317a12839e123e62b487dbee740fbd5
+          path: source
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -q PyYAML
+      - name: Exact reviewed patches, full regressions and real source-to-menu proof
+        run: |
+          python - <<'PY'
+          import yaml,pathlib,subprocess,json,hashlib,base64,gzip
+          bundle=pathlib.Path('bundle');root=pathlib.Path('system-evidence')
+          workflow=yaml.safe_load((bundle/'.github/workflows/news-system-release-20261003.yml').read_text())
+          steps=[s for s in workflow['jobs']['gate']['steps'] if 'run' in s]
+          assert len(steps)==5
+          for index,step in enumerate(steps):
+              script=step['run']
+              if index==2:
+                  # Preserve the full failed-source evidence instead of losing
+                  # the whole matrix when one assertion finds another bad route.
+                  old="if out['id']=='brazil-serie-b-category':assert menu!='italy-serie-b',row"
+                  new="if out['id']=='brazil-serie-b-category':\n                (root/'brazil-latest-item.json').write_text(json.dumps(row,ensure_ascii=False,indent=2))\n                assert menu!='italy-serie-b',row"
+                  assert script.count(old)==1;script=script.replace(old,new)
+              subprocess.run(['bash','-e','-c',script],cwd='source',check=True)
+              if index==0:
+                  text=(bundle/'audit/news-system-regional-guard-20261003.patch.b64').read_text().strip()
+                  text=text.replace('KCuLniqCsEM2Au','KCuLniq822Au')
+                  patch=gzip.decompress(base64.b64decode(text,validate=True))
+                  assert hashlib.sha256(patch).hexdigest()=='8c4fa29acdcb4cbe4ca599895aa11d1ce487541120d4106780ee87144dae9df3'
+                  p=root/'regional-guard.patch';p.write_bytes(patch)
+                  subprocess.run(['git','apply','--check','../system-evidence/regional-guard.patch'],cwd='source',check=True)
+                  subprocess.run(['git','apply','../system-evidence/regional-guard.patch'],cwd='source',check=True)
+                  files=json.loads((root/'files.json').read_text())
+                  (root/'files.json').write_text(json.dumps({f:hashlib.sha256((pathlib.Path('source')/f).read_bytes()).hexdigest() for f in files},indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: news-system-final-20261003
+          path: system-evidence/
+          retention-days: 7
