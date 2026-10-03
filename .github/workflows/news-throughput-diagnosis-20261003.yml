@@ -1,0 +1,98 @@
+name: News throughput diagnosis 20261003
+on:
+  push:
+    branches: [audit/news-throughput-20261003]
+    paths: [.github/workflows/news-throughput-diagnosis-20261003.yml]
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    env:
+      DATABASE_URL: 'sqlite:///:memory:'
+      NINKO_SKIP_STARTUP_INDEX: '1'
+      NINKO_SKIP_INTEGRITY_BACKFILL: '1'
+      NEWS_FOOTBALL_ONLY: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: pip install -q -r requirements.txt
+      - name: Classify existing sources and reproduce parser defects without publication
+        run: |
+          mkdir -p throughput-evidence
+          python - <<'PY'
+          import json,pathlib,logging,urllib.request,urllib.parse,traceback
+          from collections import Counter
+          from concurrent.futures import ThreadPoolExecutor
+          from datetime import datetime,timezone
+          from bot.feeds import enabled_feeds
+          from bot.fetch_sources import _fetch_feed_entries,_classify_candidate,_classify_item
+          from bot.extract import extract_from_url,_ArticleExtractor,paragraphs_from_html
+          from bot.news_football_priority import candidate_football_section
+          from bot.news_football_memberships import refresh_football_news_memberships
+          from bot.news_fact_guard import fact_lock_reason
+          from bot.news_policy import non_article_news_reason
+          logging.basicConfig(level=logging.WARNING)
+          root=pathlib.Path('throughput-evidence');base='https://allball-backend-production.up.railway.app'
+          def get(path):
+              with urllib.request.urlopen(base+path,timeout=15) as r:return json.loads(r.read(3000000))
+          catalog=json.loads(pathlib.Path('bot/news_football_leagues.json').read_text())
+          def inventory(row):
+              try:
+                  articles=get('/articles?'+urllib.parse.urlencode({'sport':'football','league':row['league'],'limit':1}))
+                  return {'league':row['league'],'has_article':bool(articles),'latest':[{k:a.get(k) for k in ('id','title','published_at','image_url')} for a in articles]}
+              except Exception as exc:return {'league':row['league'],'error':type(exc).__name__}
+          with ThreadPoolExecutor(max_workers=3) as pool:menus=list(pool.map(inventory,catalog))
+          (root/'menus.json').write_text(json.dumps(menus,ensure_ascii=False,indent=2))
+          refresh_football_news_memberships()
+          selected={'The72','Football Espana','Football Italia','Get German Football News','FotbollDirekt','SuomiFutis','Liga2 ProSport','Blick Football','STV Sport','Gong','Equalizer Soccer','Index.hr','NB1.hu','Goal.pl','K League United','CONMEBOL','Liga Profesional'}
+          configs=[f for f in enabled_feeds() if f.get('publisher') in selected]
+          def inspect(cfg):
+              out={'publisher':cfg.get('publisher'),'url':cfg['url'],'items':[]}
+              try:
+                  items=_fetch_feed_entries(cfg,5)
+                  for item in items:
+                      candidate=_classify_candidate(item)
+                      row={'title':item['title'],'url':item['url'],'published_at':str(item['published_at']),'candidate_sport':candidate.sport,'candidate_menu':candidate_football_section(item,candidate),'pre_rejection':non_article_news_reason(item)}
+                      if not row['pre_rejection']:
+                          body=item.get('_extracted') or extract_from_url(item['url'])[0]
+                          tags=_classify_item(item,body)
+                          enriched={**item,'_classification_text':body}
+                          row.update(source_words=len(body.split()),body_sport=tags.sport,body_menu=candidate_football_section(enriched,tags),body_rejection=non_article_news_reason({**item,'body':body}))
+                      out['items'].append(row)
+              except Exception as exc:out['error']=type(exc).__name__+': '+str(exc)[:120]
+              return out
+          with ThreadPoolExecutor(max_workers=3) as pool:sources=list(pool.map(inspect,configs))
+          (root/'sources.json').write_text(json.dumps(sources,ensure_ascii=False,indent=2))
+          sample='The football club confirmed preparations for the next match and the coach explained which players would train. '
+          failures=[]
+          for fragment in ['<p class>','<p class="">','<p id>','<p>']:
+              parser=_ArticleExtractor()
+              try:
+                  parser.feed('<article>'+fragment+sample*3+'</p></article>');parser.close()
+                  failures.append({'tag':fragment,'exception':None,'parts':len(parser.main_parts)})
+              except Exception as exc:failures.append({'tag':fragment,'exception':type(exc).__name__,'trace':traceback.format_exc(limit=3)})
+          (root/'parser.json').write_text(json.dumps(failures,indent=2))
+          import bot.news_fact_guard as guard
+          original=guard.original_draft_reason;guard.original_draft_reason=lambda *args:None
+          try:
+              facts=[]
+              for token in ['Concacaf','CONCACAF','Conmebol','UEFA','Uefa']:
+                  draft={'title':'Football organisation sets programme','summary':'The '+token.upper()+' programme was discussed.','body':'The football organisation confirmed the training programme.'}
+                  facts.append({'source_token':token,'reason':fact_lock_reason(draft,'Organisation update','The '+token+' programme was discussed.',expected_sport='football')})
+          finally:guard.original_draft_reason=original
+          (root/'acronym-reproduction.json').write_text(json.dumps(facts,indent=2))
+          summary={'checked_at':datetime.now(timezone.utc).isoformat(),'menus':len(menus),'populated':sum(r.get('has_article',False) for r in menus),'source_desks':len(sources),'AI_requests':0,'production_writes':0,'parser_failures':[r['tag'] for r in failures if r['exception']]}
+          (root/'summary.json').write_text(json.dumps(summary,indent=2));print(json.dumps(summary,indent=2));print(json.dumps(facts,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: news-throughput-diagnosis-20261003
+          path: throughput-evidence/
+          retention-days: 7
