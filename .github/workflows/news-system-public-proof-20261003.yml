@@ -1,0 +1,112 @@
+name: Football News production proof 20261003
+on:
+  push:
+    branches: [audit/news-system-20261003]
+    paths: [.github/workflows/news-system-public-proof-20261003.yml]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 2e1a2d8bf72879953403ec9ff989a17839ba8764
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Record public menus and wait only for normal zero-AI duplicate repair
+        run: |
+          mkdir -p production-proof
+          python - <<'PY'
+          import json,pathlib,time,urllib.request,urllib.parse,urllib.error
+          from concurrent.futures import ThreadPoolExecutor
+          from datetime import datetime,timezone
+          root=pathlib.Path('production-proof');base='https://allball-backend-production.up.railway.app'
+          def get(path):
+              try:
+                  req=urllib.request.Request(base+path,headers={'User-Agent':'NinkoSports-News-Release-Audit/1.0'})
+                  with urllib.request.urlopen(req,timeout=20) as r:return {'status':r.status,'data':json.loads(r.read(6000000))}
+              except urllib.error.HTTPError as e:return {'status':e.code}
+              except Exception as e:return {'error':type(e).__name__}
+          refs={22751:'france-and-italy-draw-as-olises-goal-is-cancelled-out-in-nations-league',22770:'france-and-italy-share-points-after-olises-goal-is-cancelled-out',22759:'zindine-zidane-records-first-draw-as-france-manager-against-italy',22710:'zidane-praises-france-performance-despite-1-1-draw-with-italy',22731:'italy-hold-their-own-in-1-1-draw-with-france-at-the-stade-de-france',22714:'france-and-italy-draw-1-1-as-dsir-dou-says-france-can-take-positives'}
+          observations=[]
+          for attempt in range(13):
+              rows={str(i):get('/articles/'+slug) for i,slug in refs.items()}
+              observations.append({'at':datetime.now(timezone.utc).isoformat(),'articles':rows})
+              (root/'repair-observations.json').write_text(json.dumps(observations,ensure_ascii=False,indent=2))
+              if rows['22770'].get('status')==404 and all(rows[str(i)].get('status')==200 for i in refs if i!=22770):break
+              if attempt<12:time.sleep(20)
+          final=observations[-1]['articles'];expected_repair=final['22770'].get('status')==404
+          assert all(final[str(i)].get('status')==200 for i in refs if i!=22770),{i:r.get('status') for i,r in final.items()}
+          for i,expected in {22751:'2026-10-02T20:52:20',22759:'2026-10-02T21:54:32',22710:'2026-10-02T21:25:41',22731:'2026-10-02T21:17:44',22714:'2026-10-02T21:04:43'}.items():
+              assert final[str(i)]['data']['published_at'].startswith(expected),(i,final[str(i)]['data']['published_at'])
+          (root/'reader-reference.json').write_text(json.dumps(final['22751']['data'],ensure_ascii=False,indent=2))
+          (root/'repair-summary.json').write_text(json.dumps({'checked_at':observations[-1]['at'],'duplicate_public_hold_observed':expected_repair,'kept_report':22751,'protected_reactions':[22759,22710,22731,22714],'dates_unchanged':True,'AI_requests':0,'writes':0},indent=2))
+          print('Duplicate public hold observed:',expected_repair)
+          PY
+      - run: pip install -q playwright && python -m playwright install --with-deps chromium
+      - name: Full actual article and decoded own hero on desktop and two mobile widths
+        run: |
+          python - <<'PY'
+          import json,pathlib
+          from playwright.sync_api import sync_playwright
+          root=pathlib.Path('production-proof');article=json.loads((root/'reader-reference.json').read_text());checks=[]
+          assert article['content'] and article['image_url']
+          with sync_playwright() as p:
+              browser=p.chromium.launch()
+              for width in [1440,390,320]:
+                  page=browser.new_page(viewport={'width':width,'height':900},timezone_id='Australia/Sydney')
+                  errors=[];writes=[]
+                  page.on('pageerror',lambda e:errors.append(str(e)))
+                  page.on('request',lambda r:writes.append(r.url) if '/sports-data/' in r.url and r.method not in ['GET','HEAD','OPTIONS'] else None)
+                  page.goto('https://ninkosports.com/article/'+article['slug'],wait_until='domcontentloaded',timeout=45000)
+                  page.wait_for_function("title=>document.querySelector('.article-page h1')?.textContent.trim()===title",arg=article['title'],timeout=25000)
+                  page.wait_for_function("text=>[...document.querySelectorAll('.article-page .article-body')].some(el=>el.innerText.replace(/\\s+/g,' ').includes(text))",arg=' '.join(article['content'].split()),timeout=25000)
+                  hero=page.locator('.article-page img').first;hero.scroll_into_view_if_needed()
+                  page.wait_for_function("()=>{const i=document.querySelector('.article-page img');return i&&i.complete&&i.naturalWidth>=200}",timeout=25000)
+                  image=hero.evaluate('(i)=>({url:i.currentSrc,width:i.naturalWidth,height:i.naturalHeight})')
+                  assert article['image_url'] in image['url'],image
+                  dimensions=page.evaluate('({body:document.documentElement.scrollWidth,viewport:innerWidth})');assert dimensions['body']<=width+3,dimensions
+                  assert not errors and not writes,(errors,writes)
+                  checks.append({'width':width,'article_id':article['id'],'full_body_words':len(article['content'].split()),'image':image,'page_errors':errors,'sports_writes':writes,'passed':True})
+                  page.screenshot(path=str(root/f'article-{width}.png'),full_page=True);page.close()
+              browser.close()
+          (root/'browser.json').write_text(json.dumps({'checks':checks,'mocked_responses':False},indent=2));print(json.dumps(checks,indent=2))
+          PY
+      - name: All 86 actual football menus and current publication evidence
+        run: |
+          python - <<'PY'
+          import json,pathlib,urllib.request,urllib.parse
+          from concurrent.futures import ThreadPoolExecutor
+          from datetime import datetime,timezone
+          root=pathlib.Path('production-proof');base='https://allball-backend-production.up.railway.app';now=datetime.now(timezone.utc)
+          catalog=json.loads(pathlib.Path('bot/news_football_leagues.json').read_text())
+          def check(row):
+              out={'league':row['league'],'label':row['label']}
+              try:
+                  with urllib.request.urlopen(base+'/articles?'+urllib.parse.urlencode({'sport':'football','league':row['league'],'limit':5}),timeout=20) as r:articles=json.loads(r.read(4000000))
+                  assert isinstance(articles,list)
+                  out['articles']=[{k:a.get(k) for k in ['id','title','slug','sport','league','published_at','created_at','image_url']} for a in articles]
+                  out['wrong_fields']=sum(a.get('sport')!='football' or a.get('league')!=row['league'] for a in articles)
+                  out['missing_images']=sum(not a.get('image_url') for a in articles)
+                  out['fresh']=0
+                  for a in articles:
+                      stamp=datetime.fromisoformat(a['published_at'].replace('Z','+00:00'));stamp=stamp.replace(tzinfo=timezone.utc) if stamp.tzinfo is None else stamp.astimezone(timezone.utc)
+                      out['fresh']+=0<=(now-stamp).total_seconds()<86400
+              except Exception as e:out['error']=type(e).__name__+': '+str(e)[:100]
+              return out
+          with ThreadPoolExecutor(max_workers=3) as pool:menus=list(pool.map(check,catalog))
+          (root/'menus.json').write_text(json.dumps(menus,ensure_ascii=False,indent=2))
+          summary={'checked_at':datetime.now(timezone.utc).isoformat(),'menus':len(menus),'populated':sum(bool(m.get('articles')) for m in menus),'fresh_menus':sum(bool(m.get('fresh')) for m in menus),'empty_menus':[m['league'] for m in menus if m.get('articles')==[]],'wrong_fields':sum(m.get('wrong_fields',0) for m in menus),'missing_image_urls_in_sample':sum(m.get('missing_images',0) for m in menus),'errors':[m for m in menus if m.get('error')],'all_football_news_complete':False,'AI_requests':0,'writes':0}
+          (root/'coverage-summary.json').write_text(json.dumps(summary,indent=2));print(json.dumps(summary,indent=2))
+          assert len(menus)==86 and not summary['wrong_fields'] and not summary['errors'],summary
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: news-system-production-proof-20261003
+          path: production-proof/
+          retention-days: 7
