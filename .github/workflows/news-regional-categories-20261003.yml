@@ -1,0 +1,76 @@
+name: News regional category discovery 20261003
+on:
+  push:
+    branches: [audit/news-system-20261003]
+    paths: [.github/workflows/news-regional-categories-20261003.yml]
+permissions:
+  contents: read
+jobs:
+  categories:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DATABASE_URL: 'sqlite:///:memory:'
+      NINKO_SKIP_STARTUP_INDEX: '1'
+      NINKO_SKIP_INTEGRITY_BACKFILL: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: f22e5b603317a12839e123e62b487dbee740fbd5
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -q -r requirements.txt
+      - name: Discover actual same-host category and RSS links with the existing transport
+        run: |
+          mkdir -p category-evidence
+          python - <<'PY'
+          import json,pathlib,re,logging
+          from html.parser import HTMLParser
+          from concurrent.futures import ThreadPoolExecutor
+          from urllib.parse import urljoin,urlsplit
+          import feedparser
+          from bot.news_feed_http import read_news_feed
+          from bot.extract import parse_feed_datetime
+          root=pathlib.Path('category-evidence');logging.basicConfig(level=logging.WARNING)
+          sites=[('italia','https://football-italia.net/'),('france','https://www.getfootballnewsfrance.com/'),('germany','https://www.getfootballnewsgermany.com/'),('mercato','https://www.footmercato.net/'),('poland','https://www.goal.pl/'),('hungary','https://nb1.hu/'),('sweden','https://fotbolldirekt.se/'),('finland','https://www.suomifutis.com/'),('switzerland','https://www.blick.ch/sport/fussball/'),('croatia','https://www.index.hr/sport/'),('serbia','https://www.mozzartsport.com/fudbal/1'),('brazil','https://ge.globo.com/futebol/'),('usl','https://www.uslchampionship.com/news')]
+          pattern=re.compile(r'(?:serie.?b|ligue.?2|2.?bundesliga|zweite|1-liga|pierwsza|nb.?ii|nb2|masodoszt|allsvensk|superett|veikkaus|ykkos|challenge|hnl|prva.?liga|prva.?nl|superlig|usl|championship)',re.I)
+          class Links(HTMLParser):
+              def __init__(self):super().__init__();self.links=[];self.feeds=[];self.current=None;self.parts=[]
+              def handle_starttag(self,t,attrs):
+                  a={k:v or '' for k,v in attrs}
+                  if t=='a':self.current=a.get('href');self.parts=[]
+                  if t=='link' and ('rss' in a.get('type','') or 'atom' in a.get('type','')):self.feeds.append(a.get('href'))
+              def handle_data(self,s):
+                  if self.current:self.parts.append(s)
+              def handle_endtag(self,t):
+                  if t=='a' and self.current:self.links.append((self.current,' '.join(self.parts)));self.current=None
+          def probe(pair):
+              name,url=pair;out={'id':name,'url':url,'categories':[]}
+              try:
+                  raw=read_news_feed(url).decode('utf-8','replace');p=Links();p.feed(raw)
+                  candidates={urljoin(url,u):title.strip()[:120] for u,title in p.links if u and pattern.search(u+' '+title) and urlsplit(urljoin(url,u)).hostname==urlsplit(url).hostname and len(urlsplit(urljoin(url,u)).path)<100}
+                  out['links']=candidates;out['home_feeds']=p.feeds
+                  for link,title in list(candidates.items())[:8]:
+                      row={'url':link,'title':title}
+                      try:
+                          r=read_news_feed(link).decode('utf-8','replace');lp=Links();lp.feed(r)
+                          feeds=[urljoin(link,u) for u in lp.feeds if u and 'comments' not in u and urlsplit(urljoin(link,u)).hostname==urlsplit(url).hostname]
+                          row['feeds']=[]
+                          for feed in feeds[:2]:
+                              data=feedparser.parse(read_news_feed(feed))
+                              row['feeds'].append({'url':feed,'format':data.version,'items':[{'title':e.get('title'),'url':e.get('link'),'published_at':str(parse_feed_datetime(e)),'categories':[c.get('term') for c in e.get('tags',[]) if isinstance(c,dict)]} for e in data.entries[:6]]})
+                          row['article_links']=[{'url':urljoin(link,u),'title':t.strip()[:150]} for u,t in lp.links if u and len(t.strip())>30 and urlsplit(urljoin(link,u)).hostname==urlsplit(url).hostname][:18]
+                      except Exception as e:row['error']=type(e).__name__+': '+str(e)[:100]
+                      out['categories'].append(row)
+              except Exception as e:out['error']=type(e).__name__+': '+str(e)[:120]
+              (root/(name+'.json')).write_text(json.dumps(out,ensure_ascii=False,indent=2));print(name,len(out['categories']),out.get('error'),flush=True)
+          with ThreadPoolExecutor(max_workers=3) as pool:list(pool.map(probe,sites))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: news-regional-categories-20261003
+          path: category-evidence/
+          retention-days: 7
