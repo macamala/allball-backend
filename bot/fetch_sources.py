@@ -123,7 +123,10 @@ def source_article_facts(
 
 
 def _correction_retry_allowed(*, prefer_breadth: bool = False, force: bool = False) -> bool:
-    """Conservatively preserve one request for translations when that lane is on."""
+    """Preserve the existing allowance for waiting leagues and translations."""
+    from .news_football_capacity import yield_football_repairs
+    if yield_football_repairs():
+        return False
     budget = active_ai_budget()
     if budget is None:
         # Isolated callers still mirror production breadth policy.
@@ -194,8 +197,9 @@ def _ai_story_attempt(
         return reject("empty", parsed)
     if is_dramatic_shortening(facts, body):
         from .free_ai_router import last_writer_identity
-        if last_writer_identity()[0] == 'openai':
-            logger.info('[fetch_sources] paid draft too short source_words=%s body_words=%s title=%s',
+        from .news_football_capacity import yield_football_repairs
+        if last_writer_identity()[0] == 'openai' or yield_football_repairs():
+            logger.info('[fetch_sources] draft too short; repeated length repair deferred source_words=%s body_words=%s title=%s',
                         word_count(facts), word_count(body), title[:80])
             return reject('too-short', parsed)
         raw = write_ninkosports_story(
@@ -1299,6 +1303,19 @@ def _fetch_and_store_all_articles(
                                  for item in queued[:8]])
         # A football-only cycle has no other-sport candidate to reserve for.
         prefer_breadth = update_coverage_debt() > 1
+        from collections import Counter
+        from .news_football_capacity import football_breadth_scope, underfilled_football_pending
+        football_only = os.getenv('NEWS_FOOTBALL_ONLY') == '1'
+        queue_sections = {}
+        if football_only:
+            for candidate in queued:
+                try:
+                    queue_sections[id(candidate)] = candidate_football_section(candidate, _classify_candidate(candidate))
+                except Exception:
+                    queue_sections[id(candidate)] = None
+        pending_football = Counter(queue_sections.values())
+        logger.info('[fetch_sources] underfilled football competitions with queued sources=%s',
+                    underfilled_football_pending(pending_football, football_inventory))
         for item in queued:
             if ai_budget <= 0 or openai_rate_limited() or ai_budget_exhausted():
                 break
@@ -1321,15 +1338,19 @@ def _fetch_and_store_all_articles(
                 break
             allow_ai = use_ai and ai_budget > 0 and not openai_rate_limited()
             try:
-                article, used_ai = _ingest_item(
-                    db,
-                    item,
-                    use_ai=allow_ai,
-                    max_ai_chars=max_ai_chars,
-                    ai_budget=ai_budget,
-                    prefer_breadth=prefer_breadth,
-                    first_coverage=sport_inventory.get(_classify_candidate(item).sport, 0) == 0,
-                )
+                current_section = queue_sections.get(id(item))
+                if current_section is not None:
+                    pending_football[current_section] -= 1
+                with football_breadth_scope(pending_football, football_inventory, current_section, enabled=football_only):
+                    article, used_ai = _ingest_item(
+                        db,
+                        item,
+                        use_ai=allow_ai,
+                        max_ai_chars=max_ai_chars,
+                        ai_budget=ai_budget,
+                        prefer_breadth=prefer_breadth,
+                        first_coverage=sport_inventory.get(_classify_candidate(item).sport, 0) == 0,
+                    )
             except Exception as e:
                 logger.exception("[fetch_sources] item failed: %s", e)
                 db.rollback()
@@ -1337,6 +1358,8 @@ def _fetch_and_store_all_articles(
             if article:
                 created += 1
                 sport_inventory[article.sport] = sport_inventory.get(article.sport, 0) + 1
+                if article.sport == 'football' and getattr(article, 'league', None):
+                    football_inventory[article.league] = football_inventory.get(article.league, 0) + 1
             if used_ai:
                 rewritten += 1
                 ai_budget = max(0, ai_budget - 1)

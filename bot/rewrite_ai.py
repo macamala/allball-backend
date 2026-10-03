@@ -319,6 +319,13 @@ def write_ninkosports_story(
         "VERIFIED SOURCE FACTS (may be another language; use only what is stated):\n"
         f"{facts}\n"
     )
+    if sport == 'football':
+        prompt += (
+            "\nDELIVERABLE LENGTH: The body is the text AFTER the separate headline and summary. "
+            "For a substantial source, write 180-260 body words EXCLUDING the headline and summary, "
+            "in at least three short factual paragraphs. Do not add facts or padding to reach a length. "
+            "For a genuinely brief source, stay within its available facts and preserve the central news.\n"
+        )
     if learned_instructions:
         prompt = (
             "STAFF-CONFIRMED CORRECTION MEMORY:\n"
