@@ -1,0 +1,79 @@
+name: News domestic category admission proof 20261003
+on:
+  push:
+    branches: [audit/news-system-20261003]
+    paths: [.github/workflows/news-domestic-source-proof-20261003.yml]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      DATABASE_URL: 'sqlite:///:memory:'
+      NINKO_SKIP_STARTUP_INDEX: '1'
+      NINKO_SKIP_INTEGRITY_BACKFILL: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: f22e5b603317a12839e123e62b487dbee740fbd5
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -q -r requirements.txt
+      - name: Public domestic articles, visible body, original date and own photograph
+        run: |
+          mkdir -p domestic-evidence
+          python - <<'PY'
+          import json,pathlib,logging,re
+          from concurrent.futures import ThreadPoolExecutor
+          from urllib.parse import urlsplit
+          from bot.news_official_indexes import _hydrate_source
+          from bot.fetch_sources import _fetch_feed_entries,_classify_item,_pick_reachable_article_image
+          from bot.extract import extract_from_url,extract_image_candidates_from_url
+          from bot.news_football_memberships import refresh_football_news_memberships
+          from bot.news_football_priority import candidate_football_section
+          from bot.news_policy import non_article_news_reason
+          from bot.quality import quality_check
+          from datetime import datetime,timezone
+          logging.basicConfig(level=logging.WARNING)
+          root=pathlib.Path('domestic-evidence');refresh_football_news_memberships()
+          configs=[
+            {'id':'nb2-category','publisher':'NB1.hu','url':'https://nb1.hu/category/nb2/feed/','kind':'league','sport':'football','article_body_required':True,'enabled':True,'mode':'rss'},
+            {'id':'sweden-allsvenskan-category','publisher':'FotbollDirekt','url':'https://fotbolldirekt.se/allsvenskan/','paths':('/allsvenskan/',),'article_path_re':r'^/allsvenskan/[^/]+/?$'},
+            {'id':'sweden-superettan-category','publisher':'FotbollDirekt','url':'https://fotbolldirekt.se/superettan/','paths':('/superettan/',),'article_path_re':r'^/superettan/[^/]+/?$'},
+            {'id':'finland-veikkausliiga-category','publisher':'SuomiFutis','url':'https://www.suomifutis.com/veikkausliiga/','paths':('/20',),'article_path_re':r'^/20\d{2}/\d{2}/[^/]+/?$'},
+            {'id':'finland-ykkosliiga-category','publisher':'SuomiFutis','url':'https://www.suomifutis.com/ykkosliiga/','paths':('/20',),'article_path_re':r'^/20\d{2}/\d{2}/[^/]+/?$'},
+            {'id':'brazil-serie-b-category','publisher':'ge','url':'https://ge.globo.com/futebol/brasileirao-serie-b/','paths':('/futebol/','/sp/','/mg/','/sc/','/pr/','/go/','/pe/','/ba/','/ce/','/rs/','/al/','/ma/','/pa/','/rj/','/mt/','/am/'),'article_path_re':r'^/.*/noticia/20\d{2}/\d{2}/\d{2}/[^/]+\.ghtml$'},
+            {'id':'croatia-hnl-category','publisher':'Index.hr','url':'https://www.index.hr/sport/rubrika/shnl/5204.aspx','paths':('/sport/clanak/',),'article_path_re':r'^/sport/clanak/[^/]+/\d+\.aspx$'},
+          ]
+          def probe(cfg):
+              cfg={**cfg,'host':urlsplit(cfg['url']).hostname,'sport':'football','verified_official':False}
+              out={'config':cfg,'items':[]}
+              try:
+                  items=_fetch_feed_entries(cfg,4) if cfg.get('mode')=='rss' else _hydrate_source(cfg,3)
+                  for item in items:
+                      body=item.get('_extracted') or extract_from_url(item['url'])[0]
+                      tags=_classify_item(item,body or '')
+                      pics=list(item.get('image_candidates') or []) or extract_image_candidates_from_url(item['url'])
+                      hero=_pick_reachable_article_image(pics,max_checks=2)
+                      ok,reason=quality_check(item['title'],body or '',tags.sport,require_english=False)
+                      product=non_article_news_reason({**item,'body':body})
+                      row={'title':item['title'],'url':item['url'],'published_at':str(item['published_at']),'body':body,'words':len((body or '').split()),'sport':tags.sport,'menu':candidate_football_section({**item,'_classification_text':body},tags),'image':hero,'quality':reason,'product_hold':product,'eligible_before_writer':bool(ok and hero and not product and tags.sport=='football')}
+                      out['items'].append(row)
+              except Exception as e:out['error']=type(e).__name__+': '+str(e)[:180]
+              (root/(cfg['id']+'.json')).write_text(json.dumps(out,ensure_ascii=False,indent=2));print(cfg['id'],len(out['items']),out.get('error'),flush=True)
+              return out
+          groups={}
+          for cfg in configs:groups.setdefault(urlsplit(cfg['url']).hostname,[]).append(cfg)
+          with ThreadPoolExecutor(max_workers=3) as pool:rows=[r for batch in pool.map(lambda items:[probe(c) for c in items],groups.values()) for r in batch]
+          summary={'checked_at':datetime.now(timezone.utc).isoformat(),'eligible':{r['config']['id']:sum(i['eligible_before_writer'] for i in r['items']) for r in rows},'AI_requests':0,'production_writes':0}
+          (root/'summary.json').write_text(json.dumps(summary,indent=2));print(json.dumps(summary,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: news-domestic-source-proof-20261003
+          path: domestic-evidence/
+          retention-days: 7
