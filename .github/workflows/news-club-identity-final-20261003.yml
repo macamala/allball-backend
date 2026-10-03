@@ -1,0 +1,148 @@
+name: Football club identity final gate 20261003
+on:
+  push:
+    branches: [audit/news-club-coverage-20261003]
+    paths: [.github/workflows/news-club-identity-final-20261003.yml]
+permissions:
+  contents: write
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env:
+      DATABASE_URL: 'sqlite:///:memory:'
+      NINKO_SKIP_STARTUP_INDEX: '1'
+      NINKO_SKIP_INTEGRITY_BACKFILL: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: c3bb1a871d6e769944545886864e9fc6826e8111
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply bounded News identity and source-product corrections
+        run: |
+          mkdir -p identity-evidence
+          cat > bot/news_club_identity.py <<'PY'
+          """Conservative News-only handling of ambiguous club names.
+
+          An ordinary word is not evidence of a club. This rejection rule supplies no
+          alternative league, membership or sporting fact and performs no I/O.
+          """
+          import re
+
+          _COMO = re.compile(
+              r'\b(?:como (?:1907|fc|calcio)|(?:fc|club|calcio) como|'
+              r'como s (?:coach|manager|goalkeeper|defender|midfielder|striker|forward|squad)|'
+              r'como (?:signs?|signed|appoints?|appointed|confirms?|confirmed|announces?|announced|'
+              r'beats?|defeats?|hosts?|faces?|wins?|lost|lose|draws?)\b)'
+          )
+
+          def ambiguous_club_has_evidence(alias, normalized_text):
+              """Require club-specific context for Como, also a common Portuguese word."""
+              return alias != 'como' or bool(_COMO.search(normalized_text or ''))
+          PY
+          cat > tests/test_news_club_source_collisions.py <<'PY'
+          from datetime import datetime, timezone
+          from types import SimpleNamespace
+          import pytest
+          from bot import news_football_sections as sections
+          from bot.news_club_coverage import ClubCoverage
+          from bot.news_club_identity import ambiguous_club_has_evidence
+          from bot.news_football_priority import candidate_football_section
+          from bot.news_policy import non_article_news_reason, fair_news_queue
+          NOW = datetime(2026, 10, 3, 7, tzinfo=timezone.utc)
+          LEAGUE = 'italy-serie-a'
+          @pytest.fixture
+          def coverage(monkeypatch):
+              rosters={LEAGUE:{'clubs':['Como','Roma','Milan','Juventus'],'valid_from':'2026-10-02',
+                  'valid_until':'2026-10-05','observed_at':NOW.isoformat()}}
+              monkeypatch.setattr(sections,'memberships_for_news',lambda:rosters)
+              monkeypatch.setattr(sections,'_CLUBS',{'valid_from':'2026-10-01','valid_until':'2026-12-31','leagues':{}})
+              return ClubCoverage(rosters,now=NOW)
+          @pytest.mark.parametrize('title',[
+              'Ironia de Potter apanhou Gyökeres desprevenido: Temos quase tantas baixas como acusações',
+              'Como o treinador preparou a equipa para o jogo','Jogador descrito como reforço importante',
+              'Nuno explica como defendeu a equipa','A seleção tem tantos lesionados como o adversário'])
+          def test_portuguese_word_is_not_italian_club_identity(coverage,title):
+              article=SimpleNamespace(title=title,summary='',content='',published_at=NOW,source_url='https://www.abola.pt/futebol/noticia/test')
+              assert coverage.subjects(article,LEAGUE)==()
+              assert sections._club_section(sections._norm(title),'',article,False,NOW.date()) is None
+              item={'title':title,'published_at':NOW,'summary':'','url':article.source_url}
+              assert candidate_football_section(item,SimpleNamespace(sport='football',league=LEAGUE),today=NOW.date()) is None
+          @pytest.mark.parametrize('title',[
+              'Como sign a new midfielder','Como appoint manager','Como announces training schedule',
+              'Como defeat Roma','Como 1907 discusses preparations','FC Como plans next match',
+              "Como's coach discusses the squad",'Como’s goalkeeper returns to training'])
+          def test_explicit_club_reporting_keeps_the_verified_team(coverage,title):
+              article=SimpleNamespace(title=title,summary='',content='',published_at=NOW)
+              assert 'como' in coverage.subjects(article,LEAGUE)
+              assert sections._club_section(sections._norm(title),'',article,False,NOW.date())==LEAGUE
+          def test_other_club_in_headline_is_not_displaced_by_common_como(coverage):
+              article=SimpleNamespace(title='Como a Juventus preparou o próximo jogo',summary='',published_at=NOW)
+              assert coverage.subjects(article,LEAGUE)==('juventus',)
+              assert ambiguous_club_has_evidence('juventus','anything')
+          @pytest.mark.parametrize('title',[
+              'Compra tus entradas para ver el duelo entre el Valencia y el Athletic Club',
+              'Consigue tus entradas para el partido','Adquiere las entradas para el partido',
+              'Reserva ya tus boletos para el partido','Comprar las entradas para ver al equipo'])
+          def test_ticket_purchase_instructions_are_not_club_reporting(title):
+              assert non_article_news_reason({'title':title})=='non_article_ticket_promotion'
+          @pytest.mark.parametrize('title',[
+              'Valencia anuncia reembolsos por las entradas','Aficionados protestan por el precio de las entradas',
+              'Club suspende la venta de entradas por seguridad','El estadio registra un lleno histórico',
+              'El jugador compra entradas para aficionados afectados'])
+          def test_real_reporting_about_ticket_problems_remains_eligible(title):
+              assert non_article_news_reason({'title':title}) is None
+          def test_sales_copy_is_removed_before_club_balancing_or_writer(coverage):
+              items=[{'title':'Compra tus entradas para el partido del Como','url':'https://example.com/promo','published_at':NOW},
+                  {'title':'Como appoint manager','url':'https://example.com/news','published_at':NOW}]
+              queue,reasons=fair_news_queue(items,lambda _:SimpleNamespace(sport='football',league=LEAGUE),
+                  now=NOW,allowed_sports={'football'},football_inventory={LEAGUE:2},football_club_coverage=coverage)
+              assert [row['url'] for row in queue]==['https://example.com/news']
+              assert reasons['non_article_ticket_promotion']==1
+          PY
+          pip install -q -r requirements.txt
+          python -m pytest -q tests/test_news_club_source_collisions.py --junitxml=identity-evidence/before.xml > identity-evidence/before.txt 2>&1 || true
+          python - <<'PY'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          failures=[c.attrib['name'] for c in ET.parse('identity-evidence/before.xml').iter('testcase') if c.find('failure') is not None]
+          assert any('portuguese_word' in c for c in failures) and any('ticket_purchase' in c for c in failures),failures
+          def edit(path,old,new):
+              p=Path(path);s=p.read_text();assert s.count(old)==1,(path,s.count(old));p.write_text(s.replace(old,new))
+          edit('bot/news_club_coverage.py','from text_unidecode import unidecode','from text_unidecode import unidecode\nfrom .news_club_identity import ambiguous_club_has_evidence')
+          edit('bot/news_club_coverage.py',"                for hit in re.finditer(r'(?<!\\w)' + re.escape(alias) + r'(?!\\w)', text):\n                    before, after",
+              "                if not ambiguous_club_has_evidence(alias, text):\n                    continue\n                for hit in re.finditer(r'(?<!\\w)' + re.escape(alias) + r'(?!\\w)', text):\n                    before, after")
+          edit('bot/news_football_sections.py','from .news_football_subjects import headline_national_fixture','from .news_football_subjects import headline_national_fixture\nfrom .news_club_identity import ambiguous_club_has_evidence')
+          edit('bot/news_football_sections.py','                alias = _norm(club)\n','                alias = _norm(club)\n                if not ambiguous_club_has_evidence(alias, text):\n                    continue\n')
+          old='    # A transfer wishlist is an opinion product, not a report of a deal.'
+          edit('bot/news_policy.py',old,"    # Explicit Spanish ticket purchase instructions, not price/refund reporting.\n    if re.match(r'^\\s*(?:compra|comprar|consigue|adquiere|reserva)\\s+(?:ya\\s+)?(?:tus|las|sus)\\s+(?:entradas|boletos)\\b', title):\n        return 'non_article_ticket_promotion'\n"+old)
+          PY
+      - name: All retained News and text tests on the production Python minor
+        run: |
+          python -m pytest -q tests/test_news* tests/test_textutil.py --junitxml=identity-evidence/tests.xml > identity-evidence/tests.txt 2>&1 || { tail -100 identity-evidence/tests.txt; exit 1; }
+          tail -4 identity-evidence/tests.txt
+          python -m compileall -q bot
+          git diff --check
+      - name: Persist only the tested News child release
+        run: |
+          python - <<'PY'
+          import subprocess,json,pathlib,hashlib
+          allowed={'bot/news_club_identity.py','bot/news_club_coverage.py','bot/news_football_sections.py','bot/news_policy.py','tests/test_news_club_source_collisions.py'}
+          subprocess.run(['git','add',*sorted(allowed)],check=True)
+          assert set(subprocess.check_output(['git','diff','--cached','--name-only'],text=True).splitlines())==allowed
+          pathlib.Path('identity-evidence/files.json').write_text(json.dumps({f:hashlib.sha256(pathlib.Path(f).read_bytes()).hexdigest() for f in sorted(allowed)},indent=2))
+          PY
+          git config user.name 'NinkoSports News validation'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix(news): prevent common-word club coverage and prioritize reporting over ticket sales'
+          git push origin HEAD:refs/heads/audit/news-club-identity-release-20261003
+          git rev-parse HEAD > identity-evidence/tested-commit.txt
+          git show --stat --oneline HEAD > identity-evidence/commit.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: news-club-identity-final-20261003
+          path: identity-evidence/
+          retention-days: 7
