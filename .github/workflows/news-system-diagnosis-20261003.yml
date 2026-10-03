@@ -1,0 +1,104 @@
+name: News complete pipeline diagnosis 20261003
+on:
+  push:
+    branches: [audit/news-system-repair-20261003]
+    paths: [.github/workflows/news-system-diagnosis-20261003.yml]
+permissions:
+  contents: read
+jobs:
+  diagnosis:
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    env:
+      DATABASE_URL: 'sqlite:///:memory:'
+      NINKO_SKIP_STARTUP_INDEX: '1'
+      NINKO_SKIP_INTEGRITY_BACKFILL: '1'
+      NEWS_FOOTBALL_ONLY: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 8f474371ac8001ecfeb0438f5020f79312f19339
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -q -r requirements.txt
+      - name: Existing source pipeline admission stages and exact public articles
+        run: |
+          mkdir -p diagnosis
+          python - <<'PY'
+          import json,pathlib,urllib.request,urllib.parse,logging,re
+          from concurrent.futures import ThreadPoolExecutor
+          from collections import defaultdict,Counter
+          from datetime import datetime,timezone
+          from bot.feeds import enabled_feeds
+          from bot.fetch_sources import _fetch_feed_entries,_classify_candidate,_classify_item
+          from bot.news_official_indexes import HTML_INDEXES,SITEMAPS,_hydrate_source
+          from bot.news_football_priority import candidate_football_section
+          from bot.news_football_memberships import refresh_football_news_memberships
+          from bot.news_policy import numeric_tokens,non_article_news_reason
+          from bot.extract import extract_from_url
+          from bot.quality import quality_check
+          logging.basicConfig(level=logging.WARNING)
+          root=pathlib.Path('diagnosis');base='https://allball-backend-production.up.railway.app'
+          def get(path):
+              with urllib.request.urlopen(base+path,timeout=18) as r:return json.loads(r.read(5000000))
+          catalog=json.loads(pathlib.Path('bot/news_football_leagues.json').read_text())
+          def menu(row):
+              try:return row['league'],get('/articles?'+urllib.parse.urlencode({'sport':'football','league':row['league'],'limit':3}))
+              except Exception as e:return row['league'],{'error':type(e).__name__}
+          with ThreadPoolExecutor(max_workers=3) as pool:public=dict(pool.map(menu,catalog))
+          (root/'public.json').write_text(json.dumps(public,ensure_ascii=False))
+          (root/'rosters.json').write_text(json.dumps(refresh_football_news_memberships(),indent=2))
+          def fetch(pair):
+              kind,cfg=pair;row={'kind':kind,'id':cfg.get('id') or cfg.get('publisher') or cfg['url'],'url':cfg['url'],'items':[]}
+              try:
+                  items=_fetch_feed_entries(cfg,8) if kind=='rss' else _hydrate_source(cfg,3)
+                  for item in items:
+                      tags=_classify_candidate(item)
+                      row['items'].append({'title':item['title'],'url':item['url'],'published_at':str(item['published_at']),'sport':tags.sport,'menu':candidate_football_section(item,tags),'pre_rejection':non_article_news_reason(item),'body':item.get('_extracted') or '', 'summary':item.get('summary') or '', 'feed':item.get('feed') or cfg})
+              except Exception as e:row['error']=type(e).__name__+': '+str(e)[:120]
+              print(row['id'],'candidates',len(row['items']),row.get('error'),flush=True)
+              return row
+          pairs=[('rss',c) for c in enabled_feeds() if c.get('sport') in (None,'football')]+[('index',c) for c in list(HTML_INDEXES)+list(SITEMAPS) if c.get('sport')=='football']
+          grouped=defaultdict(list)
+          for p in pairs:grouped[urllib.parse.urlsplit(p[1]['url']).hostname].append(p)
+          with ThreadPoolExecutor(max_workers=4) as pool:rows=[r for batch in pool.map(lambda ps:[fetch(p) for p in ps],grouped.values()) for r in batch]
+          (root/'sources.json').write_text(json.dumps(rows,ensure_ascii=False,default=str))
+          # Spend no AI: inspect only two promising stories from each unfilled menu.
+          selected=[];counts=Counter()
+          for source in rows:
+              for item in source['items']:
+                  key=item['menu'];host=urllib.parse.urlsplit(item['url']).hostname
+                  group=key or host
+                  if item['pre_rejection'] or counts[group]>=2:continue
+                  if key and isinstance(public.get(key),list) and public[key]:continue
+                  counts[group]+=1;selected.append(item)
+          def bodycheck(row):
+              out={k:v for k,v in row.items() if k not in {'body','summary','feed'}}
+              try:
+                  body=row['body'] or extract_from_url(row['url'])[0]
+                  item={**row,'_extracted':body,'_classification_text':body}
+                  tags=_classify_item(item,body)
+                  ok,reason=quality_check(row['title'],body,tags.sport,require_english=False)
+                  out.update(body_sport=tags.sport,body_menu=candidate_football_section(item,tags),source_words=len(body.split()),quality=reason,product=non_article_news_reason({**item,'body':body}),body=body,source_numbers=sorted(numeric_tokens(row['title']+'\n'+body,include_spelled=True)))
+              except Exception as e:out['error']=type(e).__name__+': '+str(e)[:100]
+              return out
+          with ThreadPoolExecutor(max_workers=3) as pool:bodies=list(pool.map(bodycheck,selected[:90]))
+          (root/'body-stages.json').write_text(json.dumps(bodies,ensure_ascii=False,indent=2))
+          story_slugs=['independent-commission-finds-manchester-city-guilty-of-all-premier-league-charges','chelsea-fc-legends-to-host-tottenham-hotspur-legends-at-stamford-bridge']
+          for slug in story_slugs:
+              try:(root/(slug[:45]+'.json')).write_text(json.dumps(get('/articles/'+slug),ensure_ascii=False,indent=2))
+              except Exception:pass
+          for slug in [a['slug'] for a in public.get('serbia-superliga',[]) if a.get('id')==22475]:
+              (root/'serbia-youth-article.json').write_text(json.dumps(get('/articles/'+slug),ensure_ascii=False,indent=2))
+          supplies=Counter(i['menu'] for r in rows for i in r['items'] if i['sport']=='football' and not i['pre_rejection'])
+          summary={'checked_at':datetime.now(timezone.utc).isoformat(),'source_count':len(rows),'candidate_count':sum(len(r['items']) for r in rows),'public_populated':sum(isinstance(v,list) and bool(v) for v in public.values()),'source_menu_supply':dict(supplies),'no_menu_supply':[r['league'] for r in catalog if not supplies[r['league']]],'AI_requests':0,'production_writes':0}
+          (root/'summary.json').write_text(json.dumps(summary,indent=2));print(json.dumps(summary,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: news-system-diagnosis-20261003
+          path: diagnosis/
+          retention-days: 7
