@@ -412,6 +412,9 @@ def non_article_news_reason(item):
         return 'non_article_fan_poll'
     if re.search(r'\bobjavio informacije o ulaznicama\b', title):
         return 'non_article_ticket_promotion'
+    # Require both explicit live-page markers; ordinary reporting survives.
+    if re.search(r'\ben directo\s*[|:]', title) and re.search(r'\b(?:en vivo|ultima hora|última hora)\b', title):
+        return 'non_article_rolling_tracker'
     # Explicit Spanish ticket purchase instructions, not price/refund reporting.
     if re.match(r'^\s*(?:compra|comprar|consigue|adquiere|reserva)\s+(?:ya\s+)?(?:tus|las|sus)\s+(?:entradas|boletos)\b', title):
         return 'non_article_ticket_promotion'
@@ -1069,7 +1072,8 @@ def fair_news_queue(
             list(queues['football']), football_inventory,
             section=lambda item: sections.get(news_source_identity(item.get('url'))),
             priority=lambda item: priorities.get(news_source_identity(item.get('url')), 0),
-            coverage_first=int(now.timestamp() // 600) % 3 == 1))
+            coverage_first=int(now.timestamp() // 600) % 3 == 1,
+            distinct_first=football_club_coverage is not None))
     if football_club_coverage is not None and 'football' in queues:
         queues['football'] = deque(football_club_coverage.balance(
             list(queues['football']),

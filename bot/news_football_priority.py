@@ -51,7 +51,7 @@ def candidate_football_section(item, tags, *, today=None):
     return league if league and _explicit(_norm(source.title + '\n' + lead)) == league else None
 
 
-def spread_football_leagues(items, inventory, *, section, priority, coverage_first=False):
+def spread_football_leagues(items, inventory, *, section, priority, coverage_first=False, distinct_first=False):
     """Keep Zvezda first, then balance known leagues with a protected other lane.
 
     Three major slots alternate with one other-league slot. A bounded cold-start
@@ -82,9 +82,15 @@ def spread_football_leagues(items, inventory, *, section, priority, coverage_fir
         if not lanes[tier]:
             tier = 1 - tier
         pending = lanes[tier]
-        key = min(pending, key=lambda k: (
-            max(0, int(inventory.get(k, 0) or 0)) + scheduled[k] if k else 2 + scheduled[k],
-        ))
+        def coverage_rank(key):
+            count = max(0, int(inventory.get(key, 0) or 0)) if key else 2
+            if distinct_first:
+                # Give each waiting league one opportunity before repeats,
+                # retaining the existing major/other lanes and AI limits.
+                broad = key is None or str(key).startswith('football-')
+                return (scheduled[key], int(broad), count)
+            return (count + scheduled[key],)
+        key = min(pending, key=coverage_rank)
         output.append(pending[key].popleft())
         scheduled[key] += 1
         if not pending[key]:
