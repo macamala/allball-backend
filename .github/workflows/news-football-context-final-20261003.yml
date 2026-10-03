@@ -1,0 +1,57 @@
+name: Football News source context final gate 20261003
+on:
+  push:
+    branches: [audit/news-football-20261003]
+    paths: [.github/workflows/news-football-context-final-20261003.yml]
+permissions:
+  contents: write
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    env:
+      DATABASE_URL: 'sqlite:///:memory:'
+      NINKO_SKIP_STARTUP_INDEX: '1'
+      NINKO_SKIP_INTEGRITY_BACKFILL: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 384a531f721757f6b8b3fe1c65ebbd83ce044b95
+          path: bundle
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ops/news-free-probe-20260926
+          path: source
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: pip install -q PyYAML
+      - name: Execute pinned reviewed integration, full regressions and source checks
+        run: |
+          python - <<'PY'
+          import pathlib,subprocess,yaml
+          path=pathlib.Path('bundle/.github/workflows/news-football-context-release-20261003.yml')
+          workflow=yaml.safe_load(path.read_text())
+          steps=[s for s in workflow['jobs']['gate']['steps'] if 'run' in s]
+          assert len(steps)==4,[s['name'] for s in steps]
+          for index,step in enumerate(steps):
+              script=step['run']
+              if index==3:
+                  old="'tests/test_news_football_source_context.py','bot/extract.py'"
+                  new="'tests/test_news_football_source_context.py','tests/test_news_football_sources_20261002.py','bot/extract.py'"
+                  assert script.count(old)==1
+                  script=script.replace(old,new)
+              subprocess.run(['bash','-e','-c',script],cwd='source',check=True)
+              if index==0:
+                  p=pathlib.Path('source/tests/test_news_football_sources_20261002.py');s=p.read_text()
+                  assert s.count('assert len(HTML_INDEXES)==7')==1
+                  s=s.replace('assert len(HTML_INDEXES)==7','assert len(HTML_INDEXES)==11\n    assert len({source["id"] for source in HTML_INDEXES})==11')
+                  p.write_text(s)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: football-news-context-final-20261003
+          path: context-evidence/
+          retention-days: 7
