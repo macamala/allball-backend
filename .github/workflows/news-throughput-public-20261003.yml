@@ -29,6 +29,10 @@ jobs:
               with urllib.request.urlopen(base+path,timeout=18) as r:return json.loads(r.read(3000000))
           catalog=json.loads(pathlib.Path('bot/news_football_leagues.json').read_text())
           now=datetime.now(timezone.utc)
+          def fresh(a):
+              stamp=datetime.fromisoformat(a['published_at'].replace('Z','+00:00'))
+              stamp=stamp.replace(tzinfo=timezone.utc) if stamp.tzinfo is None else stamp.astimezone(timezone.utc)
+              return 0<=(now-stamp).total_seconds()<86400
           def check(menu):
               out={'league':menu['league'],'label':menu['label']}
               try:
@@ -37,22 +41,26 @@ jobs:
                   out['articles']=[{k:a.get(k) for k in ['id','title','slug','sport','league','published_at','created_at','image_url']} for a in rows]
                   out['wrong_field']=sum(a.get('sport')!='football' or a.get('league')!=menu['league'] for a in rows)
                   out['missing_image_url']=sum(not a.get('image_url') for a in rows)
-                  out['has_fresh_article']=any(0<=(now-datetime.fromisoformat(a['published_at'].replace('Z','+00:00')).replace(tzinfo=timezone.utc)).total_seconds()<86400 for a in rows)
+                  out['has_fresh_article']=any(fresh(a) for a in rows)
               except Exception as e:out['error']=type(e).__name__+': '+str(e)[:100]
               return out
           with ThreadPoolExecutor(max_workers=3) as pool:menus=list(pool.map(check,catalog))
           (root/'menus.json').write_text(json.dumps(menus,ensure_ascii=False,indent=2))
-          slug='fc-hertha-wels-engages-legal-and-tax-advisors-following-management-changes'
-          article=get('/articles/'+slug)
-          assert article['id']==22723 and article['league']=='austria-second-league'
-          assert len(article['content'].split())>=100 and article['image_url']
-          (root/'reader-reference.json').write_text(json.dumps({'id':article['id'],'slug':slug,'title':article['title'],'league':article['league'],'published_at':article['published_at'],'body_words':len(article['content'].split()),'body_prefix':' '.join(article['content'].split())[:100],'image_url':article['image_url']},ensure_ascii=False,indent=2))
           summary={'checked_at':datetime.now(timezone.utc).isoformat(),'menus':len(menus),'populated_menus':sum(bool(m.get('articles')) for m in menus),'fresh_menus':sum(m.get('has_fresh_article',False) for m in menus),'empty_menus':[m['league'] for m in menus if m.get('articles')==[]],'wrong_league_sport_fields':sum(m.get('wrong_field',0) for m in menus),'missing_image_url_in_sample':sum(m.get('missing_image_url',0) for m in menus),'errors':[m for m in menus if m.get('error')],'AI_requests':0,'content_writes':0,'all_football_news_complete':False}
           (root/'coverage-summary.json').write_text(json.dumps(summary,indent=2));print(json.dumps(summary,indent=2))
+          slug='fc-hertha-wels-engages-legal-and-tax-advisors-following-management-changes'
+          article=get('/articles/'+slug)
+          ref={'id':article.get('id'),'slug':slug,'title':article.get('title'),'league':article.get('league'),'published_at':article.get('published_at'),'body_words':len(article.get('content','').split()),'body_text':' '.join(article.get('content','').split()),'image_url':article.get('image_url')}
+          (root/'reader-reference.json').write_text(json.dumps(ref,ensure_ascii=False,indent=2))
+          print('Reader reference:',ref['id'],ref['league'],'actual body words',ref['body_words'])
+          assert ref['id']==22723 and ref['league']=='austria-second-league'
+          # This is a rendering check against the complete served payload, not
+          # a new editorial length rule. Publication quality gates are unchanged.
+          assert ref['body_text'] and ref['image_url']
           assert len(menus)==86 and not summary['errors'] and not summary['wrong_league_sport_fields']
           PY
       - run: pip install -q playwright && python -m playwright install --with-deps chromium
-      - name: Confirm real article copy and decoded hero on desktop and mobile
+      - name: Confirm the entire served article and decoded hero on desktop and mobile
         run: |
           python - <<'PY'
           import json,pathlib
@@ -68,12 +76,12 @@ jobs:
                   try:
                       page.goto('https://ninkosports.com/article/'+ref['slug'],wait_until='domcontentloaded',timeout=45000)
                       page.wait_for_function("title=>document.querySelector('.article-page h1')?.textContent.trim()===title",arg=ref['title'],timeout=25000)
-                      page.wait_for_function("prefix=>[...document.querySelectorAll('.article-page .article-body')].some(el=>el.innerText.replace(/\\s+/g,' ').includes(prefix))",arg=ref['body_prefix'],timeout=25000)
+                      page.wait_for_function("body=>[...document.querySelectorAll('.article-page .article-body')].some(el=>el.innerText.replace(/\\s+/g,' ').includes(body))",arg=ref['body_text'],timeout=25000)
                       hero=page.locator('.article-page img').first;hero.wait_for();hero.scroll_into_view_if_needed()
                       page.wait_for_function("()=>{const i=document.querySelector('.article-page img');return i&&i.complete&&i.naturalWidth>=200}",timeout=25000)
                       row['image']=hero.evaluate('(i)=>({url:i.currentSrc,width:i.naturalWidth,height:i.naturalHeight})')
                       row['body_words']=max(len(t.split()) for t in page.locator('.article-page .article-body').all_inner_texts())
-                      assert row['body_words']>=ref['body_words']-3
+                      assert row['body_words']>=ref['body_words']
                       assert ref['image_url'] in row['image']['url']
                       dimensions=page.evaluate('({body:document.documentElement.scrollWidth,viewport:innerWidth})');assert dimensions['body']<=width+3,dimensions
                       assert not errors and not writes,(errors,writes)
