@@ -1,0 +1,131 @@
+name: Football News source context release 20261003
+on:
+  push:
+    branches: [audit/news-football-20261003]
+    paths: [.github/workflows/news-football-context-release-20261003.yml]
+permissions:
+  contents: write
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    env:
+      DATABASE_URL: 'sqlite:///:memory:'
+      NINKO_SKIP_STARTUP_INDEX: '1'
+      NINKO_SKIP_INTEGRITY_BACKFILL: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: bundle
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ops/news-free-probe-20260926
+          path: source
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Apply bounded News source-context correction
+        working-directory: source
+        run: |
+          test "$(git rev-parse HEAD)" = 'e39f63eeb1d21044ee4cf19764f0fe0012a57cc9'
+          mkdir -p ../context-evidence
+          python - <<'PY'
+          from pathlib import Path
+          import shutil
+          module=Path('../bundle/audit/news_football_source_context.py').read_text()
+          module=module.replace('def _identity(url):\n    try:', 'def _identity(url):\n    if not isinstance(url, str):\n        return None\n    try:')
+          Path('bot/news_football_source_context.py').write_text(module)
+          shutil.copyfile('../bundle/audit/test_news_football_source_context.py','tests/test_news_football_source_context.py')
+          def edit(path,old,new):
+              p=Path(path);s=p.read_text();assert s.count(old)==1,(path,s.count(old),old);p.write_text(s.replace(old,new))
+          edit('bot/extract.py','from .news_football_regional_desks import regional_article_profile, regional_hero_scope',
+              'from .news_football_regional_desks import regional_article_profile, regional_hero_scope\nfrom .news_football_source_context import WOMEN_CONTEXT, verified_women_article_category')
+          edit('bot/extract.py',"or (not self.body_id and self.body_class in values.get('class', '').split())):",
+              "or (not self.body_id and self.body_class and set(self.body_class.split()) <= set(values.get('class', '').split()))):")
+          edit('bot/extract.py','    # Verified regional football article containers.',
+              '    if verified_women_article_category(html, canonical):\n        source_category = WOMEN_CONTEXT\n    # Verified regional football article containers.')
+          edit('bot/extract.py','    if not is_substantial_source(text):\n        ld_body = _json_ld_article_body(html or "")',
+              '    if not is_substantial_source(text) and not regional and publisher_host != "www.sportschau.de":\n        ld_body = _json_ld_article_body(html or "")')
+          edit('bot/news_football_regional_desks.py','_PROFILES = {', '''_PROFILES = {
+              'www.gazzetta.gr': {'body_class': 'content is-relative', 'body_tag': 'div', 'path_prefix': '/football/'},
+              'www.laola1.at': {'body_class': 'editor-text', 'body_tag': 'div', 'path_prefix': '/de/red/fussball/'},''')
+          p=Path('bot/news_football_sources.py');p.write_text(p.read_text()+'''\nfrom .news_football_source_context import HTML_INDEXES as REGIONAL_HTML_INDEXES
+          HTML_INDEXES = HTML_INDEXES + REGIONAL_HTML_INDEXES
+          SOURCE_DESKS.update({'Gazzetta': ['greece-super-league','greece-super-league-2'],
+                               'LAOLA1': ['austria-bundesliga','austria-second-league']})
+          ''')
+          edit('bot/news_football_sections.py','from .news_competition_scope import conflicting_competition_qualifier',
+              'from .news_competition_scope import conflicting_competition_qualifier\nfrom .news_football_source_context import audited_women_article, source_menu_association')
+          edit('bot/news_football_sections.py','    except ValueError:\n        source = None',
+              "    except ValueError:\n        source = None\n    if audited_women_article(article):\n        return 'football-women'")
+          edit('bot/news_football_sections.py','    return _club_section(title, summary, article, False, today)',
+              "    return (_club_section(title, summary, article, False, today)\n            or source_menu_association(getattr(article, 'source_url', None) or getattr(article, 'external_id', None)))")
+          edit('bot/news_football_priority.py',"        published_at=item.get('published_at'))",
+              "        published_at=item.get('published_at'), source_url=item.get('url'))")
+          edit('bot/news_fact_guard.py',"    source = f\"{source_title or ''}\\n{source_body or ''}\"\n    if expected_sport == 'football':",
+              "    source = f\"{source_title or ''}\\n{source_body or ''}\"\n    if expected_sport == 'football':\n        from .news_football_source_context import preserve_women_qualifier_reason\n        context_reason = preserve_women_qualifier_reason(source, draft)\n        if context_reason:\n            return context_reason\n    if expected_sport == 'football':")
+          PY
+      - name: All News regression and syntax checks
+        working-directory: source
+        run: |
+          pip install -q -r requirements.txt
+          python -m pytest -q tests/test_news* --junitxml=../context-evidence/tests.xml > ../context-evidence/tests.txt 2>&1 || { tail -100 ../context-evidence/tests.txt; exit 1; }
+          tail -4 ../context-evidence/tests.txt
+          python -m compileall -q bot
+      - name: Read actual scoped articles, photos and category with no AI or publication
+        working-directory: source
+        run: |
+          python - <<'PY'
+          import json,pathlib,logging
+          from datetime import datetime,timezone
+          from bot.news_football_source_context import HTML_INDEXES, WOMEN_CONTEXT
+          from bot.news_official_indexes import _hydrate_source
+          from bot.news_feed_http import read_news_feed
+          from bot.extract import article_text_from_html
+          from bot.fetch_sources import _classify_item,_pick_reachable_article_image
+          from bot.news_football_priority import candidate_football_section
+          from bot.quality import quality_check
+          logging.basicConfig(level=logging.WARNING)
+          root=pathlib.Path('../context-evidence');rows=[]
+          for config in HTML_INDEXES:
+              row={'id':config['id'],'url':config['url'],'items':[]}
+              try:
+                  for item in _hydrate_source(config,2):
+                      body=item.get('_extracted') or '';tags=_classify_item(item,body)
+                      ok,reason=quality_check(item['title'],body,tags.sport,require_english=False)
+                      photo=_pick_reachable_article_image([p for p in item.get('image_candidates',[]) if p.get('source') in {'og','twitter'}],max_checks=2)
+                      row['items'].append({'title':item['title'],'url':item['url'],'published_at':str(item['published_at']),'words':len(body.split()),'sport':tags.sport,'menu':candidate_football_section(item,tags),'photo_verified':bool(photo),'quality':reason,'eligible_before_writer':bool(ok and photo and tags.sport=='football')})
+              except Exception as e:row['error']=type(e).__name__+': '+str(e)[:160]
+              rows.append(row)
+          url='https://www.sportschau.de/regional/wdr/wdr-leverkusen-feiert-comeback-sieg-gegen-bremen-100.html'
+          body=article_text_from_html(read_news_feed(url).decode('utf-8','replace'))
+          category_ok=body.startswith(WOMEN_CONTEXT+'\n\n') and 'Rheinländerinnen' in body
+          summary={'checked_at':datetime.now(timezone.utc).isoformat(),'sources':rows,'same_article_womens_category_preserved':category_ok,'AI_requests':0,'published':0}
+          (root/'source-proof.json').write_text(json.dumps(summary,ensure_ascii=False,indent=2));print(json.dumps(summary,ensure_ascii=False,indent=2))
+          assert category_ok
+          assert sum(any(i['eligible_before_writer'] for i in row['items']) for row in rows)>=2
+          PY
+      - name: Preserve clean tested release only
+        working-directory: source
+        run: |
+          python - <<'PY'
+          import subprocess,pathlib,json,hashlib
+          allowed={'bot/news_football_source_context.py','tests/test_news_football_source_context.py','bot/extract.py','bot/news_football_regional_desks.py','bot/news_football_sources.py','bot/news_football_sections.py','bot/news_football_priority.py','bot/news_fact_guard.py'}
+          changed=set(subprocess.check_output(['git','diff','--name-only'],text=True).splitlines())|set(subprocess.check_output(['git','ls-files','--others','--exclude-standard'],text=True).splitlines())
+          assert changed==allowed,changed^allowed
+          pathlib.Path('../context-evidence/files.json').write_text(json.dumps({f:hashlib.sha256(pathlib.Path(f).read_bytes()).hexdigest() for f in sorted(allowed)},indent=2))
+          subprocess.run(['git','add',*sorted(allowed)],check=True)
+          PY
+          git config user.name 'NinkoSports News validation'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix(news): retain verified womens category and admit scoped Greek and Austrian reporting'
+          git push origin HEAD:refs/heads/audit/news-football-context-release-20261003
+          git rev-parse HEAD > ../context-evidence/tested-commit.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: football-news-context-release-20261003
+          path: context-evidence/
+          retention-days: 7
