@@ -1,0 +1,53 @@
+name: Serbian club News body verification 20261003
+on:
+  push:
+    branches: [audit/news-club-coverage-20261003]
+    paths: [.github/workflows/news-serbian-clubs-body-20261003.yml]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    env:
+      DATABASE_URL: 'sqlite:///:memory:'
+      NINKO_SKIP_STARTUP_INDEX: '1'
+      NINKO_SKIP_INTEGRITY_BACKFILL: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 2e1a2d8bf72879953403ec9ff989a17839ba8764
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: pip install -q -r requirements.txt
+      - run: |
+          mkdir -p evidence
+          python - <<'PY'
+          import json,pathlib,feedparser,re
+          from bot.news_feed_http import read_news_feed
+          from bot.extract import _ScopedNewsBody,_metadata,paragraphs_from_html,article_text_from_html,page_title_from_html,collect_page_image_candidates
+          from bot.fetch_sources import _pick_reachable_article_image
+          root=pathlib.Path('evidence');out=[]
+          for name,url in [('vojvodina','https://www.fkvojvodina.rs/feed/'),('radnicki1923','https://www.fkradnicki.com/feed/'),('radnickinis','https://fkradnickinis.rs/feed/')]:
+              try:
+                  f=feedparser.parse(read_news_feed(url));e=f.entries[0];target=e['link'];html=read_news_feed(target).decode('utf-8','replace');(root/(name+'.html')).write_text(html)
+                  row={'source':name,'feed':url,'url':target,'title':page_title_from_html(html),'canonical':_metadata(html,'canonical') or _metadata(html,'og:url'),'published':e.get('published'),'default_body':article_text_from_html(html),'bodies':[],'rss_body':[v.get('value','') for v in e.get('content',[])]}
+                  for cls in ['entry-content','post-content','single__content','article-content','content','post-entry','entry','td-post-content','et_pb_post_content','vc_column-inner','article__body']:
+                      p=_ScopedNewsBody(cls);p.feed(html)
+                      if p.finished:
+                          text=paragraphs_from_html(''.join(p.parts))
+                          if len(text)>80:row['bodies'].append({'class':cls,'text':text})
+                  photos=collect_page_image_candidates(html);row['photos']=photos;row['verified_hero']=_pick_reachable_article_image([p for p in photos if p.get('source') in ['og','twitter']],max_checks=2)
+                  row['access_flags']=re.findall(r'.{0,40}(?:isAccessibleForFree|paywall|subscriber-only).{0,70}',html,re.I)[:10]
+                  out.append(row)
+              except Exception as e:out.append({'source':name,'error':str(e)[:120]})
+          (root/'articles.json').write_text(json.dumps(out,ensure_ascii=False,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: news-serbian-clubs-body-20261003
+          path: evidence/
+          retention-days: 7
