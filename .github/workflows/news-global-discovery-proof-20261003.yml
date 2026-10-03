@@ -1,0 +1,47 @@
+name: News global discovery feasibility 20261003
+on:
+  push:
+    branches: [audit/news-system-20261003]
+    paths: [.github/workflows/news-global-discovery-proof-20261003.yml]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: f22e5b603317a12839e123e62b487dbee740fbd5
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -q -r requirements.txt
+      - name: Two bounded public discovery requests, no article or model writes
+        env:
+          DATABASE_URL: 'sqlite:///:memory:'
+        run: |
+          mkdir -p global-evidence
+          python - <<'PY'
+          import json,pathlib,time
+          from urllib.parse import urlencode
+          from datetime import datetime,timezone
+          from bot.news_feed_http import read_news_feed
+          root=pathlib.Path('global-evidence');output=[]
+          queries=['("Serie B" OR "Ligue 2" OR "Superettan") (football OR soccer)', '("Super Lig" OR "USL Championship" OR "Liga MX") (football OR soccer)']
+          for i,q in enumerate(queries):
+              url='https://api.gdeltproject.org/api/v2/doc/doc?'+urlencode({'query':q,'mode':'artlist','format':'json','timespan':'24h','maxrecords':'20','sort':'datedesc'})
+              row={'query':q,'url':url,'checked_at':datetime.now(timezone.utc).isoformat()}
+              try:
+                  raw=read_news_feed(url);data=json.loads(raw);row['bytes']=len(raw);row['response']=data
+              except Exception as e:row['error']=type(e).__name__+': '+str(e)[:200]
+              output.append(row);(root/'responses.json').write_text(json.dumps(output,ensure_ascii=False,indent=2));print(json.dumps(row,ensure_ascii=False),flush=True)
+              if i==0:time.sleep(6)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: news-global-discovery-proof-20261003
+          path: global-evidence/
+          retention-days: 7
