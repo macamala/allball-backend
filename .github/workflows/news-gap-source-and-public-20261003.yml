@@ -1,0 +1,141 @@
+name: News gap sources and public proof 20261003
+on:
+  push:
+    branches: [audit/news-system-repair-20261003]
+    paths: [.github/workflows/news-gap-source-and-public-20261003.yml]
+permissions:
+  contents: read
+jobs:
+  sources:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      DATABASE_URL: 'sqlite:///:memory:'
+      NINKO_SKIP_STARTUP_INDEX: '1'
+      NINKO_SKIP_INTEGRITY_BACKFILL: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: f22e5b603317a12839e123e62b487dbee740fbd5
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -q -r requirements.txt
+      - name: Exact targeted publisher article discovery, no table ingestion and no AI
+        run: |
+          mkdir -p gap-sources
+          python - <<'PY'
+          import json,pathlib,re,logging
+          from concurrent.futures import ThreadPoolExecutor
+          from datetime import datetime,timezone
+          from collections import Counter
+          from urllib.parse import urlsplit
+          from bot.news_official_indexes import _anchor_candidates,_hydrate
+          from bot.news_feed_http import read_news_feed
+          from bot.extract import article_text_from_html,page_published_at_from_html,page_title_from_html,collect_page_image_candidates,parse_feed_datetime,paragraphs_from_html,_ScopedNewsBody
+          from bot.fetch_sources import _fetch_feed_entries,_classify_item,_pick_reachable_article_image
+          from bot.news_football_memberships import refresh_football_news_memberships
+          from bot.news_football_priority import candidate_football_section
+          from bot.news_policy import non_article_news_reason,news_freshness_reason
+          from bot.quality import quality_check
+          import feedparser
+          logging.basicConfig(level=logging.WARNING)
+          root=pathlib.Path('gap-sources');refresh_football_news_memberships()
+          ge_paths=[('brazil-serie-b','/futebol/brasileirao-serie-b/'),('conmebol-libertadores','/futebol/libertadores/'),('conmebol-sudamericana','/futebol/copa-sul-americana/'),('uefa-europa-league','/futebol/futebol-internacional/liga-europa/'),('uefa-conference-league','/futebol/futebol-internacional/liga-conferencia/')]
+          output=[]
+          for menu,path in ge_paths:
+              cfg={'id':'ge-'+menu,'publisher':'ge','sport':'football','verified_official':False,'url':'https://ge.globo.com'+path,'host':'ge.globo.com','paths':('/',),'article_path_re':r'^/(?:[^/]+/)*futebol/(?:[^/]+/)*noticia/20\d{2}/\d{2}/\d{2}/[^/]+\.ghtml$'}
+              row={'config':cfg,'planned_menu':menu,'items':[]}
+              try:
+                  links=_anchor_candidates(cfg);row['links']=links[:10]
+                  for url,title in links[:6]:
+                      reasons=Counter();item=_hydrate(cfg,url,title,diagnostics=reasons)
+                      result={'url':url,'anchor_title':title,'reasons':dict(reasons),'hydrated':bool(item)}
+                      if item:
+                          body=item.get('_extracted','');tags=_classify_item(item,body)
+                          ok,reason=quality_check(item['title'],body,tags.sport,require_english=False)
+                          photos=[p for p in item.get('image_candidates',[]) if p.get('source') in {'og','twitter'}]
+                          hero=_pick_reachable_article_image(photos,max_checks=2)
+                          result.update(title=item['title'],published_at=str(item['published_at']),body=body,words=len(body.split()),sport=tags.sport,menu=candidate_football_section(item,tags),quality=reason,product=non_article_news_reason({**item,'body':body}),hero=hero,ready_before_writer=bool(ok and hero and tags.sport=='football'))
+                      row['items'].append(result)
+              except Exception as e:row['error']=type(e).__name__+': '+str(e)[:160]
+              output.append(row);(root/(menu+'.json')).write_text(json.dumps(row,ensure_ascii=False,indent=2));print(menu,len(row['items']),row.get('error'),flush=True)
+          feeds=[('MaLigue2','https://maligue2.fr/feed/'),('PianetaSerieB','https://www.pianetaserieb.it/feed/'),('LigaZwei','https://www.liga-zwei.de/feed/'),('MaxSport','https://www.max-sport.rs/feed/')]
+          def feedprobe(pair):
+              name,url=pair;out={'name':name,'url':url,'items':[]}
+              try:
+                  raw=read_news_feed(url);feed=feedparser.parse(raw);out.update(format=feed.version,feed_title=feed.feed.get('title'),entries=len(feed.entries))
+                  (root/(name+'.xml')).write_bytes(raw)
+                  for e in feed.entries[:5]:
+                      target=e.get('link','');stamp=parse_feed_datetime(e)
+                      result={'url':target,'title':e.get('title'),'date':str(stamp),'categories':[t.get('term') for t in e.get('tags',[])],'rss_words':len(paragraphs_from_html(' '.join(c.get('value','') for c in e.get('content',[]) if isinstance(c,dict))).split())}
+                      if urlsplit(target).hostname!=urlsplit(url).hostname or not stamp or news_freshness_reason(stamp,datetime.now(timezone.utc)):
+                          result['skip']='different_host_or_not_fresh';out['items'].append(result);continue
+                      html=read_news_feed(target).decode('utf-8','replace');body=article_text_from_html(html)
+                      result.update(page_title=page_title_from_html(html),page_date=str(page_published_at_from_html(html)),body=body,words=len(body.split()),photos=collect_page_image_candidates(html)[:5])
+                      result['body_profiles']=[]
+                      for cls in ['entry-content','article-content','article-body','post-content','content-post','post__content','article__body','content-text','single__content','td-post-content']:
+                          parser=_ScopedNewsBody(cls);parser.feed(html)
+                          if parser.finished:
+                              text=paragraphs_from_html(''.join(parser.parts));result['body_profiles'].append({'class':cls,'words':len(text.split()),'body':text})
+                      out['items'].append(result)
+              except Exception as e:out['error']=type(e).__name__+': '+str(e)[:160]
+              (root/(name+'.json')).write_text(json.dumps(out,ensure_ascii=False,indent=2));print(name,out.get('format'),len(out['items']),out.get('error'),flush=True)
+          with ThreadPoolExecutor(max_workers=3) as pool:list(pool.map(feedprobe,feeds))
+          (root/'timestamp.json').write_text(json.dumps({'checked_at':datetime.now(timezone.utc).isoformat(),'AI_requests':0,'production_writes':0}))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: news-gap-sources-20261003
+          path: gap-sources/
+          retention-days: 7
+  public:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: f22e5b603317a12839e123e62b487dbee740fbd5
+          persist-credentials: false
+      - name: Current public category corrections and all menu coverage
+        run: |
+          mkdir -p public-proof
+          python - <<'PY'
+          import json,pathlib,urllib.request,urllib.parse,urllib.error,time
+          from datetime import datetime,timezone
+          from concurrent.futures import ThreadPoolExecutor
+          base='https://allball-backend-production.up.railway.app';root=pathlib.Path('public-proof')
+          def get(path):
+              with urllib.request.urlopen(base+path,timeout=18) as r:return json.loads(r.read(3000000))
+          slugs={'youth':'crvena-zvezdas-2018-football-team-wins-ilija-panteli-trophy','ticket':'chelsea-fc-legends-to-host-tottenham-hotspur-legends-at-stamford-bridge'}
+          observations={}
+          for name,slug in slugs.items():
+              try:
+                  a=get('/articles/'+slug);observations[name]={k:a.get(k) for k in ('id','title','league','published_at','image_url')};observations[name]['status']=200
+              except urllib.error.HTTPError as e:observations[name]={'status':e.code}
+          (root/'corrections.json').write_text(json.dumps(observations,indent=2))
+          catalog=json.loads(pathlib.Path('bot/news_football_leagues.json').read_text());now=datetime.now(timezone.utc)
+          def check(menu):
+              out={'league':menu['league'],'label':menu['label']}
+              try:
+                  articles=get('/articles?'+urllib.parse.urlencode({'sport':'football','league':menu['league'],'limit':5}))
+                  out['articles']=[{k:a.get(k) for k in ('id','slug','title','sport','league','published_at','created_at','image_url')} for a in articles]
+                  def fresh(a):
+                      t=datetime.fromisoformat(a['published_at'].replace('Z','+00:00'));t=t.replace(tzinfo=timezone.utc) if t.tzinfo is None else t.astimezone(timezone.utc)
+                      return 0<=(now-t).total_seconds()<86400
+                  out['fresh']=sum(fresh(a) for a in articles);out['wrong_fields']=sum(a.get('sport')!='football' or a.get('league')!=menu['league'] for a in articles)
+              except Exception as e:out['error']=type(e).__name__+': '+str(e)[:100]
+              return out
+          with ThreadPoolExecutor(max_workers=3) as pool:rows=list(pool.map(check,catalog))
+          (root/'coverage.json').write_text(json.dumps(rows,ensure_ascii=False,indent=2))
+          summary={'at':datetime.now(timezone.utc).isoformat(),'menus':len(rows),'populated':sum(bool(r.get('articles')) for r in rows),'fresh':sum(bool(r.get('fresh')) for r in rows),'empty':[r['league'] for r in rows if r.get('articles')==[]],'wrong_fields':sum(r.get('wrong_fields',0) for r in rows),'errors':[r for r in rows if r.get('error')],'corrections':observations,'AI_requests':0,'production_writes':0,'complete':False}
+          (root/'summary.json').write_text(json.dumps(summary,indent=2));print(json.dumps(summary,indent=2));assert not summary['errors'] and not summary['wrong_fields']
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: news-repair-public-20261003
+          path: public-proof/
+          retention-days: 7
