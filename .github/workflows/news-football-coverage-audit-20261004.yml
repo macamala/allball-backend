@@ -1,0 +1,39 @@
+name: News football coverage audit 20261004
+on:
+  push:
+    branches: [audit/news-football-completion-20261004]
+    paths: [.github/workflows/news-football-coverage-audit-20261004.yml]
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Package tracked News sources for offline inspection
+        run: |
+          git archive --format=zip --output=news-source.zip HEAD
+          python - <<'PY'
+          import json, urllib.request
+          from pathlib import Path
+          print('NEWS_AUDIT_HEAD:')
+          for path in sorted(Path('tests').glob('*news*')):
+              print('TEST_FILE', path)
+          for path in sorted(Path('docs').rglob('*NEWS*')):
+              print('NEWS_DOC', path)
+          try:
+              req = urllib.request.Request('https://allball-backend-production.up.railway.app/openapi.json', headers={'User-Agent': 'NinkoSports-News-read-only-audit/1.0'})
+              with urllib.request.urlopen(req, timeout=30) as response:
+                  data = json.load(response)
+              for path, methods in data.get('paths', {}).items():
+                  if any(term in path.lower() for term in ('news','article','health','football')):
+                      print('PUBLIC_ROUTE', path, ','.join(methods))
+          except Exception as exc:
+              print('PUBLIC_OPENAPI_UNAVAILABLE', type(exc).__name__, str(exc)[:180])
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: news-source-audit-20261004
+          path: news-source.zip
+          retention-days: 3
