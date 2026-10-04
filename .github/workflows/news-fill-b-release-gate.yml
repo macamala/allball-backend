@@ -8,6 +8,7 @@ on:
       - bot/news_football_club_intake_b.py
       - bot/news_football_subject_context.py
       - tests/test_news_fill_b_20261004.py
+      - tests/test_news_football_sources_20261002.py
 permissions:
   contents: write
 concurrency:
