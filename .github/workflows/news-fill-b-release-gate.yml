@@ -1,0 +1,95 @@
+name: News fill B release gate
+on:
+  push:
+    branches: [audit/news-football-completion-20261004]
+    paths:
+      - .github/workflows/news-fill-b-release-gate.yml
+      - audit/apply_news_fill_b.py
+      - bot/news_football_club_intake_b.py
+      - bot/news_football_subject_context.py
+      - tests/test_news_fill_b_20261004.py
+permissions:
+  contents: write
+concurrency:
+  group: news-fill-b-release
+  cancel-in-progress: false
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DATABASE_URL: 'sqlite:///:memory:'
+      NEWS_ACCOUNTING_BACKEND: memory
+      NEWS_WORKER_ENABLED: '0'
+      RESULTS_WRITE_ENABLED: 'false'
+      RESULTS_COLLECTION_ENABLED: 'false'
+      RESULTS_SCHEDULER_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 40
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: python -m pip install -q -r requirements.txt
+      - name: Apply bounded News-only patch and verify scope
+        run: |
+          python audit/apply_news_fill_b.py
+          git diff --check
+          python - <<'PY'
+          import subprocess
+          allowed={'bot/extract.py','bot/news_fact_guard.py','bot/news_football_sections.py','bot/news_football_source_context.py','bot/news_football_scope_guard.py','bot/news_football_sources.py','bot/news_football_regional_desks.py','bot/fetch_sources.py','bot/news_official_indexes.py'}
+          changed=set(subprocess.check_output(['git','diff','--name-only'],text=True).splitlines())
+          assert changed<=allowed,changed-allowed
+          print('NEWS_ONLY_SCOPE_PASS',sorted(changed))
+          PY
+      - name: Run every retained News regression and new failure cases
+        run: |
+          set -o pipefail
+          python -m pytest -q --disable-warnings tests/test_news*.py tests/test_editorial*.py tests/test_rewrite*.py tests/test_public*.py tests/test_taxonomy*.py --tb=short | tee news-fill-b-tests.txt
+      - name: Verify same-article live source extraction without AI or DB writes
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from bot.news_feed_http import read_news_feed
+          from bot.extract import article_text_from_html,collect_page_image_candidates,page_published_at_from_html
+          from bot.news_football_club_intake_b import YOUTH_CONTEXT
+          urls=['https://fknapredak.rs/tri-pobede-danas-3/','https://www.asroma.com/en/news/76025/interview-with-massimo-margiotta-romas-academy-director','https://www.juventus.com/en/news/articles/guerrero-we-want-to-improve-everyday-03-10-26']
+          reports=[]
+          for url in urls:
+              html=read_news_feed(url).decode('utf-8','replace')
+              body=article_text_from_html(html);images=collect_page_image_candidates(html)
+              assert len(body.split())>120 and images,(url,len(body.split()),len(images))
+              if 'fknapredak' in url:
+                  assert body.startswith(YOUTH_CONTEXT)
+                  assert len(images)==1 and images[0]['url']=='https://fknapredak.rs/wp-content/uploads/2026/08/bozanic.jpg'
+              else:assert page_published_at_from_html(html) is not None
+              reports.append({'url':url,'words':len(body.split()),'images':images[:2],'source_publication':str(page_published_at_from_html(html))})
+          Path('news-fill-b-source-check.json').write_text(json.dumps(reports,indent=2))
+          print('LIVE_SOURCE_CHECK_PASS',json.dumps(reports),flush=True)
+          PY
+      - name: Save only tested integration on audit branch
+        run: |
+          test "$GITHUB_REF_NAME" = 'audit/news-football-completion-20261004'
+          git config user.name 'NinkoSports News maintenance'
+          git config user.email '79318740+macamala@users.noreply.github.com'
+          git add bot/extract.py bot/news_fact_guard.py bot/news_football_sections.py bot/news_football_source_context.py bot/news_football_scope_guard.py bot/news_football_sources.py bot/news_football_regional_desks.py bot/fetch_sources.py bot/news_official_indexes.py
+          if ! git diff --cached --quiet; then
+            git commit -m 'fix(news): publishable official club intake and primary-subject menu repairs'
+            git push origin HEAD:refs/heads/audit/news-football-completion-20261004
+          fi
+          git rev-parse HEAD | tee tested-news-commit.txt
+          git diff 34885ab355b0dee6fae31d77278baf0c6af0a34b HEAD --stat
+          git archive --format=zip --output=tested-news-source.zip HEAD
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: news-fill-b-release-evidence
+          path: |
+            news-fill-b-tests.txt
+            news-fill-b-source-check.json
+            tested-news-commit.txt
+            tested-news-source.zip
+          retention-days: 7
