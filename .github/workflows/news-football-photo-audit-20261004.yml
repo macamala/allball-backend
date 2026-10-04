@@ -1,0 +1,57 @@
+name: News football photo audit 20261004
+on:
+  push:
+    branches: [audit/news-football-completion-20261004]
+    paths: [.github/workflows/news-football-photo-audit-20261004.yml]
+permissions:
+  contents: read
+jobs:
+  read-only-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      DATABASE_URL: 'sqlite:///:memory:'
+      NEWS_WORKER_ENABLED: '0'
+      RESULTS_COLLECTION_ENABLED: 'false'
+      RESULTS_WRITE_ENABLED: 'false'
+      RESULTS_SCHEDULER_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: c446bd6e1b55c50ffffbe94247cca1e9457f1931
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: python -m pip install -q -r requirements.txt
+      - name: Probe stored photo URLs with existing bounded News image validator
+        run: |
+          python - <<'PY'
+          import json,urllib.request
+          from collections import Counter
+          from datetime import datetime,timezone
+          from pathlib import Path
+          from bot.news_image_http import probe_news_images
+          rows={}
+          for offset in range(0,1000,100):
+              with urllib.request.urlopen('https://allball-backend-production.up.railway.app/articles?sport=football&limit=100&offset='+str(offset),timeout=25) as r:items=json.load(r)
+              assert isinstance(items,list)
+              rows.update({a['id']:a for a in items})
+              if len(items)<100:break
+          else:raise AssertionError('Read cap reached: incomplete public inventory')
+          images=[a['image_url'] for a in rows.values() if a.get('image_url')]
+          probes=probe_news_images(images,max_workers=6)
+          failed=[{'id':a['id'],'title':a['title'],'image_url':a.get('image_url'),'reason':probes.get(a.get('image_url'),(False,'missing'))[1]} for a in rows.values() if not probes.get(a.get('image_url'),(False,'missing'))[0]]
+          report={'at':datetime.now(timezone.utc).isoformat(),'articles':len(rows),'unique_images':len(set(images)),
+              'passed_article_photos':len(rows)-len(failed),'failed_article_photos':len(failed),
+              'reason_counts':dict(Counter(a['reason'] for a in failed)),'failed':failed}
+          print('PHOTO_AUDIT',json.dumps(report,ensure_ascii=False),flush=True)
+          Path('production-photo-audit.json').write_text(json.dumps(report,ensure_ascii=False,indent=2))
+          print('READ_ONLY_NO_AI_NO_DATABASE_WRITES')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: news-football-production-photo-audit
+          path: production-photo-audit.json
+          retention-days: 7
