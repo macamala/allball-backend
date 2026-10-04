@@ -355,6 +355,10 @@ def collect_page_image_candidates(html: str) -> List[dict]:
     # Yonhap uses <article> for unrelated recommendation cards too. Limit
     # body images to its actual story container; metadata remains same-page.
     canonical = _og(html or '', 'og:url') or _metadata(html or '', 'canonical') or ''
+    from .news_scottish_club_desks import motherwell_article_photos
+    scottish_photos = motherwell_article_photos(html, canonical)
+    if scottish_photos is not None:
+        return scottish_photos
     from .news_football_club_intake_b import napredak_article_photos
     verified_club_photos = napredak_article_photos(html, canonical)
     if verified_club_photos is not None:
@@ -782,6 +786,14 @@ def article_text_from_html(html: str) -> str:
         # Elementor places unrelated headlines after this exact article widget.
         # Fail closed if it is absent instead of treating recommendations as facts.
         body_class = 'elementor-widget-my-custom-post-content'
+    from .news_scottish_club_desks import motherwell_single_post, motherwell_women_category
+    scottish_post = motherwell_single_post(html, canonical)
+    if scottish_post is not None:
+        if not scottish_post:
+            return ''
+        if motherwell_women_category(scottish_post):
+            source_category = WOMEN_CONTEXT
+        html = scottish_post
     from .news_football_club_intake_b import napredak_single_post
     single_post = napredak_single_post(html, canonical)
     if single_post is not None:
@@ -847,6 +859,10 @@ def extract_image_candidates_from_url(url: str, timeout: float = 12.0) -> List[d
     """
     if not url or news_source_is_excluded(url):
         return []
+    from .news_scottish_club_desks import fetch_scottish_article
+    handled, scottish_html = fetch_scottish_article(url)
+    if handled:
+        return collect_page_image_candidates(scottish_html) if scottish_html else []
     try:
         with httpx.Client(timeout=timeout, follow_redirects=True, headers=EXTRACT_HEADERS) as client:
             resp = client.get(url)
@@ -892,6 +908,21 @@ def extract_from_url(url: str, timeout: float = 18.0) -> Tuple[str, Optional[str
     """
     if not url or news_source_is_excluded(url):
         return "", None
+    from .news_scottish_club_desks import fetch_scottish_article
+    handled, scottish_html = fetch_scottish_article(url)
+    if handled:
+        if not scottish_html:
+            return "", None
+        text = article_text_from_html(scottish_html)
+        if not text:
+            return "", None
+        from .news_image_http import pick_news_article_image
+        try:
+            image = pick_news_article_image(collect_page_image_candidates(scottish_html))
+        except Exception:
+            image = None
+        logger.info('[extract] verified Scottish article %s words=%s', url[:120], word_count(text))
+        return text, image
     try:
         with httpx.Client(timeout=timeout, follow_redirects=True, headers=EXTRACT_HEADERS) as client:
             resp = client.get(url)

@@ -182,3 +182,6 @@ _PROFILES.update(VERIFIED_DESK_PROFILES)
 
 from .news_football_club_intake_b import ARTICLE_PROFILES as CLUB_B_PROFILES
 _PROFILES.update(CLUB_B_PROFILES)
+
+from .news_scottish_club_desks import ARTICLE_PROFILES as SCOTTISH_CLUB_PROFILES
+_PROFILES.update(SCOTTISH_CLUB_PROFILES)

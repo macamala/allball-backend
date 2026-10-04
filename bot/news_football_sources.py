@@ -129,3 +129,8 @@ SOURCE_DESKS.update(VERIFIED_DESKS)
 from .news_football_club_intake_b import RSS_FEEDS as CLUB_B_RSS, HTML_INDEXES as CLUB_B_HTML
 RSS_FEEDS = RSS_FEEDS + CLUB_B_RSS
 HTML_INDEXES = HTML_INDEXES + CLUB_B_HTML
+
+# Official Scottish sources retain the same freshness and publication gates.
+from .news_scottish_club_desks import RSS_FEEDS as SCOTTISH_RSS, SOURCE_DESKS as SCOTTISH_DESKS
+RSS_FEEDS = RSS_FEEDS + SCOTTISH_RSS
+SOURCE_DESKS.update(SCOTTISH_DESKS)

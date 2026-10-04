@@ -164,3 +164,36 @@ def motherwell_article_photos(html, canonical):
     parser.feed(''.join(hero.parts))
     photos = {row['url']: row for row in parser.photos}
     return list(photos.values()) if len(photos) == 1 else []
+
+
+def fetch_scottish_article(url):
+    """Return (handled, HTML), using the existing robots-aware safe transport.
+
+    A missing/wrong canonical or changed structure does not authorize generic
+    whole-page or RSS fallback. Other publishers retain their existing path.
+    """
+    try:
+        p = urlsplit(str(url or ''))
+        if p.hostname not in ARTICLE_PROFILES:
+            return False, ''
+        valid_path = (_identity(url) is not None if p.hostname == MOTHERWELL
+                      else bool(re.fullmatch(r'/news/[^/]+/?', p.path)))
+        if (not valid_path or p.scheme != 'https' or p.username or p.password
+                or p.port not in (None, 443)):
+            return True, ''
+        from .news_feed_http import read_news_feed
+        from .extract import _og, _metadata
+        raw = read_news_feed(url)
+        if len(raw) > 2_000_000:
+            return True, ''
+        html = raw.decode('utf-8', 'replace')
+        canonical = _og(html, 'og:url') or _metadata(html, 'canonical') or ''
+        cp = urlsplit(canonical)
+        if (cp.scheme != 'https' or cp.hostname != p.hostname or cp.username
+                or cp.password or cp.port not in (None, 443) or cp.query
+                or cp.path.rstrip('/') != p.path.rstrip('/')):
+            return True, ''
+        return True, html
+    except Exception:
+        # Includes robots denial, throttling, wrong redirects and parse errors.
+        return True, ''
