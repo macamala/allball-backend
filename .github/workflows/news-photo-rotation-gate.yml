@@ -1,0 +1,70 @@
+name: News photo rotation gate
+on:
+  push:
+    branches: [audit/news-football-completion-20261004]
+    paths:
+      - .github/workflows/news-photo-rotation-gate.yml
+      - audit/apply_news_photo_rotation.py
+      - bot/news_image_rotation.py
+      - tests/test_news_photo_rotation_20261004.py
+permissions:
+  contents: write
+concurrency:
+  group: news-photo-rotation
+  cancel-in-progress: false
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DATABASE_URL: 'sqlite:///:memory:'
+      NEWS_ACCOUNTING_BACKEND: memory
+      NEWS_WORKER_ENABLED: '0'
+      RESULTS_WRITE_ENABLED: 'false'
+      RESULTS_COLLECTION_ENABLED: 'false'
+      RESULTS_SCHEDULER_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 25
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: python -m pip install -q -r requirements.txt
+      - name: Apply News-only photo selection without raising probe or source budgets
+        run: |
+          python audit/apply_news_photo_rotation.py
+          git diff --check
+          python - <<'PY'
+          import subprocess
+          files=set(subprocess.check_output(['git','diff','--name-only'],text=True).splitlines())
+          assert files<={'public_index.py','bot/scheduler.py'},files
+          print('NEWS_ONLY_SCOPE_PASS',sorted(files))
+          PY
+      - name: Full retained News regression suite
+        run: |
+          set -o pipefail
+          python -m pytest -q --disable-warnings tests/test_news*.py tests/test_editorial*.py tests/test_rewrite*.py tests/test_public*.py tests/test_taxonomy*.py --tb=short | tee news-photo-rotation-tests.txt
+      - name: Save tested News integration on isolated audit branch
+        run: |
+          test "$GITHUB_REF_NAME" = 'audit/news-football-completion-20261004'
+          git config user.name 'NinkoSports News maintenance'
+          git config user.email '79318740+macamala@users.noreply.github.com'
+          git add public_index.py bot/scheduler.py
+          if ! git diff --cached --quiet; then
+            git commit -m 'fix(news): sweep older public photos with the existing maintenance budget'
+            git push origin HEAD:refs/heads/audit/news-football-completion-20261004
+          fi
+          git rev-parse HEAD | tee tested-news-commit.txt
+          git diff 00604b3721780179c0381ef2ca8dbe7332f363a0 HEAD --stat
+          git archive --format=zip --output=tested-news-photo-source.zip HEAD
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: news-photo-rotation-evidence
+          path: |
+            news-photo-rotation-tests.txt
+            tested-news-commit.txt
+            tested-news-photo-source.zip
+          retention-days: 7
