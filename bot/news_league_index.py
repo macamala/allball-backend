@@ -35,7 +35,9 @@ def recent_public_football_inventory(db, max_age_hours=24, *, now=None):
     return {str(key): int(count) for key, count in rows}
 
 
-def repair_football_league_menus(db, limit=300):
+def repair_football_league_menus(db, limit=600):
+    # Cover the existing bounded recent archive, not just its newest half.
+    # The hard 600-row cap and all original public/date/sport gates remain.
     rows = (db.query(Article, ArticleTaxonomyResolution)
         .join(ArticleTaxonomyResolution, ArticleTaxonomyResolution.article_id == Article.id)
         .filter(Article.ai_generated.is_(True),

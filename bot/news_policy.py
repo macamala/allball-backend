@@ -241,6 +241,10 @@ def source_path_sport_hint(url):
         return None
     host = (parts.hostname or "").lower()
     path = (parts.path or "/").lower()
+    from .news_football_scope_guard import reviewed_other_sport_path
+    observed = reviewed_other_sport_path(url)
+    if observed:
+        return observed
     for expected_host, prefix, sport in _SOURCE_PATH_SPORTS:
         if host == expected_host and path.startswith(prefix):
             return sport
@@ -249,6 +253,10 @@ def source_path_sport_hint(url):
 
 def explicit_headline_sport(title):
     """Unambiguous sport words, never shared city/team or competition names."""
+    from .news_football_scope_guard import other_sport_headline
+    observed = other_sport_headline(title)
+    if observed:
+        return observed
     value = str(title or '').casefold()
     if RALLY_TITLE_RE.search(value):
         return 'motorsport'
@@ -277,6 +285,10 @@ def explicit_headline_sport(title):
 
 
 def source_path_conflict_reason(item, sport):
+    from .news_football_scope_guard import football_scope_conflict
+    conflict = football_scope_conflict(item, sport)
+    if conflict:
+        return conflict
     expected = source_path_sport_hint((item or {}).get('url'))
     if expected and sport and expected != sport and explicit_headline_sport((item or {}).get('title')) != sport:
         return 'taxonomy_source_path_conflict'
@@ -390,6 +402,10 @@ def newsworthiness_score(item):
 
 
 def non_article_news_reason(item):
+    from .news_football_scope_guard import video_game_product_reason
+    product = video_game_product_reason(item)
+    if product:
+        return product
     """Reject discovery records that are score/media products, not news articles."""
     title = str((item or {}).get("title") or "").casefold()
     url = str((item or {}).get("url") or "")
