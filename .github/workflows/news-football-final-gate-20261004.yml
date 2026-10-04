@@ -1,0 +1,73 @@
+name: News football final gate 20261004
+on:
+  push:
+    branches: [audit/news-football-completion-20261004]
+    paths:
+      - .github/workflows/news-football-final-gate-20261004.yml
+      - audit/apply_news_football_scope_20261004.py
+      - tests/test_news_football_scope_20261004.py
+      - bot/news_football_scope_guard.py
+permissions:
+  contents: write
+concurrency:
+  group: news-football-regression-20261004
+  cancel-in-progress: false
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DATABASE_URL: 'sqlite:///:memory:'
+      NEWS_ACCOUNTING_BACKEND: memory
+      NEWS_WORKER_ENABLED: '0'
+      RESULTS_COLLECTION_ENABLED: 'false'
+      RESULTS_WRITE_ENABLED: 'false'
+      RESULTS_SCHEDULER_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 50
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: python -m pip install -q -r requirements.txt
+      - name: Apply only the bounded News scope changes
+        run: |
+          python audit/apply_news_football_scope_20261004.py
+          git diff --check
+          python - <<'PY'
+          import subprocess
+          allowed={'bot/news_policy.py','bot/news_league_index.py'}
+          changed=set(subprocess.check_output(['git','diff','--name-only'],text=True).splitlines())
+          assert changed <= allowed, changed-allowed
+          print('NEWS_ONLY_SCOPE_PASS',sorted(changed))
+          PY
+      - name: Verify retained publication tests and every new incident
+        run: |
+          set -o pipefail
+          python -m pytest -q --disable-warnings tests/test_news*.py tests/test_editorial*.py tests/test_rewrite*.py tests/test_public*.py tests/test_taxonomy*.py --tb=short | tee news-final-regression.txt
+      - name: Keep the verified integration on the isolated audit branch
+        run: |
+          test "$GITHUB_REF_NAME" = 'audit/news-football-completion-20261004'
+          git config user.name 'NinkoSports News maintenance'
+          git config user.email '79318740+macamala@users.noreply.github.com'
+          git add bot/news_policy.py bot/news_league_index.py
+          if ! git diff --cached --quiet; then
+            git commit -m 'fix(news): prevent non-football leakage and repair bounded older league cards'
+            git push origin HEAD:refs/heads/audit/news-football-completion-20261004
+          fi
+          git rev-parse HEAD | tee tested-news-commit.txt
+          git diff b62ecd517f0e6b6373145c4a745aa7ff4a669748 HEAD --stat
+          git diff b62ecd517f0e6b6373145c4a745aa7ff4a669748 HEAD -- bot/ > reviewed-news-diff.txt
+          git archive --format=zip --output=tested-news-source.zip HEAD
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: news-football-final-evidence
+          path: |
+            news-final-regression.txt
+            tested-news-commit.txt
+            reviewed-news-diff.txt
+            tested-news-source.zip
+          retention-days: 7
