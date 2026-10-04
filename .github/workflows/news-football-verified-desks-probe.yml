@@ -1,0 +1,73 @@
+name: News verified desk evidence
+on:
+  push:
+    branches: [audit/news-football-completion-20261004]
+    paths: [.github/workflows/news-football-verified-desks-probe.yml]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      DATABASE_URL: 'sqlite:///:memory:'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: python -m pip install -q -r requirements.txt
+      - name: Read advertised feeds and exact official article containers
+        run: |
+          mkdir -p evidence
+          python - <<'PY'
+          import json,re,urllib.request
+          from pathlib import Path
+          from urllib.parse import urljoin,urlsplit
+          from html.parser import HTMLParser
+          import feedparser
+          from bot.news_feed_http import read_news_feed
+          from bot.extract import _ScopedNewsBody,article_text_from_html,collect_page_image_candidates,page_published_at_from_html
+          class Head(HTMLParser):
+              def __init__(self):super().__init__();self.feeds=[]
+              def handle_starttag(self,tag,attrs):
+                  a=dict(attrs)
+                  if tag=='link' and 'rss' in a.get('type',''):self.feeds.append(a.get('href'))
+          urls=['https://www.tipsbladet.dk/','https://fknapredak.rs/tri-pobede-danas-3/','https://fknapredak.rs/protiv-loznice-na-pobedu/','https://fkspartak.com/spartak-u-loznici-trazi-povratak-na-pobednicki-kolosek/']
+          for index,url in enumerate(urls):
+              try:
+                  raw=read_news_feed(url);html=raw.decode('utf-8','replace')
+                  Path('evidence/page-'+str(index)+'.html').write_bytes(raw)
+                  head=Head();head.feed(html)
+                  print('PAGE_EVIDENCE',url,'advertised_feeds',head.feeds)
+                  for cls in ('elementor-widget-theme-post-content','elementor-widget-theme-post-featured-image','post-content'):
+                      scoped=_ScopedNewsBody(cls);scoped.feed(html)
+                      if scoped.finished:
+                          fragment=''.join(scoped.parts)
+                          prose=article_text_from_html('<article>'+fragment+'</article>')
+                          print('VISIBLE_CONTAINER',url,cls,len(prose.split()),prose[:650],fragment[:1400] if 'featured' in cls else '')
+                  for feed_url in head.feeds[:2]:
+                      feed_url=urljoin(url,feed_url)
+                      if urlsplit(feed_url).hostname != urlsplit(url).hostname:continue
+                      parsed=feedparser.parse(read_news_feed(feed_url))
+                      print('ADVERTISED_FEED',feed_url,len(parsed.entries))
+                      for entry in parsed.entries[:2]:
+                          item_url=entry.get('link')
+                          page=read_news_feed(item_url).decode('utf-8','replace')
+                          Path('evidence/tips-'+str(len(list(Path('evidence').glob('tips-*'))))+'.html').write_text(page)
+                          print('FEED_ITEM',json.dumps({'url':item_url,'title':entry.get('title'),'date':entry.get('published'),'page_date':str(page_published_at_from_html(page)),'body_start':article_text_from_html(page)[:500],'photos':collect_page_image_candidates(page)[:2]},ensure_ascii=False))
+              except Exception as e:print('PAGE_ERROR',url,type(e).__name__,str(e)[:120])
+          for offset in (0,100,200,300,400):
+              try:
+                  with urllib.request.urlopen('https://allball-backend-production.up.railway.app/articles?sport=football&limit=100&offset='+str(offset),timeout=25) as r:items=json.load(r)
+                  for a in items:
+                      if not a.get('league'):print('UNCLASSIFIED',json.dumps({k:a.get(k) for k in ('id','title','summary','published_at')},ensure_ascii=False))
+                  if len(items)<100:break
+              except Exception as e:print('PUBLIC_ERROR',type(e).__name__);break
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: news-verified-desk-source-evidence
+          path: evidence/
+          retention-days: 3
