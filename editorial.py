@@ -665,6 +665,9 @@ def classify_media_url(
     value = (url or "").strip()
     if not value or not image_is_usable(value):
         return "MISSING"
+    from bot.news_publisher_media import is_publisher_branding
+    if is_publisher_branding(value):
+        return "CREST_OR_LOGO"
     lower = value.lower()
     path = lower.split("?", 1)[0]
     blob = " ".join([lower, (alt or "").lower(), (source or "").lower()])

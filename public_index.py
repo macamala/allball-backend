@@ -394,6 +394,7 @@ def repair_recent_news_images(
             func.coalesce(Article.published_at, Article.created_at) >= cutoff,
         )
         .order_by(
+            Article.image_url.ilike("%soccernews.com/og/og-image.%").desc(),
             func.coalesce(Article.published_at, Article.created_at).desc(),
             Article.id.desc(),
         )

@@ -413,7 +413,9 @@ def collect_page_image_candidates(html: str) -> List[dict]:
     except Exception:
         parser.images = []
     candidates.extend(parser.images[:8])
-    return candidates
+    from .news_publisher_media import soccernews_article_images
+    verified = soccernews_article_images(canonical, page_title_from_html(html), candidates)
+    return verified if verified is not None else candidates
 
 
 def _attr_map(attrs) -> dict:
