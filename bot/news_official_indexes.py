@@ -506,6 +506,7 @@ def _same_host_url(base: str, href: str, expected_host: str, cfg: Dict) -> Optio
 
 
 def _anchor_candidates(cfg: Dict) -> List[tuple[str, str]]:
+    from .news_index_selection import excluded_index_link
     try:
         raw = read_news_feed(cfg["url"])
         if len(raw) > MAX_INDEX_BYTES:
@@ -527,7 +528,7 @@ def _anchor_candidates(cfg: Dict) -> List[tuple[str, str]]:
                     or row.get("isPremiumContent") is not False):
                 continue
             url = _same_host_url(cfg["url"], str(row.get("url") or ""), cfg["host"], cfg)
-            if not url or url in seen:
+            if not url or url in seen or excluded_index_link(cfg, url):
                 continue
             seen.add(url)
             output.append((url, clean_text(str(row.get("title") or ""))))
@@ -575,7 +576,7 @@ def _anchor_candidates(cfg: Dict) -> List[tuple[str, str]]:
         discovered.append((href, ""))
     for href, title in discovered:
         url = _same_host_url(cfg["url"], href, cfg["host"], cfg)
-        if not url or url in seen:
+        if not url or url in seen or excluded_index_link(cfg, url):
             continue
         text = clean_text(title)
         if (
@@ -607,6 +608,7 @@ def _child_text(node, wanted: str) -> str:
 
 
 def _sitemap_candidates(cfg: Dict, *, publication_times=None) -> List[tuple[str, str]]:
+    from .news_index_selection import excluded_index_link
     try:
         raw = read_news_feed(cfg["url"])
         if len(raw) > MAX_INDEX_BYTES:
@@ -632,7 +634,7 @@ def _sitemap_candidates(cfg: Dict, *, publication_times=None) -> List[tuple[str,
         blob = f"{loc} {title}".lower()
         url_ok = any(marker in blob for marker in cfg.get("url_markers", ()))
         title_ok = any(marker in blob for marker in cfg.get("title_markers", ()))
-        if not (url_ok or title_ok) or loc in seen:
+        if not (url_ok or title_ok) or loc in seen or excluded_index_link(cfg, loc):
             continue
         if non_article_news_reason({"title": title, "url": loc}):
             continue
@@ -837,8 +839,11 @@ def _hydrate(cfg: Dict, url: str, fallback_title: str, *, diagnostics=None, site
 
 def _hydrate_source(cfg: Dict, limit: int, *, sitemap: bool = False, known_urls=()) -> List[Dict]:
     """Hydrate one allowlisted source serially; safe unit for bounded host parallelism."""
+    from .news_index_selection import discovery_config, record_stale_index_page
     publication_times = {}
-    candidates = _sitemap_candidates(cfg, publication_times=publication_times) if sitemap else _anchor_candidates(cfg)
+    selected_cfg = discovery_config(cfg, known_urls)
+    candidates = (_sitemap_candidates(selected_cfg, publication_times=publication_times)
+                  if sitemap else _anchor_candidates(selected_cfg))
     rows: List[Dict] = []
     reasons = Counter()
     from .news_policy import news_source_identity
@@ -847,8 +852,11 @@ def _hydrate_source(cfg: Dict, limit: int, *, sitemap: bool = False, known_urls=
         if news_source_identity(url) in known:
             reasons['already_ingested_before_hydration'] += 1
             continue
-        item = _hydrate(cfg, url, title, diagnostics=reasons, sitemap_published_at=publication_times.get(url))
+        item_reasons = Counter()
+        item = _hydrate(cfg, url, title, diagnostics=item_reasons, sitemap_published_at=publication_times.get(url))
+        reasons.update(item_reasons)
         if item is None:
+            record_stale_index_page(cfg, url, item_reasons)
             continue
         rows.append(item)
         if len(rows) >= limit:
