@@ -10,6 +10,8 @@ def is_publisher_branding(value):
         url = urlsplit(value.strip())
         host = (url.hostname or '').lower().removeprefix('www.')
         path = unquote(url.path).rstrip('/').lower()
+        if host == 'getfootballnewsbene.com' and path == '/wp-content/uploads/2023/02/gbenefnwhitesquare512.png':
+            return True
         return host == 'soccernews.com' and bool(re.fullmatch(r'/og/og-image\.(?:png|jpe?g|webp)', path))
     except (ValueError, TypeError):
         return False

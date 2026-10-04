@@ -119,3 +119,8 @@ SOURCE_DESKS.update(DOMESTIC_DESKS)
 # Club desks are discovery inputs, not assumed current league membership.
 from .news_official_club_desks import RSS_FEEDS as OFFICIAL_CLUB_RSS
 RSS_FEEDS = RSS_FEEDS + OFFICIAL_CLUB_RSS
+
+# Reviewed additional desks share this same intake and all publication gates.
+from .news_verified_desks import RSS_FEEDS as VERIFIED_RSS, SOURCE_DESKS as VERIFIED_DESKS
+RSS_FEEDS = RSS_FEEDS + VERIFIED_RSS
+SOURCE_DESKS.update(VERIFIED_DESKS)

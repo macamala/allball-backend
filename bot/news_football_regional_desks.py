@@ -175,3 +175,7 @@ def excluded_feed_entry(config, entry) -> bool:
     categories = {str(row.get('term', '')).strip().casefold()
                   for row in (entry.get('tags') or ()) if isinstance(row, dict)}
     return bool(excluded.intersection(categories))
+
+# Same visible-body and own-photo rules for additional reviewed publishers.
+from .news_verified_desks import ARTICLE_PROFILES as VERIFIED_DESK_PROFILES
+_PROFILES.update(VERIFIED_DESK_PROFILES)

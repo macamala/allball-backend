@@ -243,6 +243,19 @@ def held_source_urls(urls) -> set[str]:
         cursor.execute("SET LOCAL statement_timeout = '5s'")
         _ensure_schema(cursor)
         keys = [hashes[url] for url in values]
+        count_repair_url = 'https://ge.globo.com/futebol/futebol-internacional/noticia/2026/10/04/clube-suico-apresenta-projeto-de-estadio-com-montanha-russa-veja.ghtml'
+        if count_repair_url in hashes:
+            # Only the observed pre-fix Sion number-format hold may retry.
+            # A new attempt still passes every independent publication gate.
+            cursor.execute(
+                "UPDATE news_ai_source_holds SET expires_at=NOW(), "
+                "reason='audited-portuguese-count-spelling-repaired', updated_at=NOW() "
+                "WHERE source_hash=%s AND expires_at > NOW() "
+                "AND reason='unsupported_number' AND updated_at < %s::timestamptz",
+                (hashes[count_repair_url], '2026-10-04T05:22:00Z'),
+            )
+            if cursor.rowcount:
+                logger.info('[source_holds] expired audited pre-fix Portuguese count cooldown=%s', cursor.rowcount)
         for url, reason in _CJK_REPAIR_REASONS.items():
             if url not in hashes:
                 continue

@@ -107,6 +107,9 @@ def numeric_tokens(text, *, include_spelled=False):
     ):
         value = match.group()
         tokens.update((value.replace('.', ','), value.replace('.', '')))
+    # Explicit Portuguese thousand-person spellings; source-only, no new fact.
+    from .news_count_lexemes import portuguese_count_equivalents
+    tokens.update(portuguese_count_equivalents(text))
     # Source-only lexical equivalents, not calculations. Confirmed false hold:
     # the source said "Twelve-year-old" and the draft correctly wrote "12".
     units = dict(zip('zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen'.split(), range(20)))
@@ -494,6 +497,11 @@ def non_article_news_reason(item):
         return 'non_article_analysis'
     if re.search(r'\btransfer cent(?:re|er)\b', title):
         return 'non_article_rolling_tracker'
+    # Audited BET INFO daily betting product: reject before AI calls, not
+    # ordinary reporting about betting investigations or league sponsors.
+    if (re.match(r'^\s*bet[\s-]+info\s*[:|–—-]', title)
+            and re.search(r'\b(?:najigranij\w*|parov\w*|tiket\w*|kvot\w*)\b', title)):
+        return 'non_article_betting_product'
     # Branded daily betting-slip roundups contain sports names and results,
     # but are not reporting. Reject before spending writer/validator requests.
     if (re.search(r"\brez{1,2}ime dana\b", title)
