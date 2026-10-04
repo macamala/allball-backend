@@ -44,7 +44,8 @@ def reviewed_other_sport_path(url):
     path = parts.path.lower()
     if host == 'record.pt':
         for prefix, sport in (('/modalidades/surf/', 'surfing'),
-                              ('/modalidades/triatlo/', 'triathlon')):
+                              ('/modalidades/triatlo/', 'triathlon'),
+                              ('/modalidades/golfe/', 'golf')):
             if path.startswith(prefix):
                 return sport
     return None
@@ -55,6 +56,17 @@ def football_scope_conflict(item, sport):
         return None
     expected = (other_sport_headline((item or {}).get('title'))
                 or reviewed_other_sport_path((item or {}).get('url')))
+    if not expected:
+        lead = plain(str((item or {}).get('title') or '') + ' ' + str((item or {}).get('summary') or ''))
+        body = plain((item or {}).get('body') or '')[:750]
+        football = re.search(r'\b(?:football|soccer|futebol|fudbal)\b', lead)
+        if (not football and re.search(r'\b(?:golfer|golf|golfe)\b', body)
+                and len(re.findall(r'\b(?:birdies?|bogeys?|under[ -]par|strokes?|holes?)\b', body)) >= 2):
+            expected = 'golf'
+        if (not football and re.search(r'comite olimpico de portugal', lead)
+                and re.search(r'\b(?:research projects?|sports research)\b', lead)
+                and re.search(r'\b(?:grants?|funding)\b', lead)):
+            expected = 'multisport-research'
     return 'taxonomy_football_scope_conflict' if expected else None
 
 

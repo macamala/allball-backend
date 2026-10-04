@@ -835,13 +835,18 @@ def _hydrate(cfg: Dict, url: str, fallback_title: str, *, diagnostics=None, site
     }
 
 
-def _hydrate_source(cfg: Dict, limit: int, *, sitemap: bool = False) -> List[Dict]:
+def _hydrate_source(cfg: Dict, limit: int, *, sitemap: bool = False, known_urls=()) -> List[Dict]:
     """Hydrate one allowlisted source serially; safe unit for bounded host parallelism."""
     publication_times = {}
     candidates = _sitemap_candidates(cfg, publication_times=publication_times) if sitemap else _anchor_candidates(cfg)
     rows: List[Dict] = []
     reasons = Counter()
+    from .news_policy import news_source_identity
+    known = {news_source_identity(url) for url in known_urls if news_source_identity(url)}
     for url, title in candidates:
+        if news_source_identity(url) in known:
+            reasons['already_ingested_before_hydration'] += 1
+            continue
         item = _hydrate(cfg, url, title, diagnostics=reasons, sitemap_published_at=publication_times.get(url))
         if item is None:
             continue
@@ -855,7 +860,7 @@ def _hydrate_source(cfg: Dict, limit: int, *, sitemap: bool = False) -> List[Dic
     return rows
 
 
-def fetch_official_index_entries(max_per_source: int = 3) -> List[Dict]:
+def fetch_official_index_entries(max_per_source: int = 3, *, known_urls=()) -> List[Dict]:
     """Return fresh hydrated official stories; never writes DB or calls AI."""
     limit = max(1, min(int(max_per_source), 5))
     items: List[Dict] = []
@@ -869,7 +874,7 @@ def fetch_official_index_entries(max_per_source: int = 3) -> List[Dict]:
         for cfg in active_html:
             hosts.setdefault(cfg['host'], []).append(cfg)
         def hydrate_host(configs):
-            return [entry for cfg in configs for entry in _hydrate_source(cfg, limit)]
+            return [entry for cfg in configs for entry in _hydrate_source(cfg, limit, known_urls=known_urls)]
         workers = min(4, len(hosts))
         with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="news-official") as pool:
             for rows in pool.map(hydrate_host, hosts.values()):
@@ -882,7 +887,7 @@ def fetch_official_index_entries(max_per_source: int = 3) -> List[Dict]:
         workers = min(2, len(active_sitemaps))
         with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="news-sitemap") as pool:
             for rows in pool.map(
-                lambda cfg: _hydrate_source(cfg, limit, sitemap=True),
+                lambda cfg: _hydrate_source(cfg, limit, sitemap=True, known_urls=known_urls),
                 active_sitemaps,
             ):
                 items.extend(rows)

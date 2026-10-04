@@ -34,6 +34,10 @@ HTML_INDEXES = (
      'article_path_re': r'^/de/red/fussball/2--liga/news/[^/]+/?$'},
 )
 _SOURCE_MENUS = (
+    ('www.marca.com', r'^/futbol/primera-division/20\d{2}/\d{2}/\d{2}/[^/]+\.html$', 'spain-la-liga'),
+    ('www.marca.com', r'^/futbol/segunda-division/20\d{2}/\d{2}/\d{2}/[^/]+\.html$', 'spain-la-liga-2'),
+    ('www.record.pt', r'^/futebol/futebol-nacional/liga-betclic/[^/]+/detalhe/[^/]+$', 'portugal-primeira-liga'),
+    ('www.record.pt', r'^/futebol/futebol-nacional/2--liga/[^/]+/detalhe/[^/]+$', 'portugal-liga-2'),
     ('liga2.prosport.ro', r'^/seria-1/[^/]+-\d+/?$', 'romania-liga-2'),
     ('www.gazzetta.gr', r'^/football/superleague/\d+/[^/]+/?$', 'greece-super-league'),
     ('www.gazzetta.gr', r'^/football/superleague-2/\d+/[^/]+/?$', 'greece-super-league-2'),

@@ -355,6 +355,10 @@ def collect_page_image_candidates(html: str) -> List[dict]:
     # Yonhap uses <article> for unrelated recommendation cards too. Limit
     # body images to its actual story container; metadata remains same-page.
     canonical = _og(html or '', 'og:url') or _metadata(html or '', 'canonical') or ''
+    from .news_football_club_intake_b import napredak_article_photos
+    verified_club_photos = napredak_article_photos(html, canonical)
+    if verified_club_photos is not None:
+        return verified_club_photos
     if regional_hero_scope(canonical):
         return [row for row in candidates if row.get('source') in {'og', 'twitter'}]
     if urlsplit(canonical).hostname in {'www.index.hr', 'index.hr', 'nb1.hu', 'www.nb1.hu', 'www.goal.pl', 'goal.pl'}:
@@ -778,6 +782,12 @@ def article_text_from_html(html: str) -> str:
         # Elementor places unrelated headlines after this exact article widget.
         # Fail closed if it is absent instead of treating recommendations as facts.
         body_class = 'elementor-widget-my-custom-post-content'
+    from .news_football_club_intake_b import napredak_single_post
+    single_post = napredak_single_post(html, canonical)
+    if single_post is not None:
+        if not single_post:
+            return ''
+        html = single_post
     if body_class or body_id or body_tag:
         scoped = _ScopedNewsBody(body_class, body_id=body_id, body_tag=body_tag)
         try:
@@ -820,6 +830,9 @@ def article_text_from_html(html: str) -> str:
         ld_body = _json_ld_article_body(html or "")
         if word_count(ld_body) > word_count(text):
             text = ld_body
+    from .news_football_club_intake_b import source_youth_category, YOUTH_CONTEXT
+    if text and source_youth_category(canonical, '', text):
+        source_category = YOUTH_CONTEXT
     if text and source_category:
         text = source_category + '\n\n' + text
     return text

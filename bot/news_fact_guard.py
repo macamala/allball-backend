@@ -351,7 +351,9 @@ def fact_lock_reason(
     source = f"{source_title or ''}\n{source_body or ''}"
     if expected_sport == 'football':
         from .news_football_source_context import preserve_women_qualifier_reason
-        context_reason = preserve_women_qualifier_reason(source, draft)
+        from .news_football_club_intake_b import preserve_youth_qualifier_reason
+        context_reason = (preserve_women_qualifier_reason(source, draft)
+                          or preserve_youth_qualifier_reason(source, draft))
         if context_reason:
             return context_reason
     if expected_sport == 'football':

@@ -124,3 +124,8 @@ RSS_FEEDS = RSS_FEEDS + OFFICIAL_CLUB_RSS
 from .news_verified_desks import RSS_FEEDS as VERIFIED_RSS, SOURCE_DESKS as VERIFIED_DESKS
 RSS_FEEDS = RSS_FEEDS + VERIFIED_RSS
 SOURCE_DESKS.update(VERIFIED_DESKS)
+
+# Official club desks share the existing writer, validation and freshness gates.
+from .news_football_club_intake_b import RSS_FEEDS as CLUB_B_RSS, HTML_INDEXES as CLUB_B_HTML
+RSS_FEEDS = RSS_FEEDS + CLUB_B_RSS
+HTML_INDEXES = HTML_INDEXES + CLUB_B_HTML

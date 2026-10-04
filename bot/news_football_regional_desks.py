@@ -179,3 +179,6 @@ def excluded_feed_entry(config, entry) -> bool:
 # Same visible-body and own-photo rules for additional reviewed publishers.
 from .news_verified_desks import ARTICLE_PROFILES as VERIFIED_DESK_PROFILES
 _PROFILES.update(VERIFIED_DESK_PROFILES)
+
+from .news_football_club_intake_b import ARTICLE_PROFILES as CLUB_B_PROFILES
+_PROFILES.update(CLUB_B_PROFILES)

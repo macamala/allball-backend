@@ -1133,7 +1133,12 @@ def _fetch_and_store_all_articles(
             try:
                 from .news_official_indexes import fetch_official_index_entries
 
-                queued.extend(fetch_official_index_entries(per_feed))
+                # Same bounded source history as duplicate admission, before
+                # the per-source quota so known headlines do not starve new ones.
+                known_rows = db.query(Article.source_url, Article.external_id).filter(
+                    Article.source_url.isnot(None)).order_by(Article.id.desc()).limit(500).all()
+                known_urls = frozenset(value for pair in known_rows for value in pair if value)
+                queued.extend(fetch_official_index_entries(per_feed, known_urls=known_urls))
             except Exception as e:
                 logger.error("[fetch_sources] official index error: %s", type(e).__name__)
         # Current ESPN JSON catalog contains only other sports. Its independent

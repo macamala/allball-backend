@@ -197,7 +197,7 @@ def football_news_section(article, *, today=None):
     # true U6-U23 squad labels, without turning under-22 rankings into fixtures.
     age_team = any(not re.match(r' (?:study|studies|ranking|rankings|research|analysis|list|kolu|kola|minuti|minutu|minuta|satu|sata|sati)\b', lead[m.end():])
                    for m in _YOUTH.finditer(lead))
-    youth = bool(age_team or re.search(r'\bacademy\b', title))
+    youth = bool(age_team or re.search(r'\b(?:academy|youth football|youth teams?|junior teams?|cadet teams?|pioneer teams?)\b', lead))
     # A named birth-year COHORT is a team identity, not a senior team's title
     # in that year or an individual player's age. No new age is published.
     for born in re.finditer(r'\b(?:team|squad|players|children) (?:of players )?born in (20\d{2})\b', lead):
@@ -219,7 +219,11 @@ def football_news_section(article, *, today=None):
     if regional_national_event:
         return 'football-women' if women else 'football-youth' if youth else 'football-national-teams'
 
-    country_fixture = headline_national_fixture(getattr(article, 'title', ''))
+    from .news_football_subject_context import national_primary_subject, general_football_governance
+    country_fixture = (headline_national_fixture(getattr(article, 'title', ''))
+                       or national_primary_subject(getattr(article, 'title', ''))
+                       or (national_primary_subject(getattr(article, 'summary', ''))
+                           and not _club_section(title, '', article, False, today)))
     if women:
         national_women = bool(_NATIONAL.search(lead) or country_fixture)
         key = _explicit(title, women=True) or _explicit(summary, women=True)
@@ -265,7 +269,9 @@ def football_news_section(article, *, today=None):
     if key and not (country_fixture and COMPETITIONS.get(key, {}).get('country') not in {None, 'international'}):
         return key
     headline_club = _club_section(title, '', article, False, today)
-    national = country_fixture or (bool(_NATIONAL.search(title)) or
+    source_menu = source_menu_association(getattr(article, 'source_url', None) or getattr(article, 'external_id', None))
+    lead_national = national_primary_subject(getattr(article, 'summary', '')) and not headline_club
+    national = country_fixture or lead_national or (bool(_NATIONAL.search(title)) or
                 (bool(_NATIONAL.search(summary)) and not headline_club)) or (
         any(_has(lead, country) for country in _COUNTRIES)
         and (re.search(r'\b(?:national anthem|senior .{0,25}debut|(?:serbia|italy|england|france|netherlands|dutch) (?:a )?(?:squad|team|debut))\b', lead)
@@ -273,6 +279,10 @@ def football_news_section(article, *, today=None):
                  and re.search(r'\b(?:beat|beats|win|wins|defeat|defeats|coach|squad|team|draw|lose|loses|loss|fall|make|secure)\b', title))))
     # A player/coach headline can omit the national team while the lead/body
     # clearly identifies its current Nations League match.
+    if not national and source_menu and not re.search(r'\b(?:cup|pokal|coppa|copa del rey)\b', title):
+        # An admitted domestic article category beats incidental player biography.
+        # Explicit national, women and youth headline/lead subjects still win.
+        return source_menu
     if not national and not _club_section(title, summary, article, False, today):
         national = bool(_NATIONAL.search(body[:650]) or re.search(r'\bnations league (?:match|fixture)\b', body))
     if national:
@@ -285,6 +295,8 @@ def football_news_section(article, *, today=None):
                 r'\b(?:world cup|european championship|uefa euro) (?:qualifier|qualifying)\b', body):
             return body_key
         return 'football-national-teams'
+    if general_football_governance(title, summary):
+        return 'football-international'
     if re.search(r'\b(?:fifa|uefa|european club association|world football clubs)\b', lead) and re.search(
             r'\b(?:president|leadership|assembly|election|governance|rules|syndicate|association)\b', lead):
         return 'football-international'
