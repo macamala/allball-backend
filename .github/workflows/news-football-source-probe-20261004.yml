@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 12
     env:
-      DATABASE_URL: sqlite:///:memory:
+      DATABASE_URL: 'sqlite:///:memory:'
       NEWS_FOOTBALL_ONLY: '1'
       NEWS_ACCOUNTING_BACKEND: memory
       RESULTS_COLLECTION_ENABLED: 'false'
@@ -66,6 +66,7 @@ jobs:
                           body=article_text_from_html(html)
                           info['body_words']=len(body.split());info['body_start']=body[:550]
                           info['own_images']=collect_page_image_candidates(html)[:2]
+                          info['page_date']=str(page_published_at_from_html(html))
                           info['containers']=sorted(set(re.findall(r'(?:class|id)=[\"\x27]([^\"\x27]*(?:entry-content|post-content|article-body|td-post-content|post-body)[^\"\x27]*)',html)))[:10]
                           for cls in ('entry-content','post-content','td-post-content','article-body'):
                               scoped=_ScopedNewsBody(cls);scoped.feed(html)
