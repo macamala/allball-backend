@@ -949,6 +949,13 @@ def repair_recent_gossip_news(
 ) -> int:
     """Hold recent public non-news, branded copy and gossip; retain source rows."""
     cutoff = datetime.utcnow() - timedelta(hours=max(1, int(max_age_hours)))
+    import os
+    football_focus = os.environ.get('NEWS_FOOTBALL_ONLY') == '1'
+    ordering = [func.coalesce(Article.published_at, Article.created_at).desc(), Article.id.desc()]
+    if football_focus:
+        # Otherwise newer rows from other sports permanently starve older
+        # still-public football mistakes. Retain the SAME bounded budget.
+        ordering.insert(0, (ArticleTaxonomyResolution.resolved_sport == 'football').desc())
     rows = (
         db.query(Article, ArticleTaxonomyResolution)
         .join(
@@ -960,13 +967,11 @@ def repair_recent_gossip_news(
             or_(ArticleTaxonomyResolution.public_ok.is_(True), Article.id.in_((22166, 22195, 22202, 22204, 22205, 22207))),
             func.coalesce(Article.published_at, Article.created_at) >= cutoff,
         )
-        .order_by(
-            func.coalesce(Article.published_at, Article.created_at).desc(),
-            Article.id.desc(),
-        )
+        .order_by(*ordering)
         .limit(max(1, min(int(limit), 1200)))
         .all()
     )
+    logger.info('[public_index] News editorial repair scanned=%s football_focus=%s', len(rows), football_focus)
     hidden = 0
     corrected = 0
     reasons = {}
