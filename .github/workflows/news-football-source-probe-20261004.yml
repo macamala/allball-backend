@@ -1,0 +1,86 @@
+name: News football source probe 20261004
+on:
+  push:
+    branches: [audit/news-football-completion-20261004]
+    paths: [.github/workflows/news-football-source-probe-20261004.yml]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      DATABASE_URL: sqlite:///:memory:
+      NEWS_FOOTBALL_ONLY: '1'
+      NEWS_ACCOUNTING_BACKEND: memory
+      RESULTS_COLLECTION_ENABLED: 'false'
+      RESULTS_WRITE_ENABLED: 'false'
+      RESULTS_SCHEDULER_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: python -m pip install -r requirements.txt
+      - name: Bounded read-only source and public coverage probe
+        run: |
+          python - <<'PY'
+          import json,re,urllib.request
+          from collections import Counter
+          from concurrent.futures import ThreadPoolExecutor
+          from datetime import datetime,timezone
+          import feedparser
+          from bot.news_feed_http import read_news_feed
+          from bot.extract import article_text_from_html,collect_page_image_candidates,page_published_at_from_html,_ScopedNewsBody
+          from bot.news_policy import non_article_news_reason,numeric_tokens
+          base='https://allball-backend-production.up.railway.app'
+          articles=[]
+          for offset in range(0,1000,100):
+              try:
+                  req=urllib.request.Request(base+'/articles?sport=football&limit=100&offset='+str(offset),headers={'User-Agent':'NinkoSports-News-audit/1.0'})
+                  with urllib.request.urlopen(req,timeout=25) as r: rows=json.load(r)
+                  if not isinstance(rows,list):
+                      print('PUBLIC_SHAPE',str(rows)[:300]);break
+                  articles.extend(rows)
+                  if len(rows)<100:break
+              except Exception as e:
+                  print('PUBLIC_ERROR',type(e).__name__,str(e)[:160]);break
+          print('PUBLIC_COUNT',len(articles))
+          print('PUBLIC_LEAGUE_COUNTS',json.dumps(dict(Counter(a.get('league') or a.get('competition') or 'unclassified' for a in articles)),sort_keys=True))
+          print('PUBLIC_SAMPLE',json.dumps(articles[:1],ensure_ascii=False)[:3500])
+          print('PUBLIC_MISSING_IMAGES',sum(not(a.get('image_url') or a.get('image') or a.get('hero_image')) for a in articles))
+          print('PUBLIC_MISSING_SOURCE_KEYS',sum(not(a.get('source_url') or a.get('source')) for a in articles))
+          feeds=['https://www.football-oranje.com/feed/','https://www.getfootballnewsbene.com/feed/','https://turkish-football.com/feed/','https://www.tipsbladet.dk/rss','https://www.getfootballnewsfrance.com/feed/','https://fknapredak.rs/feed/','https://www.fkspartak.com/feed/']
+          def probe(url):
+              report={'feed':url,'articles':[]}
+              try:
+                  parsed=feedparser.parse(read_news_feed(url))
+                  report['entries']=len(parsed.entries)
+                  report['title']=parsed.feed.get('title')
+                  for item in parsed.entries[:2]:
+                      info={'url':item.get('link'),'title':item.get('title'),'published':item.get('published'),'categories':[x.get('term') for x in item.get('tags',[])]}
+                      info['non_news']=non_article_news_reason({'url':item.get('link'),'title':item.get('title')})
+                      try:
+                          html=read_news_feed(item.link).decode('utf-8','replace')
+                          body=article_text_from_html(html)
+                          info['body_words']=len(body.split());info['body_start']=body[:550]
+                          info['own_images']=collect_page_image_candidates(html)[:2]
+                          info['containers']=sorted(set(re.findall(r'(?:class|id)=[\"\x27]([^\"\x27]*(?:entry-content|post-content|article-body|td-post-content|post-body)[^\"\x27]*)',html)))[:10]
+                          for cls in ('entry-content','post-content','td-post-content','article-body'):
+                              scoped=_ScopedNewsBody(cls);scoped.feed(html)
+                              if scoped.finished:
+                                  scoped_body=article_text_from_html('<html><body><article>'+''.join(scoped.parts)+'</article></body></html>')
+                                  info['scope_'+cls]={'words':len(scoped_body.split()),'start':scoped_body[:420]}
+                      except Exception as e:info['error']=type(e).__name__+':'+str(e)[:180]
+                      report['articles'].append(info)
+              except Exception as e:report['error']=type(e).__name__+':'+str(e)[:180]
+              return report
+          for result in ThreadPoolExecutor(max_workers=3).map(probe,feeds):print('SOURCE_PROBE',json.dumps(result,ensure_ascii=False))
+          url='https://ge.globo.com/futebol/futebol-internacional/noticia/2026/10/04/clube-suico-apresenta-projeto-de-estadio-com-montanha-russa-veja.ghtml'
+          try:
+              body=article_text_from_html(read_news_feed(url).decode('utf-8','replace'))
+              print('SION_NUMERIC_SOURCE',json.dumps([p for p in body.splitlines() if re.search(r'\d|mil',p)],ensure_ascii=False))
+              print('SION_NUMERIC_TOKENS',sorted(numeric_tokens(body,include_spelled=True)))
+          except Exception as e:print('SION_ERROR',type(e).__name__,str(e)[:180])
+          PY
