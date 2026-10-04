@@ -52,6 +52,7 @@ jobs:
           python - <<'PY'
           import json
           from collections import Counter
+          from datetime import datetime,timezone
           from pathlib import Path
           from bot.news_scottish_club_desks import fetch_scottish_article
           from bot.extract import article_text_from_html,collect_page_image_candidates,page_published_at_from_html
@@ -66,12 +67,12 @@ jobs:
               body=article_text_from_html(html);photos=collect_page_image_candidates(html)
               date=page_published_at_from_html(html)
               checks=probe_news_images([row['url'] for row in photos],max_workers=1)
-              row={'url':url,'handled':handled,'body_words':len(body.split()),'source_date':str(date),'freshness_reason':news_freshness_reason(date),'body_start':body[:160],'photos':photos,'image_checks':checks}
+              row={'url':url,'handled':handled,'body_words':len(body.split()),'source_date':str(date),'freshness_reason':news_freshness_reason(date,datetime.now(timezone.utc)),'body_start':body[:160],'photos':photos,'image_checks':checks}
               proof['source_checks'].append(row)
+              print('EXACT_ARTICLE_SOURCE',json.dumps(row),flush=True)
               assert handled and body and date and photos,'Exact source body/date/photo not verified'
               if 'jake-girdwood' in url:assert 'Rowena Armitage' not in body and 'Matchday seven' not in body,'Neighbor contamination'
               if 'next-up-aberdeen' in url:assert 'Jake Girdwood-Reich' not in body,'Neighbor contamination'
-              print('EXACT_ARTICLE_SOURCE',json.dumps(row),flush=True)
           for name in ('sweden-allsvenskan-category','sweden-superettan-category','mls-official-news','eredivisie-official-news'):
               cfg=next(c for c in HTML_INDEXES if c['id']==name)
               first=_anchor_candidates(cfg)
