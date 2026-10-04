@@ -1,0 +1,72 @@
+name: News football production acceptance 20261004
+on:
+  push:
+    branches: [audit/news-football-completion-20261004]
+    paths: [.github/workflows/news-football-production-acceptance-20261004.yml]
+permissions:
+  contents: read
+jobs:
+  verify-public:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Bounded public-only publication checks
+        run: |
+          python - <<'PY'
+          import json,time,urllib.request,urllib.error
+          from collections import Counter
+          from concurrent.futures import ThreadPoolExecutor
+          from datetime import datetime,timezone
+          from pathlib import Path
+          base='https://allball-backend-production.up.railway.app'
+          known_bad={22926,22979,22523,22444}
+          def get(path):
+              req=urllib.request.Request(base+path,headers={'User-Agent':'NinkoSports-News-post-deploy-acceptance/1.0','Cache-Control':'no-cache'})
+              with urllib.request.urlopen(req,timeout=25) as response:return json.load(response)
+          def inventory():
+              articles={}
+              for offset in range(0,1000,100):
+                  rows=get('/articles?sport=football&limit=100&offset='+str(offset))
+                  assert isinstance(rows,list),'Article response changed shape'
+                  for a in rows:articles[a['id']]=a
+                  if len(rows)<100:return list(articles.values())
+              raise AssertionError('Public pagination cap reached; not a complete inventory')
+          def summary(rows):
+              return {'at':datetime.now(timezone.utc).isoformat(),'total':len(rows),
+                  'leagues':dict(sorted(Counter(a.get('league') or 'unclassified' for a in rows).items())),
+                  'missing_image_url':sum(not a.get('image_url') for a in rows),
+                  'wrong_sport_field':sum(a.get('sport')!='football' for a in rows),
+                  'known_bad_still_public':sorted(known_bad.intersection(a['id'] for a in rows)),
+                  'largest_article_id':max((a['id'] for a in rows),default=None),
+                  'newest':[{k:a.get(k) for k in ('id','title','league','published_at')} for a in rows[:6]]}
+          rows=inventory();before=summary(rows)
+          print('PUBLIC_FIRST',json.dumps(before,ensure_ascii=False),flush=True)
+          for attempt in range(12):
+              if not known_bad.intersection(a['id'] for a in rows):break
+              time.sleep(20)
+              rows=inventory()
+              print('CHECK',attempt+1,'known_conflicts_remaining',sorted(known_bad.intersection(a['id'] for a in rows)),flush=True)
+          after=summary(rows)
+          print('PUBLIC_FINAL',json.dumps(after,ensure_ascii=False),flush=True)
+          Path('production-football-acceptance.json').write_text(json.dumps({'first':before,'final':after,'articles':rows},ensure_ascii=False,indent=2))
+          assert len(rows)>250,'Unexpected public football inventory collapse'
+          assert not after['known_bad_still_public'],'Confirmed non-football incidents still in football'
+          assert not after['wrong_sport_field'],'Wrong public sport field'
+          assert not after['missing_image_url'],'Missing article photo URL'
+          assert 22971 in {a['id'] for a in rows},'Known valid football story unexpectedly missing'
+          def check_detail(article):
+              detail=get('/articles/'+article['slug'])
+              assert detail.get('id')==article['id'] and detail.get('content'),'Missing or incorrect article detail'
+              assert detail.get('image_url'),'Missing article image'
+              return {'id':article['id'],'detail_ok':True,'content_chars':len(detail['content']),'published_at':detail.get('published_at')}
+          checks=list(ThreadPoolExecutor(max_workers=3).map(check_detail,rows[:6]))
+          print('PUBLIC_DETAILS',json.dumps(checks,ensure_ascii=False))
+          Path('production-detail-acceptance.json').write_text(json.dumps(checks,indent=2))
+          print('PUBLIC_ACCEPTANCE_PASS')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: news-football-production-acceptance
+          path: production-*.json
+          retention-days: 7
