@@ -1,0 +1,61 @@
+name: News fill B public acceptance
+on:
+  push:
+    branches: [audit/news-football-completion-20261004]
+    paths: [.github/workflows/news-fill-b-public-acceptance.yml]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check reader-visible changes with original publication dates
+        run: |
+          python - <<'PY'
+          import json,time,urllib.request
+          from collections import Counter
+          from concurrent.futures import ThreadPoolExecutor
+          from datetime import datetime,timezone
+          from pathlib import Path
+          base='https://allball-backend-production.up.railway.app'
+          def get(path):
+              with urllib.request.urlopen(urllib.request.Request(base+path,headers={'User-Agent':'NinkoSports-News-acceptance/1.0','Cache-Control':'no-cache'}),timeout=25) as r:return json.load(r)
+          def inventory():
+              rows={}
+              for offset in range(0,1200,100):
+                  items=get('/articles?sport=football&limit=100&offset='+str(offset))
+                  assert isinstance(items,list)
+                  rows.update({a['id']:a for a in items})
+                  if len(items)<100:return rows
+              raise AssertionError('Incomplete inventory at cap')
+          old=inventory()
+          required={22967:'spain-la-liga',22940:'football-national-teams',22944:'football-national-teams',22974:'football-national-teams',22809:'football-international'}
+          bad={22513,22505,22926,22979,22523}
+          expected_dates={k:old[k]['published_at'] for k in required if k in old}
+          snapshots=[]
+          for attempt in range(16):
+              rows=inventory()
+              report={'at':datetime.now(timezone.utc).isoformat(),'count':len(rows),'unclassified':sum(not a.get('league') for a in rows.values()),'bad_visible':sorted(bad & rows.keys()),'required':{str(k):rows.get(k,{}).get('league') for k in required},'new_public_ids':sorted(rows.keys()-old.keys()),'leagues':dict(Counter(a.get('league') or 'unclassified' for a in rows.values()))}
+              snapshots.append(report);print('PUBLIC_CHANGE',json.dumps(report),flush=True)
+              if not report['bad_visible'] and all(rows.get(k,{}).get('league')==v for k,v in required.items()):break
+              time.sleep(30)
+          Path('news-fill-b-public.json').write_text(json.dumps({'snapshots':snapshots,'before':list(old.values()),'after':list(rows.values())},ensure_ascii=False,indent=2))
+          assert not bad & rows.keys(),'Wrong-sport cards remain visible'
+          assert all(rows.get(k,{}).get('league')==v for k,v in required.items()),'Primary subject menus not applied'
+          assert all(rows[k]['published_at']==v for k,v in expected_dates.items()),'Repair changed publication time'
+          assert len(rows)>250 and all(a.get('image_url') for a in rows.values()),'Public inventory or image regression'
+          targets=[rows[k] for k in required]+[rows[k] for k in sorted(rows.keys()-old.keys())[:10]]
+          def detail(a):
+              d=get('/articles/'+a['slug']);assert d['id']==a['id'] and d.get('content') and d.get('image_url')
+              return d
+          details=list(ThreadPoolExecutor(max_workers=3).map(detail,targets))
+          Path('news-fill-b-details.json').write_text(json.dumps(details,ensure_ascii=False,indent=2))
+          print('NEWS_FILL_B_PUBLIC_PASS','details',len(details),'unclassified',report['unclassified'])
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: news-fill-b-public-acceptance
+          path: news-fill-b-*.json
+          retention-days: 7
