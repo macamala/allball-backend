@@ -12,6 +12,9 @@ RSS_FEEDS = (
 HTML_INDEXES = (
     {'id':'sweden-allsvenskan-category','publisher':'FotbollDirekt','sport':'football','verified_official':False,
      'url':'https://fotbolldirekt.se/allsvenskan/','host':'fotbolldirekt.se',
+     # Observed live 2026-10-04: navigation consumed three of eight News slots.
+     # Exact directory slugs only; actual reporting about the table survives.
+     'exclude_articles':('alla-lag','spelschema','tabell'),
      'paths':('/allsvenskan/',),'article_path_re':r'^/allsvenskan/[^/]+/?$'},
     {'id':'sweden-superettan-category','publisher':'FotbollDirekt','sport':'football','verified_official':False,
      'url':'https://fotbolldirekt.se/superettan/','host':'fotbolldirekt.se',
