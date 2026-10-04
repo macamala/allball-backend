@@ -1,0 +1,81 @@
+name: News continuation final verification
+on:
+  push:
+    branches: [audit/news-football-completion-20261004]
+    paths:
+      - .github/workflows/news-continuation-final-gate-20261004.yml
+      - bot/news_domestic_categories.py
+      - tests/test_news_swedish_index_directories_20261004.py
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      DATABASE_URL: 'sqlite:///:memory:'
+      NEWS_ACCOUNTING_BACKEND: memory
+      NEWS_WORKER_ENABLED: '0'
+      RESULTS_COLLECTION_ENABLED: 'false'
+      RESULTS_WRITE_ENABLED: 'false'
+      RESULTS_SCHEDULER_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 60
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: python -m pip install -q -r requirements.txt
+      - name: Validate whole continuation scope and retain exact diff
+        run: |
+          git diff --check f46b9d98fb67a1ce69c30e9c8fddf8d90a735e09 HEAD
+          git diff f46b9d98fb67a1ce69c30e9c8fddf8d90a735e09 HEAD -- bot/ > continuation-news-runtime.patch
+          python - <<'PY'
+          import subprocess
+          allowed={'bot/news_index_selection.py','bot/news_official_indexes.py','bot/news_scottish_club_desks.py','bot/extract.py','bot/news_football_sources.py','bot/news_football_regional_desks.py','bot/news_domestic_categories.py'}
+          changed=set(subprocess.check_output(['git','diff','--name-only','f46b9d98fb67a1ce69c30e9c8fddf8d90a735e09','HEAD'],text=True).splitlines())
+          runtime={path for path in changed if not path.startswith(('.github/','audit/','tests/','docs/'))}
+          assert runtime <= allowed,runtime-allowed
+          print('EXACT_NEWS_RUNTIME_SCOPE_PASS',sorted(runtime))
+          print('NO_API_RESULTS_FRONTEND_OR_BUDGET_CHANGES')
+          PY
+      - name: Full retained publication and new regression suite
+        run: |
+          set -o pipefail
+          python -m pytest -q --disable-warnings tests/test_news*.py tests/test_editorial*.py tests/test_rewrite*.py tests/test_public*.py tests/test_taxonomy*.py --tb=short | tee continuation-news-tests.txt
+          git diff --exit-code
+      - name: Verify real Swedish index excludes directories before article limit
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from urllib.parse import urlsplit
+          from bot.news_official_indexes import HTML_INDEXES,_anchor_candidates
+          cfg=next(c for c in HTML_INDEXES if c['id']=='sweden-allsvenskan-category')
+          rows=_anchor_candidates(cfg)
+          assert rows,'Real index was unavailable'
+          assert len(rows)<=8
+          assert not any(urlsplit(url).path.rstrip('/').split('/')[-1] in {'alla-lag','tabell','spelschema'} for url,title in rows)
+          proof={'source':cfg['url'],'selection':rows,'directory_links':0,'read_cap':8,'new_articles_published':0,'deployment_performed':False}
+          Path('continuation-news-index-proof.json').write_text(json.dumps(proof,ensure_ascii=False,indent=2))
+          print('REAL_INDEX_DIRECTORY_GUARD_PASS',json.dumps(proof,ensure_ascii=False))
+          PY
+      - name: Package exact tested state without any production write
+        run: |
+          git rev-parse HEAD | tee tested-news-commit.txt
+          git archive --format=zip --output=tested-news-source.zip HEAD
+          git diff --stat 00604b3721780179c0381ef2ca8dbe7332f363a0 HEAD > full-pending-news-scope.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: news-continuation-final-tested-evidence
+          path: |
+            continuation-news-runtime.patch
+            continuation-news-tests.txt
+            continuation-news-index-proof.json
+            tested-news-commit.txt
+            tested-news-source.zip
+            full-pending-news-scope.txt
+          retention-days: 7
