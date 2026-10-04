@@ -1,0 +1,55 @@
+name: News reader browser acceptance
+on:
+  push:
+    branches: [audit/news-football-completion-20261004]
+    paths: [.github/workflows/news-reader-browser-acceptance-20261004.yml]
+permissions:
+  contents: read
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -q playwright && python -m playwright install --with-deps chromium
+      - name: Read public News in real desktop and mobile browsers
+        run: |
+          mkdir -p evidence
+          python - <<'PY'
+          import json,urllib.request
+          from pathlib import Path
+          from playwright.sync_api import sync_playwright
+          base='https://allball-backend-production.up.railway.app'
+          with urllib.request.urlopen(base+'/articles?sport=football&limit=100',timeout=25) as r:rows=json.load(r)
+          new=[a for a in rows if a['id']>=22988]
+          article=new[0] if new else rows[0]
+          report={'new_public':new,'pages':[]}
+          paths=['/football','/football/la-liga','/article/'+article['slug']]
+          with sync_playwright() as p:
+              browser=p.chromium.launch()
+              for width in (1440,390):
+                  context=browser.new_context(viewport={'width':width,'height':920},device_scale_factor=1)
+                  for number,path in enumerate(paths):
+                      page=context.new_page();errors=[]
+                      page.on('pageerror',lambda error:errors.append(str(error)))
+                      response=page.goto('https://ninkosports.com'+path,wait_until='domcontentloaded',timeout=45000)
+                      page.wait_for_timeout(6500)
+                      state=page.evaluate('''() => ({title:document.title,h1:[...document.querySelectorAll('h1')].map(e=>e.textContent),body:document.body.innerText.slice(0,8500),width:innerWidth,scrollWidth:document.documentElement.scrollWidth,articleLinks:[...document.querySelectorAll('a[href^="/article/"]')].map(a=>a.getAttribute('href')),images:[...document.images].filter(i=>i.getBoundingClientRect().top<innerHeight&&i.getBoundingClientRect().bottom>0).map(i=>({url:i.currentSrc||i.src,alt:i.alt,complete:i.complete,width:i.naturalWidth,height:i.naturalHeight}))})''')
+                      state.update({'path':path,'viewport':width,'status':response.status if response else None,'errors':errors})
+                      page.screenshot(path='evidence/news-'+str(width)+'-'+str(number)+'.png',full_page=False)
+                      report['pages'].append(state)
+                      print('NEWS_BROWSER',json.dumps({k:v for k,v in state.items() if k not in ('body','images','articleLinks')}),flush=True)
+                      page.close()
+                  context.close()
+              browser.close()
+          Path('evidence/reader-report.json').write_text(json.dumps(report,ensure_ascii=False,indent=2))
+          print('BROWSER_READ_ONLY_COMPLETE')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: news-reader-browser-evidence
+          path: evidence/
+          retention-days: 7
