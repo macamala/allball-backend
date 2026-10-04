@@ -1,0 +1,96 @@
+name: News football regression gate 20261004
+on:
+  push:
+    branches: [audit/news-football-completion-20261004]
+    paths:
+      - .github/workflows/news-football-regression-gate-20261004.yml
+      - audit/apply_news_football_20261004.py
+      - tests/test_news_football_completion_20261004.py
+      - bot/news_count_lexemes.py
+      - bot/news_verified_desks.py
+permissions:
+  contents: write
+concurrency:
+  group: news-football-regression-20261004
+  cancel-in-progress: false
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      DATABASE_URL: 'sqlite:///:memory:'
+      NEWS_ACCOUNTING_BACKEND: memory
+      RESULTS_COLLECTION_ENABLED: 'false'
+      RESULTS_WRITE_ENABLED: 'false'
+      RESULTS_SCHEDULER_ENABLED: 'false'
+      NEWS_WORKER_ENABLED: '0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: python -m pip install -q -r requirements.txt
+      - name: Apply narrow News patch and check modified scope
+        run: |
+          python audit/apply_news_football_20261004.py
+          git diff --check
+          git diff --stat
+          python - <<'PY'
+          import subprocess
+          allowed={'bot/news_policy.py','bot/news_source_holds.py','bot/news_publisher_media.py','bot/news_football_sources.py','bot/news_football_regional_desks.py'}
+          changed=set(subprocess.check_output(['git','diff','--name-only'],text=True).splitlines())
+          assert changed <= allowed, changed-allowed
+          print('NEWS_ONLY_SCOPE_PASS',sorted(changed))
+          PY
+      - name: Run retained News regressions and new incident tests
+        run: |
+          set -o pipefail
+          python -m pytest -q tests/test_news*.py tests/test_editorial*.py tests/test_rewrite*.py tests/test_public*.py tests/test_taxonomy*.py --tb=short | tee news-regression.txt
+      - name: Check public response types and original source provenance without writes
+        if: always()
+        run: |
+          python - <<'PY'
+          import json,urllib.request
+          base='https://allball-backend-production.up.railway.app'
+          def get(path):
+              with urllib.request.urlopen(base+path,timeout=30) as response:return json.load(response)
+          try:
+              rows=get('/articles?sport=football&limit=100&offset=0')
+              print('PUBLIC_SPORT_VALUES',sorted(set(str(a.get('sport')) for a in rows)))
+              for a in rows:
+                  if a.get('id') in (22926,22979,22971):
+                      print('PUBLIC_SCOPED_CARD',json.dumps(a,ensure_ascii=False))
+              paths=get('/openapi.json').get('paths',{})
+              for path in paths:
+                  if 'article' in path:print('PUBLIC_ARTICLE_ROUTE',path)
+              for a in rows[:2]:
+                  for path in ('/articles/'+str(a['id']), '/articles/'+a['slug']):
+                      try:
+                          detail=get(path)
+                          print('PUBLIC_DETAIL_PROVENANCE',json.dumps({k:detail.get(k) for k in ('id','sport','league','source','source_url','external_id','url','published_at')},ensure_ascii=False))
+                          print('PUBLIC_DETAIL_KEYS',sorted(detail.keys()))
+                          break
+                      except Exception:pass
+          except Exception as e:print('PUBLIC_READ_ERROR',type(e).__name__,str(e)[:180])
+          PY
+      - name: Save tested integration on isolated branch only
+        run: |
+          test "$GITHUB_REF_NAME" = 'audit/news-football-completion-20261004'
+          git config user.name 'NinkoSports News maintenance'
+          git config user.email '79318740+macamala@users.noreply.github.com'
+          git add bot/news_policy.py bot/news_source_holds.py bot/news_publisher_media.py bot/news_football_sources.py bot/news_football_regional_desks.py
+          if ! git diff --cached --quiet; then
+            git commit -m 'fix(news): integrate verified desks, exact counts and early promotion rejection'
+            git push origin HEAD:refs/heads/audit/news-football-completion-20261004
+          fi
+          git rev-parse HEAD | tee tested-news-commit.txt
+          git diff b62ecd517f0e6b6373145c4a745aa7ff4a669748 HEAD --stat || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: news-football-regression-evidence
+          path: |
+            news-regression.txt
+            tested-news-commit.txt
+          retention-days: 7
