@@ -1,0 +1,90 @@
+name: News football continuation evidence
+on:
+  push:
+    branches: [audit/news-football-completion-20261004]
+    paths: [.github/workflows/news-football-continuation-probe-20261004.yml]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      DATABASE_URL: 'sqlite:///:memory:'
+      NEWS_WORKER_ENABLED: '0'
+      NEWS_ACCOUNTING_BACKEND: memory
+      RESULTS_WRITE_ENABLED: 'false'
+      RESULTS_COLLECTION_ENABLED: 'false'
+      RESULTS_SCHEDULER_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: python -m pip install -q -r requirements.txt
+      - name: Read current public coverage and official feed article boundaries
+        run: |
+          mkdir -p evidence
+          python - <<'PY'
+          import json,re,urllib.request
+          from pathlib import Path
+          from collections import Counter
+          from concurrent.futures import ThreadPoolExecutor
+          from urllib.parse import urlsplit
+          import feedparser
+          from bot.news_feed_http import read_news_feed
+          from bot.extract import article_text_from_html,collect_page_image_candidates,page_title_from_html,page_published_at_from_html,_ScopedNewsBody
+          from bot.news_policy import non_article_news_reason
+          base='https://allball-backend-production.up.railway.app'
+          rows={}
+          for offset in range(0,1200,100):
+              with urllib.request.urlopen(base+'/articles?sport=football&limit=100&offset='+str(offset),timeout=25) as r:page=json.load(r)
+              assert isinstance(page,list)
+              rows.update({a['id']:a for a in page})
+              if len(page)<100:break
+          else:raise AssertionError('Inventory incomplete at read cap')
+          counts=dict(Counter(a.get('league') or 'unclassified' for a in rows.values()))
+          print('PUBLIC_COVERAGE',json.dumps({'count':len(rows),'leagues':counts,'missing_image':sum(not a.get('image_url') for a in rows.values())}),flush=True)
+          Path('evidence/public-inventory.json').write_text(json.dumps(list(rows.values()),ensure_ascii=False,indent=2))
+          sources=[('fcm','https://www.fcm.dk/feed/'),('motherwell','https://www.motherwellfc.co.uk/feed/'),('kilmarnock','https://kilmarnockfc.co.uk/feed/'),('olympiacos','https://www.olympiacos.org/feed/'),('braga','https://scbraga.pt/feed/'),('tsc','https://www.fktsc.com/feed/')]
+          def probe(pair):
+              name,url=pair;result={'id':name,'feed_url':url,'items':[]}
+              try:
+                  raw=read_news_feed(url);Path('evidence/'+name+'-feed.xml').write_bytes(raw)
+                  parsed=feedparser.parse(raw);result['feed_title']=parsed.feed.get('title');result['entry_count']=len(parsed.entries)
+                  for i,entry in enumerate(parsed.entries[:3]):
+                      link=entry.get('link');item={'url':link,'title':entry.get('title'),'published':entry.get('published'),'categories':[t.get('term') for t in entry.get('tags',[])]}
+                      result['items'].append(item)
+                      if not link or (urlsplit(link).hostname or '').removeprefix('www.') != (urlsplit(url).hostname or '').removeprefix('www.'):continue
+                      try:
+                          html=read_news_feed(link).decode('utf-8','replace');Path('evidence/'+name+'-'+str(i)+'.html').write_text(html)
+                          body=article_text_from_html(html);item['words']=len(body.split());item['body_start']=body[:400];item['page_date']=str(page_published_at_from_html(html));item['photos']=collect_page_image_candidates(html)[:2]
+                          item['admission_reason']=non_article_news_reason({'url':link,'title':entry.get('title'),'body':body})
+                          item['classes']=sorted(set(re.findall(r'(?:class|id)=[\"\x27]([^\"\x27]*(?:entry-content|post-content|article-body|article-content|news-content|post-body|content-body)[^\"\x27]*)',html)))[:12]
+                          for cls in ('entry-content','post-content','article-body','article-content','news-content','post-body','content-body'):
+                              scoped=_ScopedNewsBody(cls);scoped.feed(html)
+                              if scoped.finished:
+                                  text=article_text_from_html('<article>'+''.join(scoped.parts)+'</article>')
+                                  item['scope_'+cls]={'words':len(text.split()),'start':text[:400]}
+                      except Exception as e:item['error']=type(e).__name__+':'+str(e)[:120]
+              except Exception as e:result['error']=type(e).__name__+':'+str(e)[:140]
+              return result
+          reports=list(ThreadPoolExecutor(max_workers=3).map(probe,sources))
+          Path('evidence/new-desks.json').write_text(json.dumps(reports,ensure_ascii=False,indent=2))
+          for report in reports:print('OFFICIAL_DESK',json.dumps(report,ensure_ascii=False),flush=True)
+          from bot.news_official_indexes import HTML_INDEXES,_anchor_candidates,_hydrate_source
+          for id in ('sweden-allsvenskan-category','sweden-superettan-category','mls-official-news','eredivisie-official-news'):
+              cfg=next(c for c in HTML_INDEXES if c['id']==id)
+              try:
+                  raw=read_news_feed(cfg['url']);Path('evidence/'+id+'.html').write_bytes(raw)
+                  links=_anchor_candidates(cfg)
+                  print('INDEX_HEAD',id,json.dumps(links,ensure_ascii=False),flush=True)
+              except Exception as e:print('INDEX_ERROR',id,type(e).__name__,str(e)[:100],flush=True)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: news-football-continuation-evidence
+          path: evidence/
+          retention-days: 7
