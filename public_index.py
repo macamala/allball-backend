@@ -367,6 +367,7 @@ def repair_recent_news_images(
     limit: int = 80,
     max_age_hours: int = 72,
     recover_limit: int = 8,
+    rotate: bool = False,
 ) -> int:
     """Verify recent public hero URLs and recover fresh images without AI.
 
@@ -380,7 +381,7 @@ def repair_recent_news_images(
     from bot.news_image_http import probe_news_images
 
     cutoff = datetime.utcnow() - timedelta(hours=max(1, int(max_age_hours)))
-    rows = (
+    query = (
         db.query(Article, ArticleTaxonomyResolution)
         .join(
             ArticleTaxonomyResolution,
@@ -393,14 +394,21 @@ def repair_recent_news_images(
             Article.image_url != "",
             func.coalesce(Article.published_at, Article.created_at) >= cutoff,
         )
-        .order_by(
+    )
+    rotation_scope = rotation_cursor = None
+    if rotate:
+        import os
+        from bot.news_image_rotation import next_image_health_rows
+        rows, rotation_scope, rotation_cursor = next_image_health_rows(
+            query, limit=limit, football_only=os.environ.get('NEWS_FOOTBALL_ONLY') == '1',
+            window=max_age_hours,
+        )
+    else:
+        rows = query.order_by(
             Article.image_url.ilike("%soccernews.com/og/og-image.%").desc(),
             func.coalesce(Article.published_at, Article.created_at).desc(),
             Article.id.desc(),
-        )
-        .limit(max(1, min(int(limit), 160)))
-        .all()
-    )
+        ).limit(max(1, min(int(limit), 160))).all()
 
     probes = probe_news_images(
         [article.image_url for article, _tax in rows
@@ -525,7 +533,11 @@ def repair_recent_news_images(
     for key, expires in list(_SOURCE_IMAGE_CHECKED.items()):
         if expires <= now:
             _SOURCE_IMAGE_CHECKED.pop(key, None)
-    for article, tax in rows:
+    # A transient CDN failure is never grounds to hide an article. Prefer
+    # its own source-page photo check within the EXISTING six-check allowance.
+    alignment_rows = sorted(rows, key=lambda row: bool(
+        probes.get(str(row[0].image_url or '').strip(), (False, 'missing'))[0]))
+    for article, tax in alignment_rows:
         if not tax.public_ok or int(article.id) in touched_ids or not article.source_url:
             continue
         key = (int(article.id), article.source_url, article.image_url)
@@ -571,6 +583,11 @@ def repair_recent_news_images(
             len(broken),
             dict(reasons),
         )
+    if rotate:
+        from bot.news_image_rotation import finish_image_health_rows
+        finish_image_health_rows(rotation_scope, rotation_cursor)
+        logger.info('[public_index] News rotating photo check scope=%s checked=%s failed=%s next_id=%s source_checks=%s',
+                    rotation_scope, len(rows), dict(reasons), rotation_cursor, checks)
     return changed
 
 def _correct_confirmed_deadline_copy(article: Article) -> dict:

@@ -84,6 +84,7 @@ def _run_image_health():
             limit=160,
             max_age_hours=72,
             recover_limit=16,
+            rotate=True,
         )
         taxonomy_changes = repair_recent_sport_mislabels(
             db,
