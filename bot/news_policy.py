@@ -648,6 +648,8 @@ def non_article_news_reason(item):
             re.search(r'\bonde assistir\b', title)
             and re.search(r'\b(?:horário|horario|tv|ao vivo)\b', title)):
         return 'non_article_service_guide'
+    if re.match(r'^\s*papers\s*:', title):
+        return 'non_article_newspaper_roundup'
     if re.search(r"\b(?:today[’']?s papers|paper talk|newspaper round[- ]?up)\b", title):
         return "non_article_newspaper_roundup"
     # Keep scarce writer requests for factual news rather than opinion/listicle

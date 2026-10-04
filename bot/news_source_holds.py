@@ -256,6 +256,17 @@ def held_source_urls(urls) -> set[str]:
             )
             if cursor.rowcount:
                 logger.info('[source_holds] expired audited pre-fix Portuguese count cooldown=%s', cursor.rowcount)
+        imt_url = 'https://www.crvenazvezdafk.com/vesti/dijeng-postigao-najlepsi-gol-u-septembru'
+        if imt_url in hashes:
+            cursor.execute(
+                "UPDATE news_ai_source_holds SET expires_at=NOW(), "
+                "reason='audited-source-imt-spelling-repaired', updated_at=NOW() "
+                "WHERE source_hash=%s AND expires_at > NOW() "
+                "AND reason='unsupported_acronym:IMT' AND updated_at < %s::timestamptz",
+                (hashes[imt_url], '2026-10-04T06:45:00Z'),
+            )
+            if cursor.rowcount:
+                logger.info('[source_holds] expired exact pre-fix IMT source hold=%s', cursor.rowcount)
         for url, reason in _CJK_REPAIR_REASONS.items():
             if url not in hashes:
                 continue

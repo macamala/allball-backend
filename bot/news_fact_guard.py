@@ -308,6 +308,11 @@ def source_attested_acronyms(source: str, expected_sport: str | None = None) -> 
     if expected_sport == 'football':
         from .news_source_lexemes import source_cjk_acronyms
         src_acronyms.update(source_cjk_acronyms(source))
+        # Official Crvena zvezda article, 2026-10-03: the literal club
+        # acronym ИМТ is IMT in Latin script. This adds no club, match,
+        # opponent, league or role absent from the source.
+        if re.search(r'(?<!\w)ИМТ(?!\w)', source or '', re.I):
+            src_acronyms.add('IMT')
     # Source-grounded Serbian spellings of the same organisation, not new
     # organisations inferred from context. Semantic claim validation still runs.
     for local, canonical in {'ЦИЕС': 'CIES', 'ФИФА': 'FIFA', 'УЕФА': 'UEFA'}.items():
