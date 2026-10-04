@@ -1,0 +1,103 @@
+name: News football fill evidence B
+on:
+  push:
+    branches: [audit/news-football-completion-20261004]
+    paths: [.github/workflows/news-football-fill-probe-20261004b.yml]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      DATABASE_URL: 'sqlite:///:memory:'
+      NEWS_WORKER_ENABLED: '0'
+      RESULTS_WRITE_ENABLED: 'false'
+      RESULTS_COLLECTION_ENABLED: 'false'
+      RESULTS_SCHEDULER_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 34885ab355b0dee6fae31d77278baf0c6af0a34b
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: python -m pip install -q -r requirements.txt
+      - name: Read primary sources and public inventory; no AI or database writes
+        run: |
+          mkdir -p evidence
+          git archive --format=zip --output=evidence/current-news-source.zip HEAD
+          python - <<'PY'
+          import json,re,urllib.request
+          from pathlib import Path
+          from concurrent.futures import ThreadPoolExecutor
+          from collections import Counter
+          from types import SimpleNamespace
+          from urllib.parse import urlsplit
+          import feedparser
+          from bot.news_feed_http import read_news_feed
+          from bot.extract import article_text_from_html,collect_page_image_candidates,page_published_at_from_html,page_title_from_html,_ScopedNewsBody
+          from bot.news_official_indexes import _anchor_candidates, _hydrate
+          from bot.news_football_sections import football_news_section
+          from bot.news_football_memberships import refresh_football_news_memberships,memberships_for_news
+          base='https://allball-backend-production.up.railway.app'
+          def get(path):
+              with urllib.request.urlopen(base+path,timeout=25) as r:return json.load(r)
+          rows={}
+          for offset in range(0,1000,100):
+              chunk=get('/articles?sport=football&limit=100&offset='+str(offset));rows.update({a['id']:a for a in chunk})
+              if len(chunk)<100:break
+          print('PUBLIC_COUNTS',json.dumps(dict(Counter(a.get('league') or 'unclassified' for a in rows.values()))),flush=True)
+          targets=[a for a in rows.values() if not a.get('league') or a['id'] in (22967,22513,22505,22782,22739,22730)]
+          def detail(a):
+              try:return get('/articles/'+a['slug'])
+              except Exception as e:return {**a,'read_error':type(e).__name__}
+          details=list(ThreadPoolExecutor(max_workers=3).map(detail,targets))
+          Path('evidence/public-details.json').write_text(json.dumps(details,ensure_ascii=False,indent=2))
+          print('MEMBERSHIPS',refresh_football_news_memberships(force=True),flush=True)
+          Path('evidence/memberships.json').write_text(json.dumps(memberships_for_news(),ensure_ascii=False,indent=2))
+          for a in details:
+              target=football_news_section(SimpleNamespace(**a))
+              print('MENU_GAP',json.dumps({'id':a['id'],'title':a['title'],'old':a.get('league'),'computed':target},ensure_ascii=False),flush=True)
+          specs=[
+              ('brighton','https://www.brightonandhovealbion.com/pages/en/media/news','www.brightonandhovealbion.com',('/pages/en/media/news/',)),
+              ('man-city','https://www.mancity.com/news','www.mancity.com',('/news/',)),
+              ('tottenham','https://www.tottenhamhotspur.com/news/','www.tottenhamhotspur.com',('/news/',)),
+              ('bayern','https://fcbayern.com/en/news','fcbayern.com',('/en/news/',)),
+              ('dortmund','https://www.bvb.de/de/en/news.html','www.bvb.de',('/de/en/news/news-overview/news.html/',)),
+              ('roma','https://www.asroma.com/en/news','www.asroma.com',('/en/news/',)),
+              ('juventus','https://www.juventus.com/en/news/','www.juventus.com',('/en/news/articles/',)),
+              ('ajax','https://english.ajax.nl/','english.ajax.nl',('/articles/',)),
+              ('psv','https://www.psv.nl/en/media/artikel','www.psv.nl',('/en/media/artikel/',)),
+              ('partizan','https://partizan.rs/sr/category/vesti','partizan.rs',('/sr/article/',)),
+          ]
+          def probe(spec):
+              name,url,host,paths=spec;cfg={'id':name,'url':url,'host':host,'paths':paths,'sport':'football','publisher':name}
+              out={'id':name,'cfg':cfg,'articles':[]}
+              try:
+                  candidates=_anchor_candidates(cfg);out['links']=len(candidates)
+                  for number,(link,title) in enumerate(candidates[:3]):
+                      raw=read_news_feed(link);html=raw.decode('utf-8','replace')
+                      Path('evidence/'+name+'-'+str(number)+'.html').write_bytes(raw)
+                      prose=article_text_from_html(html);d=Counter();item=_hydrate(cfg,link,title,diagnostics=d)
+                      out['articles'].append({'url':link,'title':page_title_from_html(html) or title,'date':str(page_published_at_from_html(html)),'words':len(prose.split()),'body_start':prose[:350],'images':collect_page_image_candidates(html)[:2],'admitted':bool(item),'reasons':dict(d),'item':item})
+              except Exception as e:out['error']=type(e).__name__+':'+str(e)[:140]
+              return out
+          reports=list(ThreadPoolExecutor(max_workers=3).map(probe,specs))
+          Path('evidence/official-source-probe.json').write_text(json.dumps(reports,ensure_ascii=False,default=str,indent=2))
+          for r in reports:print('OFFICIAL_SOURCE',json.dumps({**r,'articles':[{k:v for k,v in a.items() if k!='item'} for a in r['articles']]},ensure_ascii=False),flush=True)
+          extra=['https://fknapredak.rs/tri-pobede-danas-3/','https://www.marca.com/futbol/primera-division/2026/10/04/racing-necesita-acoplarse.html','https://www.record.pt/rss','https://getfootballnewsbene.com/feed/']
+          for i,url in enumerate(extra):
+              try:
+                  raw=read_news_feed(url);Path('evidence/extra-'+str(i)+'.html').write_bytes(raw)
+                  html=raw.decode('utf-8','replace');body=article_text_from_html(html)
+                  print('EXTRA',url,'body',body[:3500],'date',str(page_published_at_from_html(html)),flush=True)
+              except Exception as e:print('EXTRA_ERROR',url,type(e).__name__,str(e)[:140],flush=True)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: news-football-fill-evidence-b
+          path: evidence/
+          retention-days: 7
