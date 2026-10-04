@@ -34,7 +34,7 @@ jobs:
           from pathlib import Path
           import shutil
           for path in ['bot/news_publisher_media.py','tests/test_news_publisher_branding.py']:shutil.copyfile('../bundle/'+path,path)
-          p=Path('editorial.py');s=p.read_text();start=s.index('def classify_media_url(');at=s.index('    lowered = ',start)
+          p=Path('editorial.py');s=p.read_text();start=s.index('def classify_media_url(');at=s.index('    lower = value.lower()',start)
           s=s[:at]+"    from bot.news_publisher_media import is_publisher_branding\n    if is_publisher_branding(value):\n        return \"CREST_OR_LOGO\"\n"+s[at:];p.write_text(s)
           p=Path('bot/extract.py');s=p.read_text();old='    candidates.extend(parser.images[:8])\n    return candidates';assert s.count(old)==1
           p.write_text(s.replace(old,"    candidates.extend(parser.images[:8])\n    from .news_publisher_media import soccernews_article_images\n    verified = soccernews_article_images(canonical, page_title_from_html(html), candidates)\n    return verified if verified is not None else candidates"))
