@@ -1,0 +1,95 @@
+name: News real photo repair release
+on:
+  push:
+    branches: [fix/news-photo-repair-20261004]
+    paths: [.github/workflows/news-photo-release.yml]
+permissions:
+  contents: write
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    env:
+      DATABASE_URL: 'sqlite:///:memory:'
+      NINKO_SKIP_STARTUP_INDEX: '1'
+      NINKO_SKIP_INTEGRITY_BACKFILL: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: eed8518ee4571f50029e3ba1940bf727f925a468
+          path: bundle
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: f1199604bbbb0085c744ca3530db0c92996c7030
+          path: source
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply only News image rules and existing bounded repair priority
+        working-directory: source
+        run: |
+          mkdir -p ../proof
+          python - <<'PY'
+          from pathlib import Path
+          import shutil
+          for path in ['bot/news_publisher_media.py','tests/test_news_publisher_branding.py']:shutil.copyfile('../bundle/'+path,path)
+          p=Path('editorial.py');s=p.read_text();start=s.index('def classify_media_url(');at=s.index('    lowered = ',start)
+          s=s[:at]+"    from bot.news_publisher_media import is_publisher_branding\n    if is_publisher_branding(value):\n        return \"CREST_OR_LOGO\"\n"+s[at:];p.write_text(s)
+          p=Path('bot/extract.py');s=p.read_text();old='    candidates.extend(parser.images[:8])\n    return candidates';assert s.count(old)==1
+          p.write_text(s.replace(old,"    candidates.extend(parser.images[:8])\n    from .news_publisher_media import soccernews_article_images\n    verified = soccernews_article_images(canonical, page_title_from_html(html), candidates)\n    return verified if verified is not None else candidates"))
+          p=Path('public_index.py');s=p.read_text();start=s.index('def repair_recent_news_images(');at=s.index('        .order_by(\n',start)+len('        .order_by(\n')
+          s=s[:at]+'            Article.image_url.ilike("%soccernews.com/og/og-image.%").desc(),\n'+s[at:];p.write_text(s)
+          PY
+      - name: All retained News and text regressions
+        working-directory: source
+        run: |
+          pip install -q -r requirements.txt
+          python -m pytest -q tests/test_news* tests/test_textutil.py --junitxml=../proof/tests.xml > ../proof/tests.txt 2>&1 || { tail -100 ../proof/tests.txt; exit 1; }
+          tail -5 ../proof/tests.txt
+          python -m compileall -q bot
+          git diff --check
+      - name: Real same-article photographs, no AI or production writes
+        working-directory: source
+        run: |
+          python - <<'PY'
+          import json,pathlib
+          from public_index import _reachable_source_image
+          from bot.extract import extract_image_candidates_from_url
+          from bot.news_image_http import probe_news_image
+          sources=[
+           'https://www.soccernews.com/ronaldo-jesus-row-cannot-divide-portugal-says-fernandes/405791/',
+           'https://www.soccernews.com/canada-can-beat-just-about-anybody-says-marsch-ahead-of-usa-test/405789/',
+           'https://www.soccernews.com/portugal-shelve-ronaldo-controversy-as-jesus-demands-full-focus-on-norway/405782/',
+          ]
+          rows=[]
+          for url in sources:
+              candidates=extract_image_candidates_from_url(url)
+              hero=_reachable_source_image(url,current_url='https://www.soccernews.com/og/og-image.png')
+              proof=probe_news_image(hero) if hero else (False,'no_real_source_photo')
+              rows.append({'source':url,'candidates':candidates,'chosen':hero,'image_probe':proof})
+          pathlib.Path('../proof/source-photos.json').write_text(json.dumps(rows,indent=2));print(json.dumps(rows,indent=2))
+          assert all(row['chosen'] and row['image_probe'][0] for row in rows)
+          PY
+      - name: Preserve clean tested release, not audit files
+        working-directory: source
+        run: |
+          python - <<'PY'
+          import subprocess,json,pathlib,hashlib
+          allowed={'bot/news_publisher_media.py','bot/extract.py','editorial.py','public_index.py','tests/test_news_publisher_branding.py'}
+          changed=set(subprocess.check_output(['git','diff','--name-only'],text=True).splitlines())|set(subprocess.check_output(['git','ls-files','--others','--exclude-standard'],text=True).splitlines())
+          assert changed==allowed,changed^allowed
+          pathlib.Path('../proof/files.json').write_text(json.dumps({p:hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest() for p in sorted(allowed)},indent=2))
+          subprocess.run(['git','add',*sorted(allowed)],check=True)
+          PY
+          git config user.name 'NinkoSports News validation'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix(news): replace publisher default logos with verified same-article photographs'
+          git push origin HEAD:refs/heads/release/news-photos-20261004
+          git rev-parse HEAD > ../proof/tested-commit.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: news-photo-release-20261004
+          path: proof/
+          retention-days: 7
